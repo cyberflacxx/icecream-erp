@@ -1,0 +1,30 @@
+{
+  "name": "@absolute-ice-cream/database",
+  "version": "0.1.0",
+  "private": true,
+  "main": "dist/src/index.js",
+  "types": "dist/src/index.d.ts",
+  "files": ["dist", "prisma"],
+  "prisma": {
+    "seed": "tsx prisma/seed.ts"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "clean": "rimraf dist",
+    "generate": "prisma generate",
+    "lint": "eslint src prisma/seed.ts --ext .ts",
+    "seed": "tsx prisma/seed.ts",
+    "seed:sample-accounts": "tsx prisma/seed-sample-accounts.ts",
+    "seed:testing": "tsx prisma/seed-testing.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.19.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.9.0",
+    "prisma": "^6.19.3",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}

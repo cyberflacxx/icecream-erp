@@ -1,0 +1,93 @@
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@200..800&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-cream text-textDark;
+    background:
+      radial-gradient(circle at top left, rgba(249, 115, 22, 0.14), transparent 32%),
+      radial-gradient(circle at top right, rgba(255, 232, 184, 0.65), transparent 24%),
+      #fff7e8;
+  }
+
+  ::selection {
+    @apply bg-orange text-white;
+  }
+
+  .dark body {
+    @apply bg-darkBg text-darkText;
+    background:
+      radial-gradient(circle at top left, rgba(249, 115, 22, 0.1), transparent 34%),
+      radial-gradient(circle at top right, rgba(60, 28, 14, 0.38), transparent 28%),
+      #1a0d07;
+  }
+}
+
+@layer utilities {
+  .section-shell {
+    @apply mx-auto max-w-7xl px-6;
+  }
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: #fff7e8;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #c2410c;
+  border-radius: 9999px;
+  border: 2px solid #fff7e8;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #7c3f22;
+}
+
+.dark ::-webkit-scrollbar-track {
+  background: #1a0d07;
+}
+
+.dark ::-webkit-scrollbar-thumb {
+  background: #4a2010;
+  border: 2px solid #1a0d07;
+}
+
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: #c9956a;
+}
+
+.dark .bg-white {
+  background-color: #2c1509;
+}
+
+.dark .bg-cream {
+  background-color: #1a0d07;
+}
+
+.dark .border-border {
+  border-color: #4a2010;
+}
+
+.dark .text-brown,
+.dark .text-textDark {
+  color: #ffe8b8;
+}
+
+.dark .text-muted {
+  color: #c9956a;
+}

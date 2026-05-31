@@ -1,0 +1,14 @@
+{
+  "extends": "../../packages/config/typescript/node.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "outDir": "dist",
+    "rootDir": "src",
+    "paths": {
+      "@absolute-ice-cream/database": ["../../packages/database/dist/src/index"],
+      "@absolute-ice-cream/shared": ["../../packages/shared/dist/index"]
+    },
+    "types": ["node"]
+  },
+  "include": ["src/**/*.ts", "src/**/*.d.ts"]
+}
