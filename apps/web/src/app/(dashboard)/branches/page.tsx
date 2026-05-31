@@ -106,7 +106,7 @@ export default function BranchesPage() {
 
               <div className="mt-5 grid grid-cols-2 gap-3 rounded-2xl border border-border bg-cream p-3 text-sm">
                 <div>
-                  <p className="text-xs uppercase tracking-[0.16em] text-muted">Today's Sales</p>
+                  <p className="text-xs uppercase tracking-[0.16em] text-muted">Today Sales</p>
                   <p className="mt-1 font-semibold text-brown">{currencyFormatter.format(branch.todaySales)}</p>
                 </div>
                 <div>

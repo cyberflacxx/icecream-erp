@@ -7,6 +7,7 @@ import { DataTable, EmptyState, FilterBar, LoadingState, StatusBadge } from '@ab
 
 import { PageHeader } from '@/components/dashboard/page-header';
 import { useExpiringBatches } from '@/hooks/inventory/useExpiringBatches';
+import { type ExpiringBatchRow } from '@/hooks/inventory/types';
 
 export default function ExpiringInventoryPage() {
   const [days, setDays] = useState(30);
@@ -44,11 +45,15 @@ export default function ExpiringInventoryPage() {
       <DataTable
         columns={[
           { key: 'batchNumber', header: 'Batch #' },
-          { key: 'item', header: 'Item', render: (row: any) => row.item?.name ?? 'N/A' },
-          { key: 'warehouse', header: 'Warehouse', render: (row: any) => row.warehouse?.name ?? 'N/A' },
+          { key: 'item', header: 'Item', render: (row: ExpiringBatchRow) => row.item?.name ?? 'N/A' },
+          { key: 'warehouse', header: 'Warehouse', render: (row: ExpiringBatchRow) => row.warehouse?.name ?? 'N/A' },
           { key: 'quantityRemaining', header: 'Qty Remaining' },
           { key: 'expiryDate', header: 'Expiry Date' },
-          { key: 'status', header: 'Status', render: (row: any) => <StatusBadge status={String(row.status)} /> }
+          {
+            key: 'status',
+            header: 'Status',
+            render: (row: ExpiringBatchRow) => <StatusBadge status={String(row.status)} />
+          }
         ]}
         data={expiringQuery.data ?? []}
         emptyState={

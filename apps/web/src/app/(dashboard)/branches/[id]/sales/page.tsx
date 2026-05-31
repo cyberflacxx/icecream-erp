@@ -5,7 +5,7 @@ import { useParams, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { Plus, ShoppingBasket } from 'lucide-react';
 
-import { DataTable, EmptyState, FilterBar, FormDrawer, StatusBadge } from '@absolute-ice-cream/ui';
+import { DataTable, EmptyState, FilterBar, FormDrawer } from '@absolute-ice-cream/ui';
 
 import { BranchOperationsNav } from '@/components/branch-operations/branch-operations-nav';
 import { PageHeader } from '@/components/dashboard/page-header';

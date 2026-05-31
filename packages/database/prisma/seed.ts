@@ -195,7 +195,6 @@ async function main(): Promise<void> {
       creditLimit: money(25000 + index * 1500),
       currentBalance: money(0),
       status: SupplierStatus.ACTIVE,
-      isApproved: true,
     })),
   });
 
