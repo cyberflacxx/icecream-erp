@@ -1,3 +1,4 @@
+import Image from 'next/image';
 import Link from 'next/link';
 import type { LucideIcon } from 'lucide-react';
 import {
@@ -98,8 +99,8 @@ export default function HomePage() {
       <Navbar />
 
       <section className="relative overflow-hidden bg-cream">
-        <div className="absolute inset-0 -z-20 bg-[url('/branding/hero-bg.png')] bg-cover bg-center opacity-25" />
-        <div className="absolute inset-0 -z-10 bg-gradient-to-b from-cream/90 via-cream/95 to-cream" />
+        <div className="absolute inset-0 -z-20 bg-[url('/branding/hero-bg.png')] bg-cover bg-center opacity-45" />
+        <div className="absolute inset-0 -z-10 bg-gradient-to-b from-cream/72 via-cream/80 to-cream/92" />
         <div className="section-shell relative py-24 sm:py-28">
           <div className="absolute inset-x-0 top-8 -z-10 mx-auto h-72 max-w-4xl rounded-full bg-orange/10 blur-3xl" />
           <div className="absolute right-0 top-10 -z-10 h-64 w-64 rounded-full bg-white/60 blur-3xl" />
@@ -357,8 +358,14 @@ export default function HomePage() {
         <div className="section-shell flex flex-col gap-8 lg:flex-row lg:items-end lg:justify-between">
           <div>
             <div className="flex items-center gap-3">
-              <span className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-orange text-sm font-semibold text-white">
-                A
+              <span className="relative inline-flex h-10 w-10 items-center justify-center overflow-hidden rounded-full border border-white/20 bg-white">
+                <Image
+                  src="/branding/logo.png"
+                  alt="Absolute Ice Cream ERP Logo"
+                  fill
+                  sizes="40px"
+                  className="object-cover"
+                />
               </span>
               <div>
                 <p className="font-semibold">Absolute Ice Cream ERP</p>
