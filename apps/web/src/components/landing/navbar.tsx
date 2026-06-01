@@ -19,10 +19,10 @@ export function Navbar() {
   const [open, setOpen] = useState(false);
 
   return (
-    <header className="sticky top-0 z-50 border-b border-white/50 bg-[rgba(255,247,232,0.62)] shadow-[0_10px_30px_rgba(60,20,0,0.08)] backdrop-blur-2xl supports-[backdrop-filter]:bg-[rgba(255,247,232,0.55)]">
+    <header className="sticky top-0 z-50 border-b border-brown/10 bg-cream shadow-[0_10px_30px_rgba(60,20,0,0.06)]">
       <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
         <Link href="/" className="flex items-center gap-3 text-sm font-semibold text-brown sm:text-base">
-          <span className="relative inline-flex h-10 w-10 items-center justify-center overflow-hidden rounded-full border border-orange/20 bg-white shadow-sm">
+          <span className="relative inline-flex h-10 w-10 items-center justify-center overflow-hidden rounded-full border border-orange/30 bg-white/55 shadow-sm backdrop-blur-md">
             <Image
               src="/branding/logo.png"
               alt="Absolute Ice Cream ERP Logo"

@@ -99,8 +99,7 @@ export default function HomePage() {
       <Navbar />
 
       <section className="relative z-0 overflow-hidden bg-cream">
-        <div className="pointer-events-none absolute inset-0 z-0 bg-[url('/branding/hero-bg.png')] bg-cover bg-center opacity-60" />
-        <div className="pointer-events-none absolute inset-0 z-10 bg-gradient-to-b from-cream/68 via-cream/76 to-cream/90" />
+        <div className="pointer-events-none absolute inset-0 z-0 bg-[url('/branding/hero-bg.png')] bg-cover bg-center bg-no-repeat" />
         <div className="section-shell relative z-20 py-24 sm:py-28">
           <div className="pointer-events-none absolute inset-x-0 top-8 z-10 mx-auto h-72 max-w-4xl rounded-full bg-orange/10 blur-3xl" />
           <div className="pointer-events-none absolute right-0 top-10 z-10 h-64 w-64 rounded-full bg-white/60 blur-3xl" />

@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from 'next';
 import type { ReactNode } from 'react';
 
 import { InstallPwaPrompt } from '@/components/pwa/install-pwa-prompt';
+import { PwaLaunchSplash } from '@/components/pwa/launch-splash';
 import { Providers } from '@/providers';
 
 import './globals.css';
@@ -33,6 +34,7 @@ export default function RootLayout({ children }: RootLayoutProps) {
     <html lang="en" suppressHydrationWarning>
       <body className="min-h-screen font-sans antialiased">
         <Providers>{children}</Providers>
+        <PwaLaunchSplash />
         <InstallPwaPrompt />
       </body>
     </html>
