@@ -1,4 +1,4 @@
-import { randomBytes } from 'crypto';
+import { randomBytes, randomUUID } from 'crypto';
 import jwt from 'jsonwebtoken';
 import { parse as parseCookie } from 'cookie';
 import type { Request } from 'express';
@@ -93,6 +93,10 @@ export function getSessionMaxAgeMs() {
 
 export function createSessionToken() {
   return randomBytes(32).toString('hex');
+}
+
+export function createSessionId() {
+  return randomUUID();
 }
 
 export function signAuthToken(payload: AuthTokenPayload) {

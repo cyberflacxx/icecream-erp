@@ -9,6 +9,7 @@ import { z } from 'zod';
 
 import { authenticateRequest } from '../middleware/auth';
 import {
+  createSessionId,
   createSessionToken,
   getRequestToken,
   getSessionMaxAgeMs,
@@ -546,7 +547,7 @@ authRouter.post('/login', loginLimiter, async (req, res, next) => {
       account.lockedUntil = null;
       account.lastLogin = new Date();
 
-      const sessionId = createSessionToken();
+      const sessionId = createSessionId();
       const token = signAuthToken({
         userId: account.id,
         workId: account.workId,
@@ -679,7 +680,7 @@ authRouter.post('/login', loginLimiter, async (req, res, next) => {
       return res.status(401).json(genericAuthError);
     }
 
-    const sessionId = createSessionToken();
+    const sessionId = createSessionId();
     const token = signAuthToken({
       userId: account.id,
       workId: account.workId,
