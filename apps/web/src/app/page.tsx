@@ -109,7 +109,7 @@ export default function HomePage() {
               Manufacturing ERP for Zimbabwe&apos;s Ice Cream Industry
             </span>
 
-            <h1 className="mt-8 text-4xl font-bold tracking-tight text-brown sm:text-5xl lg:text-7xl">
+            <h1 className="mt-8 text-4xl font-bold tracking-tight text-orange sm:text-5xl lg:text-7xl">
               From Raw Ingredients to Branch Sales
               <span className="block text-deepOrange">One System</span>
             </h1>

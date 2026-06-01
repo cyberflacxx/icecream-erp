@@ -3,7 +3,7 @@
 import Image from 'next/image';
 import Link from 'next/link';
 import { Menu, X } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -17,9 +17,27 @@ const navLinks = [
 
 export function Navbar() {
   const [open, setOpen] = useState(false);
+  const [isScrolled, setIsScrolled] = useState(false);
+
+  useEffect(() => {
+    const onScroll = () => {
+      setIsScrolled(window.scrollY > 8);
+    };
+
+    onScroll();
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
+  }, []);
 
   return (
-    <header className="sticky top-0 z-50 border-b border-brown/10 bg-white shadow-[0_10px_30px_rgba(60,20,0,0.06)]">
+    <header
+      className={cn(
+        'sticky top-0 z-50 border-b border-brown/10 shadow-[0_10px_30px_rgba(60,20,0,0.06)] transition-colors duration-300',
+        isScrolled
+          ? 'bg-white/72 backdrop-blur-xl supports-[backdrop-filter]:bg-white/68'
+          : 'bg-white',
+      )}
+    >
       <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
         <Link href="/" className="flex items-center gap-3 text-sm font-semibold text-brown sm:text-base">
           <span className="relative inline-flex h-10 w-10 items-center justify-center overflow-hidden rounded-full border border-orange/30 bg-white/55 shadow-sm backdrop-blur-md">
