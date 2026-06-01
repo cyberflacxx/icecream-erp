@@ -1,4 +1,9 @@
-export const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
+const configuredApiBaseUrl = process.env.NEXT_PUBLIC_API_URL?.trim();
+
+// Use same-origin API in production by default so Vercel preview/prod domains work without extra env config.
+export const API_BASE_URL = configuredApiBaseUrl
+  ? configuredApiBaseUrl.replace(/\/+$/, '')
+  : '';
 
 interface ApiFetchOptions extends RequestInit {
   token?: string | null;

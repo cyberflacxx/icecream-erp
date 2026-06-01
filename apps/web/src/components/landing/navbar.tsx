@@ -18,7 +18,7 @@ export function Navbar() {
   const [open, setOpen] = useState(false);
 
   return (
-    <header className="sticky top-0 z-50 border-b border-brown/10 bg-cream/90 backdrop-blur-lg">
+    <header className="sticky top-0 z-50 border-b border-white/50 bg-[rgba(255,247,232,0.62)] shadow-[0_10px_30px_rgba(60,20,0,0.08)] backdrop-blur-2xl supports-[backdrop-filter]:bg-[rgba(255,247,232,0.55)]">
       <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
         <Link href="/" className="flex items-center gap-3 text-sm font-semibold text-brown sm:text-base">
           <span className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-orange text-white shadow-sm">
@@ -32,8 +32,13 @@ export function Navbar() {
 
         <nav className="hidden items-center gap-8 md:flex">
           {navLinks.map((link) => (
-            <a key={link.href} href={link.href} className="text-sm font-medium text-muted transition hover:text-brown">
+            <a
+              key={link.href}
+              href={link.href}
+              className="group relative pb-1 text-sm font-medium text-muted transition-colors duration-200 hover:text-brown"
+            >
               {link.label}
+              <span className="pointer-events-none absolute bottom-0 left-0 h-[2px] w-full origin-left scale-x-0 rounded-full bg-gradient-to-r from-orange via-[#ffb15b] to-orange transition-transform duration-500 ease-out group-hover:scale-x-100" />
             </a>
           ))}
         </nav>
@@ -67,10 +72,11 @@ export function Navbar() {
             <a
               key={link.href}
               href={link.href}
-              className="text-sm font-medium text-muted"
+              className="group relative w-fit pb-1 text-sm font-medium text-muted transition-colors duration-200 hover:text-brown"
               onClick={() => setOpen(false)}
             >
               {link.label}
+              <span className="pointer-events-none absolute bottom-0 left-0 h-[2px] w-full origin-left scale-x-0 rounded-full bg-gradient-to-r from-orange via-[#ffb15b] to-orange transition-transform duration-500 ease-out group-hover:scale-x-100" />
             </a>
           ))}
           <Button asChild className="w-full">

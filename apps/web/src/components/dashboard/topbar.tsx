@@ -78,7 +78,7 @@ export function Topbar({ onOpenSidebar }: TopbarProps) {
           <button
             type="button"
             onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
-            className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-border bg-white text-brown dark:border-darkBorder dark:bg-darkCard dark:text-darkText"
+            className="hidden h-11 w-11 items-center justify-center rounded-full border border-border bg-white text-brown dark:border-darkBorder dark:bg-darkCard dark:text-darkText sm:inline-flex"
             aria-label="Toggle theme"
           >
             {mounted && theme === 'dark' ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
