@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import type { ReactNode } from 'react';
+import { Analytics } from '@vercel/analytics/next';
 
 import { Providers } from '@/providers';
 
@@ -20,6 +21,7 @@ export default function RootLayout({ children }: RootLayoutProps) {
     <html lang="en" suppressHydrationWarning>
       <body className="min-h-screen font-sans antialiased">
         <Providers>{children}</Providers>
+        <Analytics />
       </body>
     </html>
   );
