@@ -19,7 +19,7 @@ export function Navbar() {
   const [open, setOpen] = useState(false);
 
   return (
-    <header className="sticky top-0 z-50 border-b border-brown/10 bg-cream shadow-[0_10px_30px_rgba(60,20,0,0.06)]">
+    <header className="sticky top-0 z-50 border-b border-brown/10 bg-white shadow-[0_10px_30px_rgba(60,20,0,0.06)]">
       <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
         <Link href="/" className="flex items-center gap-3 text-sm font-semibold text-brown sm:text-base">
           <span className="relative inline-flex h-10 w-10 items-center justify-center overflow-hidden rounded-full border border-orange/30 bg-white/55 shadow-sm backdrop-blur-md">
@@ -43,7 +43,7 @@ export function Navbar() {
             <a
               key={link.href}
               href={link.href}
-              className="group relative pb-1 text-sm font-medium text-muted transition-colors duration-200 hover:text-brown"
+              className="group relative pb-1 text-sm font-medium text-brown transition-colors duration-200 hover:text-orange"
             >
               {link.label}
               <span className="pointer-events-none absolute bottom-0 left-0 h-[2px] w-full origin-left scale-x-0 rounded-full bg-gradient-to-r from-orange via-[#ffb15b] to-orange transition-transform duration-500 ease-out group-hover:scale-x-100" />
@@ -71,7 +71,7 @@ export function Navbar() {
 
       <div
         className={cn(
-          'overflow-hidden border-t border-brown/10 bg-cream transition-[max-height] duration-300 md:hidden',
+          'overflow-hidden border-t border-brown/10 bg-white transition-[max-height] duration-300 md:hidden',
           open ? 'max-h-72' : 'max-h-0 border-t-0',
         )}
       >
@@ -80,7 +80,7 @@ export function Navbar() {
             <a
               key={link.href}
               href={link.href}
-              className="group relative w-fit pb-1 text-sm font-medium text-muted transition-colors duration-200 hover:text-brown"
+              className="group relative w-fit pb-1 text-sm font-medium text-brown transition-colors duration-200 hover:text-orange"
               onClick={() => setOpen(false)}
             >
               {link.label}
