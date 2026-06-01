@@ -114,7 +114,7 @@ export default function HomePage() {
               <span className="block text-deepOrange">One System</span>
             </h1>
 
-            <p className="mt-6 max-w-2xl text-lg leading-8 text-white">
+            <p className="mt-6 max-w-2xl text-lg font-medium leading-8 text-white [text-shadow:0_2px_10px_rgba(0,0,0,0.45)]">
               Track procurement, production shifts, finished goods, branch stock, and sales in
               real time. Built for ice cream manufacturers.
             </p>
