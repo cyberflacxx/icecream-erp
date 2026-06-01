@@ -98,12 +98,12 @@ export default function HomePage() {
     <main className="relative">
       <Navbar />
 
-      <section className="relative overflow-hidden bg-cream">
-        <div className="absolute inset-0 -z-20 bg-[url('/branding/hero-bg.png')] bg-cover bg-center opacity-45" />
-        <div className="absolute inset-0 -z-10 bg-gradient-to-b from-cream/72 via-cream/80 to-cream/92" />
-        <div className="section-shell relative py-24 sm:py-28">
-          <div className="absolute inset-x-0 top-8 -z-10 mx-auto h-72 max-w-4xl rounded-full bg-orange/10 blur-3xl" />
-          <div className="absolute right-0 top-10 -z-10 h-64 w-64 rounded-full bg-white/60 blur-3xl" />
+      <section className="relative z-0 overflow-hidden bg-cream">
+        <div className="pointer-events-none absolute inset-0 z-0 bg-[url('/branding/hero-bg.png')] bg-cover bg-center opacity-60" />
+        <div className="pointer-events-none absolute inset-0 z-10 bg-gradient-to-b from-cream/68 via-cream/76 to-cream/90" />
+        <div className="section-shell relative z-20 py-24 sm:py-28">
+          <div className="pointer-events-none absolute inset-x-0 top-8 z-10 mx-auto h-72 max-w-4xl rounded-full bg-orange/10 blur-3xl" />
+          <div className="pointer-events-none absolute right-0 top-10 z-10 h-64 w-64 rounded-full bg-white/60 blur-3xl" />
 
           <div className="mx-auto flex max-w-4xl flex-col items-center text-center">
             <span className="rounded-full border border-orange/20 bg-white/80 px-4 py-2 text-sm font-semibold text-orange shadow-sm">
