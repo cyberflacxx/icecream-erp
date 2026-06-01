@@ -2,6 +2,7 @@
 
 import { useAppAuth } from '@/hooks/useAppAuth';
 import { useQuery } from '@tanstack/react-query';
+import { API_ROUTES } from '@absolute-ice-cream/shared';
 
 import { type PaginatedResponse, type StockBalanceRow, type StockBalancesFilters } from './types';
 import { buildInventoryQuery, useInventoryRequest } from './useInventoryRequest';
@@ -14,7 +15,7 @@ export function useStockBalances(filters: StockBalancesFilters) {
     queryKey: ['inventory', 'stock-balances', userId, filters],
     queryFn: () =>
       request<PaginatedResponse<StockBalanceRow>>(
-        `/api/inventory/stock-balances${buildInventoryQuery({
+        `${API_ROUTES.INVENTORY.STOCK_BALANCES}${buildInventoryQuery({
           itemId: filters.itemId,
           itemType: filters.itemType,
           lowStock: filters.lowStock,

@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
+import { API_ROUTES } from '@absolute-ice-cream/shared';
 
 import { API_BASE_URL } from '@/lib/api';
 
@@ -71,9 +72,9 @@ export default function LoginPage() {
 
               try {
                 setIsSubmitting(true);
-                const response = await fetch(`${API_BASE_URL}/api/auth/login`, {
+                const response = await fetch(`${API_BASE_URL}${API_ROUTES.AUTH.LOGIN}`, {
                   method: 'POST',
-                  credentials: 'include',
+                  credentials: 'omit',
                   headers: {
                     'Content-Type': 'application/json'
                   },
@@ -87,6 +88,10 @@ export default function LoginPage() {
                 if (!response.ok) {
                   setFormError(String(payload?.error ?? 'Login failed.'));
                   return;
+                }
+
+                if (typeof window !== 'undefined' && typeof payload?.token === 'string') {
+                  window.localStorage.setItem('aqiAuthToken', payload.token);
                 }
 
                 router.push('/dashboard');

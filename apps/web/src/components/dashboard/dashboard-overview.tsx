@@ -59,7 +59,7 @@ export function DashboardOverview() {
       onSale: () => void dashboardQuery.refetch(),
       onShiftClose: () => void dashboardQuery.refetch()
     }),
-    [dashboardQuery.refetch],
+    [dashboardQuery],
   );
 
   useBranchRealtime(role === 'branch_manager' ? branchId : undefined, realtimeHandlers);

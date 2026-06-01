@@ -49,5 +49,16 @@ export const notificationsController = {
     } catch (error) {
       return next(error);
     }
+  },
+
+  unreadCount: async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const context = getNotificationsContext(req);
+      const result = await NotificationsService.getUnreadCount(context);
+
+      return res.status(200).json(result);
+    } catch (error) {
+      return next(error);
+    }
   }
 };

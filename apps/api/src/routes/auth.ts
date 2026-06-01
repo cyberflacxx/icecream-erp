@@ -566,7 +566,21 @@ authRouter.post('/login', loginLimiter, async (req, res, next) => {
         path: '/'
       });
 
-      return res.status(200).json(toCurrentUserResponseLocal(account));
+      const currentUser = toCurrentUserResponseLocal(account);
+
+      return res.status(200).json({
+        ...currentUser,
+        token,
+        user: {
+          id: currentUser.profile.id,
+          workId: currentUser.profile.workId,
+          firstName: currentUser.profile.firstName,
+          lastName: currentUser.profile.lastName,
+          email: currentUser.profile.email,
+          roleName: currentUser.roles[0]?.name ?? '',
+          organizationId: currentUser.organizationId
+        }
+      });
     }
 
     const payload = loginSchema.parse(req.body);
@@ -721,13 +735,27 @@ authRouter.post('/login', loginLimiter, async (req, res, next) => {
       path: '/'
     });
 
-    return res.status(200).json(toCurrentUserResponse(account));
+    const currentUser = toCurrentUserResponse(account);
+
+    return res.status(200).json({
+      ...currentUser,
+      token,
+      user: {
+        id: currentUser.profile.id,
+        workId: currentUser.profile.workId,
+        firstName: currentUser.profile.firstName,
+        lastName: currentUser.profile.lastName,
+        email: currentUser.profile.email,
+        roleName: currentUser.roles[0]?.name ?? '',
+        organizationId: currentUser.organizationId
+      }
+    });
   } catch (error) {
     return next(error);
   }
 });
 
-authRouter.post('/logout', authenticateRequest, async (req, res, next) => {
+authRouter.post('/logout', async (req, res, next) => {
   try {
     const token = getRequestToken(req);
 
@@ -754,10 +782,42 @@ authRouter.post('/logout', authenticateRequest, async (req, res, next) => {
       ok: true
     });
   } catch (error) {
+    res.clearCookie('auth_token', {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
+      path: '/'
+    });
+
     return next(error);
   }
 });
 
 authRouter.get('/me', authenticateRequest, (req, res) => {
-  return res.status(200).json(req.authContext);
+  const auth = req.authContext;
+
+  if (!auth) {
+    return res.status(401).json({
+      error: 'Unauthorized'
+    });
+  }
+
+  const primaryRole = auth.roles[0] ?? { id: '', name: '' };
+
+  return res.status(200).json({
+    id: auth.profile.id,
+    workId: auth.profile.workId ?? '',
+    firstName: auth.profile.firstName,
+    lastName: auth.profile.lastName,
+    email: auth.profile.email,
+    role: {
+      id: primaryRole.id,
+      name: primaryRole.name
+    },
+    permissions: auth.permissions,
+    branchId: auth.profile.branchId,
+    organizationId: auth.organizationId,
+    isActive: auth.profile.status === 'ACTIVE',
+    lastLogin: null
+  });
 });

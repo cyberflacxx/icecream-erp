@@ -1,6 +1,7 @@
 'use client';
 
 import { useAppAuth } from '@/hooks/useAppAuth';
+import { API_ROUTES } from '@absolute-ice-cream/shared';
 import { useQuery } from '@tanstack/react-query';
 
 import { apiFetch } from '@/lib/api';
@@ -52,11 +53,10 @@ export function useProductionDashboard() {
     queryFn: async () => {
       const token = await getToken();
 
-      return apiFetch<ProductionDashboardResponse>('/api/production/dashboard', {
+      return apiFetch<ProductionDashboardResponse>(API_ROUTES.PRODUCTION.DASHBOARD, {
         token
       });
     },
     enabled: isLoaded && Boolean(isSignedIn)
   });
 }
-

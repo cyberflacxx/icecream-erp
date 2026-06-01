@@ -24,10 +24,11 @@ const quantityFormatter = new Intl.NumberFormat('en-US', {
 
 const itemTypeOptions = [
   { label: 'Raw Material', value: 'RAW_MATERIAL' },
-  { label: 'Packaging', value: 'PACKAGING' },
+  { label: 'Packaging Material', value: 'PACKAGING_MATERIAL' },
   { label: 'Finished Good', value: 'FINISHED_GOOD' },
   { label: 'Consumable', value: 'CONSUMABLE' },
-  { label: 'Spare Part', value: 'SPARE_PART' }
+  { label: 'Spare Part', value: 'SPARE_PART' },
+  { label: 'Work In Progress', value: 'WORK_IN_PROGRESS' }
 ] as const;
 
 function getStockBadge(row: StockBalanceRow) {

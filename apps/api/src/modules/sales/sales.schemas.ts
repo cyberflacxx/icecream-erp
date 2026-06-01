@@ -56,6 +56,13 @@ const lineItemSchema = z.object({
   unitPrice: z.coerce.number().nonnegative()
 });
 
+const salesOrderLineItemSchema = z.object({
+  discountPercent: z.coerce.number().min(0).max(100).default(0),
+  itemId: uuidSchema,
+  quantityOrdered: z.coerce.number().positive(),
+  unitPrice: z.coerce.number().nonnegative()
+});
+
 export const quotationsListQuerySchema = paginationQuerySchema.extend({
   customerId: uuidSchema.optional(),
   endDate: z.iso.date().optional(),
@@ -101,11 +108,13 @@ export const createSalesOrderSchema = z.object({
   branchId: uuidSchema.optional().nullable(),
   customerId: uuidSchema,
   discountAmount: z.coerce.number().nonnegative().default(0),
-  items: z.array(lineItemSchema).min(1),
+  items: z
+    .array(salesOrderLineItemSchema)
+    .min(1, 'Sales order must have at least one item'),
   notes: z.string().trim().optional().nullable(),
-  orderDate: z.iso.date().optional(),
+  orderDate: z.string().datetime().optional(),
   quotationId: uuidSchema.optional().nullable(),
-  requiredDate: z.iso.date().optional().nullable(),
+  requiredDate: z.string().datetime().optional().nullable(),
   taxAmount: z.coerce.number().nonnegative().default(0),
   warehouseId: uuidSchema
 });
@@ -159,8 +168,10 @@ export const invoiceIdParamsSchema = z.object({
 
 export const invoicePaymentSchema = z.object({
   amount: z.coerce.number().positive(),
-  method: z.enum(paymentMethodValues),
-  reference: z.string().trim().optional().nullable()
+  notes: z.string().trim().optional(),
+  paymentDate: z.string().datetime(),
+  paymentMethod: z.enum(paymentMethodValues),
+  referenceNumber: z.string().trim().optional()
 });
 
 export const createCustomerReturnSchema = z.object({

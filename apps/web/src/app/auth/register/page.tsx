@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
+import { API_ROUTES } from '@absolute-ice-cream/shared';
 
 import { API_BASE_URL } from '@/lib/api';
 
@@ -42,8 +43,8 @@ export default function RegisterPage() {
     let mounted = true;
     (async () => {
       try {
-        const response = await fetch(`${API_BASE_URL}/api/auth/roles`, {
-          credentials: 'include'
+        const response = await fetch(`${API_BASE_URL}${API_ROUTES.AUTH.ROLES}`, {
+          credentials: 'omit'
         });
         const payload = (await response.json()) as unknown;
         if (mounted) {
@@ -192,8 +193,8 @@ export default function RegisterPage() {
 
                 if (!uuidPattern.test(resolvedRoleId)) {
                   const selectedRole = roles.find((role) => role.id === roleId);
-                  const rolesResponse = await fetch(`${API_BASE_URL}/api/auth/roles`, {
-                    credentials: 'include'
+                  const rolesResponse = await fetch(`${API_BASE_URL}${API_ROUTES.AUTH.ROLES}`, {
+                    credentials: 'omit'
                   });
                   const latestRoles = (await rolesResponse.json()) as unknown;
 
@@ -229,9 +230,9 @@ export default function RegisterPage() {
                   return;
                 }
 
-                const response = await fetch(`${API_BASE_URL}/api/auth/register`, {
+                const response = await fetch(`${API_BASE_URL}${API_ROUTES.AUTH.REGISTER}`, {
                   method: 'POST',
-                  credentials: 'include',
+                  credentials: 'omit',
                   headers: {
                     'Content-Type': 'application/json'
                   },

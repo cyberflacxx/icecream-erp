@@ -2,6 +2,7 @@
 
 import { useAppAuth } from '@/hooks/useAppAuth';
 import { useQuery } from '@tanstack/react-query';
+import { API_ROUTES } from '@absolute-ice-cream/shared';
 
 import { type PaginatedResponse, type SupplierHistoryRow } from './types';
 import { buildProcurementQuery, useProcurementRequest } from './useProcurementRequest';
@@ -18,7 +19,7 @@ export function useSupplierPurchaseHistory(
     queryKey: ['procurement', 'supplier-history', id, tab, page],
     queryFn: () =>
       request<PaginatedResponse<SupplierHistoryRow>>(
-        `/api/suppliers/${id}/purchase-history${buildProcurementQuery({
+        `${API_ROUTES.SUPPLIER_PURCHASE_HISTORY(id ?? '')}${buildProcurementQuery({
           page,
           pageSize: 10,
           tab

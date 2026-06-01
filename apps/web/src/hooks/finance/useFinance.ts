@@ -1,6 +1,7 @@
 'use client';
 
 import { useAppAuth } from '@/hooks/useAppAuth';
+import { API_ROUTES } from '@absolute-ice-cream/shared';
 import { useQuery } from '@tanstack/react-query';
 
 import { apiFetch } from '@/lib/api';
@@ -47,11 +48,10 @@ export function useFinanceDashboard() {
     queryFn: async () => {
       const token = await getToken();
 
-      return apiFetch<FinanceDashboardResponse>('/api/finance/dashboard', {
+      return apiFetch<FinanceDashboardResponse>(API_ROUTES.FINANCE.DASHBOARD, {
         token
       });
     },
     enabled: isLoaded && Boolean(isSignedIn)
   });
 }
-

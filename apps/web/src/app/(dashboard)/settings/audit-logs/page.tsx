@@ -61,10 +61,12 @@ export default function SettingsAuditLogsPage() {
           <Button
             variant="outline"
             onClick={async () => {
+              const token = typeof window !== 'undefined' ? window.localStorage.getItem('aqiAuthToken') : null;
               const response = await fetch(
                 `${API_BASE_URL}/api/settings/audit-logs/export/csv${toQueryString(filters)}`,
                 {
-                  credentials: 'include'
+                  credentials: 'omit',
+                  headers: token ? { Authorization: `Bearer ${token}` } : undefined
                 },
               );
 

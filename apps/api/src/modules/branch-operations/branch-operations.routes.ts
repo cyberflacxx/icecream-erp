@@ -71,3 +71,9 @@ branchOperationsRouter.post(
   enforceBranchScope,
   branchOperationsController.approveShiftClose,
 );
+branchOperationsRouter.post(
+  '/:branchId/shift-closes/:id/reject',
+  requirePermission('branch_shift.close'),
+  enforceBranchScope,
+  branchOperationsController.rejectShiftClose,
+);

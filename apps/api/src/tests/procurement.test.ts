@@ -804,7 +804,7 @@ test('requisition approval flow updates status and approved quantities', async (
     const updatedItem = state.requisitionItems.find((item) => item.requisitionId === requisition.id);
 
     assert.equal(submitted.status, PurchaseRequisitionStatus.SUBMITTED);
-    assert.equal(approved.status, PurchaseRequisitionStatus.APPROVED);
+    assert.equal(approved.status, PurchaseRequisitionStatus.LEVEL1_APPROVED);
     assert.equal(updatedItem?.quantityApproved?.toNumber(), 80);
     assert.ok(state.auditLogs.some((log) => log.action === 'REQUISITION_APPROVED'));
   });
@@ -815,7 +815,7 @@ test('purchase order is created from approved requisition only', async () => {
     createBaseState({
       requisitions: [
         {
-          approvalStatus: PurchaseRequisitionStatus.APPROVED,
+          approvalStatus: PurchaseRequisitionStatus.LEVEL1_APPROVED,
           approvedAt: new Date('2026-05-20T00:00:00.000Z'),
           approvedBy: context.userProfileId,
           deletedAt: null,
@@ -827,7 +827,7 @@ test('purchase order is created from approved requisition only', async () => {
           requestDate: new Date('2026-05-18T00:00:00.000Z'),
           requestedBy: context.userProfileId,
           requisitionNumber: 'REQ-00001',
-          status: PurchaseRequisitionStatus.APPROVED
+          status: PurchaseRequisitionStatus.LEVEL1_APPROVED
         }
       ]
     }),
@@ -919,7 +919,7 @@ test('GRN receive updates stock balances', async () => {
         organizationId: context.organizationId,
         poNumber: 'PO-00001',
         requisitionId: null,
-        status: PurchaseOrderStatus.SENT,
+        status: PurchaseOrderStatus.SENT_TO_SUPPLIER,
         subtotal: decimal(400),
         supplierId: 'supplier-1',
         taxAmount: decimal(0),
@@ -999,7 +999,7 @@ test('GRN receive updates stock balances', async () => {
 
       assert.equal(balance?.quantityOnHand, 50);
       assert.equal(movementRecords.length, 1);
-      assert.equal(state.purchaseOrders[0]?.status, PurchaseOrderStatus.RECEIVED);
+      assert.equal(state.purchaseOrders[0]?.status, PurchaseOrderStatus.FULLY_RECEIVED);
       assert.ok(state.auditLogs.some((log) => log.action === 'GRN_RECEIVED'));
     } finally {
       inventoryServiceAny.receiveStock = originalReceiveStock;
@@ -1066,7 +1066,7 @@ test('GRN receive creates stock movement records', async () => {
         organizationId: context.organizationId,
         poNumber: 'PO-00002',
         requisitionId: null,
-        status: PurchaseOrderStatus.SENT,
+        status: PurchaseOrderStatus.SENT_TO_SUPPLIER,
         subtotal: decimal(140),
         supplierId: 'supplier-1',
         taxAmount: decimal(0),
@@ -1192,7 +1192,7 @@ test('GRN over-receive warns and allows only with reason', async () => {
         organizationId: context.organizationId,
         poNumber: 'PO-00003',
         requisitionId: null,
-        status: PurchaseOrderStatus.SENT,
+        status: PurchaseOrderStatus.SENT_TO_SUPPLIER,
         subtotal: decimal(60),
         supplierId: 'supplier-1',
         taxAmount: decimal(0),

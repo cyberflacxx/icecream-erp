@@ -2,6 +2,7 @@
 
 import { useAppAuth } from '@/hooks/useAppAuth';
 import { useQuery } from '@tanstack/react-query';
+import { API_ROUTES } from '@absolute-ice-cream/shared';
 
 import { useProcurementRequest } from './useProcurementRequest';
 
@@ -45,7 +46,7 @@ export function useProcurementMeta() {
 
   return useQuery({
     queryKey: ['procurement', 'meta'],
-    queryFn: () => request<ProcurementMetaResponse>('/api/procurement/meta'),
+    queryFn: () => request<ProcurementMetaResponse>(API_ROUTES.PROCUREMENT.META),
     enabled: isLoaded && Boolean(isSignedIn)
   });
 }
@@ -62,7 +63,7 @@ export function useSupplierCategories() {
           id: string;
           name: string;
         }>
-      >('/api/suppliers/meta'),
+      >(API_ROUTES.SUPPLIERS_META),
     enabled: isLoaded && Boolean(isSignedIn)
   });
 }

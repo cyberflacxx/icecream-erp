@@ -119,6 +119,7 @@ export interface StockMovementRow {
   };
   type: string;
   quantity: number;
+  runningBalance: number;
   unitCost: number;
   totalCost: number;
   reference: {

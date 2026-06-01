@@ -2,6 +2,7 @@
 
 import { useAppAuth } from '@/hooks/useAppAuth';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { API_ROUTES } from '@absolute-ice-cream/shared';
 
 import { apiFetch } from '@/lib/api';
 
@@ -15,6 +16,10 @@ export interface NotificationItem {
   referenceType: string | null;
   title: string;
   type: string;
+}
+
+interface UnreadCountResponse {
+  count: number;
 }
 
 interface NotificationsResponse {
@@ -34,7 +39,13 @@ export function useNotifications(limit = 10) {
     queryFn: async () => {
       const token = await getToken();
 
-      return apiFetch<NotificationsResponse>(`/api/notifications?limit=${limit}&page=1&pageSize=${limit}`, {
+      const params = new URLSearchParams({
+        limit: String(limit),
+        page: '1',
+        pageSize: String(limit)
+      });
+
+      return apiFetch<NotificationsResponse>(`${API_ROUTES.NOTIFICATIONS}?${params.toString()}`, {
         token
       });
     },
@@ -51,8 +62,8 @@ export function useMarkNotificationRead() {
     mutationFn: async (notificationId: string) => {
       const token = await getToken();
 
-      return apiFetch(`/api/notifications/${notificationId}/read`, {
-        method: 'POST',
+      return apiFetch(API_ROUTES.NOTIFICATION_READ(notificationId), {
+        method: 'PATCH',
         token
       });
     },
@@ -72,8 +83,8 @@ export function useMarkAllNotificationsRead() {
     mutationFn: async () => {
       const token = await getToken();
 
-      return apiFetch('/api/notifications/mark-all-read', {
-        method: 'POST',
+      return apiFetch(API_ROUTES.NOTIFICATIONS_READ_ALL, {
+        method: 'PATCH',
         token
       });
     },
@@ -82,6 +93,20 @@ export function useMarkAllNotificationsRead() {
         queryKey: ['notifications']
       });
     }
+  });
+}
+
+export function useUnreadNotificationsCount() {
+  const { getToken, isLoaded, isSignedIn, userId } = useAppAuth();
+
+  return useQuery({
+    queryKey: ['notifications-unread', userId],
+    queryFn: async () => {
+      const token = await getToken();
+      return apiFetch<UnreadCountResponse>(API_ROUTES.NOTIFICATIONS_UNREAD_COUNT, { token });
+    },
+    enabled: isLoaded && Boolean(isSignedIn),
+    refetchInterval: 30_000
   });
 }
 

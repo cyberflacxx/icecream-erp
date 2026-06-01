@@ -98,6 +98,7 @@ interface MockStockMovement {
   quantity: Decimal;
   referenceId: string;
   referenceType: string;
+  runningBalance: Decimal | null;
   totalCost: Decimal | null;
   unitCost: Decimal | null;
   warehouseId: string;
@@ -575,6 +576,40 @@ function createMockPrisma(initialState: MockState): MockPrismaClient {
       }
     },
     stockMovement: {
+      findFirst: async ({
+        where,
+        select
+      }: {
+        where: {
+          itemId?: string;
+          organizationId?: string;
+          warehouseId?: string;
+        };
+        select?: {
+          runningBalance?: boolean;
+        };
+      }) => {
+        const movement = [...state.movements]
+          .filter(
+            (item) =>
+              matchScalar(where.itemId, item.itemId) &&
+              matchScalar(where.organizationId, item.organizationId) &&
+              matchScalar(where.warehouseId, item.warehouseId),
+          )
+          .sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime())[0];
+
+        if (!movement) {
+          return null;
+        }
+
+        if (select?.runningBalance) {
+          return cloneValue({
+            runningBalance: movement.runningBalance
+          });
+        }
+
+        return cloneValue(movement);
+      },
       create: async ({ data }: { data: Omit<MockStockMovement, 'createdAt' | 'id'> }) => {
         const movement: MockStockMovement = {
           createdAt: new Date(),

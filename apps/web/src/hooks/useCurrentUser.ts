@@ -3,6 +3,7 @@
 import { useAppAuth } from '@/hooks/useAppAuth';
 import { useQuery } from '@tanstack/react-query';
 import { usePathname } from 'next/navigation';
+import { API_ROUTES } from '@absolute-ice-cream/shared';
 
 import { apiFetch } from '@/lib/api';
 
@@ -42,7 +43,7 @@ export interface CurrentUser {
 async function fetchCurrentUser(getToken: () => Promise<string | null>) {
   const token = await getToken();
 
-  return apiFetch<CurrentUser>('/api/auth/me', {
+  return apiFetch<CurrentUser>(API_ROUTES.AUTH.ME, {
     token
   });
 }

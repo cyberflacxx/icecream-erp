@@ -411,6 +411,57 @@ export class SettingsService {
     return createPaginationResult(mapped, query.page, query.pageSize);
   }
 
+  static async getUser(context: SettingsContext, userId: string) {
+    if (!isDatabaseConfigured) {
+      void context;
+      return {
+        id: userId,
+        branch: null,
+        email: 'local@example.com',
+        fullName: 'Local User',
+        roles: [],
+        status: 'ACTIVE'
+      };
+    }
+
+    const user = await prisma.userProfile.findFirst({
+      where: {
+        id: userId,
+        deletedAt: null,
+        organizationId: context.organizationId
+      },
+      include: {
+        branch: true,
+        roleAssignments: {
+          include: {
+            role: true
+          }
+        }
+      }
+    });
+
+    if (!user) {
+      throw new Error('User not found.');
+    }
+
+    return {
+      id: user.id,
+      branch: user.branch
+        ? {
+            id: user.branch.id,
+            name: user.branch.name
+          }
+        : null,
+      email: user.email,
+      fullName: `${user.firstName} ${user.lastName}`.trim(),
+      roles: user.roleAssignments.map((assignment) => ({
+        id: assignment.role.id,
+        name: assignment.role.name
+      })),
+      status: user.status
+    };
+  }
+
   static async inviteUser(
     context: SettingsContext,
     input: InviteUserInput,
@@ -621,6 +672,52 @@ export class SettingsService {
     }));
 
     return createPaginationResult(mapped, query.page, query.pageSize);
+  }
+
+  static async getRole(context: SettingsContext, roleId: string) {
+    if (!isDatabaseConfigured) {
+      void context;
+      return {
+        id: roleId,
+        name: 'Role',
+        description: null,
+        isSystemRole: false,
+        permissions: [],
+        userCount: 0
+      };
+    }
+
+    const role = await prisma.role.findFirst({
+      where: {
+        id: roleId,
+        organizationId: context.organizationId
+      },
+      include: {
+        permissions: {
+          include: {
+            permission: true
+          }
+        },
+        users: true
+      }
+    });
+
+    if (!role) {
+      throw new Error('Role not found.');
+    }
+
+    return {
+      id: role.id,
+      name: role.name,
+      description: role.description,
+      isSystemRole: role.isSystemRole,
+      permissions: role.permissions.map((item) => ({
+        id: item.permission.id,
+        code: item.permission.code,
+        module: item.permission.module
+      })),
+      userCount: role.users.length
+    };
   }
 
   static async createRole(context: SettingsContext, input: { name: string; description?: string | null }) {
@@ -938,5 +1035,35 @@ export class SettingsService {
       unreadCount,
       userCount
     };
+  }
+
+  static async getNumberSeries(context: SettingsContext) {
+    if (!isDatabaseConfigured) {
+      void context;
+      return { ...localSettingsOverview.numberSeries };
+    }
+
+    return getSettingsBlob(context, 'number_series', DEFAULT_NUMBER_SERIES);
+  }
+
+  static async updateNumberSeries(
+    context: SettingsContext,
+    input: typeof DEFAULT_NUMBER_SERIES,
+  ) {
+    if (!isDatabaseConfigured) {
+      void context;
+      localSettingsOverview = {
+        ...localSettingsOverview,
+        numberSeries: {
+          ...localSettingsOverview.numberSeries,
+          ...input
+        }
+      };
+
+      return { ...localSettingsOverview.numberSeries };
+    }
+
+    await saveSettingsBlob(context, 'number_series', input);
+    return getSettingsBlob(context, 'number_series', DEFAULT_NUMBER_SERIES);
   }
 }

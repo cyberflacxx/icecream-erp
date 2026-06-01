@@ -21,7 +21,7 @@ export const listSuppliersQuerySchema = suppliersPaginationSchema.extend({
 export const createSupplierSchema = z.object({
   address: z.string().trim().optional().nullable(),
   categoryId: uuidSchema,
-  code: z.string().trim().optional(),
+  code: z.string().trim().min(1).optional(),
   contactPerson: z.string().trim().optional().nullable(),
   creditLimit: z.coerce.number().nonnegative().optional().nullable(),
   email: z.email().optional().nullable(),

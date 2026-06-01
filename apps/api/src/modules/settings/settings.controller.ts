@@ -6,6 +6,7 @@ import {
   auditLogsQuerySchema,
   createRoleSchema,
   inviteUserSchema,
+  updateNumberSeriesSchema,
   roleIdParamsSchema,
   rolesQuerySchema,
   updateRoleSchema,
@@ -115,6 +116,30 @@ export const settingsController = {
     }
   },
 
+  createUser: async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const context = getSettingsContext(req);
+      const body = inviteUserSchema.parse(req.body);
+      const result = await SettingsService.inviteUser(context, body);
+
+      return res.status(201).json(result);
+    } catch (error) {
+      return next(error);
+    }
+  },
+
+  getUser: async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const context = getSettingsContext(req);
+      const params = userIdParamsSchema.parse(req.params);
+      const result = await SettingsService.getUser(context, params.id);
+
+      return res.status(200).json(result);
+    } catch (error) {
+      return next(error);
+    }
+  },
+
   listAuditLogs: async (req: Request, res: Response, next: NextFunction) => {
     try {
       const context = getSettingsContext(req);
@@ -143,6 +168,18 @@ export const settingsController = {
       const context = getSettingsContext(req);
       const query = rolesQuerySchema.parse(req.query);
       const result = await SettingsService.listRoles(context, query);
+
+      return res.status(200).json(result);
+    } catch (error) {
+      return next(error);
+    }
+  },
+
+  getRole: async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const context = getSettingsContext(req);
+      const params = roleIdParamsSchema.parse(req.params);
+      const result = await SettingsService.getRole(context, params.id);
 
       return res.status(200).json(result);
     } catch (error) {
@@ -193,6 +230,53 @@ export const settingsController = {
       const params = userIdParamsSchema.parse(req.params);
       const body = updateUserStatusSchema.parse(req.body);
       const result = await SettingsService.updateUserStatus(context, params.id, body.status);
+
+      return res.status(200).json(result);
+    } catch (error) {
+      return next(error);
+    }
+  },
+
+  activateUser: async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const context = getSettingsContext(req);
+      const params = userIdParamsSchema.parse(req.params);
+      const result = await SettingsService.updateUserStatus(context, params.id, 'ACTIVE');
+
+      return res.status(200).json(result);
+    } catch (error) {
+      return next(error);
+    }
+  },
+
+  deactivateUser: async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const context = getSettingsContext(req);
+      const params = userIdParamsSchema.parse(req.params);
+      const result = await SettingsService.updateUserStatus(context, params.id, 'INACTIVE');
+
+      return res.status(200).json(result);
+    } catch (error) {
+      return next(error);
+    }
+  },
+
+  getNumberSeries: async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const context = getSettingsContext(req);
+      const result = await SettingsService.getNumberSeries(context);
+
+      return res.status(200).json(result);
+    } catch (error) {
+      return next(error);
+    }
+  },
+
+  updateNumberSeries: async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const context = getSettingsContext(req);
+      const body = updateNumberSeriesSchema.parse(req.body);
+      const result = await SettingsService.updateNumberSeries(context, body);
 
       return res.status(200).json(result);
     } catch (error) {

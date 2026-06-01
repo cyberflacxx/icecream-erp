@@ -792,6 +792,7 @@ model StockMovement {
   quantity       Decimal            @db.Decimal(18, 3)
   unitCost       Decimal?           @db.Decimal(18, 2) @map("unit_cost")
   totalCost      Decimal?           @db.Decimal(18, 2) @map("total_cost")
+  runningBalance Decimal?           @db.Decimal(18, 3) @map("running_balance")
   referenceType  String             @map("reference_type")
   referenceId    String             @map("reference_id")
   batchId        String?            @db.Uuid @map("batch_id")
@@ -1773,6 +1774,7 @@ model BranchShiftClose {
   @@index([status])
   @@index([shiftDate])
   @@index([shiftType])
+  @@unique([branchId, shiftDate, shiftType])
   @@index([deletedAt])
   @@map("branch_shift_closes")
 }
@@ -1897,6 +1899,12 @@ model JournalEntry {
   description    String
   referenceType  String?       @map("reference_type")
   referenceId    String?       @map("reference_id")
+  totalDebit     Decimal       @db.Decimal(18, 2) @default(0) @map("total_debit")
+  totalCredit    Decimal       @db.Decimal(18, 2) @default(0) @map("total_credit")
+  status         String        @default("DRAFT")
+  isPosted       Boolean       @default(false) @map("is_posted")
+  postedBy       String?       @db.Uuid @map("posted_by")
+  postedAt       DateTime?     @map("posted_at")
   createdBy      String?       @db.Uuid @map("created_by")
   createdAt      DateTime      @default(now()) @map("created_at")
   updatedAt      DateTime      @updatedAt @map("updated_at")
@@ -2660,6 +2668,7 @@ model PettyCashRequest {
   @@index([requestedBy])
   @@index([status])
   @@index([requestDate])
+  @@index([approvalRequestId])
   @@index([deletedAt])
   @@map("petty_cash_requests")
 }
@@ -2743,6 +2752,7 @@ model Budget {
   @@index([status])
   @@index([departmentId])
   @@index([branchId])
+  @@index([approvalRequestId])
   @@index([deletedAt])
   @@map("budgets")
 }
@@ -2788,6 +2798,7 @@ model BudgetRevision {
   @@unique([budgetId, revisionNumber])
   @@index([budgetId])
   @@index([revisedBy])
+  @@index([approvalRequestId])
   @@map("budget_revisions")
 }
 
@@ -2860,6 +2871,7 @@ model TaxRate {
   @@unique([organizationId, code])
   @@index([organizationId])
   @@index([name])
+  @@index([accountId])
   @@index([isActive])
   @@index([deletedAt])
   @@map("tax_rates")

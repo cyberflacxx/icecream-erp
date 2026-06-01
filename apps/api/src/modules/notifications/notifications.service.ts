@@ -10,6 +10,7 @@ interface NotificationsQuery {
   limit?: number;
   page: number;
   pageSize: number;
+  isRead?: boolean;
   unreadOnly?: boolean;
 }
 
@@ -77,7 +78,12 @@ export class NotificationsService {
 
     const rows = await prisma.notification.findMany({
       where: {
-        isRead: query.unreadOnly ? false : undefined,
+        isRead:
+          typeof query.isRead === 'boolean'
+            ? query.isRead
+            : query.unreadOnly
+              ? false
+              : undefined,
         organizationId: context.organizationId,
         userProfileId: context.userProfileId
       },
@@ -157,5 +163,21 @@ export class NotificationsService {
     return {
       updated: result.count
     };
+  }
+
+  static async getUnreadCount(context: NotificationsContext) {
+    if (!isDatabaseConfigured) {
+      return { count: 0 };
+    }
+
+    const count = await prisma.notification.count({
+      where: {
+        isRead: false,
+        organizationId: context.organizationId,
+        userProfileId: context.userProfileId
+      }
+    });
+
+    return { count };
   }
 }

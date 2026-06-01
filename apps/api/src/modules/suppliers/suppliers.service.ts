@@ -1,6 +1,6 @@
 import {
-  PrismaClient,
-  type Prisma
+  Prisma,
+  PrismaClient
 } from '@prisma/client';
 import { Decimal } from '@prisma/client/runtime/library';
 
@@ -84,6 +84,30 @@ async function getSupplierOrThrow(db: DbClient, context: SupplierContext, suppli
   return supplier;
 }
 
+async function supplierCodeExists(
+  db: DbClient,
+  context: SupplierContext,
+  code: string,
+  excludeSupplierId?: string,
+) {
+  const supplier = await db.supplier.findFirst({
+    where: {
+      organizationId: context.organizationId,
+      code,
+      id: excludeSupplierId
+        ? {
+            not: excludeSupplierId
+          }
+        : undefined
+    },
+    select: {
+      id: true
+    }
+  });
+
+  return Boolean(supplier);
+}
+
 export class SuppliersService {
   static async listSupplierCategories(context: SupplierContext) {
     return prisma.supplierCategory.findMany({
@@ -115,26 +139,42 @@ export class SuppliersService {
     });
     const code = data.code?.trim() || `SUP-${String(supplierCount + 1).padStart(5, '0')}`;
 
-    const supplier = await prisma.supplier.create({
-      data: {
-        address: data.address ?? null,
-        categoryId: data.categoryId,
-        code,
-        contactPerson: data.contactPerson ?? null,
-        createdBy: context.userProfileId,
-        creditLimit: data.creditLimit ?? null,
-        email: data.email ?? null,
-        name: data.name,
-        organizationId: context.organizationId,
-        paymentTerms: data.paymentTerms ?? null,
-        phone: data.phone ?? null,
-        status: data.status,
-        taxNumber: data.taxNumber ?? null
-      },
-      include: {
-        category: true
+    if (await supplierCodeExists(prisma, context, code)) {
+      throw new Error('Supplier code already exists.');
+    }
+
+    let supplier;
+    try {
+      supplier = await prisma.supplier.create({
+        data: {
+          address: data.address ?? null,
+          categoryId: data.categoryId,
+          code,
+          contactPerson: data.contactPerson ?? null,
+          createdBy: context.userProfileId,
+          creditLimit: data.creditLimit ?? null,
+          email: data.email ?? null,
+          name: data.name,
+          organizationId: context.organizationId,
+          paymentTerms: data.paymentTerms ?? null,
+          phone: data.phone ?? null,
+          status: data.status,
+          taxNumber: data.taxNumber ?? null
+        },
+        include: {
+          category: true
+        }
+      });
+    } catch (error) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2002'
+      ) {
+        throw new Error('Supplier code already exists.');
       }
-    });
+
+      throw error;
+    }
 
     await createAuditLog(prisma, context, {
       action: 'SUPPLIER_CREATED',
@@ -163,6 +203,12 @@ export class SuppliersService {
 
       if (!category) {
         throw new Error('Supplier category not found.');
+      }
+    }
+
+    if (data.code && data.code !== existing.code) {
+      if (await supplierCodeExists(prisma, context, data.code, supplierId)) {
+        throw new Error('Supplier code already exists.');
       }
     }
 

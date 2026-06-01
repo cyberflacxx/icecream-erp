@@ -30,9 +30,19 @@ settingsRouter.get(
   settingsController.listUsers,
 );
 settingsRouter.post(
+  '/users',
+  requirePermission('user.manage'),
+  settingsController.createUser,
+);
+settingsRouter.post(
   '/users/invite',
   requirePermission('user.manage'),
   settingsController.inviteUser,
+);
+settingsRouter.get(
+  '/users/:id',
+  requirePermission('user.manage'),
+  settingsController.getUser,
 );
 settingsRouter.patch(
   '/users/:id/roles',
@@ -44,6 +54,16 @@ settingsRouter.patch(
   requirePermission('user.manage'),
   settingsController.updateUserStatus,
 );
+settingsRouter.patch(
+  '/users/:id/activate',
+  requirePermission('user.manage'),
+  settingsController.activateUser,
+);
+settingsRouter.patch(
+  '/users/:id/deactivate',
+  requirePermission('user.manage'),
+  settingsController.deactivateUser,
+);
 
 settingsRouter.get(
   '/roles',
@@ -54,6 +74,11 @@ settingsRouter.post(
   '/roles',
   requirePermission('settings.manage'),
   settingsController.createRole,
+);
+settingsRouter.get(
+  '/roles/:id',
+  requirePermission('settings.manage'),
+  settingsController.getRole,
 );
 settingsRouter.patch(
   '/roles/:id',
@@ -81,4 +106,14 @@ settingsRouter.get(
   '/audit-logs/export/csv',
   requirePermission('audit_log.read'),
   settingsController.exportAuditLogsCsv,
+);
+settingsRouter.get(
+  '/number-series',
+  requirePermission('settings.manage'),
+  settingsController.getNumberSeries,
+);
+settingsRouter.patch(
+  '/number-series',
+  requirePermission('settings.manage'),
+  settingsController.updateNumberSeries,
 );

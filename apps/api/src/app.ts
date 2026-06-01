@@ -4,10 +4,13 @@ import rateLimit from 'express-rate-limit';
 import helmet from 'helmet';
 import { ZodError } from 'zod';
 
+import { isAppError } from './lib/app-error';
 import { branchOperationsRouter } from './modules/branch-operations/branch-operations.routes';
 import { branchesRouter } from './modules/branches/branches.routes';
 import { financeRouter } from './modules/finance/finance.routes';
 import { inventoryRouter } from './modules/inventory/inventory.routes';
+import { hrRouter } from './modules/hr/hr.routes';
+import { maintenanceRouter } from './modules/maintenance/maintenance.routes';
 import { notificationsRouter } from './modules/notifications/notifications.routes';
 import { productionRouter } from './modules/production/production.routes';
 import { procurementRouter } from './modules/procurement/procurement.routes';
@@ -23,8 +26,13 @@ app.disable('x-powered-by');
 app.use(helmet());
 app.use(
   cors({
-    origin: true,
-    credentials: true
+    origin:
+      process.env.CORS_ORIGIN ??
+      process.env.NEXT_PUBLIC_APP_URL ??
+      'http://localhost:3000',
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Cookie']
   })
 );
 app.use(
@@ -55,7 +63,10 @@ app.get('/api/health', (_req, res) => {
 app.use('/api/auth', authRouter);
 app.use('/api/inventory', inventoryRouter);
 app.use('/api/procurement', procurementRouter);
+app.use('/api/procurement/suppliers', suppliersRouter);
 app.use('/api/suppliers', suppliersRouter);
+app.use('/api/hr', hrRouter);
+app.use('/api/maintenance', maintenanceRouter);
 app.use('/api/sales', salesRouter);
 app.use('/api/reports', reportsRouter);
 app.use('/api/production', productionRouter);
@@ -94,14 +105,16 @@ app.use((error: Error, _req: express.Request, res: express.Response, next: expre
     });
   }
 
-  const lowered = error.message.toLowerCase();
-  const statusCode = lowered.includes('unauthorized')
-    ? 401
-    : lowered.includes('forbidden')
-      ? 403
-      : 500;
+  const statusCode = isAppError(error)
+    ? error.statusCode
+    : error.message.toLowerCase().includes('unauthorized')
+      ? 401
+      : error.message.toLowerCase().includes('forbidden')
+        ? 403
+        : 500;
 
   res.status(statusCode).json({
-    error: error.message || 'Internal Server Error'
+    error: error.message || 'Internal Server Error',
+    ...(isAppError(error) && error.code ? { code: error.code } : {})
   });
 });

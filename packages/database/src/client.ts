@@ -8,9 +8,19 @@ declare global {
 export const prisma =
   globalThis.__absoluteIceCreamPrisma__ ??
   new PrismaClient({
-    log: ['warn', 'error']
+    log: process.env.NODE_ENV === 'development' ? ['query', 'warn', 'error'] : ['error'],
+    datasources: process.env.DATABASE_URL
+      ? {
+          db: {
+            url: process.env.DATABASE_URL
+          }
+        }
+      : undefined
   });
 
-if (process.env.NODE_ENV !== 'production') {
+const runtimeNodeEnv = (globalThis as { process?: { env?: { NODE_ENV?: string } } }).process?.env
+  ?.NODE_ENV;
+
+if (runtimeNodeEnv !== 'production') {
   globalThis.__absoluteIceCreamPrisma__ = prisma;
 }

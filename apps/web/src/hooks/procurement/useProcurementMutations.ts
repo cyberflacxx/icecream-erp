@@ -1,22 +1,27 @@
 'use client';
 
+import { API_ROUTES } from '@absolute-ice-cream/shared';
+
 import { useProcurementMutation } from './useProcurementRequest';
 
 export function useCreateSupplier() {
-  return useProcurementMutation<unknown, Record<string, unknown>>('/api/suppliers');
+  return useProcurementMutation<unknown, Record<string, unknown>>(API_ROUTES.SUPPLIERS);
 }
 
 export function useUpdateSupplier(id: string | undefined) {
-  return useProcurementMutation<unknown, Record<string, unknown>>(`/api/suppliers/${id}`, 'PATCH');
+  return useProcurementMutation<unknown, Record<string, unknown>>(
+    API_ROUTES.SUPPLIER(id ?? ''),
+    'PATCH',
+  );
 }
 
 export function useCreateRequisition() {
-  return useProcurementMutation<unknown, Record<string, unknown>>('/api/procurement/requisitions');
+  return useProcurementMutation<unknown, Record<string, unknown>>(API_ROUTES.PROCUREMENT.REQUISITIONS);
 }
 
 export function useUpdateRequisition(id: string | undefined) {
   return useProcurementMutation<unknown, Record<string, unknown>>(
-    `/api/procurement/requisitions/${id}`,
+    API_ROUTES.PROCUREMENT.REQUISITION(id ?? ''),
     'PATCH',
   );
 }
@@ -40,12 +45,12 @@ export function useRejectRequisition(id: string | undefined) {
 }
 
 export function useCreatePurchaseOrder() {
-  return useProcurementMutation<unknown, Record<string, unknown>>('/api/procurement/purchase-orders');
+  return useProcurementMutation<unknown, Record<string, unknown>>(API_ROUTES.PROCUREMENT.PURCHASE_ORDERS);
 }
 
 export function useUpdatePurchaseOrder(id: string | undefined) {
   return useProcurementMutation<unknown, Record<string, unknown>>(
-    `/api/procurement/purchase-orders/${id}`,
+    API_ROUTES.PROCUREMENT.PURCHASE_ORDER(id ?? ''),
     'PATCH',
   );
 }
@@ -63,7 +68,7 @@ export function useSendPurchaseOrder(id: string | undefined) {
 }
 
 export function useCreateGRN() {
-  return useProcurementMutation<unknown, Record<string, unknown>>('/api/procurement/grns');
+  return useProcurementMutation<unknown, Record<string, unknown>>(API_ROUTES.PROCUREMENT.GRNS);
 }
 
 export function useReceiveGRN(id: string | undefined) {

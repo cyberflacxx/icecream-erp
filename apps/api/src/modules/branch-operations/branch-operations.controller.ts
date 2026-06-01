@@ -9,6 +9,7 @@ import {
   createBranchExpenseSchema,
   createBranchSaleSchema,
   initShiftCloseSchema,
+  rejectShiftCloseSchema,
   shiftCloseListQuerySchema,
   submitShiftCloseSchema
 } from './branch-operations.schemas';
@@ -140,6 +141,19 @@ export const branchOperationsController = {
       const params = branchIdParamsSchema.parse(req.params);
       const query = shiftCloseListQuerySchema.parse(req.query);
       const result = await BranchOperationsService.listShiftCloses(context, params.branchId, query);
+
+      return res.status(200).json(result);
+    } catch (error) {
+      return next(error);
+    }
+  },
+
+  rejectShiftClose: async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const context = getBranchContext(req);
+      const params = branchEntityIdParamsSchema.parse(req.params);
+      const body = rejectShiftCloseSchema.parse(req.body);
+      const result = await BranchOperationsService.rejectShiftClose(context, params.branchId, params.id, body);
 
       return res.status(200).json(result);
     } catch (error) {

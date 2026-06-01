@@ -54,5 +54,5 @@ export function useBranchRealtime(
       void supabase.removeChannel(salesChannel);
       void supabase.removeChannel(shiftCloseChannel);
     };
-  }, [branchId, handlers.onSale, handlers.onShiftClose]);
+  }, [branchId, handlers]);
 }

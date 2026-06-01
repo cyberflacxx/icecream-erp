@@ -300,13 +300,7 @@ export const salesController = {
       const context = getSalesContext(req);
       const params = invoiceIdParamsSchema.parse(req.params);
       const body = invoicePaymentSchema.parse(req.body);
-      const result = await SalesService.recordPayment(
-        context,
-        params.id,
-        body.amount,
-        body.method,
-        body.reference,
-      );
+      const result = await SalesService.recordPayment(context, params.id, body);
 
       return res.status(200).json(result);
     } catch (error) {

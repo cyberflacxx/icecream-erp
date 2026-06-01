@@ -2,6 +2,7 @@
 
 import { useAppAuth } from '@/hooks/useAppAuth';
 import { useQuery } from '@tanstack/react-query';
+import { API_ROUTES } from '@absolute-ice-cream/shared';
 
 import { type PaginatedResponse, type StockMovementRow, type StockMovementsFilters } from './types';
 import { buildInventoryQuery, useInventoryRequest } from './useInventoryRequest';
@@ -14,7 +15,7 @@ export function useStockMovements(filters: StockMovementsFilters) {
     queryKey: ['inventory', 'stock-movements', userId, filters],
     queryFn: () =>
       request<PaginatedResponse<StockMovementRow>>(
-        `/api/inventory/stock-movements${buildInventoryQuery({
+        `${API_ROUTES.INVENTORY.STOCK_MOVEMENTS}${buildInventoryQuery({
           endDate: filters.endDate,
           itemId: filters.itemId,
           page: filters.page ?? 1,

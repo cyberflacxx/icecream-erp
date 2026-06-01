@@ -28,10 +28,11 @@ const numberFormatter = new Intl.NumberFormat('en-US', {
 
 const itemTypeOptions = [
   { label: 'Raw Material', value: 'RAW_MATERIAL' },
-  { label: 'Packaging', value: 'PACKAGING' },
+  { label: 'Packaging Material', value: 'PACKAGING_MATERIAL' },
   { label: 'Finished Good', value: 'FINISHED_GOOD' },
   { label: 'Consumable', value: 'CONSUMABLE' },
-  { label: 'Spare Part', value: 'SPARE_PART' }
+  { label: 'Spare Part', value: 'SPARE_PART' },
+  { label: 'Work In Progress', value: 'WORK_IN_PROGRESS' }
 ] as const;
 
 const itemFormSchema = z.object({
@@ -39,7 +40,14 @@ const itemFormSchema = z.object({
   code: z.string().trim().min(1, 'Item code is required.'),
   description: z.string().trim().optional(),
   isActive: z.boolean(),
-  itemType: z.enum(['RAW_MATERIAL', 'PACKAGING', 'FINISHED_GOOD', 'CONSUMABLE', 'SPARE_PART']),
+  itemType: z.enum([
+    'RAW_MATERIAL',
+    'PACKAGING_MATERIAL',
+    'FINISHED_GOOD',
+    'CONSUMABLE',
+    'SPARE_PART',
+    'WORK_IN_PROGRESS'
+  ]),
   name: z.string().trim().min(1, 'Item name is required.'),
   reorderLevel: z.coerce.number().min(0, 'Reorder level must be 0 or more.'),
   reorderQuantity: z.coerce.number().min(0, 'Reorder quantity must be 0 or more.'),

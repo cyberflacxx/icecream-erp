@@ -166,6 +166,11 @@ export default function StockMovementsPage() {
             render: (row) => quantityFormatter.format(row.quantity)
           },
           {
+            key: 'runningBalance',
+            header: 'Running Balance',
+            render: (row) => quantityFormatter.format(row.runningBalance)
+          },
+          {
             key: 'unitCost',
             header: 'Unit Cost',
             render: (row) => currencyFormatter.format(row.unitCost)

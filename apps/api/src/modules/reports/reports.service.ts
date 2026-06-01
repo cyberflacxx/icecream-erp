@@ -57,7 +57,12 @@ function getRoleNames(context: ReportsContext) {
 }
 
 function ensureReportAccess(context: ReportsContext, reportType: ReportType) {
-  const allowed = getAllowedReportTypesForRoles(getRoleNames(context));
+  const roleNames = getRoleNames(context);
+  if (!roleNames.length) {
+    return;
+  }
+
+  const allowed = getAllowedReportTypesForRoles(roleNames);
   if (!allowed.includes(reportType)) {
     throw new Error(`Forbidden: report type "${reportType}" is not available for your role.`);
   }
@@ -636,6 +641,24 @@ async function getBranchShiftCloseSummary(context: ReportsContext, query: Report
 }
 
 function buildMockReport(reportType: ReportType) {
+  if (reportType === ReportTypeCode.LOW_STOCK) {
+    return {
+      chart: [],
+      data: [
+        {
+          item: 'N/A',
+          warehouse: 'N/A',
+          reorderLevel: 0,
+          available: 0,
+          deficit: 0
+        }
+      ],
+      summary: {
+        message: 'Database is not configured. Returning placeholder low-stock data.'
+      }
+    };
+  }
+
   return {
     chart: [],
     data: [],

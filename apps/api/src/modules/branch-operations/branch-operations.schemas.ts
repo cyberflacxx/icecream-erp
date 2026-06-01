@@ -114,6 +114,10 @@ export const submitShiftCloseSchema = z.object({
   notes: z.string().trim().optional().nullable()
 });
 
+export const rejectShiftCloseSchema = z.object({
+  reason: z.string().trim().min(1).optional()
+});
+
 export type BranchDashboardQuery = z.infer<typeof branchDashboardQuerySchema>;
 export type BranchExpensesQuery = z.infer<typeof branchExpensesQuerySchema>;
 export type BranchListQuery = z.infer<typeof branchListQuerySchema>;
@@ -125,4 +129,5 @@ export type CreateBranchSaleInput = z.infer<typeof createBranchSaleSchema>;
 export type InitShiftCloseInput = z.infer<typeof initShiftCloseSchema>;
 export type ShiftCloseListQuery = z.infer<typeof shiftCloseListQuerySchema>;
 export type SubmitShiftCloseInput = z.infer<typeof submitShiftCloseSchema>;
+export type RejectShiftCloseInput = z.infer<typeof rejectShiftCloseSchema>;
 export type UpdateBranchInput = z.infer<typeof updateBranchSchema>;

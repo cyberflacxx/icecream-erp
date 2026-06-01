@@ -1,0 +1,2897 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+}
+
+enum SupplierStatus {
+  ACTIVE
+  INACTIVE
+  BLACKLISTED
+}
+
+enum ItemType {
+  RAW_MATERIAL
+  PACKAGING_MATERIAL
+  FINISHED_GOOD
+  WORK_IN_PROGRESS
+  CONSUMABLE
+  SPARE_PART
+}
+
+enum StockMovementType {
+  PURCHASE_RECEIVE
+  PRODUCTION_ISSUE
+  PRODUCTION_OUTPUT
+  WIP_TRANSFER
+  TRANSFER_OUT
+  TRANSFER_IN
+  SALES_ISSUE
+  RETURN_IN
+  ADJUSTMENT_IN
+  ADJUSTMENT_OUT
+  DAMAGE
+  EXPIRY_WRITE_OFF
+  WASTAGE
+  SPILLAGE
+  MACHINE_LOSS
+  PACKAGING_LOSS
+}
+
+enum PurchaseRequisitionStatus {
+  DRAFT
+  SUBMITTED
+  LEVEL1_APPROVED
+  LEVEL2_APPROVED
+  LEVEL3_APPROVED
+  LEVEL4_APPROVED
+  REJECTED
+  CANCELLED
+  PO_CREATED
+}
+
+enum PurchaseOrderStatus {
+  DRAFT
+  AWAITING_APPROVAL
+  LEVEL1_APPROVED
+  LEVEL2_APPROVED
+  LEVEL3_APPROVED
+  APPROVED
+  SENT_TO_SUPPLIER
+  PARTIAL_RECEIVED
+  FULLY_RECEIVED
+  CANCELLED
+}
+
+enum GRNStatus {
+  DRAFT
+  RECEIVED
+  QUALITY_INSPECTION
+  QUALITY_PASSED
+  QUALITY_FAILED
+  POSTED
+  REJECTED
+}
+
+enum ProductionBatchStatus {
+  DRAFT
+  PLANNED
+  MATERIALS_REQUESTED
+  MATERIALS_APPROVED
+  MATERIALS_RESERVED
+  IN_PROGRESS
+  WIP
+  QUALITY_CHECK
+  COMPLETED
+  CANCELLED
+}
+
+enum QualityStatus {
+  PENDING
+  PASSED
+  FAILED
+  CONDITIONAL_RELEASE
+  QUARANTINE
+}
+
+enum ShiftType {
+  DAY
+  NIGHT
+}
+
+enum BranchShiftStatus {
+  OPEN
+  SUBMITTED
+  REVIEWED
+  APPROVED
+  REJECTED
+}
+
+enum SalesOrderStatus {
+  DRAFT
+  CONFIRMED
+  CREDIT_CHECK
+  PICKING
+  DISPATCHED
+  DELIVERED
+  INVOICED
+  PARTIALLY_PAID
+  PAID
+  CANCELLED
+}
+
+enum PaymentMethod {
+  CASH
+  ECOCASH
+  CARD
+  BANK_TRANSFER
+  CREDIT
+  PETTY_CASH
+}
+
+enum InvoiceStatus {
+  DRAFT
+  SENT
+  PARTIAL_PAID
+  PAID
+  OVERDUE
+  DISPUTED
+  CANCELLED
+}
+
+enum EmployeeStatus {
+  ACTIVE
+  INACTIVE
+  ON_LEAVE
+  TERMINATED
+}
+
+enum LeaveStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+enum MaintenanceStatus {
+  SCHEDULED
+  IN_PROGRESS
+  COMPLETED
+  OVERDUE
+  CANCELLED
+}
+
+enum MaintenanceType {
+  PREVENTIVE
+  CORRECTIVE
+  BREAKDOWN
+  INSPECTION
+}
+
+enum ApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  ESCALATED
+}
+
+enum ApprovalLevel {
+  LEVEL1_SUPERVISOR
+  LEVEL2_MANAGER
+  LEVEL3_FINANCE_MANAGER
+  LEVEL4_MANAGING_DIRECTOR
+}
+
+enum TransactionStatus {
+  DRAFT
+  POSTED
+  APPROVED
+  LOCKED
+  VOIDED
+}
+
+enum BudgetStatus {
+  DRAFT
+  SUBMITTED
+  APPROVED
+  ACTIVE
+  CLOSED
+}
+
+enum BranchStatus {
+  ACTIVE
+  INACTIVE
+  CLOSED
+}
+
+enum WarehouseType {
+  MAIN
+  BRANCH
+  COLD_ROOM
+}
+
+enum InventoryBatchStatus {
+  ACTIVE
+  EXPIRED
+  DEPLETED
+  QUARANTINE
+}
+
+enum TransferStatus {
+  DRAFT
+  IN_TRANSIT
+  COMPLETED
+  CANCELLED
+}
+
+enum ReturnStatus {
+  DRAFT
+  APPROVED
+  COMPLETED
+  CANCELLED
+}
+
+enum RecipeStatus {
+  DRAFT
+  ACTIVE
+  INACTIVE
+}
+
+enum ProductionPlanStatus {
+  DRAFT
+  APPROVED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum CustomerStatus {
+  ACTIVE
+  INACTIVE
+  BLACKLISTED
+}
+
+enum QuotationStatus {
+  DRAFT
+  SENT
+  ACCEPTED
+  REJECTED
+  EXPIRED
+  CANCELLED
+}
+
+enum DeliveryNoteStatus {
+  DRAFT
+  DISPATCHED
+  DELIVERED
+  CANCELLED
+}
+
+enum PayrollStatus {
+  DRAFT
+  APPROVED
+  PAID
+  CANCELLED
+}
+
+enum AccountType {
+  ASSET
+  LIABILITY
+  EQUITY
+  REVENUE
+  EXPENSE
+  COST_OF_SALES
+}
+
+enum WastageType {
+  MATERIAL_WASTAGE
+  PRODUCT_LOSS
+  SPILLAGE
+  MACHINE_LOSS
+  PACKAGING_LOSS
+  QUALITY_REJECTION
+  EXPIRY_LOSS
+}
+
+enum NotificationType {
+  INFO
+  SUCCESS
+  WARNING
+  ERROR
+  ACTION_REQUIRED
+}
+
+model Organization {
+  id                  String                  @id @default(uuid()) @db.Uuid
+  name                String
+  logoUrl             String?                 @map("logo_url")
+  address             String?
+  phone               String?
+  email               String?
+  taxNumber           String?                 @map("tax_number")
+  currency            String                  @default("USD")
+  financialYearStart  Int                     @default(1) @map("financial_year_start")
+  createdAt           DateTime                @default(now()) @map("created_at")
+  updatedAt           DateTime                @updatedAt @map("updated_at")
+  userProfiles        UserProfile[]
+  userAccounts        UserAccount[]
+  roles               Role[]
+  branches            Branch[]
+  warehouses          Warehouse[]
+  itemCategories      ItemCategory[]
+  unitsOfMeasure      UnitOfMeasure[]
+  items               Item[]
+  inventoryBatches    InventoryBatch[]
+  stockBalances       StockBalance[]
+  stockMovements      StockMovement[]
+  stockTransfers      StockTransfer[]
+  supplierCategories  SupplierCategory[]
+  suppliers           Supplier[]
+  purchaseRequisitions PurchaseRequisition[]
+  purchaseOrders      PurchaseOrder[]
+  goodsReceivedNotes  GoodsReceivedNote[]
+  supplierReturns     SupplierReturn[]
+  recipes             Recipe[]
+  productionPlans     ProductionPlan[]
+  productionBatches   ProductionBatch[]
+  qualityChecks       QualityCheck[]
+  customers           Customer[]
+  quotations          Quotation[]
+  salesOrders         SalesOrder[]
+  deliveryNotes       DeliveryNote[]
+  invoices            Invoice[]
+  payments            Payment[]
+  customerReturns     CustomerReturn[]
+  branchSales         BranchSale[]
+  branchExpenses      BranchExpense[]
+  branchShiftCloses   BranchShiftClose[]
+  employees           Employee[]
+  attendances         Attendance[]
+  payrollRecords      PayrollRecord[]
+  accounts            Account[]
+  journalEntries      JournalEntry[]
+  documentFiles       DocumentFile[]
+  notifications       Notification[]
+  auditLogs           AuditLog[]
+
+  @@index([name])
+  @@map("organizations")
+}
+
+model UserProfile {
+  id                   String         @id @default(uuid()) @db.Uuid
+  clerkUserId          String         @unique @map("clerk_user_id")
+  organizationId       String         @db.Uuid @map("organization_id")
+  employeeId           String?        @unique @db.Uuid @map("employee_id")
+  firstName            String         @map("first_name")
+  lastName             String         @map("last_name")
+  email                String
+  phone                String?
+  avatarUrl            String?        @map("avatar_url")
+  status               UserStatus     @default(ACTIVE)
+  branchId             String?        @db.Uuid @map("branch_id")
+  createdAt            DateTime       @default(now()) @map("created_at")
+  updatedAt            DateTime       @updatedAt @map("updated_at")
+  deletedAt            DateTime?      @map("deleted_at")
+  organization         Organization   @relation(fields: [organizationId], references: [id])
+  employee             Employee?      @relation("EmployeeUserProfile", fields: [employeeId], references: [id])
+  branch               Branch?        @relation("BranchUsers", fields: [branchId], references: [id])
+  managedBranches      Branch[]       @relation("BranchManager")
+  roleAssignments      UserRole[]     @relation("UserRoleProfile")
+  rolesAssigned        UserRole[]     @relation("UserRoleAssignedBy")
+  createdSuppliers     Supplier[]     @relation("SupplierCreatedBy")
+  requestedRequisitions PurchaseRequisition[] @relation("PurchaseRequisitionRequestedBy")
+  approvedRequisitions PurchaseRequisition[] @relation("PurchaseRequisitionApprovedBy")
+  createdPurchaseOrders PurchaseOrder[] @relation("PurchaseOrderCreatedBy")
+  approvedPurchaseOrders PurchaseOrder[] @relation("PurchaseOrderApprovedBy")
+  receivedGrns         GoodsReceivedNote[] @relation("GoodsReceivedBy")
+  createdSupplierReturns SupplierReturn[] @relation("SupplierReturnCreatedBy")
+  createdRecipes       Recipe[]       @relation("RecipeCreatedBy")
+  createdProductionPlans ProductionPlan[] @relation("ProductionPlanCreatedBy")
+  startedBatches       ProductionBatch[] @relation("ProductionBatchStartedBy")
+  closedBatches        ProductionBatch[] @relation("ProductionBatchClosedBy")
+  qualityChecks        QualityCheck[] @relation("QualityCheckBy")
+  createdCustomers     Customer[]     @relation("CustomerCreatedBy")
+  createdQuotations    Quotation[]    @relation("QuotationCreatedBy")
+  createdSalesOrders   SalesOrder[]   @relation("SalesOrderCreatedBy")
+  deliveredNotes       DeliveryNote[] @relation("DeliveryDeliveredBy")
+  createdInvoices      Invoice[]      @relation("InvoiceCreatedBy")
+  createdPayments      Payment[]      @relation("PaymentCreatedBy")
+  createdCustomerReturns CustomerReturn[] @relation("CustomerReturnCreatedBy")
+  servedBranchSales    BranchSale[]   @relation("BranchSaleServedBy")
+  approvedBranchExpenses BranchExpense[] @relation("BranchExpenseApprovedBy")
+  createdBranchExpenses BranchExpense[] @relation("BranchExpenseCreatedBy")
+  closedShiftCloses    BranchShiftClose[] @relation("BranchShiftClosedBy")
+  approvedShiftCloses  BranchShiftClose[] @relation("BranchShiftApprovedBy")
+  createdPayrollRecords PayrollRecord[] @relation("PayrollCreatedBy")
+  createdJournalEntries JournalEntry[] @relation("JournalEntryCreatedBy")
+  uploadedFiles        DocumentFile[] @relation("DocumentUploadedBy")
+  notifications        Notification[]
+  auditLogs            AuditLog[]
+  createdStockMovements StockMovement[] @relation("StockMovementCreatedBy")
+  requestedTransfers   StockTransfer[] @relation("StockTransferRequestedBy")
+  approvedTransfers    StockTransfer[] @relation("StockTransferApprovedBy")
+  userAccount          UserAccount?
+
+  @@unique([organizationId, email])
+  @@index([organizationId])
+  @@index([branchId])
+  @@index([status])
+  @@index([firstName, lastName])
+  @@index([email])
+  @@index([deletedAt])
+  @@map("user_profiles")
+}
+
+model Role {
+  id            String           @id @default(uuid()) @db.Uuid
+  organizationId String          @db.Uuid @map("organization_id")
+  name          String
+  description   String?
+  isSystemRole  Boolean          @default(false) @map("is_system_role")
+  createdAt     DateTime         @default(now()) @map("created_at")
+  updatedAt     DateTime         @updatedAt @map("updated_at")
+  organization  Organization     @relation(fields: [organizationId], references: [id])
+  permissions   RolePermission[]
+  users         UserRole[]
+  userAccounts  UserAccount[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
+  @@index([name])
+  @@map("roles")
+}
+
+model Permission {
+  id            String           @id @default(uuid()) @db.Uuid
+  code          String           @unique
+  name          String
+  description   String?
+  module        String
+  createdAt     DateTime         @default(now()) @map("created_at")
+  updatedAt     DateTime         @updatedAt @map("updated_at")
+  rolePermissions RolePermission[]
+
+  @@index([module])
+  @@index([name])
+  @@map("permissions")
+}
+
+model RolePermission {
+  id            String       @id @default(uuid()) @db.Uuid
+  roleId        String       @db.Uuid @map("role_id")
+  permissionId  String       @db.Uuid @map("permission_id")
+  createdAt     DateTime     @default(now()) @map("created_at")
+  updatedAt     DateTime     @updatedAt @map("updated_at")
+  role          Role         @relation(fields: [roleId], references: [id])
+  permission    Permission   @relation(fields: [permissionId], references: [id])
+
+  @@unique([roleId, permissionId])
+  @@index([roleId])
+  @@index([permissionId])
+  @@map("role_permissions")
+}
+
+model UserRole {
+  id            String       @id @default(uuid()) @db.Uuid
+  userProfileId String       @db.Uuid @map("user_profile_id")
+  roleId        String       @db.Uuid @map("role_id")
+  assignedBy    String?      @db.Uuid @map("assigned_by")
+  assignedAt    DateTime     @default(now()) @map("assigned_at")
+  createdAt     DateTime     @default(now()) @map("created_at")
+  updatedAt     DateTime     @updatedAt @map("updated_at")
+  userProfile   UserProfile  @relation("UserRoleProfile", fields: [userProfileId], references: [id])
+  role          Role         @relation(fields: [roleId], references: [id])
+  assignedByUser UserProfile? @relation("UserRoleAssignedBy", fields: [assignedBy], references: [id])
+
+  @@unique([userProfileId, roleId])
+  @@index([userProfileId])
+  @@index([roleId])
+  @@index([assignedBy])
+  @@index([assignedAt])
+  @@map("user_roles")
+}
+
+model UserAccount {
+  id                 String          @id @default(uuid()) @db.Uuid
+  workId             String          @unique @map("work_id")
+  firstName          String          @map("first_name")
+  lastName           String          @map("last_name")
+  idNumber           String          @unique @map("id_number")
+  email              String          @unique
+  passwordHash       String          @map("password_hash")
+  roleId             String          @db.Uuid @map("role_id")
+  role               Role            @relation(fields: [roleId], references: [id])
+  organizationId     String          @db.Uuid @map("organization_id")
+  organization       Organization    @relation(fields: [organizationId], references: [id])
+  userProfileId      String?         @unique @db.Uuid @map("user_profile_id")
+  userProfile        UserProfile?    @relation(fields: [userProfileId], references: [id])
+  isActive           Boolean         @default(true) @map("is_active")
+  failedLoginAttempts Int            @default(0) @map("failed_login_attempts")
+  lockedUntil        DateTime?       @map("locked_until")
+  lastLogin          DateTime?       @map("last_login")
+  createdAt          DateTime        @default(now()) @map("created_at")
+  updatedAt          DateTime        @updatedAt @map("updated_at")
+  deletedAt          DateTime?       @map("deleted_at")
+  sessions           AuthSession[]
+  passwordResetTokens PasswordResetToken[]
+
+  @@index([organizationId])
+  @@index([roleId])
+  @@index([isActive])
+  @@index([deletedAt])
+  @@map("user_accounts")
+}
+
+model AdminKey {
+  id          String    @id @default(uuid()) @db.Uuid
+  keyValue    String    @unique @map("key_value")
+  description String?
+  isActive    Boolean   @default(true) @map("is_active")
+  usageCount  Int       @default(0) @map("usage_count")
+  maxUsage    Int?      @map("max_usage")
+  createdBy   String?   @map("created_by")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+  expiresAt   DateTime? @map("expires_at")
+
+  @@index([isActive])
+  @@map("admin_keys")
+}
+
+model PasswordResetToken {
+  id            String       @id @default(uuid()) @db.Uuid
+  userAccountId String       @db.Uuid @map("user_account_id")
+  userAccount   UserAccount  @relation(fields: [userAccountId], references: [id])
+  token         String       @unique
+  expiresAt     DateTime     @map("expires_at")
+  usedAt        DateTime?    @map("used_at")
+  createdAt     DateTime     @default(now()) @map("created_at")
+  updatedAt     DateTime     @updatedAt @map("updated_at")
+
+  @@index([userAccountId])
+  @@index([expiresAt])
+  @@map("password_reset_tokens")
+}
+
+model AuthSession {
+  id            String      @id @default(uuid()) @db.Uuid
+  userAccountId String      @db.Uuid @map("user_account_id")
+  userAccount   UserAccount @relation(fields: [userAccountId], references: [id])
+  token         String      @unique
+  ipAddress     String?     @map("ip_address")
+  userAgent     String?     @map("user_agent")
+  expiresAt     DateTime    @map("expires_at")
+  createdAt     DateTime    @default(now()) @map("created_at")
+  updatedAt     DateTime    @updatedAt @map("updated_at")
+
+  @@index([userAccountId])
+  @@index([expiresAt])
+  @@map("auth_sessions")
+}
+
+model Branch {
+  id               String           @id @default(uuid()) @db.Uuid
+  organizationId   String           @db.Uuid @map("organization_id")
+  code             String
+  name             String
+  address          String?
+  phone            String?
+  managerId        String?          @db.Uuid @map("manager_id")
+  status           BranchStatus     @default(ACTIVE)
+  createdAt        DateTime         @default(now()) @map("created_at")
+  updatedAt        DateTime         @updatedAt @map("updated_at")
+  deletedAt        DateTime?        @map("deleted_at")
+  organization     Organization     @relation(fields: [organizationId], references: [id])
+  manager          UserProfile?     @relation("BranchManager", fields: [managerId], references: [id])
+  userProfiles     UserProfile[]    @relation("BranchUsers")
+  employees        Employee[]
+  warehouses       Warehouse[]
+  salesOrders      SalesOrder[]
+  branchSales      BranchSale[]
+  branchExpenses   BranchExpense[]
+  branchShiftCloses BranchShiftClose[]
+
+  @@unique([organizationId, code])
+  @@index([organizationId])
+  @@index([managerId])
+  @@index([status])
+  @@index([name])
+  @@index([deletedAt])
+  @@map("branches")
+}
+
+model Warehouse {
+  id                String            @id @default(uuid()) @db.Uuid
+  organizationId    String            @db.Uuid @map("organization_id")
+  branchId          String?           @db.Uuid @map("branch_id")
+  code              String
+  name              String
+  type              WarehouseType
+  address           String?
+  isActive          Boolean           @default(true) @map("is_active")
+  createdAt         DateTime          @default(now()) @map("created_at")
+  updatedAt         DateTime          @updatedAt @map("updated_at")
+  organization      Organization      @relation(fields: [organizationId], references: [id])
+  branch            Branch?           @relation(fields: [branchId], references: [id])
+  inventoryBatches  InventoryBatch[]
+  stockBalances     StockBalance[]
+  stockMovements    StockMovement[]
+  goodsReceivedNotes GoodsReceivedNote[]
+  productionBatches ProductionBatch[]
+  salesOrders       SalesOrder[]
+  fromTransfers     StockTransfer[]   @relation("TransferFromWarehouse")
+  toTransfers       StockTransfer[]   @relation("TransferToWarehouse")
+
+  @@unique([organizationId, code])
+  @@index([organizationId])
+  @@index([branchId])
+  @@index([type])
+  @@index([name])
+  @@map("warehouses")
+}
+
+model ItemCategory {
+  id             String         @id @default(uuid()) @db.Uuid
+  organizationId String         @db.Uuid @map("organization_id")
+  name           String
+  description    String?
+  createdAt      DateTime       @default(now()) @map("created_at")
+  updatedAt      DateTime       @updatedAt @map("updated_at")
+  organization   Organization   @relation(fields: [organizationId], references: [id])
+  items          Item[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
+  @@index([name])
+  @@map("item_categories")
+}
+
+model UnitOfMeasure {
+  id             String                  @id @default(uuid()) @db.Uuid
+  organizationId String                  @db.Uuid @map("organization_id")
+  name           String
+  abbreviation   String
+  createdAt      DateTime                @default(now()) @map("created_at")
+  updatedAt      DateTime                @updatedAt @map("updated_at")
+  organization   Organization            @relation(fields: [organizationId], references: [id])
+  items          Item[]
+  requisitionItems PurchaseRequisitionItem[]
+  purchaseOrderItems PurchaseOrderItem[]
+  recipesAsOutput Recipe[]               @relation("RecipeOutputUnit")
+  recipeItems     RecipeItem[]           @relation("RecipeItemUnit")
+  productionBatchMaterials ProductionBatchMaterial[] @relation("ProductionMaterialUnit")
+  productionBatchOutputs ProductionBatchOutput[] @relation("ProductionOutputUnit")
+
+  @@unique([organizationId, abbreviation])
+  @@index([organizationId])
+  @@index([name])
+  @@map("units_of_measure")
+}
+
+model Item {
+  id                String                @id @default(uuid()) @db.Uuid
+  organizationId    String                @db.Uuid @map("organization_id")
+  code              String
+  name              String
+  description       String?
+  itemType          ItemType              @map("item_type")
+  categoryId        String                @db.Uuid @map("category_id")
+  unitOfMeasureId   String                @db.Uuid @map("unit_of_measure_id")
+  reorderLevel      Decimal?              @db.Decimal(18, 3) @map("reorder_level")
+  reorderQuantity   Decimal?              @db.Decimal(18, 3) @map("reorder_quantity")
+  unitCost          Decimal?              @db.Decimal(18, 2) @map("unit_cost")
+  sellingPrice      Decimal?              @db.Decimal(18, 2) @map("selling_price")
+  isActive          Boolean               @default(true) @map("is_active")
+  trackExpiry       Boolean               @default(false) @map("track_expiry")
+  imageUrl          String?               @map("image_url")
+  createdAt         DateTime              @default(now()) @map("created_at")
+  updatedAt         DateTime              @updatedAt @map("updated_at")
+  deletedAt         DateTime?             @map("deleted_at")
+  organization      Organization          @relation(fields: [organizationId], references: [id])
+  category          ItemCategory          @relation(fields: [categoryId], references: [id])
+  unitOfMeasure     UnitOfMeasure         @relation(fields: [unitOfMeasureId], references: [id])
+  inventoryBatches  InventoryBatch[]
+  stockBalances     StockBalance[]
+  stockMovements    StockMovement[]
+  stockTransferItems StockTransferItem[]
+  requisitionItems  PurchaseRequisitionItem[]
+  purchaseOrderItems PurchaseOrderItem[]
+  grnItems          GoodsReceivedNoteItem[]
+  recipeAsFinishedGood Recipe[]          @relation("FinishedItemRecipes")
+  recipeMaterials   RecipeItem[]          @relation("RecipeMaterialItem")
+  recipeSubstitutions RecipeItem[]        @relation("RecipeSubstituteItem")
+  productionBatchMaterials ProductionBatchMaterial[]
+  productionBatchOutputs ProductionBatchOutput[]
+  quotationItems    QuotationItem[]
+  salesOrderItems   SalesOrderItem[]
+  invoiceItems      InvoiceItem[]
+  branchSaleItems   BranchSaleItem[]
+
+  @@unique([organizationId, code])
+  @@index([organizationId])
+  @@index([categoryId])
+  @@index([unitOfMeasureId])
+  @@index([itemType])
+  @@index([name])
+  @@index([isActive])
+  @@index([deletedAt])
+  @@map("items")
+}
+
+model InventoryBatch {
+  id                String               @id @default(uuid()) @db.Uuid
+  organizationId    String               @db.Uuid @map("organization_id")
+  itemId            String               @db.Uuid @map("item_id")
+  warehouseId       String               @db.Uuid @map("warehouse_id")
+  batchNumber       String               @map("batch_number")
+  manufacturedDate  DateTime?            @db.Date @map("manufactured_date")
+  expiryDate        DateTime?            @db.Date @map("expiry_date")
+  quantityReceived  Decimal              @db.Decimal(18, 3) @map("quantity_received")
+  quantityRemaining Decimal              @db.Decimal(18, 3) @map("quantity_remaining")
+  unitCost          Decimal              @db.Decimal(18, 2) @map("unit_cost")
+  supplierId        String?              @db.Uuid @map("supplier_id")
+  status            InventoryBatchStatus @default(ACTIVE)
+  createdAt         DateTime             @default(now()) @map("created_at")
+  updatedAt         DateTime             @updatedAt @map("updated_at")
+  organization      Organization         @relation(fields: [organizationId], references: [id])
+  item              Item                 @relation(fields: [itemId], references: [id])
+  warehouse         Warehouse            @relation(fields: [warehouseId], references: [id])
+  supplier          Supplier?            @relation(fields: [supplierId], references: [id])
+  stockMovements    StockMovement[]
+
+  @@unique([warehouseId, itemId, batchNumber])
+  @@index([organizationId])
+  @@index([itemId])
+  @@index([warehouseId])
+  @@index([supplierId])
+  @@index([status])
+  @@index([manufacturedDate])
+  @@index([expiryDate])
+  @@map("inventory_batches")
+}
+
+model StockBalance {
+  id                String        @id @default(uuid()) @db.Uuid
+  organizationId    String        @db.Uuid @map("organization_id")
+  itemId            String        @db.Uuid @map("item_id")
+  warehouseId       String        @db.Uuid @map("warehouse_id")
+  quantityOnHand    Decimal       @db.Decimal(18, 3) @map("quantity_on_hand")
+  quantityReserved  Decimal       @db.Decimal(18, 3) @default(0) @map("quantity_reserved")
+  quantityAvailable Decimal       @db.Decimal(18, 3) @map("quantity_available")
+  lastUpdated       DateTime      @default(now()) @map("last_updated")
+  createdAt         DateTime      @default(now()) @map("created_at")
+  updatedAt         DateTime      @updatedAt @map("updated_at")
+  organization      Organization  @relation(fields: [organizationId], references: [id])
+  item              Item          @relation(fields: [itemId], references: [id])
+  warehouse         Warehouse     @relation(fields: [warehouseId], references: [id])
+
+  @@unique([itemId, warehouseId])
+  @@index([organizationId])
+  @@index([itemId])
+  @@index([warehouseId])
+  @@index([lastUpdated])
+  @@map("stock_balances")
+}
+
+model StockMovement {
+  id             String             @id @default(uuid()) @db.Uuid
+  organizationId String             @db.Uuid @map("organization_id")
+  itemId         String             @db.Uuid @map("item_id")
+  warehouseId    String             @db.Uuid @map("warehouse_id")
+  movementType   StockMovementType  @map("movement_type")
+  quantity       Decimal            @db.Decimal(18, 3)
+  unitCost       Decimal?           @db.Decimal(18, 2) @map("unit_cost")
+  totalCost      Decimal?           @db.Decimal(18, 2) @map("total_cost")
+  runningBalance Decimal?           @db.Decimal(18, 3) @map("running_balance")
+  referenceType  String             @map("reference_type")
+  referenceId    String             @map("reference_id")
+  batchId        String?            @db.Uuid @map("batch_id")
+  notes          String?
+  createdBy      String?            @db.Uuid @map("created_by")
+  createdAt      DateTime           @default(now()) @map("created_at")
+  updatedAt      DateTime           @updatedAt @map("updated_at")
+  organization   Organization       @relation(fields: [organizationId], references: [id])
+  item           Item               @relation(fields: [itemId], references: [id])
+  warehouse      Warehouse          @relation(fields: [warehouseId], references: [id])
+  batch          InventoryBatch?    @relation(fields: [batchId], references: [id])
+  createdByUser  UserProfile?       @relation("StockMovementCreatedBy", fields: [createdBy], references: [id])
+
+  @@index([organizationId])
+  @@index([itemId])
+  @@index([warehouseId])
+  @@index([movementType])
+  @@index([batchId])
+  @@index([createdBy])
+  @@index([createdAt])
+  @@index([referenceType, referenceId])
+  @@map("stock_movements")
+}
+
+model StockTransfer {
+  id              String         @id @default(uuid()) @db.Uuid
+  organizationId  String         @db.Uuid @map("organization_id")
+  transferNumber  String         @map("transfer_number")
+  fromWarehouseId String         @db.Uuid @map("from_warehouse_id")
+  toWarehouseId   String         @db.Uuid @map("to_warehouse_id")
+  transferDate    DateTime       @db.Date @map("transfer_date")
+  status          TransferStatus @default(DRAFT)
+  notes           String?
+  requestedBy     String?        @db.Uuid @map("requested_by")
+  approvedBy      String?        @db.Uuid @map("approved_by")
+  createdAt       DateTime       @default(now()) @map("created_at")
+  updatedAt       DateTime       @updatedAt @map("updated_at")
+  deletedAt       DateTime?      @map("deleted_at")
+  organization    Organization   @relation(fields: [organizationId], references: [id])
+  fromWarehouse   Warehouse      @relation("TransferFromWarehouse", fields: [fromWarehouseId], references: [id])
+  toWarehouse     Warehouse      @relation("TransferToWarehouse", fields: [toWarehouseId], references: [id])
+  requestedByUser UserProfile?   @relation("StockTransferRequestedBy", fields: [requestedBy], references: [id])
+  approvedByUser  UserProfile?   @relation("StockTransferApprovedBy", fields: [approvedBy], references: [id])
+  items           StockTransferItem[]
+
+  @@unique([organizationId, transferNumber])
+  @@index([organizationId])
+  @@index([fromWarehouseId])
+  @@index([toWarehouseId])
+  @@index([status])
+  @@index([transferDate])
+  @@index([requestedBy])
+  @@index([approvedBy])
+  @@index([deletedAt])
+  @@map("stock_transfers")
+}
+
+model StockTransferItem {
+  id                String        @id @default(uuid()) @db.Uuid
+  transferId        String        @db.Uuid @map("transfer_id")
+  itemId            String        @db.Uuid @map("item_id")
+  quantityRequested Decimal       @db.Decimal(18, 3) @map("quantity_requested")
+  quantitySent      Decimal?      @db.Decimal(18, 3) @map("quantity_sent")
+  quantityReceived  Decimal?      @db.Decimal(18, 3) @map("quantity_received")
+  unitCost          Decimal?      @db.Decimal(18, 2) @map("unit_cost")
+  notes             String?
+  createdAt         DateTime      @default(now()) @map("created_at")
+  updatedAt         DateTime      @updatedAt @map("updated_at")
+  transfer          StockTransfer @relation(fields: [transferId], references: [id])
+  item              Item          @relation(fields: [itemId], references: [id])
+
+  @@index([transferId])
+  @@index([itemId])
+  @@map("stock_transfer_items")
+}
+
+model SupplierCategory {
+  id             String        @id @default(uuid()) @db.Uuid
+  organizationId String        @db.Uuid @map("organization_id")
+  name           String
+  description    String?
+  createdAt      DateTime      @default(now()) @map("created_at")
+  updatedAt      DateTime      @updatedAt @map("updated_at")
+  organization   Organization  @relation(fields: [organizationId], references: [id])
+  suppliers      Supplier[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
+  @@index([name])
+  @@map("supplier_categories")
+}
+
+model Supplier {
+  id              String            @id @default(uuid()) @db.Uuid
+  organizationId  String            @db.Uuid @map("organization_id")
+  code            String
+  name            String
+  categoryId      String            @db.Uuid @map("category_id")
+  contactPerson   String?           @map("contact_person")
+  phone           String?
+  email           String?
+  address         String?
+  taxNumber       String?           @map("tax_number")
+  paymentTerms    String?           @map("payment_terms")
+  creditLimit     Decimal?          @db.Decimal(18, 2) @map("credit_limit")
+  currentBalance  Decimal?          @db.Decimal(18, 2) @default(0) @map("current_balance")
+  status          SupplierStatus    @default(ACTIVE)
+  createdBy       String?           @db.Uuid @map("created_by")
+  createdAt       DateTime          @default(now()) @map("created_at")
+  updatedAt       DateTime          @updatedAt @map("updated_at")
+  deletedAt       DateTime?         @map("deleted_at")
+  organization    Organization      @relation(fields: [organizationId], references: [id])
+  category        SupplierCategory  @relation(fields: [categoryId], references: [id])
+  createdByUser   UserProfile?      @relation("SupplierCreatedBy", fields: [createdBy], references: [id])
+  inventoryBatches InventoryBatch[]
+  purchaseOrders  PurchaseOrder[]
+  supplierReturns SupplierReturn[]
+  payments        Payment[]
+
+  @@unique([organizationId, code])
+  @@index([organizationId])
+  @@index([categoryId])
+  @@index([status])
+  @@index([name])
+  @@index([email])
+  @@index([phone])
+  @@index([createdBy])
+  @@index([deletedAt])
+  @@map("suppliers")
+}
+
+model PurchaseRequisition {
+  id              String                     @id @default(uuid()) @db.Uuid
+  organizationId  String                     @db.Uuid @map("organization_id")
+  requisitionNumber String                   @map("requisition_number")
+  requestedBy     String                     @db.Uuid @map("requested_by")
+  department      String
+  requestDate     DateTime                   @db.Date @map("request_date")
+  neededByDate    DateTime?                  @db.Date @map("needed_by_date")
+  status          PurchaseRequisitionStatus  @default(DRAFT)
+  approvalStatus  PurchaseRequisitionStatus  @default(DRAFT) @map("approval_status")
+  approvedBy      String?                    @db.Uuid @map("approved_by")
+  approvedAt      DateTime?                  @map("approved_at")
+  remarks         String?
+  createdAt       DateTime                   @default(now()) @map("created_at")
+  updatedAt       DateTime                   @updatedAt @map("updated_at")
+  deletedAt       DateTime?                  @map("deleted_at")
+  organization    Organization               @relation(fields: [organizationId], references: [id])
+  requestedByUser UserProfile                @relation("PurchaseRequisitionRequestedBy", fields: [requestedBy], references: [id])
+  approvedByUser  UserProfile?               @relation("PurchaseRequisitionApprovedBy", fields: [approvedBy], references: [id])
+  items           PurchaseRequisitionItem[]
+  purchaseOrders  PurchaseOrder[]
+
+  @@unique([organizationId, requisitionNumber])
+  @@index([organizationId])
+  @@index([requestedBy])
+  @@index([approvedBy])
+  @@index([status])
+  @@index([approvalStatus])
+  @@index([requestDate])
+  @@index([neededByDate])
+  @@index([department])
+  @@index([deletedAt])
+  @@map("purchase_requisitions")
+}
+
+model PurchaseRequisitionItem {
+  id                String               @id @default(uuid()) @db.Uuid
+  requisitionId     String               @db.Uuid @map("requisition_id")
+  itemId            String               @db.Uuid @map("item_id")
+  quantityRequested Decimal              @db.Decimal(18, 3) @map("quantity_requested")
+  quantityApproved  Decimal?             @db.Decimal(18, 3) @map("quantity_approved")
+  unitOfMeasureId   String               @db.Uuid @map("unit_of_measure_id")
+  estimatedUnitCost Decimal?             @db.Decimal(18, 2) @map("estimated_unit_cost")
+  remarks           String?
+  createdAt         DateTime             @default(now()) @map("created_at")
+  updatedAt         DateTime             @updatedAt @map("updated_at")
+  requisition       PurchaseRequisition  @relation(fields: [requisitionId], references: [id])
+  item              Item                 @relation(fields: [itemId], references: [id])
+  unitOfMeasure     UnitOfMeasure        @relation(fields: [unitOfMeasureId], references: [id])
+
+  @@index([requisitionId])
+  @@index([itemId])
+  @@index([unitOfMeasureId])
+  @@map("purchase_requisition_items")
+}
+
+model PurchaseOrder {
+  id                  String              @id @default(uuid()) @db.Uuid
+  organizationId      String              @db.Uuid @map("organization_id")
+  poNumber            String              @map("po_number")
+  supplierId          String              @db.Uuid @map("supplier_id")
+  requisitionId       String?             @db.Uuid @map("requisition_id")
+  orderDate           DateTime            @db.Date @map("order_date")
+  expectedDeliveryDate DateTime?          @db.Date @map("expected_delivery_date")
+  status              PurchaseOrderStatus @default(DRAFT)
+  subtotal            Decimal             @db.Decimal(18, 2)
+  taxAmount           Decimal             @db.Decimal(18, 2) @default(0) @map("tax_amount")
+  discountAmount      Decimal             @db.Decimal(18, 2) @default(0) @map("discount_amount")
+  total               Decimal             @db.Decimal(18, 2)
+  notes               String?
+  createdBy           String?             @db.Uuid @map("created_by")
+  approvedBy          String?             @db.Uuid @map("approved_by")
+  approvedAt          DateTime?           @map("approved_at")
+  createdAt           DateTime            @default(now()) @map("created_at")
+  updatedAt           DateTime            @updatedAt @map("updated_at")
+  deletedAt           DateTime?           @map("deleted_at")
+  organization        Organization        @relation(fields: [organizationId], references: [id])
+  supplier            Supplier            @relation(fields: [supplierId], references: [id])
+  requisition         PurchaseRequisition? @relation(fields: [requisitionId], references: [id])
+  createdByUser       UserProfile?        @relation("PurchaseOrderCreatedBy", fields: [createdBy], references: [id])
+  approvedByUser      UserProfile?        @relation("PurchaseOrderApprovedBy", fields: [approvedBy], references: [id])
+  items               PurchaseOrderItem[]
+  goodsReceivedNotes  GoodsReceivedNote[]
+
+  @@unique([organizationId, poNumber])
+  @@index([organizationId])
+  @@index([supplierId])
+  @@index([requisitionId])
+  @@index([status])
+  @@index([orderDate])
+  @@index([expectedDeliveryDate])
+  @@index([createdBy])
+  @@index([approvedBy])
+  @@index([deletedAt])
+  @@map("purchase_orders")
+}
+
+model PurchaseOrderItem {
+  id                String         @id @default(uuid()) @db.Uuid
+  purchaseOrderId   String         @db.Uuid @map("purchase_order_id")
+  itemId            String         @db.Uuid @map("item_id")
+  quantityOrdered   Decimal        @db.Decimal(18, 3) @map("quantity_ordered")
+  quantityReceived  Decimal        @db.Decimal(18, 3) @default(0) @map("quantity_received")
+  unitCost          Decimal        @db.Decimal(18, 2) @map("unit_cost")
+  totalCost         Decimal        @db.Decimal(18, 2) @map("total_cost")
+  unitOfMeasureId   String         @db.Uuid @map("unit_of_measure_id")
+  createdAt         DateTime       @default(now()) @map("created_at")
+  updatedAt         DateTime       @updatedAt @map("updated_at")
+  purchaseOrder     PurchaseOrder  @relation(fields: [purchaseOrderId], references: [id])
+  item              Item           @relation(fields: [itemId], references: [id])
+  unitOfMeasure     UnitOfMeasure  @relation(fields: [unitOfMeasureId], references: [id])
+  grnItems          GoodsReceivedNoteItem[]
+
+  @@index([purchaseOrderId])
+  @@index([itemId])
+  @@index([unitOfMeasureId])
+  @@map("purchase_order_items")
+}
+
+model GoodsReceivedNote {
+  id               String        @id @default(uuid()) @db.Uuid
+  organizationId   String        @db.Uuid @map("organization_id")
+  grnNumber        String        @map("grn_number")
+  purchaseOrderId  String        @db.Uuid @map("purchase_order_id")
+  warehouseId      String        @db.Uuid @map("warehouse_id")
+  receivedDate     DateTime      @db.Date @map("received_date")
+  receivedBy       String        @db.Uuid @map("received_by")
+  status           GRNStatus     @default(DRAFT)
+  qualityStatus    QualityStatus @default(PENDING) @map("quality_status")
+  qualityNotes     String?       @map("quality_notes")
+  notes            String?
+  createdAt        DateTime      @default(now()) @map("created_at")
+  updatedAt        DateTime      @updatedAt @map("updated_at")
+  deletedAt        DateTime?     @map("deleted_at")
+  organization     Organization  @relation(fields: [organizationId], references: [id])
+  purchaseOrder    PurchaseOrder @relation(fields: [purchaseOrderId], references: [id])
+  warehouse        Warehouse     @relation(fields: [warehouseId], references: [id])
+  receivedByUser   UserProfile   @relation("GoodsReceivedBy", fields: [receivedBy], references: [id])
+  items            GoodsReceivedNoteItem[]
+  supplierReturns  SupplierReturn[]
+
+  @@unique([organizationId, grnNumber])
+  @@index([organizationId])
+  @@index([purchaseOrderId])
+  @@index([warehouseId])
+  @@index([receivedBy])
+  @@index([status])
+  @@index([qualityStatus])
+  @@index([receivedDate])
+  @@index([deletedAt])
+  @@map("goods_received_notes")
+}
+
+model GoodsReceivedNoteItem {
+  id               String            @id @default(uuid()) @db.Uuid
+  grnId            String            @db.Uuid @map("grn_id")
+  itemId           String            @db.Uuid @map("item_id")
+  poItemId         String            @db.Uuid @map("po_item_id")
+  quantityExpected Decimal           @db.Decimal(18, 3) @map("quantity_expected")
+  quantityReceived Decimal           @db.Decimal(18, 3) @map("quantity_received")
+  quantityRejected Decimal           @db.Decimal(18, 3) @default(0) @map("quantity_rejected")
+  unitCost         Decimal           @db.Decimal(18, 2) @map("unit_cost")
+  batchNumber      String?           @map("batch_number")
+  expiryDate       DateTime?         @db.Date @map("expiry_date")
+  qualityNotes     String?           @map("quality_notes")
+  createdAt        DateTime          @default(now()) @map("created_at")
+  updatedAt        DateTime          @updatedAt @map("updated_at")
+  grn              GoodsReceivedNote @relation(fields: [grnId], references: [id])
+  item             Item              @relation(fields: [itemId], references: [id])
+  poItem           PurchaseOrderItem @relation(fields: [poItemId], references: [id])
+
+  @@index([grnId])
+  @@index([itemId])
+  @@index([poItemId])
+  @@index([expiryDate])
+  @@map("goods_received_note_items")
+}
+
+model SupplierReturn {
+  id             String        @id @default(uuid()) @db.Uuid
+  organizationId String        @db.Uuid @map("organization_id")
+  returnNumber   String        @map("return_number")
+  supplierId     String        @db.Uuid @map("supplier_id")
+  grnId          String?       @db.Uuid @map("grn_id")
+  returnDate     DateTime      @db.Date @map("return_date")
+  reason         String
+  totalValue     Decimal       @db.Decimal(18, 2) @map("total_value")
+  status         ReturnStatus  @default(DRAFT)
+  createdBy      String        @db.Uuid @map("created_by")
+  createdAt      DateTime      @default(now()) @map("created_at")
+  updatedAt      DateTime      @updatedAt @map("updated_at")
+  deletedAt      DateTime?     @map("deleted_at")
+  organization   Organization  @relation(fields: [organizationId], references: [id])
+  supplier       Supplier      @relation(fields: [supplierId], references: [id])
+  grn            GoodsReceivedNote? @relation(fields: [grnId], references: [id])
+  createdByUser  UserProfile   @relation("SupplierReturnCreatedBy", fields: [createdBy], references: [id])
+  returnItems    SupplierReturnItem[]
+
+  @@unique([organizationId, returnNumber])
+  @@index([organizationId])
+  @@index([supplierId])
+  @@index([grnId])
+  @@index([status])
+  @@index([returnDate])
+  @@index([createdBy])
+  @@index([deletedAt])
+  @@map("supplier_returns")
+}
+
+model Recipe {
+  id                     String         @id @default(uuid()) @db.Uuid
+  organizationId         String         @db.Uuid @map("organization_id")
+  code                   String
+  name                   String
+  finishedItemId         String         @db.Uuid @map("finished_item_id")
+  expectedOutputQuantity Decimal        @db.Decimal(18, 3) @map("expected_output_quantity")
+  outputUnitId           String         @db.Uuid @map("output_unit_id")
+  version                Int            @default(1)
+  status                 RecipeStatus   @default(ACTIVE)
+  instructions           String?
+  createdBy              String?        @db.Uuid @map("created_by")
+  createdAt              DateTime       @default(now()) @map("created_at")
+  updatedAt              DateTime       @updatedAt @map("updated_at")
+  deletedAt              DateTime?      @map("deleted_at")
+  organization           Organization   @relation(fields: [organizationId], references: [id])
+  finishedItem           Item           @relation("FinishedItemRecipes", fields: [finishedItemId], references: [id])
+  outputUnit             UnitOfMeasure  @relation("RecipeOutputUnit", fields: [outputUnitId], references: [id])
+  createdByUser          UserProfile?   @relation("RecipeCreatedBy", fields: [createdBy], references: [id])
+  items                  RecipeItem[]
+  packagingItems         RecipePackaging[]
+  productionBatches      ProductionBatch[]
+
+  @@unique([organizationId, code])
+  @@index([organizationId])
+  @@index([finishedItemId])
+  @@index([outputUnitId])
+  @@index([status])
+  @@index([name])
+  @@index([createdBy])
+  @@index([deletedAt])
+  @@map("recipes")
+}
+
+model RecipeItem {
+  id                       String         @id @default(uuid()) @db.Uuid
+  recipeId                 String         @db.Uuid @map("recipe_id")
+  itemId                   String         @db.Uuid @map("item_id")
+  quantityRequired         Decimal        @db.Decimal(18, 3) @map("quantity_required")
+  unitId                   String         @db.Uuid @map("unit_id")
+  wastageAllowancePercent  Decimal?       @db.Decimal(5, 2) @map("wastage_allowance_percent")
+  isOptional               Boolean        @default(false) @map("is_optional")
+  substituteItemId         String?        @db.Uuid @map("substitute_item_id")
+  notes                    String?
+  createdAt                DateTime       @default(now()) @map("created_at")
+  updatedAt                DateTime       @updatedAt @map("updated_at")
+  recipe                   Recipe         @relation(fields: [recipeId], references: [id])
+  item                     Item           @relation("RecipeMaterialItem", fields: [itemId], references: [id])
+  unit                     UnitOfMeasure  @relation("RecipeItemUnit", fields: [unitId], references: [id])
+  substituteItem           Item?          @relation("RecipeSubstituteItem", fields: [substituteItemId], references: [id])
+
+  @@index([recipeId])
+  @@index([itemId])
+  @@index([unitId])
+  @@index([substituteItemId])
+  @@map("recipe_items")
+}
+
+model ProductionPlan {
+  id              String               @id @default(uuid()) @db.Uuid
+  organizationId  String               @db.Uuid @map("organization_id")
+  planNumber      String               @map("plan_number")
+  planDate        DateTime             @db.Date @map("plan_date")
+  shift           ShiftType
+  productionLine  String               @map("production_line")
+  status          ProductionPlanStatus @default(DRAFT)
+  createdBy       String?              @db.Uuid @map("created_by")
+  createdAt       DateTime             @default(now()) @map("created_at")
+  updatedAt       DateTime             @updatedAt @map("updated_at")
+  deletedAt       DateTime?            @map("deleted_at")
+  organization    Organization         @relation(fields: [organizationId], references: [id])
+  createdByUser   UserProfile?         @relation("ProductionPlanCreatedBy", fields: [createdBy], references: [id])
+  batches         ProductionBatch[]
+  planItems       ProductionPlanItem[]
+
+  @@unique([organizationId, planNumber])
+  @@index([organizationId])
+  @@index([status])
+  @@index([planDate])
+  @@index([shift])
+  @@index([productionLine])
+  @@index([createdBy])
+  @@index([deletedAt])
+  @@map("production_plans")
+}
+
+model ProductionBatch {
+  id                   String                @id @default(uuid()) @db.Uuid
+  organizationId       String                @db.Uuid @map("organization_id")
+  batchNumber          String                @map("batch_number")
+  productionPlanId     String?               @db.Uuid @map("production_plan_id")
+  recipeId             String                @db.Uuid @map("recipe_id")
+  productionDate       DateTime              @db.Date @map("production_date")
+  shift                ShiftType
+  productionLine       String                @map("production_line")
+  warehouseId          String                @db.Uuid @map("warehouse_id")
+  plannedQuantity      Decimal               @db.Decimal(18, 3) @map("planned_quantity")
+  expectedOutput       Decimal               @db.Decimal(18, 3) @map("expected_output")
+  actualOutput         Decimal?              @db.Decimal(18, 3) @map("actual_output")
+  wastageQuantity      Decimal?              @db.Decimal(18, 3) @map("wastage_quantity")
+  wastagePercentage    Decimal?              @db.Decimal(5, 2) @map("wastage_percentage")
+  efficiencyPercentage Decimal?              @db.Decimal(5, 2) @map("efficiency_percentage")
+  status               ProductionBatchStatus @default(DRAFT)
+  qualityStatus        QualityStatus         @default(PENDING) @map("quality_status")
+  wastageReason        String?               @map("wastage_reason")
+  qualityNotes         String?               @map("quality_notes")
+  startedBy            String?               @db.Uuid @map("started_by")
+  closedBy             String?               @db.Uuid @map("closed_by")
+  startTime            DateTime?             @map("start_time")
+  endTime              DateTime?             @map("end_time")
+  createdAt            DateTime              @default(now()) @map("created_at")
+  updatedAt            DateTime              @updatedAt @map("updated_at")
+  deletedAt            DateTime?             @map("deleted_at")
+  organization         Organization          @relation(fields: [organizationId], references: [id])
+  productionPlan       ProductionPlan?       @relation(fields: [productionPlanId], references: [id])
+  recipe               Recipe                @relation(fields: [recipeId], references: [id])
+  warehouse            Warehouse             @relation(fields: [warehouseId], references: [id])
+  startedByUser        UserProfile?          @relation("ProductionBatchStartedBy", fields: [startedBy], references: [id])
+  closedByUser         UserProfile?          @relation("ProductionBatchClosedBy", fields: [closedBy], references: [id])
+  materials            ProductionBatchMaterial[]
+  outputs              ProductionBatchOutput[]
+  workerAssignments    ProductionWorkerAssignment[]
+
+  @@unique([organizationId, batchNumber])
+  @@index([organizationId])
+  @@index([productionPlanId])
+  @@index([recipeId])
+  @@index([warehouseId])
+  @@index([status])
+  @@index([qualityStatus])
+  @@index([productionDate])
+  @@index([shift])
+  @@index([startedBy])
+  @@index([closedBy])
+  @@index([deletedAt])
+  @@map("production_batches")
+}
+
+model ProductionBatchMaterial {
+  id               String          @id @default(uuid()) @db.Uuid
+  batchId          String          @db.Uuid @map("batch_id")
+  itemId           String          @db.Uuid @map("item_id")
+  quantityRequired Decimal         @db.Decimal(18, 3) @map("quantity_required")
+  quantityIssued   Decimal?        @db.Decimal(18, 3) @map("quantity_issued")
+  quantityActual   Decimal?        @db.Decimal(18, 3) @map("quantity_actual")
+  variance         Decimal?        @db.Decimal(18, 3)
+  unitId           String          @db.Uuid @map("unit_id")
+  notes            String?
+  createdAt        DateTime        @default(now()) @map("created_at")
+  updatedAt        DateTime        @updatedAt @map("updated_at")
+  batch            ProductionBatch @relation(fields: [batchId], references: [id])
+  item             Item            @relation(fields: [itemId], references: [id])
+  unit             UnitOfMeasure   @relation("ProductionMaterialUnit", fields: [unitId], references: [id])
+
+  @@index([batchId])
+  @@index([itemId])
+  @@index([unitId])
+  @@map("production_batch_materials")
+}
+
+model ProductionBatchOutput {
+  id               String          @id @default(uuid()) @db.Uuid
+  batchId          String          @db.Uuid @map("batch_id")
+  itemId           String          @db.Uuid @map("item_id")
+  expectedQuantity Decimal         @db.Decimal(18, 3) @map("expected_quantity")
+  actualQuantity   Decimal?        @db.Decimal(18, 3) @map("actual_quantity")
+  wastageQuantity  Decimal?        @db.Decimal(18, 3) @map("wastage_quantity")
+  unitId           String          @db.Uuid @map("unit_id")
+  notes            String?
+  createdAt        DateTime        @default(now()) @map("created_at")
+  updatedAt        DateTime        @updatedAt @map("updated_at")
+  batch            ProductionBatch @relation(fields: [batchId], references: [id])
+  item             Item            @relation(fields: [itemId], references: [id])
+  unit             UnitOfMeasure   @relation("ProductionOutputUnit", fields: [unitId], references: [id])
+
+  @@index([batchId])
+  @@index([itemId])
+  @@index([unitId])
+  @@map("production_batch_outputs")
+}
+
+model ProductionWorkerAssignment {
+  id               String          @id @default(uuid()) @db.Uuid
+  batchId          String          @db.Uuid @map("batch_id")
+  employeeId       String          @db.Uuid @map("employee_id")
+  shift            ShiftType
+  roleInProduction String          @map("role_in_production")
+  startTime        DateTime?       @map("start_time")
+  endTime          DateTime?       @map("end_time")
+  notes            String?
+  createdAt        DateTime        @default(now()) @map("created_at")
+  updatedAt        DateTime        @updatedAt @map("updated_at")
+  batch            ProductionBatch @relation(fields: [batchId], references: [id])
+  employee         Employee        @relation(fields: [employeeId], references: [id])
+
+  @@index([batchId])
+  @@index([employeeId])
+  @@index([shift])
+  @@index([roleInProduction])
+  @@map("production_worker_assignments")
+}
+
+model QualityCheck {
+  id             String        @id @default(uuid()) @db.Uuid
+  organizationId String        @db.Uuid @map("organization_id")
+  referenceType  String        @map("reference_type")
+  referenceId    String        @map("reference_id")
+  checkedBy      String?       @db.Uuid @map("checked_by")
+  checkDate      DateTime      @db.Date @map("check_date")
+  status         QualityStatus @default(PENDING)
+  notes          String?
+  passedQuantity Decimal?      @db.Decimal(18, 3) @map("passed_quantity")
+  failedQuantity Decimal?      @db.Decimal(18, 3) @map("failed_quantity")
+  createdAt      DateTime      @default(now()) @map("created_at")
+  updatedAt      DateTime      @updatedAt @map("updated_at")
+  organization   Organization  @relation(fields: [organizationId], references: [id])
+  checkedByUser  UserProfile?  @relation("QualityCheckBy", fields: [checkedBy], references: [id])
+
+  @@index([organizationId])
+  @@index([checkedBy])
+  @@index([status])
+  @@index([checkDate])
+  @@index([referenceType, referenceId])
+  @@map("quality_checks")
+}
+
+model Customer {
+  id             String         @id @default(uuid()) @db.Uuid
+  organizationId String         @db.Uuid @map("organization_id")
+  code           String
+  name           String
+  customerType   String         @map("customer_type")
+  phone          String?
+  email          String?
+  address        String?
+  creditLimit    Decimal?       @db.Decimal(18, 2) @map("credit_limit")
+  currentBalance Decimal?       @db.Decimal(18, 2) @default(0) @map("current_balance")
+  paymentTerms   String?        @map("payment_terms")
+  status         CustomerStatus @default(ACTIVE)
+  createdBy      String?        @db.Uuid @map("created_by")
+  createdAt      DateTime       @default(now()) @map("created_at")
+  updatedAt      DateTime       @updatedAt @map("updated_at")
+  deletedAt      DateTime?      @map("deleted_at")
+  organization   Organization   @relation(fields: [organizationId], references: [id])
+  createdByUser  UserProfile?   @relation("CustomerCreatedBy", fields: [createdBy], references: [id])
+  quotations     Quotation[]
+  salesOrders    SalesOrder[]
+  invoices       Invoice[]
+  payments       Payment[]
+  customerReturns CustomerReturn[]
+  branchSales    BranchSale[]
+
+  @@unique([organizationId, code])
+  @@index([organizationId])
+  @@index([status])
+  @@index([name])
+  @@index([email])
+  @@index([phone])
+  @@index([createdBy])
+  @@index([deletedAt])
+  @@map("customers")
+}
+
+model Quotation {
+  id             String          @id @default(uuid()) @db.Uuid
+  organizationId String          @db.Uuid @map("organization_id")
+  quotationNumber String         @map("quotation_number")
+  customerId     String          @db.Uuid @map("customer_id")
+  quotationDate  DateTime        @db.Date @map("quotation_date")
+  validUntil     DateTime?       @db.Date @map("valid_until")
+  status         QuotationStatus @default(DRAFT)
+  subtotal       Decimal         @db.Decimal(18, 2)
+  taxAmount      Decimal         @db.Decimal(18, 2) @default(0) @map("tax_amount")
+  discountAmount Decimal         @db.Decimal(18, 2) @default(0) @map("discount_amount")
+  total          Decimal         @db.Decimal(18, 2)
+  notes          String?
+  createdBy      String?         @db.Uuid @map("created_by")
+  createdAt      DateTime        @default(now()) @map("created_at")
+  updatedAt      DateTime        @updatedAt @map("updated_at")
+  deletedAt      DateTime?       @map("deleted_at")
+  organization   Organization    @relation(fields: [organizationId], references: [id])
+  customer       Customer        @relation(fields: [customerId], references: [id])
+  createdByUser  UserProfile?    @relation("QuotationCreatedBy", fields: [createdBy], references: [id])
+  items          QuotationItem[]
+  salesOrders    SalesOrder[]
+
+  @@unique([organizationId, quotationNumber])
+  @@index([organizationId])
+  @@index([customerId])
+  @@index([status])
+  @@index([quotationDate])
+  @@index([validUntil])
+  @@index([createdBy])
+  @@index([deletedAt])
+  @@map("quotations")
+}
+
+model QuotationItem {
+  id              String      @id @default(uuid()) @db.Uuid
+  quotationId     String      @db.Uuid @map("quotation_id")
+  itemId          String      @db.Uuid @map("item_id")
+  quantity        Decimal     @db.Decimal(18, 3)
+  unitPrice       Decimal     @db.Decimal(18, 2) @map("unit_price")
+  discountPercent Decimal?    @db.Decimal(5, 2) @map("discount_percent")
+  totalPrice      Decimal     @db.Decimal(18, 2) @map("total_price")
+  createdAt       DateTime    @default(now()) @map("created_at")
+  updatedAt       DateTime    @updatedAt @map("updated_at")
+  quotation       Quotation   @relation(fields: [quotationId], references: [id])
+  item            Item        @relation(fields: [itemId], references: [id])
+
+  @@index([quotationId])
+  @@index([itemId])
+  @@map("quotation_items")
+}
+
+model SalesOrder {
+  id             String           @id @default(uuid()) @db.Uuid
+  organizationId String           @db.Uuid @map("organization_id")
+  orderNumber    String           @map("order_number")
+  customerId     String           @db.Uuid @map("customer_id")
+  quotationId    String?          @db.Uuid @map("quotation_id")
+  orderDate      DateTime         @db.Date @map("order_date")
+  requiredDate   DateTime?        @db.Date @map("required_date")
+  status         SalesOrderStatus @default(DRAFT)
+  subtotal       Decimal          @db.Decimal(18, 2)
+  taxAmount      Decimal          @db.Decimal(18, 2) @default(0) @map("tax_amount")
+  discountAmount Decimal          @db.Decimal(18, 2) @default(0) @map("discount_amount")
+  total          Decimal          @db.Decimal(18, 2)
+  warehouseId    String           @db.Uuid @map("warehouse_id")
+  branchId       String?          @db.Uuid @map("branch_id")
+  notes          String?
+  createdBy      String?          @db.Uuid @map("created_by")
+  createdAt      DateTime         @default(now()) @map("created_at")
+  updatedAt      DateTime         @updatedAt @map("updated_at")
+  deletedAt      DateTime?        @map("deleted_at")
+  organization   Organization     @relation(fields: [organizationId], references: [id])
+  customer       Customer         @relation(fields: [customerId], references: [id])
+  quotation      Quotation?       @relation(fields: [quotationId], references: [id])
+  warehouse      Warehouse        @relation(fields: [warehouseId], references: [id])
+  branch         Branch?          @relation(fields: [branchId], references: [id])
+  createdByUser  UserProfile?     @relation("SalesOrderCreatedBy", fields: [createdBy], references: [id])
+  items          SalesOrderItem[]
+  deliveryNotes  DeliveryNote[]
+  invoices       Invoice[]
+
+  @@unique([organizationId, orderNumber])
+  @@index([organizationId])
+  @@index([customerId])
+  @@index([quotationId])
+  @@index([warehouseId])
+  @@index([branchId])
+  @@index([status])
+  @@index([orderDate])
+  @@index([requiredDate])
+  @@index([createdBy])
+  @@index([deletedAt])
+  @@map("sales_orders")
+}
+
+model SalesOrderItem {
+  id                String      @id @default(uuid()) @db.Uuid
+  salesOrderId      String      @db.Uuid @map("sales_order_id")
+  itemId            String      @db.Uuid @map("item_id")
+  quantityOrdered   Decimal     @db.Decimal(18, 3) @map("quantity_ordered")
+  quantityDelivered Decimal     @db.Decimal(18, 3) @default(0) @map("quantity_delivered")
+  unitPrice         Decimal     @db.Decimal(18, 2) @map("unit_price")
+  discountPercent   Decimal?    @db.Decimal(5, 2) @map("discount_percent")
+  totalPrice        Decimal     @db.Decimal(18, 2) @map("total_price")
+  createdAt         DateTime    @default(now()) @map("created_at")
+  updatedAt         DateTime    @updatedAt @map("updated_at")
+  salesOrder        SalesOrder  @relation(fields: [salesOrderId], references: [id])
+  item              Item        @relation(fields: [itemId], references: [id])
+
+  @@index([salesOrderId])
+  @@index([itemId])
+  @@map("sales_order_items")
+}
+
+model DeliveryNote {
+  id             String             @id @default(uuid()) @db.Uuid
+  organizationId String             @db.Uuid @map("organization_id")
+  deliveryNumber String             @map("delivery_number")
+  salesOrderId   String             @db.Uuid @map("sales_order_id")
+  deliveryDate   DateTime           @db.Date @map("delivery_date")
+  deliveredBy    String?            @db.Uuid @map("delivered_by")
+  status         DeliveryNoteStatus @default(DRAFT)
+  notes          String?
+  createdAt      DateTime           @default(now()) @map("created_at")
+  updatedAt      DateTime           @updatedAt @map("updated_at")
+  deletedAt      DateTime?          @map("deleted_at")
+  organization   Organization       @relation(fields: [organizationId], references: [id])
+  salesOrder     SalesOrder         @relation(fields: [salesOrderId], references: [id])
+  deliveredByUser UserProfile?      @relation("DeliveryDeliveredBy", fields: [deliveredBy], references: [id])
+  deliveryItems  DeliveryNoteItem[]
+
+  @@unique([organizationId, deliveryNumber])
+  @@index([organizationId])
+  @@index([salesOrderId])
+  @@index([deliveredBy])
+  @@index([status])
+  @@index([deliveryDate])
+  @@index([deletedAt])
+  @@map("delivery_notes")
+}
+
+model Invoice {
+  id             String        @id @default(uuid()) @db.Uuid
+  organizationId String        @db.Uuid @map("organization_id")
+  invoiceNumber  String        @map("invoice_number")
+  customerId     String        @db.Uuid @map("customer_id")
+  salesOrderId   String?       @db.Uuid @map("sales_order_id")
+  invoiceDate    DateTime      @db.Date @map("invoice_date")
+  dueDate        DateTime?     @db.Date @map("due_date")
+  status         InvoiceStatus @default(DRAFT)
+  subtotal       Decimal       @db.Decimal(18, 2)
+  taxAmount      Decimal       @db.Decimal(18, 2) @default(0) @map("tax_amount")
+  discountAmount Decimal       @db.Decimal(18, 2) @default(0) @map("discount_amount")
+  total          Decimal       @db.Decimal(18, 2)
+  amountPaid     Decimal       @db.Decimal(18, 2) @default(0) @map("amount_paid")
+  balanceDue     Decimal       @db.Decimal(18, 2) @map("balance_due")
+  notes          String?
+  createdBy      String?       @db.Uuid @map("created_by")
+  createdAt      DateTime      @default(now()) @map("created_at")
+  updatedAt      DateTime      @updatedAt @map("updated_at")
+  deletedAt      DateTime?     @map("deleted_at")
+  organization   Organization  @relation(fields: [organizationId], references: [id])
+  customer       Customer      @relation(fields: [customerId], references: [id])
+  salesOrder     SalesOrder?   @relation(fields: [salesOrderId], references: [id])
+  createdByUser  UserProfile?  @relation("InvoiceCreatedBy", fields: [createdBy], references: [id])
+  items          InvoiceItem[]
+  customerReturns CustomerReturn[]
+
+  @@unique([organizationId, invoiceNumber])
+  @@index([organizationId])
+  @@index([customerId])
+  @@index([salesOrderId])
+  @@index([status])
+  @@index([invoiceDate])
+  @@index([dueDate])
+  @@index([createdBy])
+  @@index([deletedAt])
+  @@map("invoices")
+}
+
+model InvoiceItem {
+  id              String      @id @default(uuid()) @db.Uuid
+  invoiceId       String      @db.Uuid @map("invoice_id")
+  itemId          String      @db.Uuid @map("item_id")
+  quantity        Decimal     @db.Decimal(18, 3)
+  unitPrice       Decimal     @db.Decimal(18, 2) @map("unit_price")
+  discountPercent Decimal?    @db.Decimal(5, 2) @map("discount_percent")
+  totalPrice      Decimal     @db.Decimal(18, 2) @map("total_price")
+  createdAt       DateTime    @default(now()) @map("created_at")
+  updatedAt       DateTime    @updatedAt @map("updated_at")
+  invoice         Invoice     @relation(fields: [invoiceId], references: [id])
+  item            Item        @relation(fields: [itemId], references: [id])
+
+  @@index([invoiceId])
+  @@index([itemId])
+  @@map("invoice_items")
+}
+
+model Payment {
+  id             String        @id @default(uuid()) @db.Uuid
+  organizationId String        @db.Uuid @map("organization_id")
+  paymentNumber  String        @map("payment_number")
+  customerId     String?       @db.Uuid @map("customer_id")
+  supplierId     String?       @db.Uuid @map("supplier_id")
+  paymentDate    DateTime      @db.Date @map("payment_date")
+  amount         Decimal       @db.Decimal(18, 2)
+  paymentMethod  PaymentMethod @map("payment_method")
+  referenceNumber String?      @map("reference_number")
+  notes          String?
+  createdBy      String?       @db.Uuid @map("created_by")
+  createdAt      DateTime      @default(now()) @map("created_at")
+  updatedAt      DateTime      @updatedAt @map("updated_at")
+  organization   Organization  @relation(fields: [organizationId], references: [id])
+  customer       Customer?     @relation(fields: [customerId], references: [id])
+  supplier       Supplier?     @relation(fields: [supplierId], references: [id])
+  createdByUser  UserProfile?  @relation("PaymentCreatedBy", fields: [createdBy], references: [id])
+
+  @@unique([organizationId, paymentNumber])
+  @@index([organizationId])
+  @@index([customerId])
+  @@index([supplierId])
+  @@index([paymentMethod])
+  @@index([paymentDate])
+  @@index([referenceNumber])
+  @@index([createdBy])
+  @@map("payments")
+}
+
+model CustomerReturn {
+  id             String        @id @default(uuid()) @db.Uuid
+  organizationId String        @db.Uuid @map("organization_id")
+  returnNumber   String        @map("return_number")
+  customerId     String        @db.Uuid @map("customer_id")
+  invoiceId      String?       @db.Uuid @map("invoice_id")
+  returnDate     DateTime      @db.Date @map("return_date")
+  reason         String
+  totalValue     Decimal       @db.Decimal(18, 2) @map("total_value")
+  status         ReturnStatus  @default(DRAFT)
+  createdBy      String        @db.Uuid @map("created_by")
+  createdAt      DateTime      @default(now()) @map("created_at")
+  updatedAt      DateTime      @updatedAt @map("updated_at")
+  deletedAt      DateTime?     @map("deleted_at")
+  organization   Organization  @relation(fields: [organizationId], references: [id])
+  customer       Customer      @relation(fields: [customerId], references: [id])
+  invoice        Invoice?      @relation(fields: [invoiceId], references: [id])
+  createdByUser  UserProfile   @relation("CustomerReturnCreatedBy", fields: [createdBy], references: [id])
+
+  @@unique([organizationId, returnNumber])
+  @@index([organizationId])
+  @@index([customerId])
+  @@index([invoiceId])
+  @@index([status])
+  @@index([returnDate])
+  @@index([createdBy])
+  @@index([deletedAt])
+  @@map("customer_returns")
+}
+
+model BranchSale {
+  id               String        @id @default(uuid()) @db.Uuid
+  organizationId   String        @db.Uuid @map("organization_id")
+  branchId         String        @db.Uuid @map("branch_id")
+  saleNumber       String        @map("sale_number")
+  saleDate         DateTime      @db.Date @map("sale_date")
+  shift            ShiftType
+  customerId       String?       @db.Uuid @map("customer_id")
+  totalAmount      Decimal       @db.Decimal(18, 2) @map("total_amount")
+  paymentMethod    PaymentMethod @map("payment_method")
+  paymentReference String?       @map("payment_reference")
+  servedBy         String?       @db.Uuid @map("served_by")
+  createdAt        DateTime      @default(now()) @map("created_at")
+  updatedAt        DateTime      @updatedAt @map("updated_at")
+  deletedAt        DateTime?     @map("deleted_at")
+  organization     Organization  @relation(fields: [organizationId], references: [id])
+  branch           Branch        @relation(fields: [branchId], references: [id])
+  customer         Customer?     @relation(fields: [customerId], references: [id])
+  servedByUser     UserProfile?  @relation("BranchSaleServedBy", fields: [servedBy], references: [id])
+  items            BranchSaleItem[]
+
+  @@unique([organizationId, saleNumber])
+  @@index([organizationId])
+  @@index([branchId])
+  @@index([customerId])
+  @@index([servedBy])
+  @@index([paymentMethod])
+  @@index([saleDate])
+  @@index([shift])
+  @@index([deletedAt])
+  @@map("branch_sales")
+}
+
+model BranchSaleItem {
+  id           String      @id @default(uuid()) @db.Uuid
+  branchSaleId String      @db.Uuid @map("branch_sale_id")
+  itemId       String      @db.Uuid @map("item_id")
+  quantity     Decimal     @db.Decimal(18, 3)
+  unitPrice    Decimal     @db.Decimal(18, 2) @map("unit_price")
+  totalPrice   Decimal     @db.Decimal(18, 2) @map("total_price")
+  createdAt    DateTime    @default(now()) @map("created_at")
+  updatedAt    DateTime    @updatedAt @map("updated_at")
+  branchSale   BranchSale  @relation(fields: [branchSaleId], references: [id])
+  item         Item        @relation(fields: [itemId], references: [id])
+
+  @@index([branchSaleId])
+  @@index([itemId])
+  @@map("branch_sale_items")
+}
+
+model BranchExpense {
+  id             String        @id @default(uuid()) @db.Uuid
+  organizationId String        @db.Uuid @map("organization_id")
+  branchId       String        @db.Uuid @map("branch_id")
+  expenseDate    DateTime      @db.Date @map("expense_date")
+  category       String
+  description    String
+  amount         Decimal       @db.Decimal(18, 2)
+  paymentMethod  PaymentMethod @map("payment_method")
+  receiptUrl     String?       @map("receipt_url")
+  approvedBy     String?       @db.Uuid @map("approved_by")
+  createdBy      String        @db.Uuid @map("created_by")
+  createdAt      DateTime      @default(now()) @map("created_at")
+  updatedAt      DateTime      @updatedAt @map("updated_at")
+  deletedAt      DateTime?     @map("deleted_at")
+  organization   Organization  @relation(fields: [organizationId], references: [id])
+  branch         Branch        @relation(fields: [branchId], references: [id])
+  approvedByUser UserProfile?  @relation("BranchExpenseApprovedBy", fields: [approvedBy], references: [id])
+  createdByUser  UserProfile   @relation("BranchExpenseCreatedBy", fields: [createdBy], references: [id])
+
+  @@index([organizationId])
+  @@index([branchId])
+  @@index([approvedBy])
+  @@index([createdBy])
+  @@index([paymentMethod])
+  @@index([expenseDate])
+  @@index([category])
+  @@index([deletedAt])
+  @@map("branch_expenses")
+}
+
+model BranchShiftClose {
+  id                 String            @id @default(uuid()) @db.Uuid
+  organizationId     String            @db.Uuid @map("organization_id")
+  branchId           String            @db.Uuid @map("branch_id")
+  shiftDate          DateTime          @db.Date @map("shift_date")
+  shiftType          ShiftType         @map("shift_type")
+  openingStockValue  Decimal           @db.Decimal(18, 2) @map("opening_stock_value")
+  stockReceivedValue Decimal           @db.Decimal(18, 2) @map("stock_received_value")
+  stockSoldValue     Decimal           @db.Decimal(18, 2) @map("stock_sold_value")
+  damagedStockValue  Decimal           @db.Decimal(18, 2) @map("damaged_stock_value")
+  closingStockValue  Decimal           @db.Decimal(18, 2) @map("closing_stock_value")
+  expectedCash       Decimal           @db.Decimal(18, 2) @map("expected_cash")
+  actualCash         Decimal           @db.Decimal(18, 2) @map("actual_cash")
+  ecocashTotal       Decimal           @db.Decimal(18, 2) @map("ecocash_total")
+  cardTotal          Decimal           @db.Decimal(18, 2) @map("card_total")
+  expensesTotal      Decimal           @db.Decimal(18, 2) @map("expenses_total")
+  cashVariance       Decimal           @db.Decimal(18, 2) @map("cash_variance")
+  stockVariance      Decimal           @db.Decimal(18, 2) @map("stock_variance")
+  status             BranchShiftStatus @default(OPEN)
+  notes              String?
+  closedBy           String            @db.Uuid @map("closed_by")
+  approvedBy         String?           @db.Uuid @map("approved_by")
+  approvedAt         DateTime?         @map("approved_at")
+  createdAt          DateTime          @default(now()) @map("created_at")
+  updatedAt          DateTime          @updatedAt @map("updated_at")
+  deletedAt          DateTime?         @map("deleted_at")
+  organization       Organization      @relation(fields: [organizationId], references: [id])
+  branch             Branch            @relation(fields: [branchId], references: [id])
+  closedByUser       UserProfile       @relation("BranchShiftClosedBy", fields: [closedBy], references: [id])
+  approvedByUser     UserProfile?      @relation("BranchShiftApprovedBy", fields: [approvedBy], references: [id])
+
+  @@index([organizationId])
+  @@index([branchId])
+  @@index([closedBy])
+  @@index([approvedBy])
+  @@index([status])
+  @@index([shiftDate])
+  @@index([shiftType])
+  @@unique([branchId, shiftDate, shiftType])
+  @@index([deletedAt])
+  @@map("branch_shift_closes")
+}
+
+model Employee {
+  id               String             @id @default(uuid()) @db.Uuid
+  organizationId   String             @db.Uuid @map("organization_id")
+  employeeNumber   String             @map("employee_number")
+  firstName        String             @map("first_name")
+  lastName         String             @map("last_name")
+  phone            String?
+  email            String?
+  department       String?
+  jobTitle         String?            @map("job_title")
+  branchId         String?            @db.Uuid @map("branch_id")
+  status           EmployeeStatus     @default(ACTIVE)
+  hireDate         DateTime           @db.Date @map("hire_date")
+  createdAt        DateTime           @default(now()) @map("created_at")
+  updatedAt        DateTime           @updatedAt @map("updated_at")
+  deletedAt        DateTime?          @map("deleted_at")
+  organization     Organization       @relation(fields: [organizationId], references: [id])
+  branch           Branch?            @relation(fields: [branchId], references: [id])
+  userProfile      UserProfile?       @relation("EmployeeUserProfile")
+  workerAssignments ProductionWorkerAssignment[]
+  attendances      Attendance[]
+  payrollRecords   PayrollRecord[]
+
+  @@unique([organizationId, employeeNumber])
+  @@index([organizationId])
+  @@index([branchId])
+  @@index([status])
+  @@index([department])
+  @@index([jobTitle])
+  @@index([hireDate])
+  @@index([firstName, lastName])
+  @@index([deletedAt])
+  @@map("employees")
+}
+
+model Attendance {
+  id             String        @id @default(uuid()) @db.Uuid
+  organizationId String        @db.Uuid @map("organization_id")
+  employeeId     String        @db.Uuid @map("employee_id")
+  attendanceDate DateTime      @db.Date @map("attendance_date")
+  shift          ShiftType
+  checkIn        DateTime?     @map("check_in")
+  checkOut       DateTime?     @map("check_out")
+  hoursWorked    Decimal?      @db.Decimal(8, 2) @map("hours_worked")
+  notes          String?
+  createdAt      DateTime      @default(now()) @map("created_at")
+  updatedAt      DateTime      @updatedAt @map("updated_at")
+  organization   Organization  @relation(fields: [organizationId], references: [id])
+  employee       Employee      @relation(fields: [employeeId], references: [id])
+
+  @@unique([employeeId, attendanceDate, shift])
+  @@index([organizationId])
+  @@index([employeeId])
+  @@index([attendanceDate])
+  @@index([shift])
+  @@map("attendances")
+}
+
+model PayrollRecord {
+  id             String        @id @default(uuid()) @db.Uuid
+  organizationId String        @db.Uuid @map("organization_id")
+  employeeId     String        @db.Uuid @map("employee_id")
+  payPeriodStart DateTime      @db.Date @map("pay_period_start")
+  payPeriodEnd   DateTime      @db.Date @map("pay_period_end")
+  basicSalary    Decimal       @db.Decimal(18, 2) @map("basic_salary")
+  allowances     Decimal       @db.Decimal(18, 2) @default(0)
+  deductions     Decimal       @db.Decimal(18, 2) @default(0)
+  netPay         Decimal       @db.Decimal(18, 2) @map("net_pay")
+  status         PayrollStatus @default(DRAFT)
+  notes          String?
+  createdBy      String?       @db.Uuid @map("created_by")
+  createdAt      DateTime      @default(now()) @map("created_at")
+  updatedAt      DateTime      @updatedAt @map("updated_at")
+  deletedAt      DateTime?     @map("deleted_at")
+  organization   Organization  @relation(fields: [organizationId], references: [id])
+  employee       Employee      @relation(fields: [employeeId], references: [id])
+  createdByUser  UserProfile?  @relation("PayrollCreatedBy", fields: [createdBy], references: [id])
+
+  @@index([organizationId])
+  @@index([employeeId])
+  @@index([status])
+  @@index([payPeriodStart])
+  @@index([payPeriodEnd])
+  @@index([createdBy])
+  @@index([deletedAt])
+  @@map("payroll_records")
+}
+
+model Account {
+  id              String            @id @default(uuid()) @db.Uuid
+  organizationId  String            @db.Uuid @map("organization_id")
+  accountCode     String            @map("account_code")
+  accountName     String            @map("account_name")
+  accountType     AccountType       @map("account_type")
+  parentAccountId String?           @db.Uuid @map("parent_account_id")
+  isActive        Boolean           @default(true) @map("is_active")
+  createdAt       DateTime          @default(now()) @map("created_at")
+  updatedAt       DateTime          @updatedAt @map("updated_at")
+  organization    Organization      @relation(fields: [organizationId], references: [id])
+  parentAccount   Account?          @relation("AccountHierarchy", fields: [parentAccountId], references: [id])
+  childAccounts   Account[]         @relation("AccountHierarchy")
+  journalEntryLines JournalEntryLine[]
+
+  @@unique([organizationId, accountCode])
+  @@index([organizationId])
+  @@index([parentAccountId])
+  @@index([accountType])
+  @@index([accountName])
+  @@index([isActive])
+  @@map("accounts")
+}
+
+model JournalEntry {
+  id             String        @id @default(uuid()) @db.Uuid
+  organizationId String        @db.Uuid @map("organization_id")
+  entryNumber    String        @map("entry_number")
+  entryDate      DateTime      @db.Date @map("entry_date")
+  description    String
+  referenceType  String?       @map("reference_type")
+  referenceId    String?       @map("reference_id")
+  totalDebit     Decimal       @db.Decimal(18, 2) @default(0) @map("total_debit")
+  totalCredit    Decimal       @db.Decimal(18, 2) @default(0) @map("total_credit")
+  status         String        @default("DRAFT")
+  isPosted       Boolean       @default(false) @map("is_posted")
+  postedBy       String?       @db.Uuid @map("posted_by")
+  postedAt       DateTime?     @map("posted_at")
+  createdBy      String?       @db.Uuid @map("created_by")
+  createdAt      DateTime      @default(now()) @map("created_at")
+  updatedAt      DateTime      @updatedAt @map("updated_at")
+  organization   Organization  @relation(fields: [organizationId], references: [id])
+  createdByUser  UserProfile?  @relation("JournalEntryCreatedBy", fields: [createdBy], references: [id])
+  lines          JournalEntryLine[]
+
+  @@unique([organizationId, entryNumber])
+  @@index([organizationId])
+  @@index([entryDate])
+  @@index([createdBy])
+  @@index([referenceType, referenceId])
+  @@map("journal_entries")
+}
+
+model JournalEntryLine {
+  id             String       @id @default(uuid()) @db.Uuid
+  journalEntryId String       @db.Uuid @map("journal_entry_id")
+  accountId      String       @db.Uuid @map("account_id")
+  description    String?
+  debitAmount    Decimal      @db.Decimal(18, 2) @default(0) @map("debit_amount")
+  creditAmount   Decimal      @db.Decimal(18, 2) @default(0) @map("credit_amount")
+  createdAt      DateTime     @default(now()) @map("created_at")
+  updatedAt      DateTime     @updatedAt @map("updated_at")
+  journalEntry   JournalEntry @relation(fields: [journalEntryId], references: [id])
+  account        Account      @relation(fields: [accountId], references: [id])
+
+  @@index([journalEntryId])
+  @@index([accountId])
+  @@map("journal_entry_lines")
+}
+
+model DocumentFile {
+  id             String         @id @default(uuid()) @db.Uuid
+  organizationId String         @db.Uuid @map("organization_id")
+  referenceType  String         @map("reference_type")
+  referenceId    String         @map("reference_id")
+  fileName       String         @map("file_name")
+  fileUrl        String         @map("file_url")
+  fileType       String         @map("file_type")
+  fileSize       Int            @map("file_size")
+  uploadedBy     String?        @db.Uuid @map("uploaded_by")
+  createdAt      DateTime       @default(now()) @map("created_at")
+  updatedAt      DateTime       @updatedAt @map("updated_at")
+  organization   Organization   @relation(fields: [organizationId], references: [id])
+  uploadedByUser UserProfile?   @relation("DocumentUploadedBy", fields: [uploadedBy], references: [id])
+
+  @@index([organizationId])
+  @@index([uploadedBy])
+  @@index([referenceType, referenceId])
+  @@index([fileName])
+  @@map("document_files")
+}
+
+model Notification {
+  id             String            @id @default(uuid()) @db.Uuid
+  organizationId String            @db.Uuid @map("organization_id")
+  userProfileId  String            @db.Uuid @map("user_profile_id")
+  title          String
+  message        String
+  type           NotificationType
+  isRead         Boolean           @default(false) @map("is_read")
+  referenceType  String?           @map("reference_type")
+  referenceId    String?           @map("reference_id")
+  createdAt      DateTime          @default(now()) @map("created_at")
+  updatedAt      DateTime          @updatedAt @map("updated_at")
+  organization   Organization      @relation(fields: [organizationId], references: [id])
+  userProfile    UserProfile       @relation(fields: [userProfileId], references: [id])
+
+  @@index([organizationId])
+  @@index([userProfileId])
+  @@index([type])
+  @@index([isRead])
+  @@index([createdAt])
+  @@index([referenceType, referenceId])
+  @@map("notifications")
+}
+
+model AuditLog {
+  id             String       @id @default(uuid()) @db.Uuid
+  organizationId String       @db.Uuid @map("organization_id")
+  userProfileId  String?      @db.Uuid @map("user_profile_id")
+  action         String
+  entityType     String       @map("entity_type")
+  entityId       String       @map("entity_id")
+  oldValues      Json?        @map("old_values")
+  newValues      Json?        @map("new_values")
+  ipAddress      String?      @map("ip_address")
+  userAgent      String?      @map("user_agent")
+  createdAt      DateTime     @default(now()) @map("created_at")
+  updatedAt      DateTime     @updatedAt @map("updated_at")
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  userProfile    UserProfile? @relation(fields: [userProfileId], references: [id])
+
+  @@index([organizationId])
+  @@index([userProfileId])
+  @@index([action])
+  @@index([entityType, entityId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+model ApprovalWorkflow {
+  id             String                 @id @default(uuid()) @db.Uuid
+  organizationId String                 @db.Uuid @map("organization_id")
+  name           String
+  entityType     String                 @map("entity_type")
+  description    String?
+  isActive       Boolean                @default(true) @map("is_active")
+  createdAt      DateTime               @default(now()) @map("created_at")
+  updatedAt      DateTime               @updatedAt @map("updated_at")
+  deletedAt      DateTime?              @map("deleted_at")
+  steps          ApprovalWorkflowStep[]
+  requests       ApprovalRequest[]
+
+  @@index([organizationId])
+  @@index([entityType])
+  @@index([name])
+  @@index([isActive])
+  @@index([deletedAt])
+  @@map("approval_workflows")
+}
+
+model ApprovalWorkflowStep {
+  id              String           @id @default(uuid()) @db.Uuid
+  workflowId      String           @db.Uuid @map("workflow_id")
+  stepNumber      Int              @map("step_number")
+  level           ApprovalLevel
+  roleId          String           @db.Uuid @map("role_id")
+  isRequired      Boolean          @default(true) @map("is_required")
+  escalationHours Int?             @map("escalation_hours")
+  createdAt       DateTime         @default(now()) @map("created_at")
+  updatedAt       DateTime         @updatedAt @map("updated_at")
+  workflow        ApprovalWorkflow @relation(fields: [workflowId], references: [id])
+
+  @@unique([workflowId, stepNumber])
+  @@index([workflowId])
+  @@index([roleId])
+  @@index([level])
+  @@map("approval_workflow_steps")
+}
+
+model ApprovalRequest {
+  id             String           @id @default(uuid()) @db.Uuid
+  organizationId String           @db.Uuid @map("organization_id")
+  workflowId     String           @db.Uuid @map("workflow_id")
+  entityType     String           @map("entity_type")
+  entityId       String           @map("entity_id")
+  currentStep    Int              @default(1) @map("current_step")
+  status         ApprovalStatus
+  requestedBy    String           @db.Uuid @map("requested_by")
+  requestedAt    DateTime         @default(now()) @map("requested_at")
+  completedAt    DateTime?        @map("completed_at")
+  createdAt      DateTime         @default(now()) @map("created_at")
+  updatedAt      DateTime         @updatedAt @map("updated_at")
+  workflow       ApprovalWorkflow @relation(fields: [workflowId], references: [id])
+  actions        ApprovalAction[]
+
+  @@index([organizationId])
+  @@index([workflowId])
+  @@index([entityType, entityId])
+  @@index([status])
+  @@index([requestedBy])
+  @@index([requestedAt])
+  @@map("approval_requests")
+}
+
+model ApprovalAction {
+  id                String          @id @default(uuid()) @db.Uuid
+  approvalRequestId String          @db.Uuid @map("approval_request_id")
+  stepNumber        Int             @map("step_number")
+  level             ApprovalLevel
+  actionBy          String          @db.Uuid @map("action_by")
+  action            ApprovalStatus
+  comments          String?
+  actedAt           DateTime        @default(now()) @map("acted_at")
+  createdAt         DateTime        @default(now()) @map("created_at")
+  updatedAt         DateTime        @updatedAt @map("updated_at")
+  approvalRequest   ApprovalRequest @relation(fields: [approvalRequestId], references: [id])
+
+  @@index([approvalRequestId])
+  @@index([actionBy])
+  @@index([action])
+  @@index([actedAt])
+  @@map("approval_actions")
+}
+
+model StockAdjustment {
+  id                String            @id @default(uuid()) @db.Uuid
+  organizationId    String            @db.Uuid @map("organization_id")
+  adjustmentNumber  String            @map("adjustment_number")
+  warehouseId       String            @db.Uuid @map("warehouse_id")
+  adjustmentDate    DateTime          @db.Date @map("adjustment_date")
+  reason            String
+  status            TransactionStatus
+  approvalRequestId String?           @db.Uuid @map("approval_request_id")
+  notes             String?
+  createdBy         String            @db.Uuid @map("created_by")
+  approvedBy        String?           @db.Uuid @map("approved_by")
+  createdAt         DateTime          @default(now()) @map("created_at")
+  updatedAt         DateTime          @updatedAt @map("updated_at")
+  deletedAt         DateTime?         @map("deleted_at")
+  items             StockAdjustmentItem[]
+
+  @@unique([organizationId, adjustmentNumber])
+  @@index([organizationId])
+  @@index([warehouseId])
+  @@index([status])
+  @@index([adjustmentDate])
+  @@index([approvalRequestId])
+  @@index([createdBy])
+  @@index([deletedAt])
+  @@map("stock_adjustments")
+}
+
+model StockAdjustmentItem {
+  id               String            @id @default(uuid()) @db.Uuid
+  adjustmentId     String            @db.Uuid @map("adjustment_id")
+  itemId           String            @db.Uuid @map("item_id")
+  quantityBefore   Decimal           @db.Decimal(18, 3) @map("quantity_before")
+  quantityAdjusted Decimal           @db.Decimal(18, 3) @map("quantity_adjusted")
+  quantityAfter    Decimal           @db.Decimal(18, 3) @map("quantity_after")
+  unitCost         Decimal           @db.Decimal(18, 2) @map("unit_cost")
+  movementType     StockMovementType @map("movement_type")
+  reason           String?
+  createdAt        DateTime          @default(now()) @map("created_at")
+  updatedAt        DateTime          @updatedAt @map("updated_at")
+  adjustment       StockAdjustment   @relation(fields: [adjustmentId], references: [id])
+
+  @@index([adjustmentId])
+  @@index([itemId])
+  @@index([movementType])
+  @@map("stock_adjustment_items")
+}
+
+model SupplierPerformance {
+  id                  String   @id @default(uuid()) @db.Uuid
+  supplierId          String   @db.Uuid @map("supplier_id")
+  evaluationDate      DateTime @db.Date @map("evaluation_date")
+  onTimeDelivery      Int      @map("on_time_delivery")
+  qualityScore        Int      @map("quality_score")
+  priceCompetitiveness Int     @map("price_competitiveness")
+  communicationScore  Int      @map("communication_score")
+  overallScore        Int      @map("overall_score")
+  notes               String?
+  evaluatedBy         String   @db.Uuid @map("evaluated_by")
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
+
+  @@index([supplierId])
+  @@index([evaluationDate])
+  @@index([overallScore])
+  @@index([evaluatedBy])
+  @@map("supplier_performance")
+}
+
+model RequestForQuotation {
+  id             String              @id @default(uuid()) @db.Uuid
+  organizationId String              @db.Uuid @map("organization_id")
+  rfqNumber      String              @map("rfq_number")
+  requisitionId  String?             @db.Uuid @map("requisition_id")
+  issueDate      DateTime            @db.Date @map("issue_date")
+  closingDate    DateTime            @db.Date @map("closing_date")
+  status         String
+  notes          String?
+  createdBy      String              @db.Uuid @map("created_by")
+  createdAt      DateTime            @default(now()) @map("created_at")
+  updatedAt      DateTime            @updatedAt @map("updated_at")
+  deletedAt      DateTime?           @map("deleted_at")
+  rfqSuppliers   RFQSupplier[]
+  rfqItems       RFQItem[]
+  quotations     SupplierQuotation[]
+
+  @@unique([organizationId, rfqNumber])
+  @@index([organizationId])
+  @@index([requisitionId])
+  @@index([status])
+  @@index([issueDate])
+  @@index([closingDate])
+  @@index([createdBy])
+  @@index([deletedAt])
+  @@map("request_for_quotations")
+}
+
+model RFQSupplier {
+  id               String              @id @default(uuid()) @db.Uuid
+  rfqId            String              @db.Uuid @map("rfq_id")
+  supplierId       String              @db.Uuid @map("supplier_id")
+  sentAt           DateTime?           @map("sent_at")
+  responseReceived Boolean             @default(false) @map("response_received")
+  responseDate     DateTime?           @map("response_date")
+  quotedAmount     Decimal?            @db.Decimal(18, 2) @map("quoted_amount")
+  notes            String?
+  createdAt        DateTime            @default(now()) @map("created_at")
+  updatedAt        DateTime            @updatedAt @map("updated_at")
+  rfq              RequestForQuotation @relation(fields: [rfqId], references: [id])
+
+  @@unique([rfqId, supplierId])
+  @@index([rfqId])
+  @@index([supplierId])
+  @@index([responseReceived])
+  @@map("rfq_suppliers")
+}
+
+model RFQItem {
+  id               String              @id @default(uuid()) @db.Uuid
+  rfqId            String              @db.Uuid @map("rfq_id")
+  itemId           String              @db.Uuid @map("item_id")
+  quantityRequired Decimal             @db.Decimal(18, 3) @map("quantity_required")
+  unitOfMeasureId  String              @db.Uuid @map("unit_of_measure_id")
+  specifications   String?
+  createdAt        DateTime            @default(now()) @map("created_at")
+  updatedAt        DateTime            @updatedAt @map("updated_at")
+  rfq              RequestForQuotation @relation(fields: [rfqId], references: [id])
+
+  @@index([rfqId])
+  @@index([itemId])
+  @@index([unitOfMeasureId])
+  @@map("rfq_items")
+}
+
+model SupplierQuotation {
+  id            String                @id @default(uuid()) @db.Uuid
+  rfqId         String                @db.Uuid @map("rfq_id")
+  supplierId    String                @db.Uuid @map("supplier_id")
+  quotationDate DateTime              @db.Date @map("quotation_date")
+  validUntil    DateTime              @db.Date @map("valid_until")
+  totalAmount   Decimal               @db.Decimal(18, 2) @map("total_amount")
+  deliveryDays  Int?                  @map("delivery_days")
+  paymentTerms  String?               @map("payment_terms")
+  notes         String?
+  isSelected    Boolean               @default(false) @map("is_selected")
+  selectedBy    String?               @db.Uuid @map("selected_by")
+  selectedAt    DateTime?             @map("selected_at")
+  createdAt     DateTime              @default(now()) @map("created_at")
+  updatedAt     DateTime              @updatedAt @map("updated_at")
+  rfq           RequestForQuotation   @relation(fields: [rfqId], references: [id])
+  items         SupplierQuotationItem[]
+
+  @@index([rfqId])
+  @@index([supplierId])
+  @@index([quotationDate])
+  @@index([isSelected])
+  @@map("supplier_quotations")
+}
+
+model SupplierQuotationItem {
+  id           String            @id @default(uuid()) @db.Uuid
+  quotationId  String            @db.Uuid @map("quotation_id")
+  itemId       String            @db.Uuid @map("item_id")
+  quantity     Decimal           @db.Decimal(18, 3)
+  unitPrice    Decimal           @db.Decimal(18, 2) @map("unit_price")
+  totalPrice   Decimal           @db.Decimal(18, 2) @map("total_price")
+  deliveryDays Int?              @map("delivery_days")
+  notes        String?
+  createdAt    DateTime          @default(now()) @map("created_at")
+  updatedAt    DateTime          @updatedAt @map("updated_at")
+  quotation    SupplierQuotation @relation(fields: [quotationId], references: [id])
+
+  @@index([quotationId])
+  @@index([itemId])
+  @@map("supplier_quotation_items")
+}
+
+model SupplierReturnItem {
+  id           String         @id @default(uuid()) @db.Uuid
+  returnId     String         @db.Uuid @map("return_id")
+  itemId       String         @db.Uuid @map("item_id")
+  quantity     Decimal        @db.Decimal(18, 3)
+  unitCost     Decimal        @db.Decimal(18, 2) @map("unit_cost")
+  totalCost    Decimal        @db.Decimal(18, 2) @map("total_cost")
+  reason       String?
+  createdAt    DateTime       @default(now()) @map("created_at")
+  updatedAt    DateTime       @updatedAt @map("updated_at")
+  supplierReturn SupplierReturn @relation(fields: [returnId], references: [id])
+
+  @@index([returnId])
+  @@index([itemId])
+  @@map("supplier_return_items")
+}
+
+model RecipePackaging {
+  id               String          @id @default(uuid()) @db.Uuid
+  recipeId         String          @db.Uuid @map("recipe_id")
+  itemId           String          @db.Uuid @map("item_id")
+  quantityRequired Decimal         @db.Decimal(18, 3) @map("quantity_required")
+  unitId           String          @db.Uuid @map("unit_id")
+  notes            String?
+  createdAt        DateTime        @default(now()) @map("created_at")
+  updatedAt        DateTime        @updatedAt @map("updated_at")
+  recipe           Recipe          @relation(fields: [recipeId], references: [id])
+
+  @@index([recipeId])
+  @@index([itemId])
+  @@index([unitId])
+  @@map("recipe_packaging")
+}
+
+model ProductionPlanItem {
+  id              String         @id @default(uuid()) @db.Uuid
+  productionPlanId String        @db.Uuid @map("production_plan_id")
+  recipeId        String         @db.Uuid @map("recipe_id")
+  plannedQuantity Decimal        @db.Decimal(18, 3) @map("planned_quantity")
+  expectedOutput  Decimal        @db.Decimal(18, 3) @map("expected_output")
+  notes           String?
+  createdAt       DateTime       @default(now()) @map("created_at")
+  updatedAt       DateTime       @updatedAt @map("updated_at")
+  productionPlan  ProductionPlan @relation(fields: [productionPlanId], references: [id])
+
+  @@index([productionPlanId])
+  @@index([recipeId])
+  @@map("production_plan_items")
+}
+
+model ProductionMaterialRequest {
+  id                String                         @id @default(uuid()) @db.Uuid
+  organizationId    String                         @db.Uuid @map("organization_id")
+  requestNumber     String                         @map("request_number")
+  productionBatchId String                         @db.Uuid @map("production_batch_id")
+  requestDate       DateTime                       @db.Date @map("request_date")
+  status            ApprovalStatus                 @default(PENDING)
+  approvalRequestId String?                        @db.Uuid @map("approval_request_id")
+  requestedBy       String                         @db.Uuid @map("requested_by")
+  approvedBy        String?                        @db.Uuid @map("approved_by")
+  approvedAt        DateTime?                      @map("approved_at")
+  notes             String?
+  createdAt         DateTime                       @default(now()) @map("created_at")
+  updatedAt         DateTime                       @updatedAt @map("updated_at")
+  deletedAt         DateTime?                      @map("deleted_at")
+  items             ProductionMaterialRequestItem[]
+
+  @@unique([organizationId, requestNumber])
+  @@index([organizationId])
+  @@index([productionBatchId])
+  @@index([status])
+  @@index([requestDate])
+  @@index([approvalRequestId])
+  @@index([requestedBy])
+  @@index([deletedAt])
+  @@map("production_material_requests")
+}
+
+model ProductionMaterialRequestItem {
+  id                      String                    @id @default(uuid()) @db.Uuid
+  productionMaterialRequestId String               @db.Uuid @map("production_material_request_id")
+  itemId                   String                  @db.Uuid @map("item_id")
+  quantityRequested        Decimal                 @db.Decimal(18, 3) @map("quantity_requested")
+  quantityApproved         Decimal?                @db.Decimal(18, 3) @map("quantity_approved")
+  quantityIssued           Decimal?                @db.Decimal(18, 3) @map("quantity_issued")
+  unitOfMeasureId          String                  @db.Uuid @map("unit_of_measure_id")
+  notes                    String?
+  createdAt                DateTime                @default(now()) @map("created_at")
+  updatedAt                DateTime                @updatedAt @map("updated_at")
+  productionMaterialRequest ProductionMaterialRequest @relation(fields: [productionMaterialRequestId], references: [id])
+
+  @@index([productionMaterialRequestId])
+  @@index([itemId])
+  @@index([unitOfMeasureId])
+  @@map("production_material_request_items")
+}
+
+model ProductionWastage {
+  id                String       @id @default(uuid()) @db.Uuid
+  organizationId    String       @db.Uuid @map("organization_id")
+  productionBatchId String       @db.Uuid @map("production_batch_id")
+  itemId            String       @db.Uuid @map("item_id")
+  wastageType       WastageType  @map("wastage_type")
+  quantity          Decimal      @db.Decimal(18, 3)
+  unitCost          Decimal      @db.Decimal(18, 2) @map("unit_cost")
+  totalCost         Decimal      @db.Decimal(18, 2) @map("total_cost")
+  reason            String?
+  reportedBy        String       @db.Uuid @map("reported_by")
+  createdAt         DateTime     @default(now()) @map("created_at")
+  updatedAt         DateTime     @updatedAt @map("updated_at")
+  deletedAt         DateTime?    @map("deleted_at")
+
+  @@index([organizationId])
+  @@index([productionBatchId])
+  @@index([itemId])
+  @@index([wastageType])
+  @@index([createdAt])
+  @@index([deletedAt])
+  @@map("production_wastage")
+}
+
+model ShiftReport {
+  id                String            @id @default(uuid()) @db.Uuid
+  organizationId    String            @db.Uuid @map("organization_id")
+  productionBatchId String?           @db.Uuid @map("production_batch_id")
+  branchId          String?           @db.Uuid @map("branch_id")
+  reportDate        DateTime          @db.Date @map("report_date")
+  shiftType         ShiftType         @map("shift_type")
+  status            BranchShiftStatus
+  preparedBy        String            @db.Uuid @map("prepared_by")
+  approvedBy        String?           @db.Uuid @map("approved_by")
+  notes             String?
+  createdAt         DateTime          @default(now()) @map("created_at")
+  updatedAt         DateTime          @updatedAt @map("updated_at")
+  deletedAt         DateTime?         @map("deleted_at")
+
+  @@index([organizationId])
+  @@index([productionBatchId])
+  @@index([branchId])
+  @@index([reportDate])
+  @@index([shiftType])
+  @@index([status])
+  @@index([preparedBy])
+  @@index([deletedAt])
+  @@map("shift_reports")
+}
+
+model CustomerComplaint {
+  id             String       @id @default(uuid()) @db.Uuid
+  organizationId String       @db.Uuid @map("organization_id")
+  customerId     String       @db.Uuid @map("customer_id")
+  invoiceId      String?      @db.Uuid @map("invoice_id")
+  complaintDate  DateTime     @db.Date @map("complaint_date")
+  title          String
+  details        String
+  status         String
+  resolvedBy     String?      @db.Uuid @map("resolved_by")
+  resolvedAt     DateTime?    @map("resolved_at")
+  resolutionNote String?      @map("resolution_note")
+  createdAt      DateTime     @default(now()) @map("created_at")
+  updatedAt      DateTime     @updatedAt @map("updated_at")
+  deletedAt      DateTime?    @map("deleted_at")
+
+  @@index([organizationId])
+  @@index([customerId])
+  @@index([invoiceId])
+  @@index([status])
+  @@index([complaintDate])
+  @@index([deletedAt])
+  @@map("customer_complaints")
+}
+
+model Machine {
+  id                String                @id @default(uuid()) @db.Uuid
+  organizationId    String                @db.Uuid @map("organization_id")
+  code              String
+  name              String
+  location          String?
+  machineType       String                @map("machine_type")
+  status            String
+  purchaseDate      DateTime?             @db.Date @map("purchase_date")
+  warrantyExpiry    DateTime?             @db.Date @map("warranty_expiry")
+  isActive          Boolean               @default(true) @map("is_active")
+  createdAt         DateTime              @default(now()) @map("created_at")
+  updatedAt         DateTime              @updatedAt @map("updated_at")
+  deletedAt         DateTime?             @map("deleted_at")
+  maintenanceSchedules MaintenanceSchedule[]
+  breakdowns        MachineBreakdown[]
+
+  @@unique([organizationId, code])
+  @@index([organizationId])
+  @@index([status])
+  @@index([name])
+  @@index([deletedAt])
+  @@map("machines")
+}
+
+model MaintenanceSchedule {
+  id               String            @id @default(uuid()) @db.Uuid
+  organizationId   String            @db.Uuid @map("organization_id")
+  machineId        String            @db.Uuid @map("machine_id")
+  maintenanceType  MaintenanceType   @map("maintenance_type")
+  status           MaintenanceStatus
+  scheduledDate    DateTime          @db.Date @map("scheduled_date")
+  completedDate    DateTime?         @db.Date @map("completed_date")
+  performedBy      String?           @db.Uuid @map("performed_by")
+  cost             Decimal?          @db.Decimal(18, 2)
+  notes            String?
+  createdAt        DateTime          @default(now()) @map("created_at")
+  updatedAt        DateTime          @updatedAt @map("updated_at")
+  deletedAt        DateTime?         @map("deleted_at")
+  machine          Machine           @relation(fields: [machineId], references: [id])
+
+  @@index([organizationId])
+  @@index([machineId])
+  @@index([maintenanceType])
+  @@index([status])
+  @@index([scheduledDate])
+  @@index([deletedAt])
+  @@map("maintenance_schedules")
+}
+
+model MachineBreakdown {
+  id                  String            @id @default(uuid()) @db.Uuid
+  organizationId      String            @db.Uuid @map("organization_id")
+  machineId           String            @db.Uuid @map("machine_id")
+  breakdownDate       DateTime          @map("breakdown_date")
+  description         String
+  severity            String
+  status              MaintenanceStatus
+  reportedBy          String            @db.Uuid @map("reported_by")
+  resolvedAt          DateTime?         @map("resolved_at")
+  downtimeHours       Decimal?          @db.Decimal(10, 2) @map("downtime_hours")
+  repairCost          Decimal?          @db.Decimal(18, 2) @map("repair_cost")
+  createdAt           DateTime          @default(now()) @map("created_at")
+  updatedAt           DateTime          @updatedAt @map("updated_at")
+  deletedAt           DateTime?         @map("deleted_at")
+  machine             Machine           @relation(fields: [machineId], references: [id])
+
+  @@index([organizationId])
+  @@index([machineId])
+  @@index([status])
+  @@index([breakdownDate])
+  @@index([deletedAt])
+  @@map("machine_breakdowns")
+}
+
+model SparePart {
+  id              String       @id @default(uuid()) @db.Uuid
+  organizationId  String       @db.Uuid @map("organization_id")
+  itemId          String?      @db.Uuid @map("item_id")
+  code            String
+  name            String
+  machineType     String?      @map("machine_type")
+  quantityOnHand  Decimal      @default(0) @db.Decimal(18, 3) @map("quantity_on_hand")
+  reorderLevel    Decimal      @default(0) @db.Decimal(18, 3) @map("reorder_level")
+  unitCost        Decimal      @default(0) @db.Decimal(18, 2) @map("unit_cost")
+  createdAt       DateTime     @default(now()) @map("created_at")
+  updatedAt       DateTime     @updatedAt @map("updated_at")
+  deletedAt       DateTime?    @map("deleted_at")
+
+  @@unique([organizationId, code])
+  @@index([organizationId])
+  @@index([itemId])
+  @@index([name])
+  @@index([deletedAt])
+  @@map("spare_parts")
+}
+
+model DeliveryNoteItem {
+  id               String       @id @default(uuid()) @db.Uuid
+  deliveryNoteId   String       @db.Uuid @map("delivery_note_id")
+  salesOrderItemId String       @db.Uuid @map("sales_order_item_id")
+  itemId           String       @db.Uuid @map("item_id")
+  quantity         Decimal      @db.Decimal(18, 3)
+  createdAt        DateTime     @default(now()) @map("created_at")
+  updatedAt        DateTime     @updatedAt @map("updated_at")
+  deliveryNote     DeliveryNote @relation(fields: [deliveryNoteId], references: [id])
+
+  @@index([deliveryNoteId])
+  @@index([salesOrderItemId])
+  @@index([itemId])
+  @@map("delivery_note_items")
+}
+
+model Department {
+  id             String      @id @default(uuid()) @db.Uuid
+  organizationId String      @db.Uuid @map("organization_id")
+  code           String
+  name           String
+  description    String?
+  isActive       Boolean     @default(true) @map("is_active")
+  createdAt      DateTime    @default(now()) @map("created_at")
+  updatedAt      DateTime    @updatedAt @map("updated_at")
+  deletedAt      DateTime?   @map("deleted_at")
+
+  @@unique([organizationId, code])
+  @@unique([organizationId, name])
+  @@index([organizationId])
+  @@index([name])
+  @@index([deletedAt])
+  @@map("departments")
+}
+
+model LeaveRequest {
+  id             String       @id @default(uuid()) @db.Uuid
+  organizationId String       @db.Uuid @map("organization_id")
+  employeeId     String       @db.Uuid @map("employee_id")
+  leaveType      String       @map("leave_type")
+  startDate      DateTime     @db.Date @map("start_date")
+  endDate        DateTime     @db.Date @map("end_date")
+  daysRequested  Decimal      @db.Decimal(8, 2) @map("days_requested")
+  reason         String?
+  status         LeaveStatus
+  approvedBy     String?      @db.Uuid @map("approved_by")
+  approvedAt     DateTime?    @map("approved_at")
+  createdAt      DateTime     @default(now()) @map("created_at")
+  updatedAt      DateTime     @updatedAt @map("updated_at")
+  deletedAt      DateTime?    @map("deleted_at")
+
+  @@index([organizationId])
+  @@index([employeeId])
+  @@index([status])
+  @@index([startDate])
+  @@index([endDate])
+  @@index([deletedAt])
+  @@map("leave_requests")
+}
+
+model BankAccount {
+  id                String               @id @default(uuid()) @db.Uuid
+  organizationId    String               @db.Uuid @map("organization_id")
+  accountId         String               @db.Uuid @map("account_id")
+  accountName       String               @map("account_name")
+  bankName          String               @map("bank_name")
+  accountNumber     String               @map("account_number")
+  branchName        String?              @map("branch_name")
+  swiftCode         String?              @map("swift_code")
+  currency          String               @default("USD")
+  currentBalance    Decimal              @default(0) @db.Decimal(18, 2) @map("current_balance")
+  isActive          Boolean              @default(true) @map("is_active")
+  createdAt         DateTime             @default(now()) @map("created_at")
+  updatedAt         DateTime             @updatedAt @map("updated_at")
+  deletedAt         DateTime?            @map("deleted_at")
+  reconciliations   BankReconciliation[]
+
+  @@unique([organizationId, accountNumber])
+  @@index([organizationId])
+  @@index([accountId])
+  @@index([bankName])
+  @@index([isActive])
+  @@index([deletedAt])
+  @@map("bank_accounts")
+}
+
+model CashAccount {
+  id             String       @id @default(uuid()) @db.Uuid
+  organizationId String       @db.Uuid @map("organization_id")
+  accountId      String       @db.Uuid @map("account_id")
+  branchId       String?      @db.Uuid @map("branch_id")
+  name           String
+  balance        Decimal      @default(0) @db.Decimal(18, 2)
+  isActive       Boolean      @default(true) @map("is_active")
+  createdAt      DateTime     @default(now()) @map("created_at")
+  updatedAt      DateTime     @updatedAt @map("updated_at")
+  deletedAt      DateTime?    @map("deleted_at")
+
+  @@index([organizationId])
+  @@index([accountId])
+  @@index([branchId])
+  @@index([name])
+  @@index([deletedAt])
+  @@map("cash_accounts")
+}
+
+model PettyCashRequest {
+  id                String            @id @default(uuid()) @db.Uuid
+  organizationId    String            @db.Uuid @map("organization_id")
+  requestNumber     String            @map("request_number")
+  branchId          String?           @db.Uuid @map("branch_id")
+  requestedBy       String            @db.Uuid @map("requested_by")
+  requestDate       DateTime          @db.Date @map("request_date")
+  amountRequested   Decimal           @db.Decimal(18, 2) @map("amount_requested")
+  purpose           String
+  status            ApprovalStatus
+  approvalRequestId String?           @db.Uuid @map("approval_request_id")
+  approvedBy        String?           @db.Uuid @map("approved_by")
+  approvedAt        DateTime?         @map("approved_at")
+  disbursedAt       DateTime?         @map("disbursed_at")
+  createdAt         DateTime          @default(now()) @map("created_at")
+  updatedAt         DateTime          @updatedAt @map("updated_at")
+  deletedAt         DateTime?         @map("deleted_at")
+
+  @@unique([organizationId, requestNumber])
+  @@index([organizationId])
+  @@index([branchId])
+  @@index([requestedBy])
+  @@index([status])
+  @@index([requestDate])
+  @@index([approvalRequestId])
+  @@index([deletedAt])
+  @@map("petty_cash_requests")
+}
+
+model PettyCashReplenishment {
+  id             String        @id @default(uuid()) @db.Uuid
+  organizationId String        @db.Uuid @map("organization_id")
+  replenishmentNumber String   @map("replenishment_number")
+  cashAccountId  String        @db.Uuid @map("cash_account_id")
+  requestId      String?       @db.Uuid @map("request_id")
+  replenishmentDate DateTime   @db.Date @map("replenishment_date")
+  amount         Decimal       @db.Decimal(18, 2)
+  status         TransactionStatus
+  approvedBy     String?       @db.Uuid @map("approved_by")
+  createdBy      String        @db.Uuid @map("created_by")
+  createdAt      DateTime      @default(now()) @map("created_at")
+  updatedAt      DateTime      @updatedAt @map("updated_at")
+  deletedAt      DateTime?     @map("deleted_at")
+
+  @@unique([organizationId, replenishmentNumber])
+  @@index([organizationId])
+  @@index([cashAccountId])
+  @@index([requestId])
+  @@index([replenishmentDate])
+  @@index([status])
+  @@index([deletedAt])
+  @@map("petty_cash_replenishments")
+}
+
+model BankReconciliation {
+  id                  String     @id @default(uuid()) @db.Uuid
+  organizationId      String     @db.Uuid @map("organization_id")
+  bankAccountId       String     @db.Uuid @map("bank_account_id")
+  periodStart         DateTime   @db.Date @map("period_start")
+  periodEnd           DateTime   @db.Date @map("period_end")
+  openingBalance      Decimal    @db.Decimal(18, 2) @map("opening_balance")
+  closingBalance      Decimal    @db.Decimal(18, 2) @map("closing_balance")
+  statementBalance    Decimal    @db.Decimal(18, 2) @map("statement_balance")
+  outstandingDeposits Decimal    @default(0) @db.Decimal(18, 2) @map("outstanding_deposits")
+  outstandingPayments Decimal    @default(0) @db.Decimal(18, 2) @map("outstanding_payments")
+  reconciledBalance   Decimal    @db.Decimal(18, 2) @map("reconciled_balance")
+  isReconciled        Boolean    @default(false) @map("is_reconciled")
+  reconciledBy        String?    @db.Uuid @map("reconciled_by")
+  reconciledAt        DateTime?  @map("reconciled_at")
+  createdAt           DateTime   @default(now()) @map("created_at")
+  updatedAt           DateTime   @updatedAt @map("updated_at")
+  bankAccount         BankAccount @relation(fields: [bankAccountId], references: [id])
+
+  @@index([organizationId])
+  @@index([bankAccountId])
+  @@index([periodStart])
+  @@index([periodEnd])
+  @@index([isReconciled])
+  @@map("bank_reconciliations")
+}
+
+model Budget {
+  id                String         @id @default(uuid()) @db.Uuid
+  organizationId    String         @db.Uuid @map("organization_id")
+  budgetCode        String         @map("budget_code")
+  name              String
+  budgetYear        Int            @map("budget_year")
+  budgetType        String         @map("budget_type")
+  departmentId      String?        @db.Uuid @map("department_id")
+  branchId          String?        @db.Uuid @map("branch_id")
+  status            BudgetStatus
+  totalBudgeted     Decimal        @default(0) @db.Decimal(18, 2) @map("total_budgeted")
+  approvalRequestId String?        @db.Uuid @map("approval_request_id")
+  approvedBy        String?        @db.Uuid @map("approved_by")
+  approvedAt        DateTime?      @map("approved_at")
+  createdBy         String         @db.Uuid @map("created_by")
+  createdAt         DateTime       @default(now()) @map("created_at")
+  updatedAt         DateTime       @updatedAt @map("updated_at")
+  deletedAt         DateTime?      @map("deleted_at")
+  lines             BudgetLine[]
+  revisions         BudgetRevision[]
+
+  @@unique([organizationId, budgetCode])
+  @@index([organizationId])
+  @@index([budgetYear])
+  @@index([status])
+  @@index([departmentId])
+  @@index([branchId])
+  @@index([approvalRequestId])
+  @@index([deletedAt])
+  @@map("budgets")
+}
+
+model BudgetLine {
+  id          String   @id @default(uuid()) @db.Uuid
+  budgetId    String   @db.Uuid @map("budget_id")
+  accountId   String   @db.Uuid @map("account_id")
+  january     Decimal  @default(0) @db.Decimal(18, 2)
+  february    Decimal  @default(0) @db.Decimal(18, 2)
+  march       Decimal  @default(0) @db.Decimal(18, 2)
+  april       Decimal  @default(0) @db.Decimal(18, 2)
+  may         Decimal  @default(0) @db.Decimal(18, 2)
+  june        Decimal  @default(0) @db.Decimal(18, 2)
+  july        Decimal  @default(0) @db.Decimal(18, 2)
+  august      Decimal  @default(0) @db.Decimal(18, 2)
+  september   Decimal  @default(0) @db.Decimal(18, 2)
+  october     Decimal  @default(0) @db.Decimal(18, 2)
+  november    Decimal  @default(0) @db.Decimal(18, 2)
+  december    Decimal  @default(0) @db.Decimal(18, 2)
+  annualTotal Decimal  @default(0) @db.Decimal(18, 2) @map("annual_total")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+  budget      Budget   @relation(fields: [budgetId], references: [id])
+
+  @@index([budgetId])
+  @@index([accountId])
+  @@map("budget_lines")
+}
+
+model BudgetRevision {
+  id                String     @id @default(uuid()) @db.Uuid
+  budgetId          String     @db.Uuid @map("budget_id")
+  revisionNumber    Int        @map("revision_number")
+  reason            String
+  revisedBy         String     @db.Uuid @map("revised_by")
+  approvalRequestId String?    @db.Uuid @map("approval_request_id")
+  approvedBy        String?    @db.Uuid @map("approved_by")
+  createdAt         DateTime   @default(now()) @map("created_at")
+  updatedAt         DateTime   @updatedAt @map("updated_at")
+  budget            Budget     @relation(fields: [budgetId], references: [id])
+
+  @@unique([budgetId, revisionNumber])
+  @@index([budgetId])
+  @@index([revisedBy])
+  @@index([approvalRequestId])
+  @@map("budget_revisions")
+}
+
+model FixedAsset {
+  id                  String    @id @default(uuid()) @db.Uuid
+  organizationId      String    @db.Uuid @map("organization_id")
+  assetCode           String    @map("asset_code")
+  name                String
+  description         String?
+  category            String
+  location            String?
+  purchaseDate        DateTime  @db.Date @map("purchase_date")
+  purchaseCost        Decimal   @db.Decimal(18, 2) @map("purchase_cost")
+  usefulLifeYears     Int       @map("useful_life_years")
+  residualValue       Decimal   @default(0) @db.Decimal(18, 2) @map("residual_value")
+  depreciationMethod  String    @map("depreciation_method")
+  currentValue        Decimal   @db.Decimal(18, 2) @map("current_value")
+  accumulatedDep      Decimal   @default(0) @db.Decimal(18, 2) @map("accumulated_dep")
+  isActive            Boolean   @default(true) @map("is_active")
+  disposalDate        DateTime? @db.Date @map("disposal_date")
+  disposalValue       Decimal?  @db.Decimal(18, 2) @map("disposal_value")
+  createdAt           DateTime  @default(now()) @map("created_at")
+  updatedAt           DateTime  @updatedAt @map("updated_at")
+  deletedAt           DateTime? @map("deleted_at")
+  depreciations       AssetDepreciation[]
+
+  @@unique([organizationId, assetCode])
+  @@index([organizationId])
+  @@index([category])
+  @@index([isActive])
+  @@index([purchaseDate])
+  @@index([deletedAt])
+  @@map("fixed_assets")
+}
+
+model AssetDepreciation {
+  id                 String    @id @default(uuid()) @db.Uuid
+  assetId            String    @db.Uuid @map("asset_id")
+  periodStart        DateTime  @db.Date @map("period_start")
+  periodEnd          DateTime  @db.Date @map("period_end")
+  depreciationAmount Decimal   @db.Decimal(18, 2) @map("depreciation_amount")
+  accumulatedTotal   Decimal   @db.Decimal(18, 2) @map("accumulated_total")
+  bookValue          Decimal   @db.Decimal(18, 2) @map("book_value")
+  journalEntryId     String?   @db.Uuid @map("journal_entry_id")
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt          DateTime  @updatedAt @map("updated_at")
+  asset              FixedAsset @relation(fields: [assetId], references: [id])
+
+  @@index([assetId])
+  @@index([periodStart])
+  @@index([periodEnd])
+  @@index([journalEntryId])
+  @@map("asset_depreciation")
+}
+
+model TaxRate {
+  id                String    @id @default(uuid()) @db.Uuid
+  organizationId    String    @db.Uuid @map("organization_id")
+  name              String
+  code              String
+  rate              Decimal   @db.Decimal(8, 4)
+  isActive          Boolean   @default(true) @map("is_active")
+  appliesToSales    Boolean   @default(true) @map("applies_to_sales")
+  appliesToPurchase Boolean   @default(true) @map("applies_to_purchase")
+  accountId         String?   @db.Uuid @map("account_id")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+  deletedAt         DateTime? @map("deleted_at")
+
+  @@unique([organizationId, code])
+  @@index([organizationId])
+  @@index([name])
+  @@index([accountId])
+  @@index([isActive])
+  @@index([deletedAt])
+  @@map("tax_rates")
+}
+
+model NumberSeries {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String   @db.Uuid @map("organization_id")
+  seriesType     String   @map("series_type")
+  prefix         String
+  lastNumber     Int      @default(0) @map("last_number")
+  padding        Int      @default(4)
+  isActive       Boolean  @default(true) @map("is_active")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  @@unique([organizationId, seriesType])
+  @@index([organizationId])
+  @@index([seriesType])
+  @@index([isActive])
+  @@map("number_series")
+}

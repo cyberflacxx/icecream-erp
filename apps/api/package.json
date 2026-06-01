@@ -3,12 +3,13 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "prisma generate --schema=../../packages/database/prisma/schema.postgresql.prisma && tsc -p tsconfig.build.json",
     "clean": "rimraf dist",
     "dev": "tsx watch src/server.ts",
     "lint": "eslint src --ext .ts",
+    "postinstall": "prisma generate --schema=../../packages/database/prisma/schema.postgresql.prisma",
     "start": "node dist/server.js",
-    "test": "node --test --import tsx src/tests/inventory.test.ts src/tests/procurement.test.ts src/tests/branch-operations.test.ts src/tests/reports-jobs.test.ts",
+    "test": "node --test --import tsx src/tests/inventory.test.ts src/tests/procurement.test.ts src/tests/branch-operations.test.ts src/tests/reports-jobs.test.ts src/tests/production.test.ts src/tests/sales.test.ts src/tests/finance.test.ts src/tests/hr.test.ts src/tests/maintenance.test.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {

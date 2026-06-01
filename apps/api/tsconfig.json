@@ -3,10 +3,11 @@
   "compilerOptions": {
     "baseUrl": ".",
     "outDir": "dist",
-    "rootDir": "src",
+    "rootDir": "../../",
     "paths": {
-      "@absolute-ice-cream/database": ["../../packages/database/dist/src/index"],
-      "@absolute-ice-cream/shared": ["../../packages/shared/dist/index"]
+      "@absolute-ice-cream/database": ["../../packages/database/src"],
+      "@absolute-ice-cream/shared": ["../../packages/shared/src"],
+      "@absolute-ice-cream/config": ["../../packages/config/src"]
     },
     "types": ["node"]
   },

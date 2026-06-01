@@ -23,6 +23,7 @@ import type {
   CreateBranchExpenseInput,
   CreateBranchInput,
   CreateBranchSaleInput,
+  RejectShiftCloseInput,
   ShiftCloseListQuery,
   SubmitShiftCloseInput,
   UpdateBranchInput
@@ -815,6 +816,48 @@ export class BranchOperationsService {
         action: 'BRANCH_SHIFT_APPROVED',
         entityId: shiftCloseId,
         entityType: 'branch_shift_close'
+      });
+
+      return updated;
+    });
+  }
+
+  static async rejectShiftClose(
+    context: BranchContext,
+    branchId: string,
+    shiftCloseId: string,
+    input: RejectShiftCloseInput,
+  ) {
+    ensureBranchAccess(context, branchId);
+
+    if (!isAdminOrAccountant(context)) {
+      throw new Error('Only admin or accountant users can reject shift close.');
+    }
+
+    return prisma.$transaction(async (db) => {
+      const shiftClose = await getShiftCloseOrThrow(db, context, branchId, shiftCloseId);
+
+      if (shiftClose.status !== BranchShiftStatus.SUBMITTED) {
+        throw new Error('Only submitted shift close can be rejected.');
+      }
+
+      const updated = await db.branchShiftClose.update({
+        where: {
+          id: shiftCloseId
+        },
+        data: {
+          approvedAt: new Date(),
+          approvedBy: context.userProfileId,
+          notes: input.reason ? [shiftClose.notes, `Rejected: ${input.reason}`].filter(Boolean).join('\n') : shiftClose.notes,
+          status: BranchShiftStatus.REJECTED
+        }
+      });
+
+      await createAuditLog(db, context, {
+        action: 'BRANCH_SHIFT_REJECTED',
+        entityId: shiftCloseId,
+        entityType: 'branch_shift_close',
+        newValues: input.reason ? { reason: input.reason } : undefined
       });
 
       return updated;

@@ -254,8 +254,14 @@ export default function ReportsPage() {
   const reportQuery = useReports(activeReportType, filters, {
     enabled: canReadReports && allowedReportTypes.length > 0
   });
-  const reportData = (reportQuery.data?.data ?? []) as Array<Record<string, unknown>>;
-  const chartData = (reportQuery.data?.chart ?? []) as Array<Record<string, unknown>>;
+  const reportData = useMemo(
+    () => ((reportQuery.data?.data ?? []) as Array<Record<string, unknown>>),
+    [reportQuery.data?.data],
+  );
+  const chartData = useMemo(
+    () => ((reportQuery.data?.chart ?? []) as Array<Record<string, unknown>>),
+    [reportQuery.data?.chart],
+  );
   const summary = (reportQuery.data?.summary ?? {}) as Record<string, unknown>;
   const tableColumns = useMemo(() => {
     const firstRow = reportData[0];
@@ -328,7 +334,7 @@ export default function ReportsPage() {
         })}`,
         {
           headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-          credentials: 'include'
+          credentials: 'omit'
         },
       );
 

@@ -6,18 +6,36 @@ interface ApiFetchOptions extends RequestInit {
 
 export async function apiFetch<T>(path: string, options: ApiFetchOptions = {}) {
   const { headers, token, ...rest } = options;
+  const authToken =
+    token ??
+    (typeof window !== 'undefined' ? window.localStorage.getItem('aqiAuthToken') : null);
   const response = await fetch(`${API_BASE_URL}${path}`, {
     ...rest,
-    credentials: 'include',
+    credentials: 'omit',
     headers: {
       'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
       ...headers
     },
     cache: 'no-store'
   });
 
   if (!response.ok) {
+    if (response.status === 401 && typeof window !== 'undefined') {
+      window.localStorage.removeItem('aqiAuthToken');
+      try {
+        await fetch(`${API_BASE_URL}/api/auth/logout`, {
+          method: 'POST',
+          credentials: 'omit',
+          headers: authToken ? { Authorization: `Bearer ${authToken}` } : undefined
+        });
+      } catch {
+        // Best-effort cleanup before redirecting.
+      }
+
+      window.location.replace('/auth/login');
+    }
+
     const message = await response.text();
     let parsedMessage: string | undefined;
 

@@ -129,6 +129,26 @@ const decimalToNumber = (value: Prisma.Decimal | null | undefined) =>
 
 const now = () => new Date();
 const isProductionReference = (referenceType: string) => referenceType.toLowerCase().includes('production');
+const incomingMovementTypes = new Set<StockMovementType>([
+  StockMovementType.PURCHASE_RECEIVE,
+  StockMovementType.PRODUCTION_OUTPUT,
+  StockMovementType.TRANSFER_IN,
+  StockMovementType.RETURN_IN,
+  StockMovementType.ADJUSTMENT_IN
+]);
+const outgoingMovementTypes = new Set<StockMovementType>([
+  StockMovementType.PRODUCTION_ISSUE,
+  StockMovementType.WIP_TRANSFER,
+  StockMovementType.TRANSFER_OUT,
+  StockMovementType.SALES_ISSUE,
+  StockMovementType.ADJUSTMENT_OUT,
+  StockMovementType.DAMAGE,
+  StockMovementType.EXPIRY_WRITE_OFF,
+  StockMovementType.WASTAGE,
+  StockMovementType.SPILLAGE,
+  StockMovementType.MACHINE_LOSS,
+  StockMovementType.PACKAGING_LOSS
+]);
 
 function formatQuantity(value: Prisma.Decimal | number) {
   return decimal(value).toFixed(3);
@@ -288,6 +308,28 @@ async function createMovement(
 ) {
   const unitCost = input.unitCost ?? null;
   const totalCost = unitCost ? unitCost.mul(input.quantity) : null;
+  const lastMovement = await db.stockMovement.findFirst({
+    where: {
+      itemId: input.itemId,
+      organizationId: context.organizationId,
+      warehouseId: input.warehouseId
+    },
+    orderBy: [
+      {
+        createdAt: 'desc'
+      }
+    ],
+    select: {
+      runningBalance: true
+    }
+  });
+
+  const previousBalance = lastMovement?.runningBalance ?? decimal(0);
+  const runningBalance = incomingMovementTypes.has(input.movementType)
+    ? previousBalance.plus(input.quantity)
+    : outgoingMovementTypes.has(input.movementType)
+      ? previousBalance.minus(input.quantity)
+      : previousBalance;
 
   return db.stockMovement.create({
     data: {
@@ -300,6 +342,7 @@ async function createMovement(
       quantity: input.quantity,
       referenceId: input.reference.id,
       referenceType: input.reference.type,
+      runningBalance,
       totalCost,
       unitCost,
       warehouseId: input.warehouseId
@@ -876,6 +919,7 @@ export class InventoryService {
       },
       type: movement.movementType,
       quantity: decimalToNumber(movement.quantity),
+      runningBalance: decimalToNumber(movement.runningBalance),
       unitCost: decimalToNumber(movement.unitCost),
       totalCost: decimalToNumber(movement.totalCost),
       reference: {

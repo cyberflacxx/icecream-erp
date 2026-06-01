@@ -8,6 +8,7 @@ import { createClient } from '@supabase/supabase-js';
 import { prisma } from '@absolute-ice-cream/database';
 
 import { env } from '../../config/env';
+import { AppError } from '../../lib/app-error';
 import {
   buildDeliveryNotePdf,
   buildInvoicePdf,
@@ -20,8 +21,7 @@ import {
   InvoiceStatus,
   QuotationStatus,
   ReturnStatus,
-  SalesOrderStatus,
-  type PaymentMethod as PaymentMethodCode
+  SalesOrderStatus
 } from './sales.constants';
 import type {
   CreateCustomerInput,
@@ -295,6 +295,44 @@ function normalizeInvoiceStatus(amountPaid: number, total: number) {
   return InvoiceStatus.PARTIAL_PAID;
 }
 
+async function checkCreditLimit(
+  db: DbClient,
+  customerId: string,
+  orderTotal: number,
+) {
+  const customer = await db.customer.findUnique({
+    where: {
+      id: customerId
+    },
+    select: {
+      currentBalance: true,
+      creditLimit: true,
+      name: true
+    }
+  });
+
+  if (!customer) {
+    throw new AppError('Customer not found', 404);
+  }
+
+  const creditLimit = decimalToNumber(customer.creditLimit);
+  if (!creditLimit || creditLimit <= 0) {
+    return;
+  }
+
+  const currentBalance = decimalToNumber(customer.currentBalance);
+  const projectedBalance = currentBalance + orderTotal;
+
+  if (projectedBalance > creditLimit) {
+    const available = Math.max(0, creditLimit - currentBalance);
+    throw new AppError(
+      `Credit limit exceeded for ${customer.name}. Credit limit: $${creditLimit.toFixed(2)}. Current balance: $${currentBalance.toFixed(2)}. Available credit: $${available.toFixed(2)}. Order total: $${orderTotal.toFixed(2)}.`,
+      400,
+      'CREDIT_LIMIT_EXCEEDED',
+    );
+  }
+}
+
 export class SalesService {
   static async listCustomers(context: SalesContext, query: CustomersListQuery) {
     const customers = await prisma.customer.findMany({
@@ -489,7 +527,13 @@ export class SalesService {
         throw new Error('One or more quotation items are invalid.');
       }
 
-      const { subtotal, lineDiscountTotal } = mapLineTotals(input.items);
+      const normalizedItems = input.items.map((item) => ({
+        discountPercent: item.discountPercent,
+        itemId: item.itemId,
+        quantity: item.quantity,
+        unitPrice: item.unitPrice
+      }));
+      const { subtotal, lineDiscountTotal } = mapLineTotals(normalizedItems);
       const count = await db.quotation.count({
         where: {
           organizationId: context.organizationId
@@ -789,7 +833,13 @@ export class SalesService {
         throw new Error('One or more sales order items are invalid.');
       }
 
-      const { subtotal, lineDiscountTotal } = mapLineTotals(input.items);
+      const normalizedItems = input.items.map((item) => ({
+        discountPercent: item.discountPercent,
+        itemId: item.itemId,
+        quantity: item.quantityOrdered,
+        unitPrice: item.unitPrice
+      }));
+      const { subtotal, lineDiscountTotal } = mapLineTotals(normalizedItems);
       const count = await db.salesOrder.count({
         where: {
           organizationId: context.organizationId
@@ -816,7 +866,7 @@ export class SalesService {
       });
 
       await db.salesOrderItem.createMany({
-        data: input.items.map((item) => ({
+        data: normalizedItems.map((item) => ({
           discountPercent: item.discountPercent ?? null,
           itemId: item.itemId,
           quantityDelivered: decimal(0),
@@ -847,6 +897,12 @@ export class SalesService {
 
       if (order.status !== SalesOrderStatus.DRAFT) {
         throw new Error('Only draft sales orders can be confirmed.');
+      }
+
+      const paymentTerms = order.customer.paymentTerms?.toLowerCase() ?? '';
+      const requiresCreditCheck = paymentTerms.includes('credit');
+      if (requiresCreditCheck) {
+        await checkCreditLimit(db, order.customerId, decimalToNumber(order.total));
       }
 
       const updated = await db.salesOrder.update({
@@ -1284,16 +1340,31 @@ export class SalesService {
   static async recordPayment(
     context: SalesContext,
     invoiceId: string,
-    amount: number,
-    method: PaymentMethodCode,
-    reference?: string | null,
+    input: InvoicePaymentInput,
   ) {
     return prisma.$transaction(async (db) => {
       const invoice = await getInvoiceOrThrow(db, context, invoiceId);
       const customer = await getCustomerOrThrow(db, context, invoice.customerId);
 
       if (invoice.status === InvoiceStatus.CANCELLED) {
-        throw new Error('Cannot apply payment to cancelled invoice.');
+        throw new AppError('Cannot record payment on cancelled invoice', 400);
+      }
+
+      if (invoice.status === InvoiceStatus.PAID) {
+        throw new AppError(`Invoice ${invoice.invoiceNumber} is already fully paid`, 400);
+      }
+
+      if (input.amount <= 0) {
+        throw new AppError('Payment amount must be positive', 400);
+      }
+
+      const balanceDue = decimalToNumber(invoice.balanceDue);
+      if (input.amount > balanceDue) {
+        throw new AppError(
+          `Payment amount $${input.amount.toFixed(2)} exceeds balance due $${balanceDue.toFixed(2)}. Overpayment not allowed.`,
+          400,
+          'OVERPAYMENT',
+        );
       }
 
       const paymentCount = await db.payment.count({
@@ -1303,20 +1374,20 @@ export class SalesService {
       });
       const payment = await db.payment.create({
         data: {
-          amount: decimal(amount),
+          amount: decimal(input.amount),
           createdBy: context.userProfileId,
           customerId: invoice.customerId,
-          notes: `Invoice payment for ${invoice.invoiceNumber}`,
+          notes: input.notes ?? `Invoice payment for ${invoice.invoiceNumber}`,
           organizationId: context.organizationId,
-          paymentDate: new Date(),
-          paymentMethod: method,
+          paymentDate: new Date(input.paymentDate),
+          paymentMethod: input.paymentMethod,
           paymentNumber: `PAY-${String(paymentCount + 1).padStart(5, '0')}`,
-          referenceNumber: reference ?? null,
+          referenceNumber: input.referenceNumber ?? null,
           supplierId: null
         }
       });
 
-      const nextAmountPaid = decimalToNumber(invoice.amountPaid.plus(decimal(amount)));
+      const nextAmountPaid = decimalToNumber(invoice.amountPaid.plus(decimal(input.amount)));
       const total = decimalToNumber(invoice.total);
       const nextBalanceDue = Math.max(0, total - nextAmountPaid);
       const nextStatus = normalizeInvoiceStatus(nextAmountPaid, total);
@@ -1333,7 +1404,7 @@ export class SalesService {
 
       const nextCustomerBalance = Math.max(
         0,
-        decimalToNumber(customer.currentBalance) - amount,
+        decimalToNumber(customer.currentBalance) - input.amount,
       );
       await db.customer.update({
         where: {
@@ -1345,12 +1416,12 @@ export class SalesService {
       });
 
       const receiptPdf = await buildReceiptPdf({
-        amountPaid: amount,
+        amountPaid: input.amount,
         invoiceNumber: invoice.invoiceNumber,
-        method,
+        method: input.paymentMethod,
         paymentDate: payment.paymentDate.toISOString().slice(0, 10),
         paymentNumber: payment.paymentNumber,
-        reference
+        reference: input.referenceNumber
       });
 
       const receipt = await storeDocument(db, context, {
@@ -1366,13 +1437,16 @@ export class SalesService {
         entityId: invoiceId,
         entityType: 'invoice',
         newValues: {
-          amount,
-          method
+          amount: input.amount,
+          method: input.paymentMethod,
+          newBalanceDue: nextBalanceDue,
+          newStatus: nextStatus,
+          paymentId: payment.id
         }
       });
       await (db as unknown as { notification?: { create?: (input: unknown) => Promise<unknown> } }).notification?.create?.({
         data: {
-          message: `Payment of ${amount.toFixed(2)} received for invoice ${invoice.invoiceNumber}.`,
+          message: `Payment of ${input.amount.toFixed(2)} received for invoice ${invoice.invoiceNumber}.`,
           organizationId: context.organizationId,
           referenceId: invoiceId,
           referenceType: 'PAYMENT_RECEIVED',

@@ -250,7 +250,7 @@ export class ProcurementService {
           deletedAt: null,
           organizationId: context.organizationId,
           status: {
-            in: [PurchaseOrderStatus.SENT, PurchaseOrderStatus.PARTIAL_RECEIVED]
+            in: [PurchaseOrderStatus.SENT_TO_SUPPLIER, PurchaseOrderStatus.PARTIAL_RECEIVED]
           }
         },
         include: {
@@ -566,11 +566,11 @@ export class ProcurementService {
           id: requisitionId
         },
         data: {
-          approvalStatus: PurchaseRequisitionStatus.APPROVED,
+          approvalStatus: PurchaseRequisitionStatus.LEVEL1_APPROVED,
           approvedAt: new Date(),
           approvedBy: context.userProfileId,
           remarks: remarks ?? requisition.remarks,
-          status: PurchaseRequisitionStatus.APPROVED
+          status: PurchaseRequisitionStatus.LEVEL1_APPROVED
         }
       });
 
@@ -755,7 +755,7 @@ export class ProcurementService {
       if (input.requisitionId) {
         const requisition = await getRequisitionOrThrow(db, context, input.requisitionId);
 
-        if (requisition.status !== PurchaseRequisitionStatus.APPROVED) {
+        if (requisition.status !== PurchaseRequisitionStatus.LEVEL1_APPROVED) {
           throw new Error('Purchase order can only be created from approved requisitions.');
         }
       }
@@ -841,6 +841,17 @@ export class ProcurementService {
           total: totals.total
         }
       });
+
+      if (input.requisitionId) {
+        await db.purchaseRequisition.update({
+          where: {
+            id: input.requisitionId
+          },
+          data: {
+            status: PurchaseRequisitionStatus.PO_CREATED
+          }
+        });
+      }
 
       return getPurchaseOrderOrThrow(db, context, order.id);
     });
@@ -1007,7 +1018,7 @@ export class ProcurementService {
           id: purchaseOrderId
         },
         data: {
-          status: PurchaseOrderStatus.SENT
+          status: PurchaseOrderStatus.SENT_TO_SUPPLIER
         }
       });
 
@@ -1074,7 +1085,7 @@ export class ProcurementService {
     return prisma.$transaction(async (db) => {
       const order = await getPurchaseOrderOrThrow(db, context, input.purchaseOrderId);
 
-      if (order.status !== PurchaseOrderStatus.SENT && order.status !== PurchaseOrderStatus.PARTIAL_RECEIVED) {
+      if (order.status !== PurchaseOrderStatus.SENT_TO_SUPPLIER && order.status !== PurchaseOrderStatus.PARTIAL_RECEIVED) {
         throw new Error('GRN can only be created for sent or partially received purchase orders.');
       }
 
@@ -1285,10 +1296,10 @@ export class ProcurementService {
       );
       const anyReceived = refreshedItems.some((item) => item.quantityReceived.greaterThan(0));
       const nextOrderStatus = allReceived
-        ? PurchaseOrderStatus.RECEIVED
+        ? PurchaseOrderStatus.FULLY_RECEIVED
         : anyReceived
           ? PurchaseOrderStatus.PARTIAL_RECEIVED
-          : PurchaseOrderStatus.SENT;
+          : PurchaseOrderStatus.SENT_TO_SUPPLIER;
 
       await db.purchaseOrder.update({
         where: {
