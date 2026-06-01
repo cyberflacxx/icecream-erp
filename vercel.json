@@ -2,14 +2,22 @@
   "version": 2,
   "builds": [
     {
+      "src": "apps/web/package.json",
+      "use": "@vercel/next"
+    },
+    {
       "src": "apps/api/src/index.ts",
       "use": "@vercel/node"
     }
   ],
   "routes": [
     {
-      "src": "/(.*)",
+      "src": "/api/(.*)",
       "dest": "apps/api/src/index.ts"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "apps/web/$1"
     }
   ]
 }
