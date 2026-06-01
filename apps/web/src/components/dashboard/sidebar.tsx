@@ -99,10 +99,10 @@ export function Sidebar() {
         <div className="mt-5 rounded-2xl border border-white/10 bg-white/5 px-4 py-4">
           <p className="text-xs uppercase tracking-[0.22em] text-white/50">Signed in as</p>
           <p className="mt-2 text-sm font-semibold text-white">
-            {currentUser?.profile.fullName ?? 'ERP User'}
+            {currentUser?.profile?.fullName ?? 'ERP User'}
           </p>
           <p className="mt-1 text-xs text-white/60">
-            {currentUser?.roles.map((role) => role.name).join(' | ') ?? 'Awaiting role sync'}
+            {currentUser?.roles?.map((role) => role.name).join(' | ') || 'Awaiting role sync'}
           </p>
         </div>
       </div>

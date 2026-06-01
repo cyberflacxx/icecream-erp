@@ -134,7 +134,7 @@ export function DashboardOverview() {
     return (
       <div className="space-y-8">
         <PageHeader
-          title={`Welcome back, ${currentUser?.profile.firstName ?? 'team'}`}
+          title={`Welcome back, ${currentUser?.profile?.firstName ?? 'team'}`}
           description={`${roleLabel} dashboard with live production, sales, stock, and audit visibility.`}
         />
 
@@ -263,7 +263,7 @@ export function DashboardOverview() {
     return (
       <div className="space-y-8">
         <PageHeader
-          title={`Welcome back, ${currentUser?.profile.firstName ?? 'team'}`}
+          title={`Welcome back, ${currentUser?.profile?.firstName ?? 'team'}`}
           description={`${roleLabel} dashboard with live production throughput, efficiency, and material health.`}
         />
 
@@ -382,7 +382,7 @@ export function DashboardOverview() {
     return (
       <div className="space-y-8">
         <PageHeader
-          title={`Welcome back, ${currentUser?.profile.firstName ?? 'team'}`}
+          title={`Welcome back, ${currentUser?.profile?.firstName ?? 'team'}`}
           description={`${roleLabel} dashboard focused on ${focus.replace(/_/g, ' ')} data only.`}
         />
 
@@ -447,7 +447,7 @@ export function DashboardOverview() {
   return (
     <div className="space-y-8">
       <PageHeader
-        title={`Welcome back, ${currentUser?.profile.firstName ?? 'team'}`}
+        title={`Welcome back, ${currentUser?.profile?.firstName ?? 'team'}`}
         description={`${roleLabel} dashboard with live branch sales monitoring and shift close visibility.`}
       />
 

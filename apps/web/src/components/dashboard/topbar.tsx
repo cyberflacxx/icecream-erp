@@ -107,7 +107,7 @@ export function Topbar({ onOpenSidebar }: TopbarProps) {
           <div className="flex items-center gap-3 rounded-full border border-border bg-white px-3 py-2 shadow-sm dark:border-darkBorder dark:bg-darkCard">
             <div className="hidden text-right sm:block">
               <p className="text-sm font-semibold text-brown">
-                {currentUser?.profile.fullName ?? 'ERP User'}
+                {currentUser?.profile?.fullName ?? 'ERP User'}
               </p>
               <p className="text-xs text-muted dark:text-darkMuted">
                 {currentUser?.branch?.name ?? 'Factory-wide access'}

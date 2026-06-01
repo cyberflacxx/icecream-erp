@@ -7,6 +7,7 @@ import {
   DeliveryNoteStatus,
   EmployeeStatus,
   InvoiceStatus,
+  InventoryBatchStatus,
   ItemType,
   MaintenanceStatus,
   MaintenanceType,
@@ -419,7 +420,7 @@ async function main(): Promise<void> {
         if (key < 12) {
           shift = ShiftType.DAY;
           const inHour = 5;
-          const inMin = 45 + ((e + d) % 30);
+          const inMin = 45 + ((e + d) % 15);
           checkIn = new Date(`${workingDays[d].toISOString().slice(0, 10)}T${String(inHour).padStart(2, '0')}:${String(inMin).padStart(2, '0')}:00.000Z`);
           const hrs = 7.5 + ((e + d) % 4) * 0.5;
           checkOut = new Date(checkIn.getTime() + hrs * 3600000);
@@ -427,7 +428,7 @@ async function main(): Promise<void> {
         } else if (key < 18) {
           shift = ShiftType.NIGHT;
           const inHour = 17;
-          const inMin = 45 + ((e + d) % 30);
+          const inMin = 45 + ((e + d) % 15);
           checkIn = new Date(`${workingDays[d].toISOString().slice(0, 10)}T${String(inHour).padStart(2, '0')}:${String(inMin).padStart(2, '0')}:00.000Z`);
           const hrs = 7.5 + ((e + d + 1) % 4) * 0.5;
           checkOut = new Date(checkIn.getTime() + hrs * 3600000);

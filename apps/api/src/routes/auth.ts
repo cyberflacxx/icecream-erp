@@ -803,22 +803,5 @@ authRouter.get('/me', authenticateRequest, (req, res) => {
     });
   }
 
-  const primaryRole = auth.roles[0] ?? { id: '', name: '' };
-
-  return res.status(200).json({
-    id: auth.profile.id,
-    workId: auth.profile.workId ?? '',
-    firstName: auth.profile.firstName,
-    lastName: auth.profile.lastName,
-    email: auth.profile.email,
-    role: {
-      id: primaryRole.id,
-      name: primaryRole.name
-    },
-    permissions: auth.permissions,
-    branchId: auth.profile.branchId,
-    organizationId: auth.organizationId,
-    isActive: auth.profile.status === 'ACTIVE',
-    lastLogin: null
-  });
+  return res.status(200).json(auth);
 });
