@@ -49,52 +49,32 @@ export async function GET(request: NextRequest) {
 
   if (error) return serverError(error.message);
 
-  type MovementRow = {
-    id: string;
-    movement_type: string;
-    quantity: number;
-    running_balance: number;
-    unit_cost: number | null;
-    total_cost: number | null;
-    reference_id: string | null;
-    reference_type: string | null;
-    notes: string | null;
-    created_at: string;
-    items: { id: string; code: string; name: string } | null;
-    warehouses: {
-      id: string;
-      name: string;
-      branches: { id: string; name: string } | null;
-    } | null;
-    users: { id: string; first_name: string | null; last_name: string | null } | null;
-  };
+  type Obj = Record<string, unknown> | null;
 
-  const mapped = ((data ?? []) as MovementRow[]).map((m) => ({
-    id: m.id,
-    date: m.created_at,
-    type: m.movement_type,
-    quantity: Number(m.quantity),
-    runningBalance: Number(m.running_balance),
-    unitCost: m.unit_cost !== null ? Number(m.unit_cost) : null,
-    totalCost: m.total_cost !== null ? Number(m.total_cost) : null,
-    reference: {
-      id: m.reference_id ?? null,
-      type: m.reference_type ?? null,
-    },
-    notes: m.notes ?? null,
-    item: m.items
-      ? { id: m.items.id, code: m.items.code, name: m.items.name }
-      : null,
-    warehouse: m.warehouses
-      ? { id: m.warehouses.id, name: m.warehouses.name }
-      : null,
-    createdBy: m.users
-      ? {
-          id: m.users.id,
-          name: `${m.users.first_name ?? ''} ${m.users.last_name ?? ''}`.trim(),
-        }
-      : null,
-  }));
+  const mapped = (data ?? []).map((row: Record<string, unknown>) => {
+    const rawItems = row.items as Obj | Obj[];
+    const items: Obj = Array.isArray(rawItems) ? (rawItems[0] ?? null) : rawItems;
+    const rawWH = row.warehouses as Obj | Obj[];
+    const warehouses: Obj = Array.isArray(rawWH) ? (rawWH[0] ?? null) : rawWH;
+    const rawUsers = row.users as Obj | Obj[];
+    const users: Obj = Array.isArray(rawUsers) ? (rawUsers[0] ?? null) : rawUsers;
+    return {
+      id: row.id,
+      date: row.created_at,
+      type: row.movement_type,
+      quantity: Number(row.quantity),
+      runningBalance: Number(row.running_balance),
+      unitCost: row.unit_cost !== null && row.unit_cost !== undefined ? Number(row.unit_cost) : null,
+      totalCost: row.total_cost !== null && row.total_cost !== undefined ? Number(row.total_cost) : null,
+      reference: { id: row.reference_id ?? null, type: row.reference_type ?? null },
+      notes: row.notes ?? null,
+      item: items ? { id: items.id, code: items.code, name: items.name } : null,
+      warehouse: warehouses ? { id: warehouses.id, name: warehouses.name } : null,
+      createdBy: users
+        ? { id: users.id, name: `${users.first_name ?? ''} ${users.last_name ?? ''}`.trim() }
+        : null,
+    };
+  });
 
   return NextResponse.json({
     data: mapped,

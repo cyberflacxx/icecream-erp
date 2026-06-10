@@ -30,55 +30,34 @@ export async function GET(request: NextRequest) {
   const { data, error } = await query;
   if (error) return serverError(error.message);
 
-  type BalanceRow = {
-    id: string;
-    quantity_on_hand: number;
-    quantity_available: number;
-    quantity_reserved: number;
-    items: {
-      id: string;
-      code: string;
-      name: string;
-      reorder_level: number | null;
-      units_of_measure: { id: string; name: string; abbreviation: string } | null;
-    } | null;
-    warehouses: {
-      id: string;
-      code: string;
-      name: string;
-      branches: { id: string; name: string } | null;
-    } | null;
-  };
+  type ItemObj = { id?: string; code?: string; name?: string; reorder_level?: number | null; units_of_measure?: { id: string; name: string; abbreviation: string } | Array<{ id: string; name: string; abbreviation: string }> | null } | null;
+  type WHObj = { id?: string; code?: string; name?: string; branches?: { id: string; name: string } | Array<{ id: string; name: string }> | null } | null;
 
-  const lowStock = ((data ?? []) as BalanceRow[])
-    .filter((b) => {
-      const reorderLevel = Number(b.items?.reorder_level ?? 0);
-      const available = Number(b.quantity_available);
-      return reorderLevel > 0 && available <= reorderLevel;
+  const lowStock = (data ?? [])
+    .map((row: Record<string, unknown>) => {
+      const rawItems = row.items as ItemObj | ItemObj[];
+      const items: ItemObj = Array.isArray(rawItems) ? (rawItems[0] ?? null) : rawItems;
+      const rawWH = row.warehouses as WHObj | WHObj[];
+      const warehouses: WHObj = Array.isArray(rawWH) ? (rawWH[0] ?? null) : rawWH;
+      const rawUoM = items?.units_of_measure;
+      const unitOfMeasure = Array.isArray(rawUoM) ? (rawUoM[0] ?? null) : (rawUoM ?? null);
+      const rawBranch = warehouses?.branches;
+      const branch = Array.isArray(rawBranch) ? (rawBranch[0] ?? null) : (rawBranch ?? null);
+      return {
+        id: row.id,
+        quantityOnHand: Number(row.quantity_on_hand),
+        quantityAvailable: Number(row.quantity_available),
+        quantityReserved: Number(row.quantity_reserved),
+        reorderLevel: Number(items?.reorder_level ?? 0),
+        item: items
+          ? { id: items.id, code: items.code, name: items.name, reorderLevel: Number(items.reorder_level ?? 0), unitOfMeasure }
+          : null,
+        warehouse: warehouses
+          ? { id: warehouses.id, code: warehouses.code, name: warehouses.name, branch }
+          : null,
+      };
     })
-    .map((b) => ({
-      id: b.id,
-      quantityOnHand: Number(b.quantity_on_hand),
-      quantityAvailable: Number(b.quantity_available),
-      quantityReserved: Number(b.quantity_reserved),
-      item: b.items
-        ? {
-            id: b.items.id,
-            code: b.items.code,
-            name: b.items.name,
-            reorderLevel: Number(b.items.reorder_level ?? 0),
-            unitOfMeasure: b.items.units_of_measure ?? null,
-          }
-        : null,
-      warehouse: b.warehouses
-        ? {
-            id: b.warehouses.id,
-            code: b.warehouses.code,
-            name: b.warehouses.name,
-            branch: b.warehouses.branches ?? null,
-          }
-        : null,
-    }));
+    .filter((b) => b.reorderLevel > 0 && b.quantityAvailable <= b.reorderLevel);
 
   return NextResponse.json(lowStock);
 }

@@ -40,44 +40,40 @@ export async function GET(request: NextRequest) {
   const { data, error } = await query;
   if (error) return serverError(error.message);
 
-  type BatchRow = {
-    id: string;
-    batch_number: string;
-    expiry_date: string | null;
-    manufactured_date: string | null;
-    quantity_remaining: number;
-    quantity_received: number;
-    status: string;
-    created_at: string;
-    items: { id: string; code: string; name: string } | null;
-    warehouses: {
-      id: string;
-      code: string;
-      name: string;
-      branches: { id: string; name: string } | null;
-    } | null;
-  };
+  type ItemObj = { id?: string; code?: string; name?: string } | null;
+  type WarehouseObj = {
+    id?: string; code?: string; name?: string;
+    branches?: { id: string; name: string } | Array<{ id: string; name: string }> | null;
+  } | null;
 
-  const mapped = ((data ?? []) as BatchRow[]).map((batch) => ({
-    id: batch.id,
-    batchNumber: batch.batch_number,
-    expiryDate: batch.expiry_date,
-    manufacturedDate: batch.manufactured_date ?? null,
-    quantityRemaining: Number(batch.quantity_remaining),
-    quantityReceived: Number(batch.quantity_received),
-    status: batch.status,
-    item: batch.items
-      ? { id: batch.items.id, code: batch.items.code, name: batch.items.name }
+  const mapped = (data ?? []).map((row: Record<string, unknown>) => {
+    const rawItems = row.items as ItemObj | ItemObj[];
+    const batch_items: ItemObj = Array.isArray(rawItems) ? (rawItems[0] ?? null) : rawItems;
+    const rawWH = row.warehouses as WarehouseObj | WarehouseObj[];
+    const batch_warehouses: WarehouseObj = Array.isArray(rawWH) ? (rawWH[0] ?? null) : rawWH;
+    const rawBranch = batch_warehouses?.branches;
+    const branch = Array.isArray(rawBranch) ? (rawBranch[0] ?? null) : (rawBranch ?? null);
+    return {
+    id: row.id,
+    batchNumber: row.batch_number,
+    expiryDate: row.expiry_date,
+    manufacturedDate: row.manufactured_date ?? null,
+    quantityRemaining: Number(row.quantity_remaining),
+    quantityReceived: Number(row.quantity_received),
+    status: row.status,
+    item: batch_items
+      ? { id: batch_items.id, code: batch_items.code, name: batch_items.name }
       : null,
-    warehouse: batch.warehouses
+    warehouse: batch_warehouses
       ? {
-          id: batch.warehouses.id,
-          code: batch.warehouses.code,
-          name: batch.warehouses.name,
-          branch: batch.warehouses.branches ?? null,
+          id: batch_warehouses.id,
+          code: batch_warehouses.code,
+          name: batch_warehouses.name,
+          branch,
         }
       : null,
-  }));
+    };
+  });
 
   return NextResponse.json(mapped);
 }

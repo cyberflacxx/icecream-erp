@@ -52,32 +52,25 @@ export async function GET(request: NextRequest) {
 
   if (error) return serverError(error.message);
 
-  type TransferRow = {
-    id: string;
-    transfer_number: string;
-    transfer_date: string | null;
-    status: string;
-    notes: string | null;
-    created_at: string;
-    from_warehouse: { id: string; name: string; branch_id: string | null } | null;
-    to_warehouse: { id: string; name: string; branch_id: string | null } | null;
-    stock_transfer_items: Array<{ id: string }>;
-  };
+  type WHObj = { id?: string; name?: string } | null;
 
-  const mapped = ((data ?? []) as TransferRow[]).map((t) => ({
-    id: t.id,
-    transferNumber: t.transfer_number,
-    transferDate: t.transfer_date,
-    status: t.status,
-    notes: t.notes ?? null,
-    fromWarehouse: t.from_warehouse
-      ? { id: t.from_warehouse.id, name: t.from_warehouse.name }
-      : null,
-    toWarehouse: t.to_warehouse
-      ? { id: t.to_warehouse.id, name: t.to_warehouse.name }
-      : null,
-    itemsCount: t.stock_transfer_items?.length ?? 0,
-  }));
+  const mapped = (data ?? []).map((row: Record<string, unknown>) => {
+    const rawFW = row.from_warehouse as WHObj | WHObj[];
+    const from_warehouse: WHObj = Array.isArray(rawFW) ? (rawFW[0] ?? null) : rawFW;
+    const rawTW = row.to_warehouse as WHObj | WHObj[];
+    const to_warehouse: WHObj = Array.isArray(rawTW) ? (rawTW[0] ?? null) : rawTW;
+    const items = row.stock_transfer_items as Array<unknown> | null;
+    return {
+      id: row.id,
+      transferNumber: row.transfer_number,
+      transferDate: row.transfer_date,
+      status: row.status,
+      notes: row.notes ?? null,
+      fromWarehouse: from_warehouse ? { id: from_warehouse.id, name: from_warehouse.name } : null,
+      toWarehouse: to_warehouse ? { id: to_warehouse.id, name: to_warehouse.name } : null,
+      itemsCount: items?.length ?? 0,
+    };
+  });
 
   return NextResponse.json({
     data: mapped,

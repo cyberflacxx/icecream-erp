@@ -99,14 +99,16 @@ export async function GET(_request: NextRequest) {
       .limit(5);
 
     const lowStockTop5 = (lowStock ?? [])
-      .filter((row: { quantity_available: number; items: { reorder_level: number } }) =>
-        row.quantity_available <= row.items.reorder_level
-      )
-      .map((row: { quantity_available: number; items: { name: string; reorder_level: number } }) => ({
-        name: row.items.name,
-        currentStock: Number(row.quantity_available),
-        reorderPoint: Number(row.items.reorder_level),
-      }))
+      .map((row: Record<string, unknown>) => {
+        const items = row.items as { name?: string; reorder_level?: number } | Array<{ name?: string; reorder_level?: number }> | null;
+        const item = Array.isArray(items) ? items[0] : items;
+        return {
+          name: String(item?.name ?? ''),
+          currentStock: Number(row.quantity_available ?? 0),
+          reorderPoint: Number(item?.reorder_level ?? 0),
+        };
+      })
+      .filter((row) => row.currentStock <= row.reorderPoint)
       .slice(0, 5);
 
     // Recent audit logs

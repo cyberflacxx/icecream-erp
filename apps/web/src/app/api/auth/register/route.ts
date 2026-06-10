@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { ROLES, workIdToEmail } from '@/lib/auth-roles';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
-const VALID_ROLES = ROLES.map((r) => r.id);
+const VALID_ROLES: string[] = ROLES.map((r) => r.id);
 
 function generateWorkId(seq: number): string {
   const year = new Date().getFullYear();

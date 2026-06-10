@@ -25,8 +25,8 @@ export async function GET(_request: NextRequest, { params }: RouteContext) {
     .select(`
       *,
       branch:branches(*),
-      attendances(*, order:attendance_date.desc),
-      payroll_records(*, order:pay_period_start.desc)
+      attendances(*),
+      payroll_records(*)
     `)
     .eq('id', id)
     .is('deleted_at', null)

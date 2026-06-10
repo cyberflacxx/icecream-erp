@@ -93,13 +93,17 @@ export async function GET(request: NextRequest) {
         cashflowLast7Days,
         paymentMethodBreakdown: Array.from(paymentMethodMap.entries()).map(([method, total]) => ({ method, total })),
       },
-      overdueInvoices: (overdueInvoices ?? []).map((inv: { invoice_number: string; status: string; due_date: string; balance_due: number; customers: { name: string } | null }) => ({
-        invoiceNumber: inv.invoice_number,
-        status: inv.status,
-        dueDate: inv.due_date ? inv.due_date.slice(0, 10) : 'N/A',
-        balance: Number(inv.balance_due ?? 0),
-        customer: inv.customers?.name ?? 'Walk-in',
-      })),
+      overdueInvoices: (overdueInvoices ?? []).map((inv: Record<string, unknown>) => {
+        const customers = inv.customers as { name?: string } | Array<{ name?: string }> | null;
+        const customer = Array.isArray(customers) ? customers[0] : customers;
+        return {
+          invoiceNumber: String(inv.invoice_number ?? ''),
+          status: String(inv.status ?? ''),
+          dueDate: inv.due_date ? String(inv.due_date).slice(0, 10) : 'N/A',
+          balance: Number(inv.balance_due ?? 0),
+          customer: customer?.name ?? 'Walk-in',
+        };
+      }),
       recentEntries: (recentEntries ?? []).map((entry: { entry_number: string; entry_date: string; description: string; journal_entry_lines: Array<{ debit_amount: number; credit_amount: number }> }) => ({
         entryNumber: entry.entry_number,
         entryDate: entry.entry_date.slice(0, 10),

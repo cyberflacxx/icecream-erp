@@ -72,7 +72,9 @@ export async function POST(request: NextRequest) {
     return badRequest('Batch has no remaining quantity to write off.');
   }
 
-  const itemName = (batch.items as { id: string; name: string } | null)?.name ?? 'Unknown';
+  const rawBatchItems = batch.items as { id?: string; name?: string } | Array<{ id?: string; name?: string }> | null;
+  const batchItemObj = Array.isArray(rawBatchItems) ? (rawBatchItems[0] ?? null) : rawBatchItems;
+  const itemName = batchItemObj?.name ?? 'Unknown';
 
   // Get stock balance
   const { data: balance, error: balErr } = await service

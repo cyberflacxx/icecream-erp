@@ -48,7 +48,7 @@ export async function GET(request: NextRequest) {
       .from('stock_balances')
       .select('warehouse_id, quantity_on_hand, item_id, items!item_id(unit_cost)')
       .in('warehouse_id', warehouseIds);
-    balancesData = (balances ?? []) as typeof balancesData;
+    balancesData = (balances ?? []) as unknown as typeof balancesData;
   }
 
   const balancesByWarehouse = new Map<
@@ -56,7 +56,9 @@ export async function GET(request: NextRequest) {
     Array<{ quantity_on_hand: number; unit_cost: number | null }>
   >();
   for (const b of balancesData) {
-    const unitCost = b.items?.unit_cost ?? null;
+    const rawItems = b.items as { unit_cost?: unknown } | Array<{ unit_cost?: unknown }> | null;
+    const itemObj = Array.isArray(rawItems) ? (rawItems[0] ?? null) : rawItems;
+    const unitCost = itemObj?.unit_cost !== undefined ? (itemObj.unit_cost as number | null) : null;
     const existing = balancesByWarehouse.get(b.warehouse_id) ?? [];
     existing.push({ quantity_on_hand: Number(b.quantity_on_hand), unit_cost: unitCost });
     balancesByWarehouse.set(b.warehouse_id, existing);
@@ -77,9 +79,11 @@ export async function GET(request: NextRequest) {
       type: warehouse.type,
       isActive: warehouse.is_active,
       address: warehouse.address ?? null,
-      branch: warehouse.branches
-        ? { id: (warehouse.branches as { id: string; name: string }).id, name: (warehouse.branches as { id: string; name: string }).name }
-        : null,
+      branch: (() => {
+        const raw = warehouse.branches as { id: string; name: string } | Array<{ id: string; name: string }> | null;
+        const b = Array.isArray(raw) ? (raw[0] ?? null) : raw;
+        return b ? { id: b.id, name: b.name } : null;
+      })(),
       itemCount,
       totalValue,
     };

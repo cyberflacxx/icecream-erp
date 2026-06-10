@@ -107,8 +107,10 @@ export async function POST(
       .select('quantity_on_hand, items(unit_cost)')
       .eq('warehouse_id', warehouse.id);
 
-    const openingStockValue = (balances ?? []).reduce((sum: number, b: { quantity_on_hand: number; items: { unit_cost: number } | null }) => {
-      const unitCost = Number(b.items?.unit_cost ?? 0);
+    const openingStockValue = (balances ?? []).reduce((sum: number, b: Record<string, unknown>) => {
+      const items = b.items as { unit_cost?: unknown } | { unit_cost?: unknown }[] | null;
+      const itemObj = Array.isArray(items) ? items[0] : items;
+      const unitCost = Number(itemObj?.unit_cost ?? 0);
       return sum + Number(b.quantity_on_hand ?? 0) * unitCost;
     }, 0);
 

@@ -49,31 +49,11 @@ export async function GET(request: NextRequest) {
 
     if (error) return serverError(error.message);
 
-    type BalanceRow = {
-      id: string;
-      quantity_on_hand: number;
-      quantity_available: number;
-      quantity_reserved: number;
-      last_updated: string | null;
-      items: {
-        id: string;
-        code: string;
-        name: string;
-        item_type: string;
-        reorder_level: number | null;
-        units_of_measure: { id: string; name: string; abbreviation: string } | null;
-      } | null;
-      warehouses: {
-        id: string;
-        code: string;
-        name: string;
-        branches: { id: string; name: string } | null;
-      } | null;
-    };
-
-    const filtered = ((data ?? []) as BalanceRow[]).filter((b) => {
-      const reorderLevel = Number(b.items?.reorder_level ?? 0);
-      const available = Number(b.quantity_available);
+    const filtered = (data ?? []).filter((row: Record<string, unknown>) => {
+      const rawItems = row.items as { reorder_level?: unknown } | Array<{ reorder_level?: unknown }> | null;
+      const items = Array.isArray(rawItems) ? (rawItems[0] ?? null) : rawItems;
+      const reorderLevel = Number(items?.reorder_level ?? 0);
+      const available = Number(row.quantity_available);
       return reorderLevel > 0 && available <= reorderLevel;
     });
 
@@ -101,62 +81,46 @@ export async function GET(request: NextRequest) {
   if (error) return serverError(error.message);
 
   return NextResponse.json({
-    data: ((data ?? []) as Parameters<typeof mapBalance>[0][]).map(mapBalance),
+    data: (data ?? []).map(mapBalance),
     pagination: { page, pageSize, total: count ?? 0 },
   });
 }
 
-function mapBalance(b: {
-  id: string;
-  quantity_on_hand: number;
-  quantity_available: number;
-  quantity_reserved: number;
-  last_updated: string | null;
-  items: {
-    id: string;
-    code: string;
-    name: string;
-    item_type: string;
-    reorder_level: number | null;
-    units_of_measure: { id: string; name: string; abbreviation: string } | null;
-  } | null;
-  warehouses: {
-    id: string;
-    code: string;
-    name: string;
-    branches: { id: string; name: string } | null;
-  } | null;
-}) {
+function mapBalance(row: Record<string, unknown>) {
+  type Obj = Record<string, unknown> | null;
+  const rawItems = row.items as Obj | Obj[];
+  const items: Obj = Array.isArray(rawItems) ? (rawItems[0] ?? null) : rawItems;
+  const rawWH = row.warehouses as Obj | Obj[];
+  const warehouses: Obj = Array.isArray(rawWH) ? (rawWH[0] ?? null) : rawWH;
+  const rawUoM = items?.units_of_measure as Obj | Obj[] | undefined;
+  const unitOfMeasure: Obj = Array.isArray(rawUoM) ? (rawUoM[0] ?? null) : (rawUoM ?? null);
+  const rawBranch = warehouses?.branches as Obj | Obj[] | undefined;
+  const branch: Obj = Array.isArray(rawBranch) ? (rawBranch[0] ?? null) : (rawBranch ?? null);
+
   return {
-    id: b.id,
-    lastUpdated: b.last_updated,
-    quantityOnHand: Number(b.quantity_on_hand),
-    quantityAvailable: Number(b.quantity_available),
-    quantityReserved: Number(b.quantity_reserved),
-    item: b.items
+    id: row.id,
+    lastUpdated: row.last_updated,
+    quantityOnHand: Number(row.quantity_on_hand),
+    quantityAvailable: Number(row.quantity_available),
+    quantityReserved: Number(row.quantity_reserved),
+    item: items
       ? {
-          id: b.items.id,
-          code: b.items.code,
-          name: b.items.name,
-          itemType: b.items.item_type,
-          reorderLevel: Number(b.items.reorder_level ?? 0),
-          unitOfMeasure: b.items.units_of_measure
-            ? {
-                id: b.items.units_of_measure.id,
-                name: b.items.units_of_measure.name,
-                abbreviation: b.items.units_of_measure.abbreviation,
-              }
+          id: items.id,
+          code: items.code,
+          name: items.name,
+          itemType: items.item_type,
+          reorderLevel: Number(items.reorder_level ?? 0),
+          unitOfMeasure: unitOfMeasure
+            ? { id: unitOfMeasure.id, name: unitOfMeasure.name, abbreviation: unitOfMeasure.abbreviation }
             : null,
         }
       : null,
-    warehouse: b.warehouses
+    warehouse: warehouses
       ? {
-          id: b.warehouses.id,
-          code: b.warehouses.code,
-          name: b.warehouses.name,
-          branch: b.warehouses.branches
-            ? { id: b.warehouses.branches.id, name: b.warehouses.branches.name }
-            : null,
+          id: warehouses.id,
+          code: warehouses.code,
+          name: warehouses.name,
+          branch: branch ? { id: branch.id, name: branch.name } : null,
         }
       : null,
   };
