@@ -1,9 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import { ROLES, workIdToEmail } from '@/lib/auth-roles';
+import { ROLES, type UserRole, workIdToEmail } from '@/lib/auth-roles';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
 const VALID_ROLES = ROLES.map((r) => r.id);
+
+function isValidRole(value: string): value is UserRole {
+  return VALID_ROLES.includes(value as UserRole);
+}
 
 function generateWorkId(seq: number): string {
   const year = new Date().getFullYear();
@@ -38,7 +42,7 @@ export async function POST(request: NextRequest) {
   if (!email?.trim()) fieldErrors.email = 'Email is required.';
   if (!password || password.length < 8) fieldErrors.password = 'Password must be at least 8 characters.';
   if (password !== confirm_password) fieldErrors.confirm_password = 'Passwords do not match.';
-  if (!role || !VALID_ROLES.includes(role)) fieldErrors.role = 'Invalid role selected.';
+  if (!role || !isValidRole(role)) fieldErrors.role = 'Invalid role selected.';
 
   if (Object.keys(fieldErrors).length > 0) {
     return NextResponse.json({ error: 'Validation failed.', fieldErrors }, { status: 400 });
@@ -87,7 +91,7 @@ export async function POST(request: NextRequest) {
     first_name: first_name!.trim(),
     last_name: last_name!.trim(),
     id_number: id_number!.trim(),
-    role: role!,
+    role,
     status: 'active',
   });
 

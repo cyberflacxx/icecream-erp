@@ -99,13 +99,18 @@ export async function GET(_request: NextRequest) {
       .limit(5);
 
     const lowStockTop5 = (lowStock ?? [])
-      .filter((row: { quantity_available: number; items: { reorder_level: number } }) =>
-        row.quantity_available <= row.items.reorder_level
+      .filter(
+        (
+          row: {
+            quantity_available: number | null;
+            items: Array<{ name: string | null; reorder_level: number | null }>;
+          },
+        ) => row.quantity_available !== null && row.quantity_available <= Number(row.items[0]?.reorder_level ?? 0),
       )
-      .map((row: { quantity_available: number; items: { name: string; reorder_level: number } }) => ({
-        name: row.items.name,
+      .map((row: { quantity_available: number | null; items: Array<{ name: string | null; reorder_level: number | null }> }) => ({
+        name: row.items[0]?.name ?? 'Unknown item',
         currentStock: Number(row.quantity_available),
-        reorderPoint: Number(row.items.reorder_level),
+        reorderPoint: Number(row.items[0]?.reorder_level ?? 0),
       }))
       .slice(0, 5);
 

@@ -107,10 +107,16 @@ export async function POST(
       .select('quantity_on_hand, items(unit_cost)')
       .eq('warehouse_id', warehouse.id);
 
-    const openingStockValue = (balances ?? []).reduce((sum: number, b: { quantity_on_hand: number; items: { unit_cost: number } | null }) => {
-      const unitCost = Number(b.items?.unit_cost ?? 0);
+    const openingStockValue = (balances ?? []).reduce(
+      (
+        sum: number,
+        b: { quantity_on_hand: number | null; items: Array<{ unit_cost: number | null }> | null },
+      ) => {
+      const unitCost = Number(b.items?.[0]?.unit_cost ?? 0);
       return sum + Number(b.quantity_on_hand ?? 0) * unitCost;
-    }, 0);
+      },
+      0,
+    );
 
     const { data: shiftClose, error } = await service
       .schema('icecream_erp')
