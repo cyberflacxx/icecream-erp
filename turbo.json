@@ -3,6 +3,26 @@
   "globalDependencies": [
     ".env.example"
   ],
+  "globalEnv": [
+    "NEXT_PUBLIC_SUPABASE_URL",
+    "NEXT_PUBLIC_SUPABASE_ANON_KEY",
+    "NEXT_PUBLIC_APP_URL",
+    "SUPABASE_SERVICE_ROLE_KEY",
+    "EMAIL_HOST",
+    "EMAIL_PORT",
+    "EMAIL_SECURE",
+    "EMAIL_USER",
+    "EMAIL_APP_PASSWORD",
+    "EMAIL_PASSWORD",
+    "EMAIL_FROM",
+    "EMAIL_APP_NAME",
+    "IMPERSONATE_KEY",
+    "RESEND_API_KEY",
+    "OPENAI_API_KEY",
+    "API_URL",
+    "USER_KEY",
+    "APP_TOKEN"
+  ],
   "tasks": {
     "build": {
       "dependsOn": [
