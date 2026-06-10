@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Bash(git commit -m ' *)"
+      "Bash(git commit -m ' *)",
+      "PowerShell(cd \"c:\\\\Users\\\\XO\\\\Desktop\\\\icecream-erp\"; $env:GIT_SSL_NO_VERIFY=\"true\"; git push origin master 2>&1; $env:GIT_SSL_NO_VERIFY=\"\")"
     ]
   }
 }
