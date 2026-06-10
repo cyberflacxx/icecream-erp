@@ -2,7 +2,22 @@
   "permissions": {
     "allow": [
       "Bash(git commit -m ' *)",
-      "PowerShell(cd \"c:\\\\Users\\\\XO\\\\Desktop\\\\icecream-erp\"; $env:GIT_SSL_NO_VERIFY=\"true\"; git push origin master 2>&1; $env:GIT_SSL_NO_VERIFY=\"\")"
+      "PowerShell(cd \"c:\\\\Users\\\\XO\\\\Desktop\\\\icecream-erp\"; $env:GIT_SSL_NO_VERIFY=\"true\"; git push origin master 2>&1; $env:GIT_SSL_NO_VERIFY=\"\")",
+      "PowerShell(node -e \"const fs=require\\('fs'\\); const lock=JSON.parse\\(fs.readFileSync\\('c:/Users/XO/Desktop/icecream-erp/package-lock.json','utf8'\\)\\); const keys=Object.keys\\(lock.packages||{}\\).filter\\(k=>k.includes\\('@next/swc'\\)\\); console.log\\(keys.length ? keys : 'NONE FOUND'\\)\")",
+      "PowerShell(node -e \"const p=require\\('c:/Users/XO/Desktop/icecream-erp/node_modules/next/package.json'\\); console.log\\(p.version, JSON.stringify\\(p.optionalDependencies?.['@next/swc-win32-x64-msvc']\\)\\)\")",
+      "PowerShell(Select-String -Path \"c:\\\\Users\\\\XO\\\\Desktop\\\\icecream-erp\\\\node_modules\\\\next\\\\dist\\\\lib\\\\patch-incorrect-lockfile.js\" -Pattern \"swc|missing|lockfile\" | Select-Object -First 40 | ForEach-Object { $_.LineNumber.ToString\\(\\) + \": \" + $_.Line.Trim\\(\\) })",
+      "Bash(cp -r apps/web/src .)",
+      "Bash(cp -r apps/web/public .)",
+      "Bash(cp -r packages/ui/src/components/* /c/Users/XO/Desktop/icecream-erp/src/components/ui-library/)",
+      "Bash(cp -r packages/ui/src/permissions /c/Users/XO/Desktop/icecream-erp/src/components/ui-library/permissions)",
+      "Bash(git rm *)",
+      "PowerShell($env:GIT_SSL_NO_VERIFY=\"true\"; git push origin master 2>&1)",
+      "Read(//c/Users/XO/AppData/Local/Temp/claude/c--Users-XO-Desktop-icecream-erp/04eb8278-317d-45dc-8c83-490e4a9e9f3b/tasks/**)",
+      "PowerShell($env:GIT_SSL_NO_VERIFY=\"true\"; git push icecream-erp master 2>&1)",
+      "Bash(GIT_SSL_NO_VERIFY=true git push icecream-erp master)",
+      "Bash(GIT_SSL_NO_VERIFY=true git config http.postBuffer 524288000)",
+      "Bash(ls /c/Users/XO/.claude/projects/c--Users-XO-Desktop-icecream-erp/memory/ 2>/dev/null)",
+      "Read(//c/Users/XO/.claude/projects/c--Users-XO-Desktop-icecream-erp/memory//**)"
     ]
   }
 }
