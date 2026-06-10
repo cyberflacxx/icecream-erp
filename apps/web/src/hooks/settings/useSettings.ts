@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 
 import { useAppAuth } from '@/hooks/useAppAuth';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -39,6 +39,8 @@ export interface SettingsUserRow {
   email: string;
   fullName: string;
   id: string;
+  workId: string;
+  role: string;
   roles: Array<{ id: string; name: string }>;
   status: string;
 }
@@ -77,83 +79,71 @@ function toQueryString(params: QueryValue) {
   return query ? `?${query}` : '';
 }
 
-async function authedFetch<T>(path: string, getToken: () => Promise<string | null>, options?: RequestInit) {
-  const token = await getToken();
-
-  return apiFetch<T>(path, {
-    ...(options ?? {}),
-    token
-  });
-}
-
 export function useSettingsOverview() {
-  const { getToken, isLoaded, isSignedIn, userId } = useAppAuth();
+  const { isLoaded, isSignedIn, userId } = useAppAuth();
 
   return useQuery({
     queryKey: ['settings', 'overview', userId],
-    queryFn: () => authedFetch<SettingsOverviewResponse>('/api/settings/overview', getToken),
-    enabled: isLoaded && Boolean(isSignedIn)
+    queryFn: () => apiFetch<SettingsOverviewResponse>('/api/settings/overview'),
+    enabled: isLoaded && Boolean(isSignedIn),
   });
 }
 
 export function useSettingsSummary() {
-  const { getToken, isLoaded, isSignedIn, userId } = useAppAuth();
+  const { isLoaded, isSignedIn, userId } = useAppAuth();
 
   return useQuery({
     queryKey: ['settings', 'summary', userId],
-    queryFn: () => authedFetch<Record<string, unknown>>('/api/settings/summary', getToken),
-    enabled: isLoaded && Boolean(isSignedIn)
+    queryFn: () => apiFetch<Record<string, unknown>>('/api/settings/summary'),
+    enabled: isLoaded && Boolean(isSignedIn),
   });
 }
 
 export function useUsers(filters: { page?: number; pageSize?: number; search?: string; status?: string }) {
-  const { getToken, isLoaded, isSignedIn, userId } = useAppAuth();
+  const { isLoaded, isSignedIn, userId } = useAppAuth();
 
   return useQuery({
     queryKey: ['settings', 'users', userId, filters],
     queryFn: () =>
-      authedFetch<PaginatedResponse<SettingsUserRow>>(
-        `/api/settings/users${toQueryString({
+      apiFetch<PaginatedResponse<SettingsUserRow>>(
+        `/api/users${toQueryString({
           page: filters.page ?? 1,
           pageSize: filters.pageSize ?? 10,
           search: filters.search,
-          status: filters.status
+          status: filters.status,
         })}`,
-        getToken,
       ),
-    enabled: isLoaded && Boolean(isSignedIn)
+    enabled: isLoaded && Boolean(isSignedIn),
   });
 }
 
 export function useRoles(filters: { page?: number; pageSize?: number; search?: string }) {
-  const { getToken, isLoaded, isSignedIn, userId } = useAppAuth();
+  const { isLoaded, isSignedIn, userId } = useAppAuth();
 
   return useQuery({
     queryKey: ['settings', 'roles', userId, filters],
     queryFn: () =>
-      authedFetch<PaginatedResponse<SettingsRoleRow>>(
-        `/api/settings/roles${toQueryString({
+      apiFetch<PaginatedResponse<SettingsRoleRow>>(
+        `/api/roles${toQueryString({
           page: filters.page ?? 1,
           pageSize: filters.pageSize ?? 50,
-          search: filters.search
+          search: filters.search,
         })}`,
-        getToken,
       ),
-    enabled: isLoaded && Boolean(isSignedIn)
+    enabled: isLoaded && Boolean(isSignedIn),
   });
 }
 
 export function usePermissions() {
-  const { getToken, isLoaded, isSignedIn, userId } = useAppAuth();
+  const { isLoaded, isSignedIn, userId } = useAppAuth();
 
   return useQuery({
     queryKey: ['settings', 'permissions', userId],
     queryFn: () =>
-      authedFetch<Record<string, Array<{ code: string; id: string; name: string }>>>(
+      apiFetch<Record<string, Array<{ code: string; id: string; name: string }>>>(
         '/api/settings/permissions',
-        getToken,
       ),
-    enabled: isLoaded && Boolean(isSignedIn)
+    enabled: isLoaded && Boolean(isSignedIn),
   });
 }
 
@@ -166,12 +156,12 @@ export function useAuditLogs(filters: {
   startDate?: string;
   userProfileId?: string;
 }) {
-  const { getToken, isLoaded, isSignedIn, userId } = useAppAuth();
+  const { isLoaded, isSignedIn, userId } = useAppAuth();
 
   return useQuery({
     queryKey: ['settings', 'audit-logs', userId, filters],
     queryFn: () =>
-      authedFetch<PaginatedResponse<AuditLogRow>>(
+      apiFetch<PaginatedResponse<AuditLogRow>>(
         `/api/settings/audit-logs${toQueryString({
           action: filters.action,
           endDate: filters.endDate,
@@ -179,32 +169,23 @@ export function useAuditLogs(filters: {
           page: filters.page ?? 1,
           pageSize: filters.pageSize ?? 20,
           startDate: filters.startDate,
-          userProfileId: filters.userProfileId
+          userProfileId: filters.userProfileId,
         })}`,
-        getToken,
       ),
-    enabled: isLoaded && Boolean(isSignedIn)
+    enabled: isLoaded && Boolean(isSignedIn),
   });
 }
 
 function useSettingsMutation<TBody>(path: string, method: 'POST' | 'PATCH' = 'PATCH') {
-  const { getToken } = useAppAuth();
   const queryClient = useQueryClient();
 
   return useMutation({
     mutationFn: async (body: TBody) =>
-      authedFetch(path, getToken, {
-        body: JSON.stringify(body),
-        method
-      }),
+      apiFetch(path, { body: JSON.stringify(body), method }),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({
-        queryKey: ['settings']
-      });
-      await queryClient.invalidateQueries({
-        queryKey: ['notifications']
-      });
-    }
+      await queryClient.invalidateQueries({ queryKey: ['settings'] });
+      await queryClient.invalidateQueries({ queryKey: ['notifications'] });
+    },
   });
 }
 
@@ -212,16 +193,37 @@ export function useUpdateSettingsOverview() {
   return useSettingsMutation('/api/settings/overview', 'PATCH');
 }
 
+export function useCreateUser() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (body: {
+      firstName: string;
+      lastName: string;
+      email: string;
+      idNumber: string;
+      roleId: string;
+      branchId?: string | null;
+    }) =>
+      apiFetch('/api/users', {
+        method: 'POST',
+        body: JSON.stringify({ ...body, role: body.roleId }),
+      }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['settings', 'users'] });
+    },
+  });
+}
+
 export function useInviteUser() {
   return useSettingsMutation('/api/settings/users/invite', 'POST');
 }
 
 export function useAssignUserRoles(userId: string) {
-  return useSettingsMutation(`/api/settings/users/${userId}/roles`, 'PATCH');
+  return useSettingsMutation(`/api/users/${userId}`, 'PATCH');
 }
 
 export function useUpdateUserStatus(userId: string) {
-  return useSettingsMutation(`/api/settings/users/${userId}/status`, 'PATCH');
+  return useSettingsMutation(`/api/users/${userId}`, 'PATCH');
 }
 
 export function useCreateRole() {
@@ -236,6 +238,4 @@ export function useAssignRolePermissions(roleId: string) {
   return useSettingsMutation(`/api/settings/roles/${roleId}/permissions`, 'PATCH');
 }
 
-export { authedFetch, toQueryString };
-
-
+export { toQueryString };

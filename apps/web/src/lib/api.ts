@@ -1,43 +1,23 @@
-const configuredApiBaseUrl = process.env.NEXT_PUBLIC_API_URL?.trim();
-
-// Use same-origin API in production by default so Vercel preview/prod domains work without extra env config.
-export const API_BASE_URL = configuredApiBaseUrl
-  ? configuredApiBaseUrl.replace(/\/+$/, '')
-  : '';
-
 interface ApiFetchOptions extends RequestInit {
   token?: string | null;
 }
 
 export async function apiFetch<T>(path: string, options: ApiFetchOptions = {}) {
   const { headers, token, ...rest } = options;
-  const authToken =
-    token ??
-    (typeof window !== 'undefined' ? window.localStorage.getItem('aqiAuthToken') : null);
-  const response = await fetch(`${API_BASE_URL}${path}`, {
+
+  const response = await fetch(path, {
     ...rest,
-    credentials: 'omit',
+    credentials: 'include',
     headers: {
       'Content-Type': 'application/json',
-      ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
-      ...headers
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...headers,
     },
-    cache: 'no-store'
+    cache: 'no-store',
   });
 
   if (!response.ok) {
     if (response.status === 401 && typeof window !== 'undefined') {
-      window.localStorage.removeItem('aqiAuthToken');
-      try {
-        await fetch(`${API_BASE_URL}/api/auth/logout`, {
-          method: 'POST',
-          credentials: 'omit',
-          headers: authToken ? { Authorization: `Bearer ${authToken}` } : undefined
-        });
-      } catch {
-        // Best-effort cleanup before redirecting.
-      }
-
       window.location.replace('/auth/login');
     }
 

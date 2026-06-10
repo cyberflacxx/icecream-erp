@@ -3,14 +3,20 @@
 import Link from 'next/link';
 import {
   BarChart3,
+  Building2,
+  DollarSign,
   Factory,
+  FlaskConical,
   LayoutDashboard,
   LogOut,
   Receipt,
   Settings,
   ShoppingCart,
   Truck,
-  Warehouse
+  UsersRound,
+  Wallet,
+  Warehouse,
+  Wrench
 } from 'lucide-react';
 import { usePathname, useRouter } from 'next/navigation';
 
@@ -26,57 +32,113 @@ const navItems = [
     icon: LayoutDashboard,
     label: 'Dashboard',
     permission: PERMISSIONS.dashboard.read,
-    comingSoon: false
+    color: 'text-orange',
+    bgActive: 'bg-orange/15',
   },
   {
     href: '/procurement/suppliers',
     icon: Truck,
     label: 'Procurement',
     permission: PERMISSIONS.supplier.read,
-    comingSoon: false
+    color: 'text-blue-400',
+    bgActive: 'bg-blue-500/15',
   },
   {
     href: '/inventory',
     icon: Warehouse,
     label: 'Inventory',
     permission: PERMISSIONS.inventory.read,
-    comingSoon: false
+    color: 'text-emerald-400',
+    bgActive: 'bg-emerald-500/15',
   },
   {
     href: '/production',
     icon: Factory,
     label: 'Production',
     permission: PERMISSIONS.productionBatch.read,
-    comingSoon: false
+    color: 'text-violet-400',
+    bgActive: 'bg-violet-500/15',
   },
   {
     href: '/branches',
-    icon: ShoppingCart,
+    icon: Building2,
     label: 'Branch Ops',
     permission: PERMISSIONS.branchSales.read,
-    comingSoon: false
+    color: 'text-pink-400',
+    bgActive: 'bg-pink-500/15',
+  },
+  {
+    href: '/sales',
+    icon: ShoppingCart,
+    label: 'Sales',
+    permission: PERMISSIONS.branchSales.read,
+    color: 'text-yellow-400',
+    bgActive: 'bg-yellow-500/15',
   },
   {
     href: '/finance',
-    icon: Receipt,
+    icon: Wallet,
     label: 'Finance',
     permission: PERMISSIONS.finance.read,
-    comingSoon: false
+    color: 'text-teal-400',
+    bgActive: 'bg-teal-500/15',
+  },
+  {
+    href: '/hr',
+    icon: UsersRound,
+    label: 'HR & Payroll',
+    permission: PERMISSIONS.finance.read,
+    color: 'text-indigo-400',
+    bgActive: 'bg-indigo-500/15',
+  },
+  {
+    href: '/quality',
+    icon: FlaskConical,
+    label: 'Quality Control',
+    permission: PERMISSIONS.inventory.read,
+    color: 'text-lime-400',
+    bgActive: 'bg-lime-500/15',
+  },
+  {
+    href: '/cost-accounting',
+    icon: DollarSign,
+    label: 'Cost Accounting',
+    permission: PERMISSIONS.finance.read,
+    color: 'text-amber-400',
+    bgActive: 'bg-amber-500/15',
+  },
+  {
+    href: '/maintenance',
+    icon: Wrench,
+    label: 'Maintenance',
+    permission: PERMISSIONS.inventory.read,
+    color: 'text-cyan-400',
+    bgActive: 'bg-cyan-500/15',
+  },
+  {
+    href: '/budget',
+    icon: Receipt,
+    label: 'Budget',
+    permission: PERMISSIONS.finance.read,
+    color: 'text-teal-300',
+    bgActive: 'bg-teal-500/15',
   },
   {
     href: '/reports',
     icon: BarChart3,
     label: 'Reports',
     permission: PERMISSIONS.reports.read,
-    comingSoon: false
+    color: 'text-orange-400',
+    bgActive: 'bg-orange-500/15',
   },
   {
     href: '/settings',
     icon: Settings,
     label: 'Settings',
     permission: PERMISSIONS.settings.manage,
-    comingSoon: false
-  }
+    color: 'text-slate-400',
+    bgActive: 'bg-slate-500/15',
+  },
 ] as const;
 
 export function Sidebar() {
@@ -85,74 +147,83 @@ export function Sidebar() {
   const { currentUser } = useUserContext();
 
   return (
-    <aside className="flex h-full flex-col border-r border-brown/10 bg-brown px-4 py-6 text-white dark:border-darkBorder dark:bg-darkCard">
-      <div className="rounded-[28px] border border-white/10 bg-white/5 p-4">
+    <aside className="flex h-full flex-col overflow-hidden bg-[#0D0500]">
+      {/* Brand */}
+      <div className="border-b border-white/10 px-4 py-5">
         <div className="flex items-center gap-3">
-          <div className="inline-flex h-11 w-11 items-center justify-center rounded-2xl bg-orange text-white">
+          <div className="relative flex h-10 w-10 items-center justify-center rounded-xl bg-orange text-white font-bold text-sm shadow-glow-sm">
             A
+            <span className="absolute -right-0.5 -top-0.5 flex h-3 w-3 items-center justify-center rounded-full bg-emerald-400">
+              <span className="h-1.5 w-1.5 rounded-full bg-white" />
+            </span>
           </div>
-          <div>
-            <p className="font-semibold">Absolute Ice Cream ERP</p>
-            <p className="text-xs text-white/65">Absolute Quality Icecream</p>
+          <div className="min-w-0">
+            <p className="truncate text-sm font-bold text-white">Absolute Ice Cream ERP</p>
+            <p className="text-[10px] text-white/50">Manufacturing Intelligence</p>
           </div>
         </div>
-        <div className="mt-5 rounded-2xl border border-white/10 bg-white/5 px-4 py-4">
-          <p className="text-xs uppercase tracking-[0.22em] text-white/50">Signed in as</p>
-          <p className="mt-2 text-sm font-semibold text-white">
+
+        {/* User card */}
+        <div className="mt-4 rounded-xl border border-white/10 bg-white/7 px-3 py-3">
+          <p className="text-[10px] uppercase tracking-[0.2em] text-white/50">Signed in as</p>
+          <p className="mt-1.5 truncate text-sm font-semibold text-white">
             {currentUser?.profile?.fullName ?? 'ERP User'}
           </p>
-          <p className="mt-1 text-xs text-white/60">
-            {currentUser?.roles?.map((role) => role.name).join(' | ') || 'Awaiting role sync'}
-          </p>
+          <div className="mt-1.5 flex items-center gap-1.5">
+            <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+            <p className="truncate text-[10px] text-white/60">
+              {currentUser?.roles?.map((role) => role.name).join(' | ') || 'No role assigned'}
+            </p>
+          </div>
         </div>
       </div>
 
-      <nav className="mt-8 flex-1 space-y-2">
+      {/* Navigation */}
+      <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-0.5">
         {navItems.map((item) => {
           const Icon = item.icon;
           const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`);
 
           return (
             <PermissionGate key={item.label} permission={item.permission}>
-              {item.comingSoon ? (
-                <div className="flex items-center justify-between rounded-2xl px-4 py-3 text-sm text-white/65">
-                  <span className="flex items-center gap-3">
-                    <Icon className="h-4 w-4" />
-                    {item.label}
-                  </span>
-                  <span className="rounded-full bg-white/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.18em]">
-                    Soon
-                  </span>
-                </div>
-              ) : (
-                <Link
-                  href={item.href}
-                  className={cn(
-                    'flex items-center gap-3 rounded-2xl px-4 py-3 text-sm font-medium transition',
-                    isActive
-                      ? 'bg-white text-brown shadow-sm dark:bg-darkBg dark:text-darkText'
-                      : 'text-white/70 hover:bg-white/10 hover:text-white',
-                  )}
-                >
+              <Link
+                href={item.href}
+                className={cn(
+                  'group flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-200',
+                  isActive
+                    ? `${item.bgActive} ${item.color}`
+                    : 'text-white/60 hover:bg-white/10 hover:text-white',
+                )}
+              >
+                <div className={cn(
+                  'flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg transition-colors duration-200',
+                  isActive ? `${item.bgActive}` : 'group-hover:bg-white/10'
+                )}>
                   <Icon className="h-4 w-4" />
-                  {item.label}
-                </Link>
-              )}
+                </div>
+                <span className="truncate">{item.label}</span>
+                {isActive && (
+                  <span className={cn('ml-auto h-1.5 w-1.5 flex-shrink-0 rounded-full', item.color.replace('text-', 'bg-'))} />
+                )}
+              </Link>
             </PermissionGate>
           );
         })}
       </nav>
 
-      <button
-        type="button"
-        onClick={async () => {
-          await logoutAndRedirect(router);
-        }}
-        className="mt-4 flex items-center gap-3 rounded-2xl border border-white/15 px-4 py-3 text-sm font-medium text-white/80 transition hover:bg-white/10 hover:text-white"
-      >
-        <LogOut className="h-4 w-4" />
-        Logout
-      </button>
+      {/* Logout */}
+      <div className="border-t border-white/10 px-3 py-4">
+        <button
+          type="button"
+          onClick={async () => { await logoutAndRedirect(router); }}
+          className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-white/50 transition-all duration-200 hover:bg-red-500/15 hover:text-red-300"
+        >
+          <div className="flex h-7 w-7 items-center justify-center rounded-lg">
+            <LogOut className="h-4 w-4" />
+          </div>
+          <span>Sign out</span>
+        </button>
+      </div>
     </aside>
   );
 }

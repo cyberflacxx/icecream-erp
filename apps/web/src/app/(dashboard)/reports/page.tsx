@@ -1,7 +1,6 @@
 ﻿'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { useAppAuth } from '@/hooks/useAppAuth';
 import { AlertCircle } from 'lucide-react';
 import {
   Bar,
@@ -40,7 +39,6 @@ import {
   useReports
 } from '@/hooks/reports/useReports';
 import { useUserContext } from '@/contexts/UserContext';
-import { API_BASE_URL } from '@/lib/api';
 
 const reportLabels: Record<ReportType, string> = {
   branch_sales: 'Branch Sales Report',
@@ -230,7 +228,6 @@ function getLabel(value: string) {
 }
 
 export default function ReportsPage() {
-  const { getToken } = useAppAuth();
   const { currentUser } = useUserContext();
   const canReadReports = usePermission(PERMISSIONS.reports.read);
   const [reportType, setReportType] = useState<ReportType>('daily_production');
@@ -326,16 +323,12 @@ export default function ReportsPage() {
     setIsExportingCsv(true);
 
     try {
-      const token = await getToken();
       const response = await fetch(
-        `${API_BASE_URL}/api/reports/export/csv${buildReportQuery({
+        `/api/reports/export/csv${buildReportQuery({
           ...filters,
           reportType: activeReportType
         })}`,
-        {
-          headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-          credentials: 'omit'
-        },
+        { credentials: 'include' },
       );
 
       if (!response.ok) {
@@ -360,13 +353,12 @@ export default function ReportsPage() {
     setIsQueueingPdf(true);
 
     try {
-      const token = await getToken();
       const result = await requestWithToken<{ message: string }>(
         `/api/reports/export/pdf${buildReportQuery({
           ...filters,
           reportType: activeReportType
         })}`,
-        token,
+        null,
       );
 
       setToastMessage(result.message || 'PDF export queued. You will be notified when it is ready.');
@@ -387,6 +379,7 @@ export default function ReportsPage() {
       <PageHeader
         title="Reports"
         description="Generate operational reports, visualize trends, and export analytics for leadership and branch execution."
+        status="partial"
         actions={
           <>
             <Button variant={viewMode === 'chart' ? 'default' : 'outline'} size="sm" onClick={() => setViewMode('chart')}>

@@ -1,5 +1,6 @@
 'use client';
 
+import { createClient } from '@/lib/supabase/client';
 import { useEffect, useState } from 'react';
 
 interface AppAuthState {
@@ -11,27 +12,33 @@ interface AppAuthState {
 
 export function useAppAuth(): AppAuthState {
   const [isLoaded, setIsLoaded] = useState(false);
-  const [token, setToken] = useState<string | null>(null);
+  const [userId, setUserId] = useState<string | null>(null);
 
   useEffect(() => {
-    if (typeof window === 'undefined') {
-      return;
-    }
+    const supabase = createClient();
 
-    setToken(window.localStorage.getItem('aqiAuthToken'));
-    setIsLoaded(true);
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setUserId(session?.user?.id ?? null);
+      setIsLoaded(true);
+    });
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUserId(session?.user?.id ?? null);
+    });
+
+    return () => subscription.unsubscribe();
   }, []);
 
   return {
     getToken: async () => {
-      if (typeof window === 'undefined') {
-        return null;
-      }
-
-      return window.localStorage.getItem('aqiAuthToken');
+      const supabase = createClient();
+      const { data: { session } } = await supabase.auth.getSession();
+      return session?.access_token ?? null;
     },
     isLoaded,
-    isSignedIn: Boolean(token),
-    userId: token ? 'session-user' : null
+    isSignedIn: Boolean(userId),
+    userId,
   };
 }

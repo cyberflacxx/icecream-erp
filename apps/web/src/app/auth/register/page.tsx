@@ -3,17 +3,13 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
-import { API_ROUTES } from '@absolute-ice-cream/shared';
-
-import { API_BASE_URL } from '@/lib/api';
-
+import Swal from 'sweetalert2';
 interface RoleOption {
   id: string;
   name: string;
 }
 
 const idNumberPattern = /^[0-9]{6,9}[A-Z][0-9]{2}$/;
-const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89abAB][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function sanitizeIdNumber(value: string) {
   return value.toUpperCase().replace(/[^0-9A-Z]/g, '');
@@ -43,32 +39,42 @@ export default function RegisterPage() {
     let mounted = true;
     (async () => {
       try {
-        const response = await fetch(`${API_BASE_URL}${API_ROUTES.AUTH.ROLES}`, {
-          credentials: 'omit'
-        });
-        const payload = (await response.json()) as unknown;
+        const response = await fetch('/api/roles/public');
+        const payload = (await response.json()) as { data?: RoleOption[] } | RoleOption[];
         if (mounted) {
-          if (response.ok && Array.isArray(payload)) {
-            const normalizedRoles = payload.filter(
+          const roleArray = Array.isArray(payload) ? payload : (payload as { data?: RoleOption[] }).data ?? [];
+          if (response.ok && roleArray.length > 0) {
+            setRoles(roleArray.filter(
               (item): item is RoleOption =>
-                typeof item === 'object' &&
-                item !== null &&
-                'id' in item &&
-                'name' in item &&
-                typeof (item as RoleOption).id === 'string' &&
-                typeof (item as RoleOption).name === 'string',
-            );
-            setRoles(normalizedRoles);
+                typeof item === 'object' && item !== null &&
+                typeof item.id === 'string' && typeof item.name === 'string',
+            ));
             setRolesError(null);
           } else {
             setRoles([]);
-            setRolesError('Unable to load roles. Refresh or check API connection.');
+            setRolesError('Unable to load roles. Please refresh the page.');
+            Swal.fire({
+              icon: 'error',
+              title: 'Could Not Load Roles',
+              html: '<p>Could not load staff roles from the server. Please refresh and try again.</p>',
+              confirmButtonColor: '#F97316',
+              background: '#fff7e8',
+              color: '#3B1F12',
+            });
           }
         }
       } catch {
         if (mounted) {
           setRoles([]);
-          setRolesError('Unable to load roles. Refresh or check API connection.');
+          setRolesError('Unable to load roles. Please refresh the page.');
+          Swal.fire({
+            icon: 'error',
+            title: 'Server Unreachable',
+            html: '<p>Cannot connect to the server. Please refresh and try again.</p>',
+            confirmButtonColor: '#F97316',
+            background: '#fff7e8',
+            color: '#3B1F12',
+          });
         }
       } finally {
         if (mounted) {
@@ -116,8 +122,6 @@ export default function RegisterPage() {
     }
     if (!roleId) {
       errors.role_id = 'Please select your role';
-    } else if (!uuidPattern.test(roleId)) {
-      errors.role_id = 'Selected role is outdated. Please reselect your role.';
     }
     if (!adminKey.trim()) {
       errors.admin_key = 'Invalid admin key. Please contact your administrator.';
@@ -138,7 +142,7 @@ export default function RegisterPage() {
     passwordChecks.digit &&
     passwordChecks.special &&
     password === confirmPassword &&
-    uuidPattern.test(roleId) &&
+    Boolean(roleId) &&
     Boolean(adminKey.trim());
 
   return (
@@ -189,53 +193,21 @@ export default function RegisterPage() {
 
               try {
                 setIsSubmitting(true);
-                let resolvedRoleId = roleId;
 
-                if (!uuidPattern.test(resolvedRoleId)) {
-                  const selectedRole = roles.find((role) => role.id === roleId);
-                  const rolesResponse = await fetch(`${API_BASE_URL}${API_ROUTES.AUTH.ROLES}`, {
-                    credentials: 'omit'
-                  });
-                  const latestRoles = (await rolesResponse.json()) as unknown;
+                Swal.fire({
+                  title: 'Creating account\u2026',
+                  html: 'Please wait while we register your account.',
+                  allowOutsideClick: false,
+                  allowEscapeKey: false,
+                  didOpen: () => Swal.showLoading(),
+                  background: '#fff7e8',
+                  color: '#3B1F12',
+                });
 
-                  if (rolesResponse.ok && Array.isArray(latestRoles)) {
-                    const normalizedLatestRoles = latestRoles.filter(
-                      (item): item is RoleOption =>
-                        typeof item === 'object' &&
-                        item !== null &&
-                        'id' in item &&
-                        'name' in item &&
-                        typeof (item as RoleOption).id === 'string' &&
-                        typeof (item as RoleOption).name === 'string',
-                    );
-                    setRoles(normalizedLatestRoles);
-
-                    if (selectedRole) {
-                      const refreshedRole = normalizedLatestRoles.find((role) => role.name === selectedRole.name);
-                      if (refreshedRole && uuidPattern.test(refreshedRole.id)) {
-                        resolvedRoleId = refreshedRole.id;
-                        setRoleId(refreshedRole.id);
-                        setFieldErrors((current) => ({ ...current, role_id: '' }));
-                      }
-                    }
-                  }
-                }
-
-                if (!uuidPattern.test(resolvedRoleId)) {
-                  setFieldErrors((current) => ({
-                    ...current,
-                    role_id: 'Selected role is outdated. Please reselect your role.'
-                  }));
-                  setFormError('Please reselect your role and try again.');
-                  return;
-                }
-
-                const response = await fetch(`${API_BASE_URL}${API_ROUTES.AUTH.REGISTER}`, {
+                const response = await fetch('/api/auth/register', {
                   method: 'POST',
-                  credentials: 'omit',
-                  headers: {
-                    'Content-Type': 'application/json'
-                  },
+                  credentials: 'include',
+                  headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({
                     first_name: firstName.trim(),
                     last_name: surname.trim(),
@@ -243,9 +215,9 @@ export default function RegisterPage() {
                     email: email.trim().toLowerCase(),
                     password,
                     confirm_password: confirmPassword,
-                    role_id: resolvedRoleId,
-                    admin_key: adminKey
-                  })
+                    role: roleId,
+                    admin_key: adminKey,
+                  }),
                 });
                 const payload = await response.json().catch(() => ({}));
 
@@ -260,20 +232,50 @@ export default function RegisterPage() {
                       ...responseError.fieldErrors
                     }));
                   }
-                  setFormError(String(responseError.error ?? 'Registration failed.'));
+                  const msg = String(responseError.error ?? 'Registration failed.');
+                  setFormError(msg);
+                  Swal.fire({
+                    icon: response.status === 409 ? 'warning' : 'error',
+                    title: response.status === 409 ? 'Already Registered' : response.status === 403 ? 'Invalid Admin Key' : 'Registration Failed',
+                    html: msg,
+                    confirmButtonColor: '#F97316',
+                    background: '#fff7e8',
+                    color: '#3B1F12',
+                  });
                   return;
                 }
 
-                setSuccessMessage(
-                  `Account created successfully! Your Work ID has been sent to ${email}. ` +
-                    'Check your inbox and use your Work ID to log in.',
-                );
-                setTimeout(() => {
-                  router.push('/auth/login');
-                }, 5000);
+                const accountPayload = payload as { work_id?: string };
+                await Swal.fire({
+                  icon: 'success',
+                  title: 'Account Created! 🎉',
+                  html:
+                    `<p>Your account has been registered successfully.</p>` +
+                    (accountPayload.work_id
+                      ? `<p style="margin-top:12px">Your Work ID is: <b style="font-size:1.1rem;color:#F97316">${accountPayload.work_id}</b></p>`
+                      : '') +
+                    `<p style="margin-top:8px;font-size:0.85rem;color:#666">A confirmation has been sent to <b>${email}</b>. Use your Work ID to log in.</p>`,
+                  confirmButtonColor: '#F97316',
+                  confirmButtonText: 'Go to Login',
+                  background: '#fff7e8',
+                  color: '#3B1F12',
+                  iconColor: '#22c55e',
+                  allowOutsideClick: false,
+                });
+                router.push('/auth/login');
               } catch (error) {
+                Swal.fire({
+                  icon: 'error',
+                  title: error instanceof TypeError ? 'Server Unreachable' : 'Unexpected Error',
+                  html: error instanceof TypeError
+                    ? '<p>Cannot connect to the server. Please refresh and try again.</p>'
+                    : (error instanceof Error ? error.message : 'Something went wrong. Please try again.'),
+                  confirmButtonColor: '#F97316',
+                  background: '#fff7e8',
+                  color: '#3B1F12',
+                });
                 setFormError(error instanceof Error ? error.message : 'Registration failed.');
-              } finally {
+            } finally {
                 setIsSubmitting(false);
               }
             }}

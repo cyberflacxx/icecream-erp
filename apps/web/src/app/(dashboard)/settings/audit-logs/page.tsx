@@ -9,7 +9,6 @@ import { PageHeader } from '@/components/dashboard/page-header';
 import { SettingsNav } from '@/components/settings/settings-nav';
 import { Button } from '@/components/ui/button';
 import { useAuditLogs } from '@/hooks/settings/useSettings';
-import { API_BASE_URL } from '@/lib/api';
 
 function toQueryString(params: Record<string, string | number | undefined>) {
   const searchParams = new URLSearchParams();
@@ -61,13 +60,9 @@ export default function SettingsAuditLogsPage() {
           <Button
             variant="outline"
             onClick={async () => {
-              const token = typeof window !== 'undefined' ? window.localStorage.getItem('aqiAuthToken') : null;
               const response = await fetch(
-                `${API_BASE_URL}/api/settings/audit-logs/export/csv${toQueryString(filters)}`,
-                {
-                  credentials: 'omit',
-                  headers: token ? { Authorization: `Bearer ${token}` } : undefined
-                },
+                `/api/settings/audit-logs/export/csv${toQueryString(filters)}`,
+                { credentials: 'include' },
               );
 
               if (!response.ok) {

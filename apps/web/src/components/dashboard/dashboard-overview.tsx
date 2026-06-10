@@ -37,6 +37,7 @@ import {
 } from '@absolute-ice-cream/ui';
 
 import { PageHeader } from '@/components/dashboard/page-header';
+import { WelcomeModal } from '@/components/dashboard/welcome-modal';
 import { useUserContext } from '@/contexts/UserContext';
 import { useBranchRealtime } from '@/hooks/branch-operations/useBranchRealtime';
 import { useDashboardMetrics } from '@/hooks/reports/useReports';
@@ -171,9 +172,9 @@ export function DashboardOverview() {
             <div className="h-72">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={productionLast7Days}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#F3D7B6" />
-                  <XAxis dataKey="day" stroke="#6B4A3A" fontSize={12} />
-                  <YAxis stroke="#6B4A3A" fontSize={12} />
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
+                  <XAxis dataKey="day" stroke="rgba(255,255,255,0.3)" fontSize={12} />
+                  <YAxis stroke="rgba(255,255,255,0.3)" fontSize={12} />
                   <Tooltip />
                   <Bar dataKey="output" fill="#F97316" radius={[10, 10, 0, 0]} />
                 </BarChart>
@@ -185,11 +186,11 @@ export function DashboardOverview() {
             <div className="h-72">
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={salesLast7Days}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#F3D7B6" />
-                  <XAxis dataKey="day" stroke="#6B4A3A" fontSize={12} />
-                  <YAxis stroke="#6B4A3A" fontSize={12} />
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
+                  <XAxis dataKey="day" stroke="rgba(255,255,255,0.3)" fontSize={12} />
+                  <YAxis stroke="rgba(255,255,255,0.3)" fontSize={12} />
                   <Tooltip />
-                  <Line type="monotone" dataKey="total" stroke="#3B1F12" strokeWidth={3} />
+                  <Line type="monotone" dataKey="total" stroke="#f97316" strokeWidth={3} />
                 </LineChart>
               </ResponsiveContainer>
             </div>
@@ -319,9 +320,9 @@ export function DashboardOverview() {
             <div className="h-72">
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={wastageTrend}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#F3D7B6" />
-                  <XAxis dataKey="day" stroke="#6B4A3A" fontSize={12} />
-                  <YAxis stroke="#6B4A3A" fontSize={12} />
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
+                  <XAxis dataKey="day" stroke="rgba(255,255,255,0.3)" fontSize={12} />
+                  <YAxis stroke="rgba(255,255,255,0.3)" fontSize={12} />
                   <Tooltip />
                   <Line type="monotone" dataKey="wastage" stroke="#F97316" strokeWidth={3} />
                 </LineChart>
@@ -402,9 +403,9 @@ export function DashboardOverview() {
             <div className="h-72">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={chartData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#F3D7B6" />
-                  <XAxis dataKey={xAxisKey} stroke="#6B4A3A" fontSize={12} />
-                  <YAxis stroke="#6B4A3A" fontSize={12} />
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
+                  <XAxis dataKey={xAxisKey} stroke="rgba(255,255,255,0.3)" fontSize={12} />
+                  <YAxis stroke="rgba(255,255,255,0.3)" fontSize={12} />
                   <Tooltip />
                   <Bar dataKey={primaryMetric} fill="#F97316" radius={[10, 10, 0, 0]} />
                 </BarChart>
@@ -446,6 +447,7 @@ export function DashboardOverview() {
 
   return (
     <div className="space-y-8">
+      <WelcomeModal firstName={currentUser?.profile?.firstName} />
       <PageHeader
         title={`Welcome back, ${currentUser?.profile?.firstName ?? 'team'}`}
         description={`${roleLabel} dashboard with live branch sales monitoring and shift close visibility.`}
@@ -521,3 +523,4 @@ export function DashboardOverview() {
     </div>
   );
 }
+

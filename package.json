@@ -10,7 +10,7 @@
   "scripts": {
     "build": "turbo run build",
     "clean": "turbo run clean --continue",
-    "dev": "turbo run dev",
+    "dev": "npm run dev --workspace=apps/web",
     "format": "prettier --check .",
     "format:write": "prettier --write .",
     "lint": "turbo run lint",
@@ -28,5 +28,8 @@
   },
   "engines": {
     "node": ">=20.0.0"
+  },
+  "overrides": {
+    "@next/swc-win32-x64-msvc": "14.2.35"
   }
 }

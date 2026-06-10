@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@200..800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,200..800;1,200..800&family=Space+Grotesk:wght@300..700&display=swap');
 
 @tailwind base;
 @tailwind components;
@@ -38,6 +38,223 @@
   .section-shell {
     @apply mx-auto max-w-7xl px-6;
   }
+
+  /* Dashboard card — theme-aware */
+  .dash-card {
+    @apply rounded-xl border border-brown/10 bg-white shadow-sm dark:border-white/8 dark:bg-white/4;
+  }
+  .dash-card-muted {
+    @apply rounded-xl border border-brown/8 bg-white/70 dark:border-white/6 dark:bg-white/3;
+  }
+
+  /* Glassmorphism */
+  .glass {
+    @apply bg-white/10 backdrop-blur-xl border border-white/20;
+  }
+  .glass-dark {
+    background: rgba(20, 8, 3, 0.55);
+    -webkit-backdrop-filter: blur(24px);
+    backdrop-filter: blur(24px);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+  }
+
+  /* Gradient text */
+  .grad-text {
+    @apply bg-gradient-to-r from-orange via-amber-400 to-deepOrange bg-clip-text text-transparent;
+  }
+  .grad-text-cool {
+    background: linear-gradient(135deg, #60a5fa 0%, #a78bfa 50%, #f472b6 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  /* Glow effects */
+  .glow-orange {
+    box-shadow: 0 0 30px rgba(249, 115, 22, 0.35), 0 0 60px rgba(249, 115, 22, 0.15);
+  }
+  .glow-blue {
+    box-shadow: 0 0 30px rgba(96, 165, 250, 0.35), 0 0 60px rgba(96, 165, 250, 0.15);
+  }
+
+  /* Interactive card tilt */
+  .card-tilt {
+    transform-style: preserve-3d;
+    transition: transform 0.3s ease;
+  }
+  .card-tilt:hover {
+    transform: perspective(800px) rotateX(-2deg) rotateY(4deg) scale(1.02);
+  }
+
+  /* Marquee */
+  .marquee-inner {
+    animation: marquee 24s linear infinite;
+    display: flex;
+    gap: 3rem;
+    white-space: nowrap;
+  }
+  .marquee-inner:hover {
+    animation-play-state: paused;
+  }
+
+  /* Shimmer button */
+  .btn-shimmer {
+    position: relative;
+    overflow: hidden;
+  }
+  .btn-shimmer::after {
+    content: '';
+    position: absolute;
+    top: -50%;
+    left: -75%;
+    width: 50%;
+    height: 200%;
+    background: linear-gradient(to right, transparent, rgba(255,255,255,0.3), transparent);
+    transform: skewX(-20deg);
+    animation: shimmer-sweep 2.8s ease-in-out infinite;
+  }
+
+  /* Noise texture overlay */
+  .noise::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.04'/%3E%3C/svg%3E");
+    pointer-events: none;
+    border-radius: inherit;
+  }
+
+  /* Floating animation */
+  .float-slow {
+    animation: float 6s ease-in-out infinite;
+  }
+  .float-medium {
+    animation: float 4s ease-in-out infinite 1s;
+  }
+  .float-fast {
+    animation: float 3s ease-in-out infinite 0.5s;
+  }
+
+  /* Pulse ring */
+  .pulse-ring {
+    animation: pulse-ring 2s cubic-bezier(0.215, 0.61, 0.355, 1) infinite;
+  }
+
+  /* Counter animation */
+  .counter {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: 'tnum';
+  }
+
+  /* Neon border */
+  .neon-border {
+    border: 1px solid rgba(249, 115, 22, 0.4);
+    box-shadow: inset 0 0 20px rgba(249, 115, 22, 0.05),
+                0 0 20px rgba(249, 115, 22, 0.1);
+  }
+
+  /* Gradient border */
+  .gradient-border {
+    position: relative;
+  }
+  .gradient-border::before {
+    content: '';
+    position: absolute;
+    inset: -1px;
+    background: linear-gradient(135deg, rgba(249,115,22,0.6), rgba(251,191,36,0.3), rgba(249,115,22,0.6));
+    border-radius: inherit;
+    z-index: -1;
+    opacity: 0;
+    transition: opacity 0.3s;
+  }
+  .gradient-border:hover::before {
+    opacity: 1;
+  }
+
+  /* Tag badge */
+  .ice-badge {
+    @apply inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold tracking-wide;
+  }
+
+  /* Module accent lines */
+  .module-line {
+    position: relative;
+  }
+  .module-line::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    height: 2px;
+    width: 0;
+    background: linear-gradient(to right, #f97316, #fbbf24);
+    border-radius: 9999px;
+    transition: width 0.4s ease;
+  }
+  .module-line:hover::after {
+    width: 100%;
+  }
+}
+
+/* ─── Keyframes ───────────────────────────────────────────────── */
+@keyframes float {
+  0%, 100% { transform: translateY(0px); }
+  50%       { transform: translateY(-16px); }
+}
+
+@keyframes marquee {
+  0%   { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+
+@keyframes shimmer-sweep {
+  0%   { left: -75%; }
+  60%, 100% { left: 150%; }
+}
+
+@keyframes pulse-ring {
+  0%   { box-shadow: 0 0 0 0 rgba(249,115,22,0.5); }
+  70%  { box-shadow: 0 0 0 14px rgba(249,115,22,0); }
+  100% { box-shadow: 0 0 0 0 rgba(249,115,22,0); }
+}
+
+@keyframes gradient-shift {
+  0%   { background-position: 0% 50%; }
+  50%  { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+@keyframes spin-slow {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+@keyframes blob {
+  0%, 100% { border-radius: 60% 40% 30% 70% / 60% 30% 70% 40%; }
+  25%       { border-radius: 30% 60% 70% 40% / 50% 60% 30% 60%; }
+  50%       { border-radius: 50% 60% 30% 60% / 40% 30% 70% 60%; }
+  75%       { border-radius: 40% 50% 60% 30% / 70% 40% 50% 30%; }
+}
+
+@keyframes slide-up-fade {
+  from { opacity: 0; transform: translateY(24px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes count-up {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes flow-particle {
+  0%   { left: -40%; }
+  100% { left: 140%; }
+}
+.flow-particle {
+  animation: flow-particle 1.8s linear infinite;
+  position: absolute;
+  top: 0;
+  bottom: 0;
 }
 
 ::-webkit-scrollbar {

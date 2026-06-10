@@ -1,11 +1,8 @@
-﻿'use client';
+'use client';
 
 import { useAppAuth } from '@/hooks/useAppAuth';
 import { useQuery } from '@tanstack/react-query';
 import { usePathname } from 'next/navigation';
-import { API_ROUTES } from '@absolute-ice-cream/shared';
-
-import { apiFetch } from '@/lib/api';
 
 export interface CurrentUser {
   branch: {
@@ -30,6 +27,7 @@ export interface CurrentUser {
     branchId: string | null;
     workId?: string;
     status: string;
+    role: string;
   };
   rawPermissions: string[];
   roles: Array<{
@@ -40,17 +38,19 @@ export interface CurrentUser {
   }>;
 }
 
-async function fetchCurrentUser(getToken: () => Promise<string | null>) {
-  const token = await getToken();
-
-  return apiFetch<CurrentUser>(API_ROUTES.AUTH.ME, {
-    token
-  });
+async function fetchCurrentUser(): Promise<CurrentUser> {
+  const response = await fetch('/api/auth/profile', { cache: 'no-store' });
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(text || `Request failed with status ${response.status}`);
+  }
+  return response.json() as Promise<CurrentUser>;
 }
 
 export function useCurrentUser() {
-  const { getToken, isLoaded, isSignedIn, userId } = useAppAuth();
+  const { isLoaded, isSignedIn, userId } = useAppAuth();
   const pathname = usePathname();
+
   const requiresAuth =
     pathname === '/dashboard' ||
     pathname.startsWith('/dashboard/') ||
@@ -65,10 +65,8 @@ export function useCurrentUser() {
 
   return useQuery({
     queryKey: ['current-user', userId],
-    queryFn: () => fetchCurrentUser(getToken),
-    enabled: requiresAuth && isLoaded && Boolean(isSignedIn),
-    retry: false
+    queryFn: fetchCurrentUser,
+    enabled: requiresAuth && isLoaded && isSignedIn,
+    retry: false,
   });
 }
-
-

@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 
 import { useAppAuth } from '@/hooks/useAppAuth';
 import { useQuery } from '@tanstack/react-query';
@@ -46,7 +46,7 @@ interface UseReportsOptions {
 
 type QueryValue = boolean | number | string | null | undefined;
 
-function buildReportQuery(params: Record<string, QueryValue>) {
+export function buildReportQuery(params: Record<string, QueryValue>) {
   const searchParams = new URLSearchParams();
 
   Object.entries(params).forEach(([key, value]) => {
@@ -62,47 +62,30 @@ function buildReportQuery(params: Record<string, QueryValue>) {
   return query ? `?${query}` : '';
 }
 
-async function requestWithToken<T>(path: string, token: string | null, options?: RequestInit) {
-  return apiFetch<T>(path, {
-    ...(options ?? {}),
-    token
-  });
-}
-
 export function useReports(reportType: ReportType, filters: ReportFilters, options?: UseReportsOptions) {
-  const { isLoaded, isSignedIn, userId, getToken } = useAppAuth();
+  const { isLoaded, isSignedIn, userId } = useAppAuth();
 
   return useQuery({
     queryKey: ['reports', reportType, userId, filters],
-    queryFn: async () => {
-      const token = await getToken();
-
-      return requestWithToken<ReportResponse>(
-        `/api/reports${buildReportQuery({
-          ...filters,
-          reportType
-        })}`,
-        token,
-      );
-    },
-    enabled: (options?.enabled ?? true) && isLoaded && Boolean(isSignedIn)
+    queryFn: () =>
+      apiFetch<ReportResponse>(
+        `/api/reports${buildReportQuery({ ...filters, reportType })}`,
+      ),
+    enabled: (options?.enabled ?? true) && isLoaded && Boolean(isSignedIn),
   });
 }
 
 export function useDashboardMetrics() {
-  const { isLoaded, isSignedIn, userId, getToken } = useAppAuth();
+  const { isLoaded, isSignedIn, userId } = useAppAuth();
 
   return useQuery({
     queryKey: ['reports', 'dashboard-metrics', userId],
-    queryFn: async () => {
-      const token = await getToken();
-
-      return requestWithToken<Record<string, unknown>>('/api/reports/dashboard', token);
-    },
-    enabled: isLoaded && Boolean(isSignedIn)
+    queryFn: () => apiFetch<Record<string, unknown>>('/api/dashboard'),
+    enabled: isLoaded && Boolean(isSignedIn),
   });
 }
 
-export { buildReportQuery, requestWithToken };
-
-
+/** @deprecated token is no longer needed; use apiFetch directly */
+export async function requestWithToken<T>(path: string, _token: string | null, options?: RequestInit) {
+  return apiFetch<T>(path, options);
+}

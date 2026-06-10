@@ -109,6 +109,7 @@ export default function SettingsOverviewPage() {
       <PageHeader
         title="Settings"
         description="Manage company profile, numbering rules, and system notifications."
+        status="partial"
         actions={
           <Button
             onClick={async () => {

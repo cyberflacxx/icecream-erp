@@ -48,6 +48,7 @@ export default function ProductionPage() {
       <PageHeader
         title="Production Module"
         description="Track batch execution, quality risk, and raw-material exposure from one production console."
+        status="partial"
       />
 
       <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-5">
