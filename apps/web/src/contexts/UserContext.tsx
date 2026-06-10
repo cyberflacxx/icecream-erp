@@ -7,7 +7,7 @@ import { useQueryClient } from '@tanstack/react-query';
 
 import { PermissionProvider } from '@absolute-ice-cream/ui';
 
-import { createClient } from '@/lib/supabase/client';
+import { createClient, hasSupabaseClientEnv } from '@/lib/supabase/client';
 import { useCurrentUser, type CurrentUser } from '@/hooks/useCurrentUser';
 
 interface UserContextValue {
@@ -49,6 +49,10 @@ function AuthenticatedUserProvider({ children }: { children: ReactNode }) {
 
   // Listen for Supabase auth state changes to invalidate user cache on logout/login
   useEffect(() => {
+    if (!hasSupabaseClientEnv()) {
+      return;
+    }
+
     const supabase = createClient();
     const {
       data: { subscription },

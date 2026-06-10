@@ -1,6 +1,6 @@
 'use client';
 
-import { createClient } from '@/lib/supabase/client';
+import { createClient, hasSupabaseClientEnv } from '@/lib/supabase/client';
 import { useEffect, useState } from 'react';
 
 interface AppAuthState {
@@ -15,6 +15,12 @@ export function useAppAuth(): AppAuthState {
   const [userId, setUserId] = useState<string | null>(null);
 
   useEffect(() => {
+    if (!hasSupabaseClientEnv()) {
+      setUserId(null);
+      setIsLoaded(true);
+      return;
+    }
+
     const supabase = createClient();
 
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -33,6 +39,10 @@ export function useAppAuth(): AppAuthState {
 
   return {
     getToken: async () => {
+      if (!hasSupabaseClientEnv()) {
+        return null;
+      }
+
       const supabase = createClient();
       const { data: { session } } = await supabase.auth.getSession();
       return session?.access_token ?? null;

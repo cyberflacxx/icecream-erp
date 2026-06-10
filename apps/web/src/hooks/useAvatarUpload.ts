@@ -3,7 +3,7 @@
 import { useRef, useState } from 'react';
 
 import { useUserContext } from '@/contexts/UserContext';
-import { createClient } from '@/lib/supabase/client';
+import { createClient, hasSupabaseClientEnv } from '@/lib/supabase/client';
 
 const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
 const MAX_SIZE = 4 * 1024 * 1024;
@@ -35,6 +35,10 @@ export function useAvatarUpload() {
     setError(null);
 
     try {
+      if (!hasSupabaseClientEnv()) {
+        throw new Error('Supabase environment variables are missing in the current deployment.');
+      }
+
       const supabase = createClient();
       const { data: { user: authUser } } = await supabase.auth.getUser();
       if (!authUser) throw new Error('Not authenticated');

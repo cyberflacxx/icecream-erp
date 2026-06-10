@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Swal from 'sweetalert2';
 
-import { createClient } from '@/lib/supabase/client';
+import { createClient, hasSupabaseClientEnv } from '@/lib/supabase/client';
 import { workIdToEmail } from '@/lib/auth-roles';
 
 const workIdPattern = /^AQI-[0-9]{8}$/;
@@ -42,6 +42,19 @@ export default function LoginPage() {
     if (wErr || pErr) return;
 
     setIsSubmitting(true);
+
+    if (!hasSupabaseClientEnv()) {
+      setIsSubmitting(false);
+      await Swal.fire({
+        icon: 'error',
+        title: 'System Not Configured',
+        html: 'Supabase environment variables are missing in the current deployment.',
+        confirmButtonColor: '#F97316',
+        background: '#fff7e8',
+        color: '#3B1F12',
+      });
+      return;
+    }
 
     Swal.fire({
       title: 'Signing you in…',
