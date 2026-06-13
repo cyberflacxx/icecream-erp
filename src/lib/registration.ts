@@ -1,4 +1,4 @@
-import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'crypto';
+import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes } from 'crypto';
 
 import { ROLES, generateWorkId } from '@/lib/auth-roles';
 import { createServiceRoleClient } from '@/lib/supabase/server';
@@ -129,6 +129,58 @@ export function generateOtpCode() {
 
 export function hashOtpCode(requestId: string, otp: string) {
   return createHash('sha256').update(`${requestId}:${otp}:${registrationSecret()}`).digest('hex');
+}
+
+function base64UrlEncode(value: string | Buffer) {
+  return Buffer.from(value)
+    .toString('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/g, '');
+}
+
+function base64UrlDecode(value: string) {
+  const normalized = value.replace(/-/g, '+').replace(/_/g, '/');
+  const padded = normalized + '='.repeat((4 - (normalized.length % 4 || 4)) % 4);
+  return Buffer.from(padded, 'base64').toString('utf8');
+}
+
+function signRegistrationToken(payload: string) {
+  return base64UrlEncode(createHmac('sha256', registrationSecret()).update(payload).digest());
+}
+
+export function createRegistrationRequestToken(payload: {
+  email: string;
+  expiresAt: string;
+  otpHash: string;
+  payloadEncrypted: string;
+  requestId: string;
+  roleId: string;
+}) {
+  const encodedPayload = base64UrlEncode(JSON.stringify(payload));
+  const signature = signRegistrationToken(encodedPayload);
+  return `${encodedPayload}.${signature}`;
+}
+
+export function verifyRegistrationRequestToken(token: string) {
+  const [encodedPayload, signature] = token.split('.');
+  if (!encodedPayload || !signature) {
+    throw new Error('Invalid registration token.');
+  }
+
+  const expectedSignature = signRegistrationToken(encodedPayload);
+  if (expectedSignature !== signature) {
+    throw new Error('Registration token signature is invalid.');
+  }
+
+  return JSON.parse(base64UrlDecode(encodedPayload)) as {
+    email: string;
+    expiresAt: string;
+    otpHash: string;
+    payloadEncrypted: string;
+    requestId: string;
+    roleId: string;
+  };
 }
 
 export function encryptRegistrationPayload(payload: RegistrationPayload) {

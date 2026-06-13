@@ -10,29 +10,10 @@ import {
   hashOtpCode,
   otpExpiryLabel,
   resolveRegistrationRole,
+  verifyRegistrationRequestToken,
 } from '@/lib/registration';
 import { recordSecurityEvent } from '@/lib/security-server';
 import { createServiceRoleClient } from '@/lib/supabase/server';
-
-function decodeRegistrationState(fileUrl: string) {
-  if (!fileUrl.startsWith('json://')) {
-    throw new Error('Registration request data is invalid.');
-  }
-
-  return JSON.parse(decodeURIComponent(fileUrl.replace('json://', ''))) as {
-    email: string;
-    otp_attempts: number;
-    otp_expires_at: string;
-    otp_hash: string;
-    payload_encrypted: string;
-    role_id: string;
-    verified_at: string | null;
-  };
-}
-
-function encodeRegistrationState(payload: Record<string, unknown>) {
-  return `json://${encodeURIComponent(JSON.stringify(payload))}`;
-}
 
 export async function POST(request: NextRequest) {
   const body = (await request.json()) as { otp?: string; requestId?: string };
@@ -43,44 +24,25 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Request ID and OTP are required.' }, { status: 400 });
   }
 
-  const service = createServiceRoleClient().schema('icecream_erp');
-  const { data: pending, error: pendingError } = await service
-    .from('system_settings')
-    .select('id, setting_value')
-    .eq('id', requestId)
-    .maybeSingle();
+  let registrationRequest: ReturnType<typeof verifyRegistrationRequestToken>;
+  try {
+    registrationRequest = verifyRegistrationRequestToken(requestId);
+  } catch (error) {
+    return NextResponse.json({ error: error instanceof Error ? error.message : 'Registration token is invalid.' }, { status: 400 });
+  }
 
-  if (pendingError) {
-    return NextResponse.json({ error: pendingError.message }, { status: 500 });
-  }
-  if (!pending) {
-    return NextResponse.json({ error: 'Registration request was not found.' }, { status: 404 });
-  }
-  const pendingValue = (pending as { setting_value?: { state?: string } | null }).setting_value;
-  const state = decodeRegistrationState(String(pendingValue?.state ?? ''));
-  if (state.verified_at) {
-    return NextResponse.json({ error: 'This OTP has already been used.' }, { status: 409 });
-  }
-  if (new Date(state.otp_expires_at).getTime() < Date.now()) {
+  if (new Date(registrationRequest.expiresAt).getTime() < Date.now()) {
     return NextResponse.json({ error: `OTP expired. Request a new code and try again. Codes remain valid for ${otpExpiryLabel()}.` }, { status: 410 });
   }
 
-  const expectedHash = hashOtpCode(requestId, otp);
-  if (expectedHash !== state.otp_hash) {
-    const attempts = Number(state.otp_attempts ?? 0) + 1;
-    const retryState = encodeRegistrationState({ ...state, otp_attempts: attempts });
-    await service.from('system_settings').update({
-      setting_value: {
-        requestId,
-        state: retryState,
-      },
-      updated_at: new Date().toISOString(),
-    }).eq('id', requestId);
-    return NextResponse.json({ error: attempts >= 5 ? 'Too many invalid OTP attempts. Request a new code.' : 'Invalid OTP code.' }, { status: attempts >= 5 ? 429 : 400 });
+  const service = createServiceRoleClient().schema('icecream_erp');
+  const expectedHash = hashOtpCode(registrationRequest.requestId, otp);
+  if (expectedHash !== registrationRequest.otpHash) {
+    return NextResponse.json({ error: 'Invalid OTP code.' }, { status: 400 });
   }
 
-  const payload = decryptRegistrationPayload(state.payload_encrypted);
-  const role = await resolveRegistrationRole(service, String(state.role_id ?? payload.role));
+  const payload = decryptRegistrationPayload(registrationRequest.payloadEncrypted);
+  const role = await resolveRegistrationRole(service, String(registrationRequest.roleId ?? payload.role));
   if (!role) {
     return NextResponse.json({ error: 'Selected role is no longer available.' }, { status: 400 });
   }
@@ -149,17 +111,6 @@ export async function POST(request: NextRequest) {
     await createServiceRoleClient().auth.admin.deleteUser(authData.user.id);
     return NextResponse.json({ error: roleError instanceof Error ? roleError.message : 'Failed to assign role.' }, { status: 500 });
   }
-
-  await service
-    .from('system_settings')
-    .update({
-      setting_value: {
-        requestId,
-        state: encodeRegistrationState({ ...state, verified_at: new Date().toISOString() }),
-      },
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', requestId);
 
   try {
     await sendTransactionalEmail({

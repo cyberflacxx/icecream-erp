@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { randomUUID } from 'crypto';
 
 import { sendTransactionalEmail } from '@/lib/email';
 import {
+  createRegistrationRequestToken,
   encryptRegistrationPayload,
   generateOtpCode,
   getPrimaryOrganizationId,
@@ -14,14 +16,6 @@ import {
 } from '@/lib/registration';
 import { recordSecurityEvent } from '@/lib/security-server';
 import { createServiceRoleClient } from '@/lib/supabase/server';
-
-function encodeRegistrationState(payload: Record<string, unknown>) {
-  return `json://${encodeURIComponent(JSON.stringify(payload))}`;
-}
-
-function registrationSettingKey(email: string) {
-  return `security.registration_request.${email}`;
-}
 
 export async function POST(request: NextRequest) {
   const body = (await request.json()) as {
@@ -76,7 +70,7 @@ export async function POST(request: NextRequest) {
 
   const otp = generateOtpCode();
   const expiresAt = registrationOtpExpiresAt();
-  const settingKey = registrationSettingKey(normalized.email);
+  const requestId = randomUUID();
   const payload = encryptRegistrationPayload({
     email: normalized.email,
     firstName: normalized.firstName,
@@ -85,73 +79,15 @@ export async function POST(request: NextRequest) {
     password: normalized.password,
     role: role.id,
   });
-
-  const { data: existingPending } = await service
-    .from('system_settings')
-    .select('id')
-    .eq('setting_key', settingKey)
-    .maybeSingle();
-
-  let requestId = existingPending?.id ? String(existingPending.id) : null;
-  if (!requestId) {
-    const initialState = encodeRegistrationState({
-      email: normalized.email,
-      otp_attempts: 0,
-      otp_expires_at: expiresAt,
-      otp_hash: 'pending',
-      payload_encrypted: payload,
-      role_id: role.id,
-      verified_at: null,
-    });
-    const { data: createdPending, error: createError } = await service
-      .from('system_settings')
-      .insert({
-        created_by: null,
-        description: 'Pending self-registration OTP request',
-        is_active: true,
-        module_name: 'security',
-        organization_id: organizationId,
-        setting_key: settingKey,
-        setting_value: {
-          requestId: null,
-          state: initialState,
-        },
-        updated_by: null,
-      })
-      .select('id')
-      .single();
-
-    if (createError || !createdPending?.id) {
-      return NextResponse.json({ error: createError?.message ?? 'Failed to create registration request.' }, { status: 500 });
-    }
-    requestId = String(createdPending.id);
-  }
-
   const otpHash = hashOtpCode(requestId, otp);
-  const encodedState = encodeRegistrationState({
+  const requestToken = createRegistrationRequestToken({
     email: normalized.email,
-    otp_attempts: 0,
-    otp_expires_at: expiresAt,
-    otp_hash: otpHash,
-    payload_encrypted: payload,
-    role_id: role.id,
-    verified_at: null,
+    expiresAt,
+    otpHash,
+    payloadEncrypted: payload,
+    requestId,
+    roleId: role.id,
   });
-  const { error: updateError } = await service
-    .from('system_settings')
-    .update({
-      setting_value: {
-        requestId,
-        state: encodedState,
-      },
-      updated_at: new Date().toISOString(),
-      updated_by: null,
-    })
-    .eq('id', requestId);
-
-  if (updateError) {
-    return NextResponse.json({ error: updateError.message }, { status: 500 });
-  }
 
   try {
     await sendTransactionalEmail({
@@ -187,6 +123,6 @@ export async function POST(request: NextRequest) {
     email: maskEmailAddress(normalized.email),
     expiresIn: otpExpiryLabel(),
     message: 'OTP sent successfully.',
-    requestId,
+    requestId: requestToken,
   });
 }
