@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from 'crypto';
+import { createHash, createHmac, randomBytes } from 'crypto';
 
 import { ROLE_PERMISSIONS } from '@/lib/auth-roles';
 import { createServiceRoleClient } from '@/lib/supabase/server';
@@ -66,6 +66,34 @@ export interface SystemSecuritySettings extends SecurityPolicySettings {
 
 function securityService() {
   return createServiceRoleClient().schema('icecream_erp');
+}
+
+function passwordResetSecret() {
+  return (
+    process.env.PASSWORD_RESET_SECRET ||
+    process.env.SUPABASE_SERVICE_ROLE_KEY ||
+    process.env.ADMIN_REGISTRATION_KEY ||
+    process.env.IMPERSONATE_KEY ||
+    'password-reset-secret'
+  );
+}
+
+function base64UrlEncode(value: string | Buffer) {
+  return Buffer.from(value)
+    .toString('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/g, '');
+}
+
+function base64UrlDecode(value: string) {
+  const normalized = value.replace(/-/g, '+').replace(/_/g, '/');
+  const padded = normalized + '='.repeat((4 - (normalized.length % 4 || 4)) % 4);
+  return Buffer.from(padded, 'base64').toString('utf8');
+}
+
+function signPasswordResetToken(payload: string) {
+  return base64UrlEncode(createHmac('sha256', passwordResetSecret()).update(payload).digest());
 }
 
 function mapBoolean(value: unknown, fallback: boolean) {
@@ -513,36 +541,47 @@ export function createPasswordResetToken() {
 }
 
 export async function createPasswordResetRequest(profile: SecurityUserProfile) {
-  const service = securityService();
-  const token = createPasswordResetToken();
   const expiresAt = new Date(Date.now() + 60 * 60_000).toISOString();
-
-  await service.from('password_reset_tokens').insert({
-    user_account_id: profile.userAccountId ?? profile.id,
-    token,
-    expires_at: expiresAt,
-  });
-
-  return { token, expiresAt };
+  const payload = base64UrlEncode(JSON.stringify({
+    authId: profile.authId,
+    expiresAt,
+    organizationId: profile.organizationId,
+    userAccountId: profile.userAccountId ?? profile.id,
+    userProfileId: profile.id,
+    workId: profile.workId,
+  }));
+  const signature = signPasswordResetToken(payload);
+  return { token: `${payload}.${signature}`, expiresAt };
 }
 
 export async function consumePasswordResetToken(token: string) {
-  const service = securityService();
-  const { data } = await service
-    .from('password_reset_tokens')
-    .select('id, user_account_id, expires_at, used_at')
-    .eq('token', token)
-    .maybeSingle();
+  const [payload, signature] = token.split('.');
+  if (!payload || !signature) return null;
+  if (signPasswordResetToken(payload) !== signature) return null;
 
-  if (!data) return null;
+  const decoded = JSON.parse(base64UrlDecode(payload)) as {
+    authId?: string | null;
+    expiresAt?: string;
+    organizationId?: string;
+    userAccountId?: string;
+    userProfileId?: string;
+  };
 
-  const record = data as Record<string, unknown>;
-  if (record.used_at || new Date(String(record.expires_at)).getTime() < Date.now()) {
+  if (!decoded.authId || !decoded.userAccountId || !decoded.userProfileId || !decoded.organizationId || !decoded.expiresAt) {
     return null;
   }
 
-  await service.from('password_reset_tokens').update({ used_at: new Date().toISOString() }).eq('id', record.id);
-  return { id: String(record.id), userAccountId: String(record.user_account_id) };
+  if (new Date(decoded.expiresAt).getTime() < Date.now()) {
+    return null;
+  }
+
+  return {
+    authId: decoded.authId,
+    id: createPasswordResetToken(),
+    organizationId: decoded.organizationId,
+    userAccountId: decoded.userAccountId,
+    userProfileId: decoded.userProfileId,
+  };
 }
 
 export function assertLoginAllowed(profile: SecurityUserProfile) {

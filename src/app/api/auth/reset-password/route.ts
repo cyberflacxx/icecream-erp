@@ -18,17 +18,7 @@ export async function POST(request: Request) {
   }
 
   const service = createServiceRoleClient();
-  const { data: user } = await service
-    .from('users')
-    .select('auth_id, organization_id')
-    .eq('id', resetRecord.userAccountId)
-    .maybeSingle();
-
-  if (!user || !(user as Record<string, unknown>).auth_id) {
-    return NextResponse.json({ error: 'Linked account not found.' }, { status: 404 });
-  }
-
-  const { error } = await service.auth.admin.updateUserById(String((user as Record<string, unknown>).auth_id), {
+  const { error } = await service.auth.admin.updateUserById(resetRecord.authId, {
     password: newPassword,
   });
 
@@ -37,8 +27,8 @@ export async function POST(request: Request) {
   }
 
   await recordSecurityEvent({
-    organizationId: String((user as Record<string, unknown>).organization_id ?? ''),
-    userProfileId: resetRecord.userAccountId,
+    organizationId: resetRecord.organizationId,
+    userProfileId: resetRecord.userProfileId,
     eventType: 'PASSWORD_RESET',
     status: 'SUCCESS',
     ipAddress: request.headers.get('x-forwarded-for'),

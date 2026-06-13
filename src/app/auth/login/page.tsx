@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Swal from 'sweetalert2';
@@ -124,6 +125,9 @@ export default function LoginPage() {
         <div className="w-full max-w-xl rounded-2xl bg-white p-8 shadow-soft">
           <h2 className="text-3xl font-semibold text-brown">Welcome Back</h2>
           <p className="mt-2 text-sm text-muted">Sign in with your Work ID and password.</p>
+          <Link href="/" className="mt-3 inline-flex text-sm font-semibold text-orange transition hover:text-[#ea6a0a]">
+            Return to main page
+          </Link>
 
           <form className="mt-8 space-y-5" onSubmit={handleSubmit}>
             <label className="block space-y-2">
@@ -183,7 +187,14 @@ export default function LoginPage() {
             </button>
           </form>
 
-          <p className="mt-5 text-sm text-muted">Forgot your password? Contact your system administrator.</p>
+          <div className="mt-5 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
+            <Link href="/auth/register" className="font-semibold text-orange transition hover:text-[#ea6a0a]">
+              Create account
+            </Link>
+            <Link href="/auth/forgot-password" className="font-semibold text-orange transition hover:text-[#ea6a0a]">
+              Forgot password?
+            </Link>
+          </div>
         </div>
       </section>
     </main>

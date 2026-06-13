@@ -12,21 +12,24 @@ const DEFAULT_NOTIFICATION_SETTINGS = {
   expiryAlert: true, lowStock: true, paymentReceived: true,
   productionBatchReady: true, purchaseOrderApproved: true, shiftCloseSubmitted: true,
 };
+const SETTINGS_REFERENCE_ID = 'system';
 
 async function getSettingsBlob<T extends Record<string, unknown>>(
   service: ReturnType<typeof createServiceRoleClient>,
   referenceType: string,
   defaults: T,
 ): Promise<T> {
-  const { data: record } = await service
+  const { data: record, error } = await service
     .schema('icecream_erp')
     .from('document_files')
     .select('file_url')
     .eq('reference_type', referenceType)
+    .eq('reference_id', SETTINGS_REFERENCE_ID)
     .order('created_at', { ascending: false })
     .limit(1)
     .maybeSingle();
 
+  if (error) return defaults;
   if (!record || !record.file_url?.startsWith('json://')) return defaults;
   try {
     const parsed = JSON.parse(decodeURIComponent(record.file_url.replace('json://', ''))) as T;
@@ -80,6 +83,7 @@ export async function PATCH(request: NextRequest) {
   if (!ctx) return unauthorized();
   if (!can(ctx, 'settings.write')) return forbidden();
   const currentUserId = ctx.userId;
+  const organizationId = ctx.organizationId;
 
   const service = createServiceRoleClient();
 
@@ -121,6 +125,7 @@ export async function PATCH(request: NextRequest) {
         .from('document_files')
         .select('id')
         .eq('reference_type', referenceType)
+        .eq('reference_id', SETTINGS_REFERENCE_ID)
         .order('created_at', { ascending: false })
         .limit(1)
         .maybeSingle();
@@ -138,7 +143,9 @@ export async function PATCH(request: NextRequest) {
           file_url: fileUrl,
           file_size: Buffer.byteLength(content, 'utf8'),
           file_type: 'application/json',
+          organization_id: organizationId,
           reference_type: referenceType,
+          reference_id: SETTINGS_REFERENCE_ID,
           uploaded_by: currentUserId,
         });
       }
