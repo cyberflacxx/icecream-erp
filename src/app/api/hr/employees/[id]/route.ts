@@ -79,7 +79,7 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
   if (body.full_name && !body.first_name && !body.last_name) {
     const fullName = String(body.full_name).trim();
     const parts = fullName.split(/\s+/).filter(Boolean);
-    updates.first_name = parts.slice(0, -1).join(' ') || parts[0] ?? '';
+    updates.first_name = (parts.slice(0, -1).join(' ') || parts[0]) ?? '';
     updates.last_name = parts.slice(-1)[0] ?? '';
     updates.full_name = fullName;
   }
