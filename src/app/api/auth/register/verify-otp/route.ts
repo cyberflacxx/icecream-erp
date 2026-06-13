@@ -45,9 +45,8 @@ export async function POST(request: NextRequest) {
 
   const service = createServiceRoleClient().schema('icecream_erp');
   const { data: pending, error: pendingError } = await service
-    .from('document_files')
-    .select('id, file_url')
-    .eq('reference_type', 'registration_request')
+    .from('system_settings')
+    .select('id, setting_value')
     .eq('id', requestId)
     .maybeSingle();
 
@@ -57,7 +56,8 @@ export async function POST(request: NextRequest) {
   if (!pending) {
     return NextResponse.json({ error: 'Registration request was not found.' }, { status: 404 });
   }
-  const state = decodeRegistrationState(String(pending.file_url ?? ''));
+  const pendingValue = (pending as { setting_value?: { state?: string } | null }).setting_value;
+  const state = decodeRegistrationState(String(pendingValue?.state ?? ''));
   if (state.verified_at) {
     return NextResponse.json({ error: 'This OTP has already been used.' }, { status: 409 });
   }
@@ -69,10 +69,12 @@ export async function POST(request: NextRequest) {
   if (expectedHash !== state.otp_hash) {
     const attempts = Number(state.otp_attempts ?? 0) + 1;
     const retryState = encodeRegistrationState({ ...state, otp_attempts: attempts });
-    await service.from('document_files').update({
-      file_size: Buffer.byteLength(retryState, 'utf8'),
-      file_type: 'application/json',
-      file_url: retryState,
+    await service.from('system_settings').update({
+      setting_value: {
+        requestId,
+        state: retryState,
+      },
+      updated_at: new Date().toISOString(),
     }).eq('id', requestId);
     return NextResponse.json({ error: attempts >= 5 ? 'Too many invalid OTP attempts. Request a new code.' : 'Invalid OTP code.' }, { status: attempts >= 5 ? 429 : 400 });
   }
@@ -149,11 +151,13 @@ export async function POST(request: NextRequest) {
   }
 
   await service
-    .from('document_files')
+    .from('system_settings')
     .update({
-      file_size: Buffer.byteLength(encodeRegistrationState({ ...state, verified_at: new Date().toISOString() }), 'utf8'),
-      file_type: 'application/json',
-      file_url: encodeRegistrationState({ ...state, verified_at: new Date().toISOString() }),
+      setting_value: {
+        requestId,
+        state: encodeRegistrationState({ ...state, verified_at: new Date().toISOString() }),
+      },
+      updated_at: new Date().toISOString(),
     })
     .eq('id', requestId);
 

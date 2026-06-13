@@ -19,6 +19,10 @@ function encodeRegistrationState(payload: Record<string, unknown>) {
   return `json://${encodeURIComponent(JSON.stringify(payload))}`;
 }
 
+function registrationSettingKey(email: string) {
+  return `security.registration_request.${email}`;
+}
+
 export async function POST(request: NextRequest) {
   const body = (await request.json()) as {
     admin_key?: string;
@@ -72,6 +76,7 @@ export async function POST(request: NextRequest) {
 
   const otp = generateOtpCode();
   const expiresAt = registrationOtpExpiresAt();
+  const settingKey = registrationSettingKey(normalized.email);
   const payload = encryptRegistrationPayload({
     email: normalized.email,
     firstName: normalized.firstName,
@@ -82,12 +87,9 @@ export async function POST(request: NextRequest) {
   });
 
   const { data: existingPending } = await service
-    .from('document_files')
+    .from('system_settings')
     .select('id')
-    .eq('reference_type', 'registration_request')
-    .eq('file_name', normalized.email)
-    .order('created_at', { ascending: false })
-    .limit(1)
+    .eq('setting_key', settingKey)
     .maybeSingle();
 
   let requestId = existingPending?.id ? String(existingPending.id) : null;
@@ -102,14 +104,19 @@ export async function POST(request: NextRequest) {
       verified_at: null,
     });
     const { data: createdPending, error: createError } = await service
-      .from('document_files')
+      .from('system_settings')
       .insert({
-        file_name: normalized.email,
-        file_size: Buffer.byteLength(initialState, 'utf8'),
-        file_type: 'application/json',
-        file_url: initialState,
-        reference_type: 'registration_request',
-        uploaded_by: null,
+        created_by: null,
+        description: 'Pending self-registration OTP request',
+        is_active: true,
+        module_name: 'security',
+        organization_id: organizationId,
+        setting_key: settingKey,
+        setting_value: {
+          requestId: null,
+          state: initialState,
+        },
+        updated_by: null,
       })
       .select('id')
       .single();
@@ -131,13 +138,14 @@ export async function POST(request: NextRequest) {
     verified_at: null,
   });
   const { error: updateError } = await service
-    .from('document_files')
+    .from('system_settings')
     .update({
-      file_name: normalized.email,
-      file_size: Buffer.byteLength(encodedState, 'utf8'),
-      file_type: 'application/json',
-      file_url: encodedState,
-      uploaded_by: null,
+      setting_value: {
+        requestId,
+        state: encodedState,
+      },
+      updated_at: new Date().toISOString(),
+      updated_by: null,
     })
     .eq('id', requestId);
 
