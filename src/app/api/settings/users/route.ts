@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { badRequest, can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
-import { generateWorkId, workIdToEmail } from '@/lib/auth-roles';
+import { workIdToEmail } from '@/lib/auth-roles';
+import { assignUserRole, generateNextWorkId, getPrimaryOrganizationId, resolveRegistrationRole } from '@/lib/registration';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
 export async function GET(request: NextRequest) {
@@ -15,7 +16,8 @@ export async function GET(request: NextRequest) {
   const search = searchParams.get('search') ?? undefined;
   const status = searchParams.get('status') ?? undefined;
 
-  const service = createServiceRoleClient();
+    const service = createServiceRoleClient();
+    const schemaService = service.schema('icecream_erp');
 
   try {
     let query = service
@@ -84,7 +86,7 @@ export async function POST(request: NextRequest) {
     const normalizedEmail = email.trim().toLowerCase();
 
     // Check email not taken
-    const { data: existing } = await service
+    const { data: existing } = await schemaService
       .from('users')
       .select('id')
       .ilike('email', normalizedEmail)
@@ -92,9 +94,13 @@ export async function POST(request: NextRequest) {
 
     if (existing) return badRequest('Email address is already registered.');
 
-    // Generate Work ID
-    const { count } = await service.from('users').select('id', { count: 'exact', head: true });
-    const workId = generateWorkId(count ?? 0);
+    const role = await resolveRegistrationRole(schemaService, roleId);
+    if (!role) return badRequest('Role is not available.');
+
+    const [workId, organizationId] = await Promise.all([
+      generateNextWorkId(schemaService),
+      getPrimaryOrganizationId(schemaService),
+    ]);
     const syntheticEmail = workIdToEmail(workId);
 
     // Derive initial password from ID number (no dashes/spaces, lowercase)
@@ -124,7 +130,8 @@ export async function POST(request: NextRequest) {
         first_name: firstName.trim(),
         last_name: lastName.trim(),
         id_number: idNumber.trim().toUpperCase(),
-        role: roleId,
+        organization_id: organizationId,
+        role: role.legacyRole,
         branch_id: branchId ?? null,
         status: 'active',
       })
@@ -135,6 +142,13 @@ export async function POST(request: NextRequest) {
       await service.auth.admin.deleteUser(authData.user.id);
       return serverError(profileError.message);
     }
+
+    await assignUserRole({
+      assignedBy: ctx.userId,
+      roleId: role.id,
+      service: schemaService,
+      userProfileId: String(profile.id),
+    });
 
     try {
       await service.schema('icecream_erp').from('audit_logs').insert({
@@ -151,7 +165,7 @@ export async function POST(request: NextRequest) {
       fullName,
       workId,
       status: 'active',
-      roles: [{ id: roleId, name: roleId }],
+      roles: [{ id: role.id, name: role.name }],
       branch: null,
     }, { status: 201 });
   } catch (err) {

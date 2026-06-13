@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import { generateWorkId, workIdToEmail } from '@/lib/auth-roles';
+import { workIdToEmail } from '@/lib/auth-roles';
+import { assignUserRole, generateNextWorkId, getPrimaryOrganizationId, resolveRegistrationRole } from '@/lib/registration';
 import { createClient, createServiceRoleClient } from '@/lib/supabase/server';
 
 export async function GET(request: NextRequest) {
@@ -11,6 +12,7 @@ export async function GET(request: NextRequest) {
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   const service = createServiceRoleClient();
+  const schemaService = service.schema('icecream_erp');
 
   // Verify caller is admin
   const { data: caller } = await service.from('users').select('role').eq('auth_id', user.id).single();
@@ -56,7 +58,7 @@ export async function POST(request: NextRequest) {
   const service = createServiceRoleClient();
 
   // Verify caller is admin
-  const { data: caller } = await service.from('users').select('id, role').eq('auth_id', user.id).single();
+  const { data: caller } = await schemaService.from('users').select('id, role').eq('auth_id', user.id).single();
   if (!caller || !['super_admin', 'branch_manager'].includes(caller.role)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
@@ -75,18 +77,15 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'firstName, lastName, email, idNumber and role are required' }, { status: 400 });
   }
 
-  // Generate next Work ID
-  const year = new Date().getFullYear();
-  const { data: lastUser } = await service
-    .from('users')
-    .select('work_id')
-    .like('work_id', `AQI-${year}%`)
-    .order('work_id', { ascending: false })
-    .limit(1)
-    .maybeSingle();
+  const roleRecord = await resolveRegistrationRole(schemaService, role);
+  if (!roleRecord) {
+    return NextResponse.json({ error: 'Selected role is not available' }, { status: 400 });
+  }
 
-  const lastSeq = lastUser?.work_id ? parseInt(lastUser.work_id.slice(-4)) : 0;
-  const workId = generateWorkId(lastSeq);
+  const [workId, organizationId] = await Promise.all([
+    generateNextWorkId(schemaService),
+    getPrimaryOrganizationId(schemaService),
+  ]);
 
   // Temp password = idNumber stripped to lowercase
   const tempPassword = idNumber.replace(/[\s-]/g, '').toLowerCase();
@@ -104,7 +103,7 @@ export async function POST(request: NextRequest) {
   }
 
   // Create profile row
-  const { data: newUser, error: profileErr } = await service
+  const { data: newUser, error: profileErr } = await schemaService
     .from('users')
     .insert({
       auth_id: authData.user.id,
@@ -113,7 +112,8 @@ export async function POST(request: NextRequest) {
       full_name: `${firstName} ${lastName}`.trim(),
       first_name: firstName,
       last_name: lastName,
-      role,
+      organization_id: organizationId,
+      role: roleRecord.legacyRole,
       status: 'active',
       id_number: idNumber,
       branch_id: branchId ?? null,
@@ -127,6 +127,13 @@ export async function POST(request: NextRequest) {
     await service.auth.admin.deleteUser(authData.user.id);
     return NextResponse.json({ error: profileErr.message }, { status: 500 });
   }
+
+  await assignUserRole({
+    assignedBy: String(caller.id),
+    roleId: roleRecord.id,
+    service: schemaService,
+    userProfileId: String(newUser.id),
+  });
 
   return NextResponse.json({ ...formatUserRow(newUser), workId, tempPassword }, { status: 201 });
 }

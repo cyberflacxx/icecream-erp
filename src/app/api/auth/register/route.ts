@@ -1,105 +1,184 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import { ROLES, type UserRole, workIdToEmail } from '@/lib/auth-roles';
+import { sendTransactionalEmail } from '@/lib/email';
+import {
+  encryptRegistrationPayload,
+  generateOtpCode,
+  getPrimaryOrganizationId,
+  hashOtpCode,
+  maskEmailAddress,
+  otpExpiryLabel,
+  registrationOtpExpiresAt,
+  resolveRegistrationRole,
+  validateRegistrationPayload,
+} from '@/lib/registration';
+import { recordSecurityEvent } from '@/lib/security-server';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
-const VALID_ROLES: string[] = ROLES.map((r) => r.id);
-
-function isValidRole(value: string): value is UserRole {
-  return VALID_ROLES.includes(value as UserRole);
-}
-
-function generateWorkId(seq: number): string {
-  const year = new Date().getFullYear();
-  return `AQI-${year}${String(seq).padStart(4, '0')}`;
+function encodeRegistrationState(payload: Record<string, unknown>) {
+  return `json://${encodeURIComponent(JSON.stringify(payload))}`;
 }
 
 export async function POST(request: NextRequest) {
   const body = (await request.json()) as {
-    first_name?: string;
-    last_name?: string;
-    id_number?: string;
-    email?: string;
-    password?: string;
-    confirm_password?: string;
-    role?: string;
     admin_key?: string;
+    confirm_password?: string;
+    email?: string;
+    first_name?: string;
+    id_number?: string;
+    last_name?: string;
+    password?: string;
+    role?: string;
   };
 
-  const { first_name, last_name, id_number, email, password, confirm_password, role, admin_key } = body;
+  const { fieldErrors, normalized } = validateRegistrationPayload({
+    adminKey: body.admin_key,
+    confirmPassword: body.confirm_password,
+    email: body.email,
+    firstName: body.first_name,
+    idNumber: body.id_number,
+    lastName: body.last_name,
+    password: body.password,
+    role: body.role,
+  });
 
-  // Verify admin key
-  const adminKey = process.env.ADMIN_REGISTRATION_KEY ?? process.env.IMPERSONATE_KEY;
-  if (!adminKey || admin_key !== adminKey) {
-    return NextResponse.json({ error: 'Invalid admin key.' }, { status: 403 });
+  const validAdminKey = process.env.ADMIN_REGISTRATION_KEY ?? process.env.IMPERSONATE_KEY;
+  if (!validAdminKey || normalized.adminKey !== validAdminKey) {
+    fieldErrors.admin_key = 'Invalid admin registration key.';
   }
-
-  // Validate fields
-  const fieldErrors: Record<string, string> = {};
-  if (!first_name?.trim()) fieldErrors.first_name = 'First name is required.';
-  if (!last_name?.trim()) fieldErrors.last_name = 'Last name is required.';
-  if (!id_number?.trim()) fieldErrors.id_number = 'ID number is required.';
-  if (!email?.trim()) fieldErrors.email = 'Email is required.';
-  if (!password || password.length < 8) fieldErrors.password = 'Password must be at least 8 characters.';
-  if (password !== confirm_password) fieldErrors.confirm_password = 'Passwords do not match.';
-  if (!role || !isValidRole(role)) fieldErrors.role = 'Invalid role selected.';
 
   if (Object.keys(fieldErrors).length > 0) {
     return NextResponse.json({ error: 'Validation failed.', fieldErrors }, { status: 400 });
   }
 
-  const service = createServiceRoleClient();
+  const service = createServiceRoleClient().schema('icecream_erp');
+  const role = await resolveRegistrationRole(service, normalized.role);
+  if (!role) {
+    return NextResponse.json({ error: 'Selected role is not available.', fieldErrors: { role: 'Selected role is not available.' } }, { status: 400 });
+  }
 
-  // Check if email already registered
-  const { data: existing } = await service
-    .from('users')
-    .select('id')
-    .ilike('email', email!.trim().toLowerCase())
-    .single();
+  const [{ data: existingUser }, { data: existingIdUser }, organizationId] = await Promise.all([
+    service.from('users').select('id').ilike('email', normalized.email).maybeSingle(),
+    service.from('users').select('id').eq('id_number', normalized.idNumber).maybeSingle(),
+    getPrimaryOrganizationId(service),
+  ]);
 
-  if (existing) {
+  if (existingUser) {
     return NextResponse.json({ error: 'An account with this email already exists.' }, { status: 409 });
   }
-
-  // Generate work ID
-  const { count } = await service.from('users').select('id', { count: 'exact', head: true });
-  const seq = (count ?? 0) + 1;
-  const workId = generateWorkId(seq);
-  const syntheticEmail = workIdToEmail(workId);
-
-  // Create Supabase Auth user
-  const { data: authData, error: authError } = await service.auth.admin.createUser({
-    email: syntheticEmail,
-    password: password!,
-    email_confirm: true,
-  });
-
-  if (authError || !authData.user) {
-    return NextResponse.json(
-      { error: authError?.message ?? 'Failed to create authentication account.' },
-      { status: 500 },
-    );
+  if (existingIdUser) {
+    return NextResponse.json({ error: 'An account with this ID number already exists.' }, { status: 409 });
   }
 
-  // Create profile row
-  const fullName = `${first_name!.trim()} ${last_name!.trim()}`;
-  const { error: profileError } = await service.from('users').insert({
-    auth_id: authData.user.id,
-    work_id: workId,
-    email: email!.trim().toLowerCase(),
-    full_name: fullName,
-    first_name: first_name!.trim(),
-    last_name: last_name!.trim(),
-    id_number: id_number!.trim(),
-    role,
-    status: 'active',
+  const otp = generateOtpCode();
+  const expiresAt = registrationOtpExpiresAt();
+  const payload = encryptRegistrationPayload({
+    email: normalized.email,
+    firstName: normalized.firstName,
+    idNumber: normalized.idNumber,
+    lastName: normalized.lastName,
+    password: normalized.password,
+    role: role.id,
   });
 
-  if (profileError) {
-    // Rollback auth user
-    await service.auth.admin.deleteUser(authData.user.id);
-    return NextResponse.json({ error: profileError.message }, { status: 500 });
+  const { data: existingPending } = await service
+    .from('document_files')
+    .select('id')
+    .eq('reference_type', 'registration_request')
+    .eq('file_name', normalized.email)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  let requestId = existingPending?.id ? String(existingPending.id) : null;
+  if (!requestId) {
+    const initialState = encodeRegistrationState({
+      email: normalized.email,
+      otp_attempts: 0,
+      otp_expires_at: expiresAt,
+      otp_hash: 'pending',
+      payload_encrypted: payload,
+      role_id: role.id,
+      verified_at: null,
+    });
+    const { data: createdPending, error: createError } = await service
+      .from('document_files')
+      .insert({
+        file_name: normalized.email,
+        file_size: Buffer.byteLength(initialState, 'utf8'),
+        file_type: 'application/json',
+        file_url: initialState,
+        reference_type: 'registration_request',
+        uploaded_by: null,
+      })
+      .select('id')
+      .single();
+
+    if (createError || !createdPending?.id) {
+      return NextResponse.json({ error: createError?.message ?? 'Failed to create registration request.' }, { status: 500 });
+    }
+    requestId = String(createdPending.id);
   }
 
-  return NextResponse.json({ work_id: workId }, { status: 201 });
+  const otpHash = hashOtpCode(requestId, otp);
+  const encodedState = encodeRegistrationState({
+    email: normalized.email,
+    otp_attempts: 0,
+    otp_expires_at: expiresAt,
+    otp_hash: otpHash,
+    payload_encrypted: payload,
+    role_id: role.id,
+    verified_at: null,
+  });
+  const { error: updateError } = await service
+    .from('document_files')
+    .update({
+      file_name: normalized.email,
+      file_size: Buffer.byteLength(encodedState, 'utf8'),
+      file_type: 'application/json',
+      file_url: encodedState,
+      uploaded_by: null,
+    })
+    .eq('id', requestId);
+
+  if (updateError) {
+    return NextResponse.json({ error: updateError.message }, { status: 500 });
+  }
+
+  try {
+    await sendTransactionalEmail({
+      html: `
+        <p>Hello ${normalized.firstName},</p>
+        <p>Your OTP for Absolute Ice Cream ERP registration is:</p>
+        <p style="font-size: 28px; font-weight: 700; letter-spacing: 4px;">${otp}</p>
+        <p>This code expires in ${otpExpiryLabel()}.</p>
+        <p>Requested role: <strong>${role.name}</strong></p>
+      `,
+      subject: 'Your Absolute Ice Cream ERP OTP',
+      text: `Your OTP for Absolute Ice Cream ERP registration is ${otp}. It expires in ${otpExpiryLabel()}.`,
+      to: normalized.email,
+    });
+  } catch (error) {
+    return NextResponse.json({ error: error instanceof Error ? error.message : 'Failed to send OTP email.' }, { status: 500 });
+  }
+
+  await recordSecurityEvent({
+    eventType: 'REGISTRATION_OTP_SENT',
+    organizationId,
+    status: 'SUCCESS',
+    details: {
+      email: normalized.email,
+      requestId,
+      role: role.name,
+    },
+    ipAddress: request.headers.get('x-forwarded-for'),
+    userAgent: request.headers.get('user-agent'),
+  });
+
+  return NextResponse.json({
+    email: maskEmailAddress(normalized.email),
+    expiresIn: otpExpiryLabel(),
+    message: 'OTP sent successfully.',
+    requestId,
+  });
 }
