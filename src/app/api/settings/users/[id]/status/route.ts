@@ -37,13 +37,15 @@ export async function PATCH(
 
     if (error) throw error;
 
-    await service.schema('icecream_erp').from('audit_logs').insert({
-      action: 'USER_STATUS_UPDATED',
-      entity_id: id,
-      entity_type: 'user',
-      new_values: { status: rawStatus },
-      user_profile_id: ctx.userId,
-    }).catch(() => {});
+    try {
+      await service.schema('icecream_erp').from('audit_logs').insert({
+        action: 'USER_STATUS_UPDATED',
+        entity_id: id,
+        entity_type: 'user',
+        new_values: { status: rawStatus },
+        user_profile_id: ctx.userId,
+      });
+    } catch {}
 
     return NextResponse.json({ id, status: rawStatus.toUpperCase() });
   } catch (err) {

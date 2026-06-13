@@ -29,7 +29,9 @@ export async function GET(
       name: role.name,
       description: role.description ?? null,
       isSystemRole: role.is_system_role ?? false,
-      permissions: ((role.role_permissions as Array<{ permissions: { id: string; code: string; module: string } }>) ?? []).map((rp) => rp.permissions),
+      permissions: ((role.role_permissions as Array<{ permissions: Array<{ id: string; code: string; module: string }> | { id: string; code: string; module: string } }>) ?? []).map((rp) =>
+        Array.isArray(rp.permissions) ? rp.permissions[0] : rp.permissions,
+      ),
       userCount: Array.isArray(role.user_roles) ? role.user_roles.length : 0,
     });
   } catch (err) {
@@ -65,12 +67,14 @@ export async function PATCH(
 
     if (error || !role) return notFound('Role not found.');
 
-    await service.schema('icecream_erp').from('audit_logs').insert({
-      action: 'ROLE_UPDATED',
-      entity_id: id,
-      entity_type: 'role',
-      user_profile_id: ctx.userId,
-    }).catch(() => {});
+    try {
+      await service.schema('icecream_erp').from('audit_logs').insert({
+        action: 'ROLE_UPDATED',
+        entity_id: id,
+        entity_type: 'role',
+        user_profile_id: ctx.userId,
+      });
+    } catch {}
 
     return NextResponse.json(role);
   } catch (err) {

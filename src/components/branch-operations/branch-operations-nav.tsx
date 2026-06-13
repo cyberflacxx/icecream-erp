@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { Activity, ClipboardCheck, ShoppingBasket } from 'lucide-react';
+import { Activity, ClipboardCheck, Package, Receipt, RotateCcw, ShoppingBasket, Users, Wallet } from 'lucide-react';
 import { usePathname } from 'next/navigation';
 
 import { cn } from '@/lib/utils';
@@ -24,9 +24,44 @@ export function BranchOperationsNav({ branchId }: BranchOperationsNavProps) {
       label: 'Sales'
     },
     {
+      href: `/branches/${branchId}/stock`,
+      icon: Package,
+      label: 'Stock'
+    },
+    {
+      href: `/branches/${branchId}/shifts`,
+      icon: ClipboardCheck,
+      label: 'Shifts'
+    },
+    {
+      href: `/branches/${branchId}/expenses`,
+      icon: Receipt,
+      label: 'Expenses'
+    },
+    {
+      href: `/branches/${branchId}/customers`,
+      icon: Users,
+      label: 'Customers'
+    },
+    {
+      href: `/branches/${branchId}/payments`,
+      icon: Wallet,
+      label: 'Payments'
+    },
+    {
+      href: `/branches/${branchId}/returns`,
+      icon: RotateCcw,
+      label: 'Returns'
+    },
+    {
       href: `/branches/${branchId}/shift-close`,
       icon: ClipboardCheck,
       label: 'Shift Close'
+    },
+    {
+      href: `/branches/${branchId}/reports`,
+      icon: Activity,
+      label: 'Reports'
     }
   ] as const;
 

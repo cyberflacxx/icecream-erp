@@ -27,8 +27,11 @@ export async function GET(_request: NextRequest) {
       service.schema('icecream_erp').from('stock_balances').select('quantity_on_hand, items(unit_cost)'),
     ]);
 
-    const totalInventoryValue = (stockBalances ?? []).reduce((sum: number, row: { quantity_on_hand: number; items: { unit_cost: number } | null }) => {
-      return sum + Number(row.quantity_on_hand ?? 0) * Number(row.items?.unit_cost ?? 0);
+    const totalInventoryValue = ((stockBalances ?? []) as Array<{
+      quantity_on_hand: number | null;
+      items: Array<{ unit_cost: number | null }> | null;
+    }>).reduce((sum, row) => {
+      return sum + Number(row.quantity_on_hand ?? 0) * Number(row.items?.[0]?.unit_cost ?? 0);
     }, 0);
 
     return NextResponse.json({

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
+import { validateCustomerCodeUniqueness } from '@/lib/sales';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -36,7 +37,7 @@ export async function GET(request: NextRequest) {
   let query = service
     .schema('icecream_erp')
     .from('customers')
-    .select('id, code, name, customer_type, email, phone, address, payment_terms, credit_limit, current_balance, status')
+    .select('id, code, name, customer_type, email, phone, address, payment_terms, credit_limit, current_balance, status, credit_allowed, customer_group_id, price_list_code, tax_number')
     .is('deleted_at', null)
     .order('name', { ascending: true });
 
@@ -63,8 +64,12 @@ export async function GET(request: NextRequest) {
     address: c.address,
     paymentTerms: c.payment_terms,
     creditLimit: c.credit_limit ? Number(c.credit_limit) : 0,
+    creditAllowed: Boolean(c.credit_allowed),
     currentBalance: c.current_balance ? Number(c.current_balance) : 0,
+    customerGroup: c.customer_group_id,
+    priceListCode: c.price_list_code,
     status: c.status,
+    taxNumber: c.tax_number,
   }));
 
   return NextResponse.json(paginate(mapped, page, pageSize));
@@ -80,15 +85,19 @@ export async function POST(request: NextRequest) {
   const service = createServiceRoleClient();
 
   const body = await request.json() as {
-    name: string;
-    customerType: string;
-    status: string;
-    code?: string;
-    email?: string;
-    phone?: string;
     address?: string;
-    paymentTerms?: string;
+    code?: string;
+    creditAllowed?: boolean;
     creditLimit?: number;
+    customerGroupId?: string | null;
+    customerType: string;
+    email?: string;
+    name: string;
+    paymentTerms?: string;
+    phone?: string;
+    priceListCode?: string | null;
+    status: string;
+    taxNumber?: string | null;
   };
 
   if (!body.name || !body.customerType || !body.status) {
@@ -105,6 +114,17 @@ export async function POST(request: NextRequest) {
     code = `CUS-${String((count ?? 0) + 1).padStart(5, '0')}`;
   }
 
+  const { data: existingCodes, error: codesError } = await service
+    .schema('icecream_erp')
+    .from('customers')
+    .select('code')
+    .is('deleted_at', null);
+
+  if (codesError) return serverError(codesError.message);
+  if (!validateCustomerCodeUniqueness((existingCodes ?? []).map((row) => String(row.code ?? '')), code)) {
+    return NextResponse.json({ error: 'Customer code already exists.' }, { status: 409 });
+  }
+
   const { data, error } = await service
     .schema('icecream_erp')
     .from('customers')
@@ -117,8 +137,12 @@ export async function POST(request: NextRequest) {
       phone: body.phone ?? null,
       address: body.address ?? null,
       payment_terms: body.paymentTerms ?? null,
+      credit_allowed: body.creditAllowed ?? false,
       credit_limit: body.creditLimit ?? null,
       current_balance: 0,
+      customer_group_id: body.customerGroupId ?? null,
+      price_list_code: body.priceListCode ?? null,
+      tax_number: body.taxNumber ?? null,
       created_by: ctx.userId,
     })
     .select()

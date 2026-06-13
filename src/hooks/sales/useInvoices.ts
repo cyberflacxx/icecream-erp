@@ -15,6 +15,28 @@ interface UseInvoicesParams {
   status?: string;
 }
 
+export interface InvoiceListItem {
+  amountPaid: number;
+  balanceDue: number;
+  customer: { id: string; name: string } | null;
+  dueDate: string | null;
+  id: string;
+  invoiceDate: string | null;
+  invoiceNumber: string;
+  itemsCount: number;
+  status: string;
+  total: number;
+}
+
+interface PaginatedResponse<T> {
+  data: T[];
+  pagination: {
+    page: number;
+    pageSize: number;
+    total: number;
+  };
+}
+
 function toQueryString(params: UseInvoicesParams) {
   const query = new URLSearchParams();
   if (params.page) query.set('page', String(params.page));
@@ -30,11 +52,11 @@ function toQueryString(params: UseInvoicesParams) {
 export function useInvoices(params: UseInvoicesParams = {}) {
   const { getToken, isLoaded, isSignedIn, userId } = useAppAuth();
 
-  return useQuery({
+  return useQuery<PaginatedResponse<InvoiceListItem>>({
     queryKey: ['invoices', userId, params],
     queryFn: async () => {
       const token = await getToken();
-      return apiFetch(`${API_ROUTES.SALES.INVOICES}${toQueryString(params)}`, { token });
+      return apiFetch<PaginatedResponse<InvoiceListItem>>(`${API_ROUTES.SALES.INVOICES}${toQueryString(params)}`, { token });
     },
     enabled: isLoaded && Boolean(isSignedIn)
   });

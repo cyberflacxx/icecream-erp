@@ -1,14 +1,14 @@
 ﻿'use client';
 
 import { useEffect, useState } from 'react';
-import { Bell, Building2, Hash } from 'lucide-react';
+import { Building2, FileDown, Package2, Shield, Warehouse } from 'lucide-react';
 
 import { EmptyState, LoadingState, StatCard } from '@/components/ui-library';
 
 import { PageHeader } from '@/components/dashboard/page-header';
 import { SettingsNav } from '@/components/settings/settings-nav';
 import { Button } from '@/components/ui/button';
-import { useSettingsOverview, useSettingsSummary, useUpdateSettingsOverview } from '@/hooks/settings/useSettings';
+import { useSettingsDashboard, useSettingsOverview, useSettingsSummary, useUpdateSettingsOverview } from '@/hooks/settings/useSettings';
 
 interface SettingsFormState {
   companyProfile: {
@@ -62,6 +62,7 @@ const defaultState: SettingsFormState = {
 export default function SettingsOverviewPage() {
   const overviewQuery = useSettingsOverview();
   const summaryQuery = useSettingsSummary();
+  const dashboardQuery = useSettingsDashboard();
   const updateOverview = useUpdateSettingsOverview();
   const [formState, setFormState] = useState<SettingsFormState>(defaultState);
   const [message, setMessage] = useState<string | null>(null);
@@ -88,7 +89,7 @@ export default function SettingsOverviewPage() {
     });
   }, [overviewQuery.data]);
 
-  if (overviewQuery.isLoading || summaryQuery.isLoading) {
+  if (overviewQuery.isLoading || summaryQuery.isLoading || dashboardQuery.isLoading) {
     return <LoadingState />;
   }
 
@@ -103,6 +104,7 @@ export default function SettingsOverviewPage() {
   }
 
   const summary = (summaryQuery.data ?? {}) as Record<string, unknown>;
+  const dashboard = (dashboardQuery.data ?? {}) as Record<string, unknown>;
 
   return (
     <div className="space-y-8">
@@ -128,11 +130,41 @@ export default function SettingsOverviewPage() {
       <SettingsNav />
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <StatCard title="Users" value={String(summary.userCount ?? 0)} icon={<Building2 className="h-5 w-5" />} />
-        <StatCard title="Roles" value={String(summary.roleCount ?? 0)} icon={<Hash className="h-5 w-5" />} color="brown" />
-        <StatCard title="Unread Alerts" value={String(summary.unreadCount ?? 0)} icon={<Bell className="h-5 w-5" />} color="warning" />
-        <StatCard title="Audit Entries" value={String(summary.auditCount ?? 0)} icon={<Hash className="h-5 w-5" />} color="success" />
+        <StatCard title="Users" value={String(summary.userCount ?? dashboard.activeUsers ?? 0)} icon={<Building2 className="h-5 w-5" />} />
+        <StatCard title="Branches" value={String(dashboard.activeBranches ?? 0)} icon={<Warehouse className="h-5 w-5" />} color="brown" />
+        <StatCard title="Products" value={String(dashboard.activeProducts ?? 0)} icon={<Package2 className="h-5 w-5" />} color="success" />
+        <StatCard title="Open Imports" value={String(dashboard.pendingImports ?? 0)} icon={<FileDown className="h-5 w-5" />} color="warning" />
       </div>
+
+      <section className="grid gap-4 lg:grid-cols-3">
+        <div className="rounded-2xl border border-border bg-white p-5 shadow-sm dark:border-darkBorder dark:bg-darkCard">
+          <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-muted dark:text-darkMuted">
+            <Shield className="h-4 w-4" />
+            Security Snapshot
+          </div>
+          <div className="mt-3 space-y-2 text-sm text-brown dark:text-darkText">
+            <p>Roles configured: {String(summary.roleCount ?? 0)}</p>
+            <p>Unread alerts: {String(summary.unreadCount ?? 0)}</p>
+            <p>Audit entries: {String(summary.auditCount ?? 0)}</p>
+          </div>
+        </div>
+        <div className="rounded-2xl border border-border bg-white p-5 shadow-sm dark:border-darkBorder dark:bg-darkCard">
+          <div className="text-xs font-semibold uppercase tracking-[0.18em] text-muted dark:text-darkMuted">Master Data Coverage</div>
+          <div className="mt-3 space-y-2 text-sm text-brown dark:text-darkText">
+            <p>Warehouses active: {String(dashboard.activeWarehouses ?? 0)}</p>
+            <p>Raw materials active: {String(dashboard.activeRawMaterials ?? 0)}</p>
+            <p>Profile status: {String(dashboard.companyProfileStatus ?? 'PENDING')}</p>
+          </div>
+        </div>
+        <div className="rounded-2xl border border-border bg-white p-5 shadow-sm dark:border-darkBorder dark:bg-darkCard">
+          <div className="text-xs font-semibold uppercase tracking-[0.18em] text-muted dark:text-darkMuted">Data Movement</div>
+          <div className="mt-3 space-y-2 text-sm text-brown dark:text-darkText">
+            <p>Pending imports: {String(dashboard.pendingImports ?? 0)}</p>
+            <p>Failed imports: {String(dashboard.failedImports ?? 0)}</p>
+            <p>Inventory alerts: {String(summary.lowStockCount ?? 0)}</p>
+          </div>
+        </div>
+      </section>
 
       <section className="space-y-4 rounded-2xl border border-border bg-white p-6 shadow-sm dark:border-darkBorder dark:bg-darkCard">
         <h3 className="text-lg font-semibold text-brown dark:text-darkText">Company Profile</h3>

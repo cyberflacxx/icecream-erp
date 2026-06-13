@@ -4,9 +4,6 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Swal from 'sweetalert2';
 
-import { createClient, hasSupabaseClientEnv } from '@/lib/supabase/client';
-import { workIdToEmail } from '@/lib/auth-roles';
-
 const workIdPattern = /^AQI-[0-9]{8}$/;
 
 export default function LoginPage() {
@@ -43,21 +40,8 @@ export default function LoginPage() {
 
     setIsSubmitting(true);
 
-    if (!hasSupabaseClientEnv()) {
-      setIsSubmitting(false);
-      await Swal.fire({
-        icon: 'error',
-        title: 'System Not Configured',
-        html: 'Supabase environment variables are missing in the current deployment.',
-        confirmButtonColor: '#F97316',
-        background: '#fff7e8',
-        color: '#3B1F12',
-      });
-      return;
-    }
-
     Swal.fire({
-      title: 'Signing you in…',
+      title: 'Signing you in...',
       html: 'Verifying your credentials.',
       allowOutsideClick: false,
       allowEscapeKey: false,
@@ -67,24 +51,27 @@ export default function LoginPage() {
     });
 
     try {
-      const supabase = createClient();
-      const email = workIdToEmail(workId);
+      const response = await fetch('/api/auth/login', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ workId, password }),
+      });
 
-      const { error } = await supabase.auth.signInWithPassword({ email, password });
-
-      if (error) {
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => ({}))) as { error?: string };
+        const errorMessage = payload.error ?? 'Login failed.';
         const isInvalid =
-          error.message.toLowerCase().includes('invalid') ||
-          error.message.toLowerCase().includes('credentials') ||
-          error.message.toLowerCase().includes('email not confirmed') ||
-          error.status === 400;
+          response.status === 401 ||
+          errorMessage.toLowerCase().includes('invalid') ||
+          errorMessage.toLowerCase().includes('credentials');
 
-        Swal.fire({
+        await Swal.fire({
           icon: 'error',
           title: isInvalid ? 'Incorrect Credentials' : 'Login Failed',
           html: isInvalid
             ? '<p>Work ID or password is incorrect.</p><p style="margin-top:8px;font-size:0.85rem;color:#666">Check your Work ID format (AQI-XXXXXXXX) and try again.</p>'
-            : `<p>${error.message}</p>`,
+            : `<p>${errorMessage}</p>`,
           confirmButtonColor: '#F97316',
           background: '#fff7e8',
           color: '#3B1F12',
@@ -95,7 +82,7 @@ export default function LoginPage() {
       await Swal.fire({
         icon: 'success',
         title: 'Welcome back!',
-        html: '<p>Signed in successfully.</p><p style="margin-top:8px;font-size:0.85rem;color:#666">Redirecting to your dashboard…</p>',
+        html: '<p>Signed in successfully.</p><p style="margin-top:8px;font-size:0.85rem;color:#666">Redirecting to your dashboard...</p>',
         timer: 1600,
         timerProgressBar: true,
         showConfirmButton: false,
@@ -107,7 +94,7 @@ export default function LoginPage() {
       router.replace('/dashboard');
       router.refresh();
     } catch (error) {
-      Swal.fire({
+      await Swal.fire({
         icon: 'error',
         title: 'Unexpected Error',
         html: error instanceof Error ? error.message : 'Something went wrong. Please try again.',
@@ -143,7 +130,10 @@ export default function LoginPage() {
               <span className="text-sm font-medium text-brown">Work ID</span>
               <input
                 value={workId}
-                onChange={(e) => { setWorkId(e.target.value.toUpperCase()); setWorkIdError(null); }}
+                onChange={(e) => {
+                  setWorkId(e.target.value.toUpperCase());
+                  setWorkIdError(null);
+                }}
                 onBlur={() => setWorkIdError(validateWorkId(workId))}
                 placeholder="e.g. AQI-20260034"
                 autoComplete="username"
@@ -151,28 +141,37 @@ export default function LoginPage() {
                   workIdError ? 'border-red-500 bg-red-50' : workIdPattern.test(workId) ? 'border-green-500' : 'border-border'
                 }`}
               />
-              {workIdError && <p className="text-xs text-red-600">{workIdError}</p>}
+              {workIdError ? <p className="text-xs text-red-600">{workIdError}</p> : null}
             </label>
 
             <label className="block space-y-2">
               <span className="text-sm font-medium text-brown">Password</span>
-              <div className={`flex h-11 items-center rounded-xl border px-3 transition ${
-                passwordError ? 'border-red-500 bg-red-50' : password ? 'border-green-500' : 'border-border'
-              }`}>
+              <div
+                className={`flex h-11 items-center rounded-xl border px-3 transition ${
+                  passwordError ? 'border-red-500 bg-red-50' : password ? 'border-green-500' : 'border-border'
+                }`}
+              >
                 <input
                   value={password}
-                  onChange={(e) => { setPassword(e.target.value); setPasswordError(null); }}
+                  onChange={(e) => {
+                    setPassword(e.target.value);
+                    setPasswordError(null);
+                  }}
                   onBlur={() => setPasswordError(validatePassword(password))}
                   type={showPassword ? 'text' : 'password'}
                   placeholder="Enter your password"
                   autoComplete="current-password"
                   className="w-full bg-transparent outline-none"
                 />
-                <button type="button" onClick={() => setShowPassword((v) => !v)} className="text-xs font-semibold text-orange">
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((value) => !value)}
+                  className="text-xs font-semibold text-orange"
+                >
                   {showPassword ? 'Hide' : 'Show'}
                 </button>
               </div>
-              {passwordError && <p className="text-xs text-red-600">{passwordError}</p>}
+              {passwordError ? <p className="text-xs text-red-600">{passwordError}</p> : null}
             </label>
 
             <button
@@ -180,7 +179,7 @@ export default function LoginPage() {
               disabled={!canSubmit}
               className="h-11 w-full rounded-xl bg-[#F97316] font-semibold text-white transition hover:bg-[#ea6a0a] disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {isSubmitting ? 'Signing In…' : 'Sign In'}
+              {isSubmitting ? 'Signing In...' : 'Sign In'}
             </button>
           </form>
 

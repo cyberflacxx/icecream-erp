@@ -1,12 +1,20 @@
 'use client';
 
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
-import { Bell } from 'lucide-react';
+import Link from 'next/link';
+import { Bell, ChevronRight } from 'lucide-react';
+
+import { sortNotificationsByPriority } from '@/lib/notifications';
+import { StatusBadge } from '@/components/ui-library/status-badge';
 
 interface NotificationBellProps {
   notifications: Array<{
+    createdAt?: string;
     id: string;
+    severity?: string;
     link?: string;
+    module?: string;
+    status?: string;
     title: string;
     message: string;
     isRead?: boolean;
@@ -20,7 +28,8 @@ export function NotificationBell({
   onMarkAllRead,
   onNotificationClick
 }: NotificationBellProps) {
-  const unreadCount = notifications.filter((notification) => !notification.isRead).length;
+  const orderedNotifications = sortNotificationsByPriority(notifications);
+  const unreadCount = orderedNotifications.filter((notification) => !notification.isRead).length;
 
   return (
     <DropdownMenu.Root>
@@ -58,10 +67,10 @@ export function NotificationBell({
             ) : null}
           </div>
           <div className="max-h-80 overflow-y-auto py-2">
-            {notifications.length === 0 ? (
+            {orderedNotifications.length === 0 ? (
               <div className="px-3 py-8 text-center text-sm text-muted dark:text-darkMuted">No notifications yet.</div>
             ) : (
-              notifications.map((notification) => (
+              orderedNotifications.map((notification) => (
                 <DropdownMenu.Item
                   key={notification.id}
                   className="cursor-pointer rounded-2xl px-3 py-3 outline-none transition hover:bg-cream dark:hover:bg-tableHoverDark"
@@ -72,11 +81,21 @@ export function NotificationBell({
                       <p className="text-sm font-semibold text-brown dark:text-darkText">{notification.title}</p>
                       {!notification.isRead ? <span className="h-2.5 w-2.5 rounded-full bg-orange" /> : null}
                     </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      {notification.severity ? <StatusBadge status={notification.severity} /> : null}
+                      {notification.module ? <span className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted dark:text-darkMuted">{notification.module.replace(/_/g, ' ')}</span> : null}
+                    </div>
                     <p className="text-xs leading-5 text-muted dark:text-darkMuted">{notification.message}</p>
                   </div>
                 </DropdownMenu.Item>
               ))
             )}
+          </div>
+          <div className="border-t border-border px-3 py-2 dark:border-darkBorder">
+            <Link href="/notifications" className="flex items-center justify-between text-xs font-semibold text-orange">
+              Open notification center
+              <ChevronRight className="h-4 w-4" />
+            </Link>
           </div>
         </DropdownMenu.Content>
       </DropdownMenu.Portal>

@@ -136,12 +136,14 @@ export async function POST(request: NextRequest) {
       return serverError(profileError.message);
     }
 
-    await service.schema('icecream_erp').from('audit_logs').insert({
-      action: 'USER_CREATED',
-      entity_id: String(profile.id),
-      entity_type: 'user',
-      user_profile_id: ctx.userId,
-    }).catch(() => {});
+    try {
+      await service.schema('icecream_erp').from('audit_logs').insert({
+        action: 'USER_CREATED',
+        entity_id: String(profile.id),
+        entity_type: 'user',
+        user_profile_id: ctx.userId,
+      });
+    } catch {}
 
     return NextResponse.json({
       id: profile.id,

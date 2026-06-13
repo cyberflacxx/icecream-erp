@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { badRequest, can, forbidden, getAuthContext, notFound, serverError, unauthorized } from '@/lib/api-auth';
+import { emitOperationalNotifications } from '@/lib/notifications-server';
 import { createServiceRoleClient } from '@/lib/supabase/server';
+import { postWorkflowDocument } from '@/lib/workflow-server';
 
 export async function POST(
   _request: NextRequest,
@@ -36,28 +38,43 @@ export async function POST(
       return badRequest(`Journal entry is not balanced. Debit: ${totalDebit.toFixed(2)}, Credit: ${totalCredit.toFixed(2)}`);
     }
 
-    const { data: updated, error: updateErr } = await service
+    await service
       .schema('icecream_erp')
       .from('journal_entries')
       .update({
-        is_posted: true,
-        posted_at: new Date().toISOString(),
-        posted_by: ctx.userId,
-        status: 'POSTED',
+        status: 'APPROVED',
         total_debit: totalDebit,
         total_credit: totalCredit,
       })
-      .eq('id', id)
-      .select()
-      .single();
+      .eq('id', id);
 
-    if (updateErr) throw updateErr;
+    const updated = await postWorkflowDocument({
+      ctx,
+      documentId: id,
+      documentType: 'journal_entry',
+      requestMeta: {
+        ipAddress: _request.headers.get('x-forwarded-for'),
+        userAgent: _request.headers.get('user-agent'),
+      },
+    });
 
-    await service.schema('icecream_erp').from('audit_logs').insert({
-      action: 'JOURNAL_ENTRY_POSTED',
-      entity_id: id,
-      entity_type: 'journal_entry',
-      user_profile_id: ctx.userId,
+    await emitOperationalNotifications({
+      actorUserId: ctx.userId,
+      branchId: null,
+      documentId: id,
+      documentType: 'journal_entry',
+      eventType: 'JOURNAL_POSTED',
+      message: `Journal entry ${entry.entry_number} was posted successfully.`,
+      metadata: {
+        entryNumber: entry.entry_number,
+        totalCredit,
+        totalDebit,
+      },
+      moduleName: 'finance',
+      organizationId: ctx.organizationId,
+      recipientRoleNames: ['Accountant', 'Finance Manager'],
+      severity: 'MEDIUM',
+      title: 'Journal entry posted',
     });
 
     return NextResponse.json(updated);

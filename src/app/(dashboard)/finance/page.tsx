@@ -1,6 +1,16 @@
 ﻿'use client';
 
-import { AlertCircle, BanknoteArrowDown, BanknoteArrowUp, CircleDollarSign, Wallet } from 'lucide-react';
+import {
+  AlertCircle,
+  BanknoteArrowDown,
+  BanknoteArrowUp,
+  CircleDollarSign,
+  Coins,
+  Landmark,
+  Package,
+  PiggyBank,
+  Wallet
+} from 'lucide-react';
 import {
   Bar,
   BarChart,
@@ -16,6 +26,7 @@ import {
 import { ChartCard, DataTable, EmptyState, LoadingState, StatCard } from '@/components/ui-library';
 
 import { PageHeader } from '@/components/dashboard/page-header';
+import { FinanceNav } from '@/components/finance/finance-nav';
 import { useFinanceDashboard } from '@/hooks/finance/useFinance';
 
 function formatCurrency(value: number) {
@@ -50,6 +61,7 @@ export default function FinancePage() {
         description="Monitor revenue, receivables, cashflow and accounting entries from a consolidated finance view."
         status="partial"
       />
+      <FinanceNav />
 
       <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard
@@ -60,7 +72,7 @@ export default function FinancePage() {
         />
         <StatCard
           title="Payments Count"
-          value={formatCurrency(stats.payments)}
+          value={formatCurrency(stats.paymentsCount)}
           icon={<Wallet className="h-5 w-5" />}
         />
         <StatCard
@@ -74,6 +86,49 @@ export default function FinancePage() {
           value={formatCurrency(stats.outstandingPayables)}
           icon={<BanknoteArrowDown className="h-5 w-5" />}
           color="brown"
+        />
+        <StatCard
+          title="Total Expenses"
+          value={formatCurrency(stats.totalExpenses)}
+          icon={<Coins className="h-5 w-5" />}
+        />
+        <StatCard
+          title="Cash Balance"
+          value={formatCurrency(stats.cashBalance)}
+          icon={<Wallet className="h-5 w-5" />}
+          color="warning"
+        />
+        <StatCard
+          title="Bank Balance"
+          value={formatCurrency(stats.bankBalance)}
+          icon={<Landmark className="h-5 w-5" />}
+        />
+        <StatCard
+          title="Petty Cash"
+          value={formatCurrency(stats.pettyCashBalance)}
+          icon={<PiggyBank className="h-5 w-5" />}
+        />
+        <StatCard
+          title="Stock Valuation"
+          value={formatCurrency(stats.stockValuation)}
+          icon={<Package className="h-5 w-5" />}
+        />
+        <StatCard
+          title="Production Cost"
+          value={formatCurrency(stats.productionCost)}
+          icon={<Package className="h-5 w-5" />}
+          color="brown"
+        />
+        <StatCard
+          title="Branch Profitability"
+          value={formatCurrency(stats.branchProfitability)}
+          icon={<CircleDollarSign className="h-5 w-5" />}
+          color="success"
+        />
+        <StatCard
+          title="Pending Approvals"
+          value={formatCurrency(stats.pendingApprovals)}
+          icon={<BanknoteArrowUp className="h-5 w-5" />}
         />
       </div>
 

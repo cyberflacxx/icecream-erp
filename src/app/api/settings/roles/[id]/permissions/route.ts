@@ -40,13 +40,15 @@ export async function PATCH(
         .insert(permissionIds.map((pid) => ({ role_id: id, permission_id: pid })));
     }
 
-    await service.schema('icecream_erp').from('audit_logs').insert({
-      action: 'ROLE_PERMISSIONS_UPDATED',
-      entity_id: id,
-      entity_type: 'role',
-      new_values: { permissionIds },
-      user_profile_id: ctx.userId,
-    }).catch(() => {});
+    try {
+      await service.schema('icecream_erp').from('audit_logs').insert({
+        action: 'ROLE_PERMISSIONS_UPDATED',
+        entity_id: id,
+        entity_type: 'role',
+        new_values: { permissionIds },
+        user_profile_id: ctx.userId,
+      });
+    } catch {}
 
     return NextResponse.json({ success: true });
   } catch (err) {

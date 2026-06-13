@@ -11,11 +11,19 @@ const protectedPrefixes = [
   '/settings',
   '/finance',
   '/sales',
+  '/quality',
 ];
+
+const DEFAULT_TIMEOUT_MINUTES = 15;
+const LAST_ACTIVITY_COOKIE = 'icecream-last-activity';
 
 export async function middleware(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request });
   const { pathname } = request.nextUrl;
+
+  if (pathname === '/') {
+    return NextResponse.redirect(new URL('/auth/login', request.url));
+  }
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -46,13 +54,36 @@ export async function middleware(request: NextRequest) {
     (p) => pathname === p || pathname.startsWith(`${p}/`)
   );
   const isLoginPage = pathname.startsWith('/auth/login') || pathname === '/sign-in';
+  const lastActivityCookie = request.cookies.get(LAST_ACTIVITY_COOKIE)?.value;
 
   if (isProtected && !user) {
     return NextResponse.redirect(new URL('/auth/login', request.url));
   }
 
+  if (isProtected && user && lastActivityCookie) {
+    const lastActivityMs = Number(lastActivityCookie);
+    const timeoutMs = DEFAULT_TIMEOUT_MINUTES * 60 * 1000;
+
+    if (Number.isFinite(lastActivityMs) && lastActivityMs + timeoutMs <= Date.now()) {
+      const response = NextResponse.redirect(new URL('/auth/login?reason=timeout', request.url));
+      response.cookies.delete(LAST_ACTIVITY_COOKIE);
+      response.cookies.delete('sb-access-token');
+      response.cookies.delete('sb-refresh-token');
+      return response;
+    }
+  }
+
   if (isLoginPage && user) {
     return NextResponse.redirect(new URL('/dashboard', request.url));
+  }
+
+  if (isProtected && user) {
+    supabaseResponse.cookies.set(LAST_ACTIVITY_COOKIE, String(Date.now()), {
+      httpOnly: true,
+      sameSite: 'lax',
+      secure: process.env.NODE_ENV === 'production',
+      path: '/',
+    });
   }
 
   return supabaseResponse;

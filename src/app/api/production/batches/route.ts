@@ -38,7 +38,7 @@ export async function GET(request: NextRequest) {
       .from('production_batches')
       .select(`
         id, batch_number, production_date, shift, production_line, status, quality_status,
-        planned_quantity, expected_output, actual_output, warehouse_id, recipe_id,
+        planned_quantity, expected_output, actual_output, warehouse_id, recipe_id, worker_count, labour_cost, overhead_cost,
         recipes!inner(id, code, name),
         warehouses!inner(id, name)
       `, { count: 'exact' })
@@ -71,6 +71,9 @@ export async function GET(request: NextRequest) {
         plannedQuantity: Number(row.planned_quantity ?? 0),
         expectedOutput: Number(row.expected_output ?? 0),
         actualOutput: Number(row.actual_output ?? 0),
+        workerCount: Number(row.worker_count ?? 0),
+        labourCost: Number(row.labour_cost ?? 0),
+        overheadCost: Number(row.overhead_cost ?? 0),
         recipe: row.recipes,
         warehouse: row.warehouses,
       })),
@@ -152,6 +155,9 @@ export async function POST(request: NextRequest) {
         status: 'PLANNED',
         quality_status: 'PENDING',
         actual_output: 0,
+        worker_count: 0,
+        labour_cost: 0,
+        overhead_cost: 0,
         wastage_quantity: 0,
         wastage_percentage: 0,
         efficiency_percentage: 0,

@@ -1,0 +1,466 @@
+import { asArray, asObject, ensureNonNegative, ensurePositiveQuantity, normalizeDate, toCsv, toNumber } from './inventory';
+
+export const PRODUCTION_PLAN_STATUSES = [
+  'DRAFT',
+  'PENDING_APPROVAL',
+  'APPROVED',
+  'IN_PROGRESS',
+  'COMPLETED',
+  'CANCELLED',
+] as const;
+
+export const PRODUCTION_BATCH_STATUSES = [
+  'DRAFT',
+  'PLANNED',
+  'MATERIALS_REQUESTED',
+  'MATERIALS_ISSUED',
+  'IN_PROGRESS',
+  'PENDING_QC',
+  'COMPLETED',
+  'TRANSFERRED_TO_STORES',
+  'CANCELLED',
+  'VOIDED',
+] as const;
+
+export const PRODUCTION_QUALITY_STATUSES = [
+  'PENDING',
+  'PASSED',
+  'PARTIALLY_PASSED',
+  'FAILED',
+  'REWORK_REQUIRED',
+] as const;
+
+export const PRODUCTION_SHIFTS = ['DAY', 'NIGHT'] as const;
+
+export type ProductionShift = (typeof PRODUCTION_SHIFTS)[number];
+
+export type MaterialRequirementInput = {
+  item_id: string;
+  items?: unknown;
+  quantity_required: number | string | null;
+  unit_id?: string | null;
+  units_of_measure?: unknown;
+  wastage_allowance_percent?: number | string | null;
+};
+
+export type MaterialRequirementRow = {
+  availableQuantity: number;
+  itemCode: string | null;
+  itemId: string;
+  itemName: string;
+  requiredQuantity: number;
+  shortageQuantity: number;
+  unit: string | null;
+  unitId: string | null;
+  wastageAllowancePercent: number;
+};
+
+export type PlanShortageSummary = {
+  availableQuantity: number;
+  itemCode: string | null;
+  itemId: string;
+  itemName: string;
+  requiredQuantity: number;
+  shortageQuantity: number;
+  supplierLeadTimeDays: number | null;
+};
+
+export type ProductionVarianceRow = {
+  actualMaterialQuantity: number;
+  actualOutput: number;
+  batchNumber: string;
+  expectedMaterialQuantity: number;
+  expectedOutput: number;
+  materialVariance: number;
+  outputVariance: number;
+  productName: string;
+  shift: string;
+};
+
+export type ProductionYieldRow = {
+  acceptedOutput: number;
+  batchNumber: string;
+  mixUsed: number;
+  productName: string;
+  shift: string;
+  yieldPercentage: number;
+};
+
+export type ProductionProductivityRow = {
+  actualOutput: number;
+  batchNumber: string;
+  outputPerWorker: number;
+  productName: string;
+  shift: string;
+  workerCount: number;
+};
+
+export type ProductionCostingRow = {
+  acceptedOutput: number;
+  batchNumber: string;
+  costPerUnit: number;
+  productName: string;
+  shift: string;
+  totalBatchCost: number;
+};
+
+export type ShiftPerformanceRow = {
+  actualOutput: number;
+  date: string;
+  efficiencyPercentage: number;
+  shift: string;
+  targetOutput: number;
+  totalBatches: number;
+  varianceQuantity: number;
+  workerCount: number;
+};
+
+export type ImportValidationResult<T extends Record<string, unknown>> = {
+  errors: Array<{ message: string; rowNumber: number }>;
+  rows: T[];
+};
+
+export function normalizeShift(value: unknown): ProductionShift {
+  const text = String(value ?? '').trim().toUpperCase();
+  return text === 'NIGHT' ? 'NIGHT' : 'DAY';
+}
+
+export function validateProductionCodeUniqueness(existingCodes: string[], nextCode: string) {
+  return !existingCodes.map((code) => code.trim().toUpperCase()).includes(nextCode.trim().toUpperCase());
+}
+
+export function calculateRequiredMaterials(
+  recipeItems: MaterialRequirementInput[],
+  plannedQuantity: number,
+  recipeExpectedOutput: number,
+  stockByItemId = new Map<string, number>(),
+): MaterialRequirementRow[] {
+  const normalizedPlanned = ensurePositiveQuantity(plannedQuantity, 'plannedQuantity');
+  const normalizedExpectedOutput = ensurePositiveQuantity(recipeExpectedOutput, 'recipeExpectedOutput');
+
+  return recipeItems.map((item) => {
+    const ingredient = asObject(item.items);
+    const unit = asObject(item.units_of_measure);
+    const baseQuantity = ensurePositiveQuantity(item.quantity_required ?? 0, 'recipe ingredient quantity');
+    const wastageAllowancePercent = ensureNonNegative(
+      item.wastage_allowance_percent ?? 0,
+      'wastageAllowancePercent',
+    );
+    const grossRequiredQuantity =
+      (baseQuantity * normalizedPlanned) / normalizedExpectedOutput;
+    const requiredQuantity =
+      grossRequiredQuantity + (grossRequiredQuantity * wastageAllowancePercent) / 100;
+    const availableQuantity = stockByItemId.get(String(item.item_id)) ?? 0;
+
+    return {
+      availableQuantity,
+      itemCode: ingredient?.code ? String(ingredient.code) : null,
+      itemId: String(item.item_id),
+      itemName: String(ingredient?.name ?? 'Unknown item'),
+      requiredQuantity,
+      shortageQuantity: Math.max(0, requiredQuantity - availableQuantity),
+      unit: unit?.abbreviation ? String(unit.abbreviation) : null,
+      unitId: item.unit_id ? String(item.unit_id) : null,
+      wastageAllowancePercent,
+    };
+  });
+}
+
+export function summarizePlanShortages(
+  requirements: MaterialRequirementRow[],
+  supplierLeadTimes = new Map<string, number>(),
+): PlanShortageSummary[] {
+  return requirements
+    .filter((row) => row.shortageQuantity > 0)
+    .map((row) => ({
+      availableQuantity: row.availableQuantity,
+      itemCode: row.itemCode,
+      itemId: row.itemId,
+      itemName: row.itemName,
+      requiredQuantity: row.requiredQuantity,
+      shortageQuantity: row.shortageQuantity,
+      supplierLeadTimeDays: supplierLeadTimes.get(row.itemId) ?? null,
+    }))
+    .sort((a, b) => b.shortageQuantity - a.shortageQuantity);
+}
+
+export function calculateEfficiencyPercentage(actualOutput: number, expectedOutput: number) {
+  const normalizedExpectedOutput = ensurePositiveQuantity(expectedOutput, 'expectedOutput');
+  const normalizedActualOutput = ensureNonNegative(actualOutput, 'actualOutput');
+  return (normalizedActualOutput / normalizedExpectedOutput) * 100;
+}
+
+export function calculateYieldPercentage(acceptedOutput: number, mixUsed: number) {
+  const normalizedAcceptedOutput = ensureNonNegative(acceptedOutput, 'acceptedOutput');
+  const normalizedMixUsed = ensurePositiveQuantity(mixUsed, 'mixUsed');
+  return (normalizedAcceptedOutput / normalizedMixUsed) * 100;
+}
+
+export function calculateProductivity(actualOutput: number, workerCount: number) {
+  const normalizedActualOutput = ensureNonNegative(actualOutput, 'actualOutput');
+  const normalizedWorkerCount = ensurePositiveQuantity(workerCount, 'workerCount');
+  return normalizedActualOutput / normalizedWorkerCount;
+}
+
+export function calculateCostPerUnit(totalBatchCost: number, acceptedOutput: number) {
+  const normalizedTotalBatchCost = ensureNonNegative(totalBatchCost, 'totalBatchCost');
+  const normalizedAcceptedOutput = ensurePositiveQuantity(acceptedOutput, 'acceptedOutput');
+  return normalizedTotalBatchCost / normalizedAcceptedOutput;
+}
+
+export function buildVarianceRows(
+  batches: Array<Record<string, unknown>>,
+): ProductionVarianceRow[] {
+  return batches.map((batch) => {
+    const materials = asArray(batch.production_batch_materials);
+    const recipe = asObject(batch.recipes);
+    const finishedItem = asObject(recipe?.finished_item);
+    const expectedMaterialQuantity = materials.reduce(
+      (sum, row) => sum + toNumber(row.quantity_required),
+      0,
+    );
+    const actualMaterialQuantity = materials.reduce(
+      (sum, row) => sum + toNumber(row.quantity_actual ?? row.quantity_issued),
+      0,
+    );
+    const expectedOutput = toNumber(batch.expected_output);
+    const actualOutput = toNumber(batch.actual_output);
+
+    return {
+      actualMaterialQuantity,
+      actualOutput,
+      batchNumber: String(batch.batch_number ?? ''),
+      expectedMaterialQuantity,
+      expectedOutput,
+      materialVariance: actualMaterialQuantity - expectedMaterialQuantity,
+      outputVariance: actualOutput - expectedOutput,
+      productName: String(finishedItem?.name ?? recipe?.name ?? 'Unknown product'),
+      shift: String(batch.shift ?? ''),
+    };
+  });
+}
+
+export function buildYieldRows(
+  batches: Array<Record<string, unknown>>,
+): ProductionYieldRow[] {
+  return batches.map((batch) => {
+    const recipe = asObject(batch.recipes);
+    const finishedItem = asObject(recipe?.finished_item);
+    const materials = asArray(batch.production_batch_materials);
+    const mixUsed = materials
+      .filter((row) => {
+        const item = asObject(row.items);
+        const name = String(item?.name ?? '').toLowerCase();
+        return name.includes('mix');
+      })
+      .reduce((sum, row) => sum + toNumber(row.quantity_actual ?? row.quantity_issued), 0);
+    const acceptedOutput = toNumber(batch.actual_output);
+
+    return {
+      acceptedOutput,
+      batchNumber: String(batch.batch_number ?? ''),
+      mixUsed,
+      productName: String(finishedItem?.name ?? recipe?.name ?? 'Unknown product'),
+      shift: String(batch.shift ?? ''),
+      yieldPercentage: mixUsed > 0 ? calculateYieldPercentage(acceptedOutput, mixUsed) : 0,
+    };
+  });
+}
+
+export function buildProductivityRows(
+  batches: Array<Record<string, unknown>>,
+  workerCounts = new Map<string, number>(),
+): ProductionProductivityRow[] {
+  return batches.map((batch) => {
+    const recipe = asObject(batch.recipes);
+    const finishedItem = asObject(recipe?.finished_item);
+    const batchId = String(batch.id ?? '');
+    const workerCount = workerCounts.get(batchId) ?? toNumber(batch.worker_count, 0);
+    const actualOutput = toNumber(batch.actual_output);
+
+    return {
+      actualOutput,
+      batchNumber: String(batch.batch_number ?? ''),
+      outputPerWorker: workerCount > 0 ? calculateProductivity(actualOutput, workerCount) : 0,
+      productName: String(finishedItem?.name ?? recipe?.name ?? 'Unknown product'),
+      shift: String(batch.shift ?? ''),
+      workerCount,
+    };
+  });
+}
+
+export function buildCostingRows(
+  batches: Array<Record<string, unknown>>,
+): ProductionCostingRow[] {
+  return batches.map((batch) => {
+    const recipe = asObject(batch.recipes);
+    const finishedItem = asObject(recipe?.finished_item);
+    const materials = asArray(batch.production_batch_materials);
+    const totalBatchCost = materials.reduce((sum, row) => {
+      const actualQuantity = toNumber(row.quantity_actual ?? row.quantity_issued);
+      const item = asObject(row.items);
+      const unitCost = toNumber(row.unit_cost ?? item?.unit_cost);
+      return sum + (actualQuantity * unitCost);
+    }, 0);
+    const acceptedOutput = toNumber(batch.actual_output);
+
+    return {
+      acceptedOutput,
+      batchNumber: String(batch.batch_number ?? ''),
+      costPerUnit: acceptedOutput > 0 ? calculateCostPerUnit(totalBatchCost, acceptedOutput) : 0,
+      productName: String(finishedItem?.name ?? recipe?.name ?? 'Unknown product'),
+      shift: String(batch.shift ?? ''),
+      totalBatchCost,
+    };
+  });
+}
+
+export function buildShiftPerformanceRows(
+  batches: Array<Record<string, unknown>>,
+  targets: Array<Record<string, unknown>>,
+  workerCounts = new Map<string, number>(),
+): ShiftPerformanceRow[] {
+  const grouped = new Map<string, ShiftPerformanceRow>();
+
+  for (const batch of batches) {
+    const date = String(batch.production_date ?? '').slice(0, 10);
+    const shift = String(batch.shift ?? '');
+    const key = `${date}:${shift}`;
+    const existing = grouped.get(key) ?? {
+      actualOutput: 0,
+      date,
+      efficiencyPercentage: 0,
+      shift,
+      targetOutput: 0,
+      totalBatches: 0,
+      varianceQuantity: 0,
+      workerCount: 0,
+    };
+
+    existing.actualOutput += toNumber(batch.actual_output);
+    existing.totalBatches += 1;
+    existing.workerCount += workerCounts.get(String(batch.id ?? '')) ?? toNumber(batch.worker_count, 0);
+    grouped.set(key, existing);
+  }
+
+  for (const target of targets) {
+    const date = String(target.target_date ?? target.shift_date ?? '').slice(0, 10);
+    const shift = String(target.shift ?? '');
+    const key = `${date}:${shift}`;
+    const existing = grouped.get(key) ?? {
+      actualOutput: 0,
+      date,
+      efficiencyPercentage: 0,
+      shift,
+      targetOutput: 0,
+      totalBatches: 0,
+      varianceQuantity: 0,
+      workerCount: 0,
+    };
+
+    existing.targetOutput += toNumber(target.target_output_quantity ?? target.target_quantity);
+    existing.workerCount = Math.max(existing.workerCount, toNumber(target.target_workers, existing.workerCount));
+    grouped.set(key, existing);
+  }
+
+  return Array.from(grouped.values())
+    .map((row) => ({
+      ...row,
+      efficiencyPercentage: row.targetOutput > 0 ? (row.actualOutput / row.targetOutput) * 100 : 0,
+      varianceQuantity: row.actualOutput - row.targetOutput,
+    }))
+    .sort((a, b) => `${b.date}${b.shift}`.localeCompare(`${a.date}${a.shift}`));
+}
+
+export function buildReportCsv(rows: Array<Record<string, unknown>>) {
+  return toCsv(rows as Array<Record<string, string | number | boolean | null | undefined>>);
+}
+
+export function buildProductionImportTemplate(type: 'recipes' | 'shift-targets') {
+  if (type === 'recipes') {
+    return toCsv([
+      {
+        chocolateTypeCode: '',
+        expectedOutputQuantity: 0,
+        flavourCode: '',
+        ingredientCode: '',
+        ingredientQuantity: 0,
+        packagingRequirement: '',
+        productCode: '',
+        recipeCode: '',
+        recipeName: '',
+        unitAbbreviation: '',
+        versionNumber: 1,
+        wastageAllowancePercent: 0,
+      },
+    ]);
+  }
+
+  return toCsv([
+    {
+      productCode: '',
+      shift: 'DAY',
+      targetDate: normalizeDate(new Date().toISOString()).slice(0, 10),
+      targetMaterialUsage: 0,
+      targetOutputQuantity: 0,
+      targetProductionTimeHours: 0,
+      targetWorkers: 0,
+    },
+  ]);
+}
+
+export function validateRecipeImportRows(
+  rows: Array<Record<string, unknown>>,
+): ImportValidationResult<Record<string, unknown>> {
+  const errors: ImportValidationResult<Record<string, unknown>>['errors'] = [];
+  const validRows: Array<Record<string, unknown>> = [];
+
+  rows.forEach((row, index) => {
+    const rowNumber = index + 2;
+    const recipeCode = String(row.recipeCode ?? '').trim();
+    const productCode = String(row.productCode ?? '').trim();
+    const ingredientCode = String(row.ingredientCode ?? '').trim();
+    const ingredientQuantity = toNumber(row.ingredientQuantity, NaN);
+
+    if (!recipeCode) errors.push({ message: 'recipeCode is required', rowNumber });
+    if (!productCode) errors.push({ message: 'productCode is required', rowNumber });
+    if (!ingredientCode) errors.push({ message: 'ingredientCode is required', rowNumber });
+    if (!Number.isFinite(ingredientQuantity) || ingredientQuantity <= 0) {
+      errors.push({ message: 'ingredientQuantity must be greater than zero', rowNumber });
+    }
+
+    if (recipeCode && productCode && ingredientCode && ingredientQuantity > 0) {
+      validRows.push(row);
+    }
+  });
+
+  return { errors, rows: validRows };
+}
+
+export function validateShiftTargetImportRows(
+  rows: Array<Record<string, unknown>>,
+): ImportValidationResult<Record<string, unknown>> {
+  const errors: ImportValidationResult<Record<string, unknown>>['errors'] = [];
+  const validRows: Array<Record<string, unknown>> = [];
+
+  rows.forEach((row, index) => {
+    const rowNumber = index + 2;
+    const productCode = String(row.productCode ?? '').trim();
+    const targetOutputQuantity = toNumber(row.targetOutputQuantity, NaN);
+    const targetWorkers = toNumber(row.targetWorkers, NaN);
+
+    if (!productCode) errors.push({ message: 'productCode is required', rowNumber });
+    if (!Number.isFinite(targetOutputQuantity) || targetOutputQuantity <= 0) {
+      errors.push({ message: 'targetOutputQuantity must be greater than zero', rowNumber });
+    }
+    if (!Number.isFinite(targetWorkers) || targetWorkers <= 0) {
+      errors.push({ message: 'targetWorkers must be greater than zero', rowNumber });
+    }
+
+    if (productCode && targetOutputQuantity > 0 && targetWorkers > 0) {
+      validRows.push(row);
+    }
+  });
+
+  return { errors, rows: validRows };
+}

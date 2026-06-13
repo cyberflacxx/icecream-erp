@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { can, forbidden, getAuthContext, notFound, serverError, unauthorized } from '@/lib/api-auth';
+import { validateCustomerCodeUniqueness } from '@/lib/sales';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
 // ─── GET /api/sales/customers/[id] ───────────────────────────────────────────
@@ -52,17 +53,38 @@ export async function PATCH(
   if (fetchErr || !existing) return notFound('Customer not found.');
 
   const body = await request.json() as {
-    name?: string;
+    address?: string | null;
+    code?: string;
+    creditAllowed?: boolean;
+    creditLimit?: number | null;
+    currentBalance?: number | null;
+    customerGroupId?: string | null;
     customerType?: string;
-    status?: string;
     email?: string;
-    phone?: string;
-    address?: string;
+    name?: string;
     paymentTerms?: string;
-    creditLimit?: number;
+    phone?: string;
+    priceListCode?: string | null;
+    status?: string;
+    taxNumber?: string | null;
   };
 
+  if (body.code !== undefined) {
+    const { data: existingCodes, error: codesError } = await service
+      .schema('icecream_erp')
+      .from('customers')
+      .select('id, code')
+      .neq('id', params.id)
+      .is('deleted_at', null);
+
+    if (codesError) return serverError(codesError.message);
+    if (!validateCustomerCodeUniqueness((existingCodes ?? []).map((row) => String(row.code ?? '')), body.code)) {
+      return NextResponse.json({ error: 'Customer code already exists.' }, { status: 409 });
+    }
+  }
+
   const updates: Record<string, unknown> = {};
+  if (body.code !== undefined) updates.code = body.code;
   if (body.name !== undefined) updates.name = body.name;
   if (body.customerType !== undefined) updates.customer_type = body.customerType;
   if (body.status !== undefined) updates.status = body.status;
@@ -71,6 +93,11 @@ export async function PATCH(
   if (body.address !== undefined) updates.address = body.address;
   if (body.paymentTerms !== undefined) updates.payment_terms = body.paymentTerms;
   if (body.creditLimit !== undefined) updates.credit_limit = body.creditLimit;
+  if (body.creditAllowed !== undefined) updates.credit_allowed = body.creditAllowed;
+  if (body.customerGroupId !== undefined) updates.customer_group_id = body.customerGroupId;
+  if (body.priceListCode !== undefined) updates.price_list_code = body.priceListCode;
+  if (body.taxNumber !== undefined) updates.tax_number = body.taxNumber;
+  if (body.currentBalance !== undefined) updates.current_balance = body.currentBalance;
 
   if (Object.keys(updates).length === 0) {
     return NextResponse.json({ error: 'Nothing to update' }, { status: 400 });

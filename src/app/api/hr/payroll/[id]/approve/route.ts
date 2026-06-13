@@ -1,43 +1,35 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import {
-  can,
-  forbidden,
-  getAuthContext,
-  notFound,
-  serverError,
-  unauthorized,
-} from '@/lib/api-auth';
-import { createServiceRoleClient } from '@/lib/supabase/server';
+import { can, forbidden, getAuthContext, notFound, serverError, unauthorized } from '@/lib/api-auth';
+import { hrService, writeHrAuditLog } from '@/lib/hr-server';
 
 type RouteContext = { params: Promise<{ id: string }> };
 
-export async function PATCH(_request: NextRequest, { params }: RouteContext) {
+export async function POST(_request: NextRequest, { params }: RouteContext) {
   const ctx = await getAuthContext();
   if (!ctx) return unauthorized();
-  if (!can(ctx, 'hr.write')) return forbidden();
+  if (!can(ctx, 'hr.write', 'payroll.approve', 'finance.write')) return forbidden();
 
   const { id } = await params;
-  const service = createServiceRoleClient();
+  const service = hrService();
 
-  // Verify exists
   const { data: existing, error: fetchErr } = await service
-    .from('payroll_records')
+    .from('hr_payroll_summaries')
     .select('id, status')
     .eq('id', id)
-    .is('deleted_at', null)
     .maybeSingle();
 
   if (fetchErr) return serverError(fetchErr.message);
   if (!existing) return notFound('Payroll record not found');
 
   const { data, error } = await service
-    .from('payroll_records')
+    .from('hr_payroll_summaries')
     .update({
-      status: 'APPROVED',
       approved_by: ctx.userId,
       approved_at: new Date().toISOString(),
+      status: 'APPROVED',
       updated_at: new Date().toISOString(),
+      updated_by: ctx.userId,
     })
     .eq('id', id)
     .select()
@@ -45,5 +37,6 @@ export async function PATCH(_request: NextRequest, { params }: RouteContext) {
 
   if (error) return serverError(error.message);
 
+  await writeHrAuditLog('HR_PAYROLL_SUMMARY_APPROVED', id, ctx.userId, { status: 'APPROVED' }, 'payroll_summary');
   return NextResponse.json(data);
 }

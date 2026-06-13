@@ -1,7 +1,8 @@
-﻿'use client';
+'use client';
 
+import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
-import { AlertCircle } from 'lucide-react';
+import { AlertCircle, BookmarkPlus, History } from 'lucide-react';
 import {
   Bar,
   BarChart,
@@ -23,6 +24,7 @@ import {
   EmptyState,
   type FilterConfig,
   FilterBar,
+  FormDrawer,
   LoadingState
 } from '@/components/ui-library';
 import { PERMISSIONS } from '@/lib/shared';
@@ -36,7 +38,10 @@ import {
   type ReportType,
   buildReportQuery,
   requestWithToken,
-  useReports
+  useCreateSavedReportFilter,
+  useDeleteSavedReportFilter,
+  useReports,
+  useSavedReportFilters
 } from '@/hooks/reports/useReports';
 import { useUserContext } from '@/contexts/UserContext';
 
@@ -235,10 +240,14 @@ export default function ReportsPage() {
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [isExportingCsv, setIsExportingCsv] = useState(false);
   const [isQueueingPdf, setIsQueueingPdf] = useState(false);
+  const [saveFilterOpen, setSaveFilterOpen] = useState(false);
+  const [savedFilterName, setSavedFilterName] = useState('');
   const [filters, setFilters] = useState<ReportFilters>(() => ({
     ...getDefaultDateRange(),
     daysAhead: 30
   }));
+  const savedFiltersQuery = useSavedReportFilters();
+  const createSavedFilter = useCreateSavedReportFilter();
   const roleNames = useMemo(() => currentUser?.roles.map((role) => role.name) ?? [], [currentUser?.roles]);
   const allowedReportTypes = useMemo(
     () => getAllowedReportTypesForRoles(roleNames) as ReportType[],
@@ -247,6 +256,10 @@ export default function ReportsPage() {
   const activeReportType = allowedReportTypes.includes(reportType)
     ? reportType
     : (allowedReportTypes[0] ?? reportType);
+  const activeSavedFilters = useMemo(
+    () => (savedFiltersQuery.data ?? []).filter((savedFilter) => savedFilter.report_type === activeReportType),
+    [activeReportType, savedFiltersQuery.data],
+  );
 
   const reportQuery = useReports(activeReportType, filters, {
     enabled: canReadReports && allowedReportTypes.length > 0
@@ -378,7 +391,7 @@ export default function ReportsPage() {
     <div className="space-y-8">
       <PageHeader
         title="Reports"
-        description="Generate operational reports, visualize trends, and export analytics for leadership and branch execution."
+        description="Generate operational reports, visualize trends, save favorite filters, and export analytics."
         status="partial"
         actions={
           <>
@@ -391,6 +404,15 @@ export default function ReportsPage() {
             <Button size="sm" variant="outline" onClick={() => window.print()}>
               Print
             </Button>
+            <Button size="sm" variant="outline" onClick={() => setSaveFilterOpen(true)}>
+              Save Filter
+            </Button>
+            <Link href="/reports/history">
+              <Button size="sm" variant="outline">
+                <History className="mr-2 h-4 w-4" />
+                Export History
+              </Button>
+            </Link>
             <Button size="sm" variant="outline" onClick={exportCsv} disabled={isExportingCsv}>
               {isExportingCsv ? 'Exporting CSV...' : 'Export CSV'}
             </Button>
@@ -427,6 +449,19 @@ export default function ReportsPage() {
           }))
         }
       />
+
+      {activeSavedFilters.length > 0 ? (
+        <div className="flex flex-wrap gap-2 rounded-2xl border border-border bg-white p-4 shadow-sm">
+          {activeSavedFilters.map((savedFilter) => (
+            <SavedFilterChip
+              key={savedFilter.id}
+              filterName={savedFilter.filter_name}
+              onApply={() => setFilters((savedFilter.filter_values ?? {}) as ReportFilters)}
+              savedFilterId={savedFilter.id}
+            />
+          ))}
+        </div>
+      ) : null}
 
       {reportQuery.isLoading ? <LoadingState /> : null}
 
@@ -492,8 +527,70 @@ export default function ReportsPage() {
           {toastMessage}
         </div>
       ) : null}
+
+      <FormDrawer title="Save Report Filter" open={saveFilterOpen} onClose={() => setSaveFilterOpen(false)}>
+        <div className="space-y-4">
+          <label className="block space-y-2 text-sm text-muted">
+            <span>Filter Name</span>
+            <input
+              value={savedFilterName}
+              onChange={(event) => setSavedFilterName(event.target.value)}
+              className="h-11 w-full rounded-xl border border-border bg-cream px-3 text-brown outline-none"
+              placeholder="e.g. This Week Production"
+            />
+          </label>
+          <Button
+            onClick={async () => {
+              try {
+                await createSavedFilter.mutateAsync({
+                  category: 'general',
+                  filterName: savedFilterName,
+                  filters: filters as Record<string, unknown>,
+                  reportType: activeReportType,
+                });
+                setSavedFilterName('');
+                setSaveFilterOpen(false);
+                setToastMessage('Report filter saved.');
+              } catch (error) {
+                setToastMessage(error instanceof Error ? error.message : 'Failed to save filter.');
+              }
+            }}
+            disabled={createSavedFilter.isPending || !savedFilterName.trim()}
+          >
+            {createSavedFilter.isPending ? 'Saving...' : 'Save Filter'}
+          </Button>
+        </div>
+      </FormDrawer>
     </div>
   );
 }
 
+function SavedFilterChip({
+  filterName,
+  onApply,
+  savedFilterId,
+}: {
+  filterName: string;
+  onApply: () => void;
+  savedFilterId: string;
+}) {
+  const removeFilter = useDeleteSavedReportFilter(savedFilterId);
 
+  return (
+    <div className="inline-flex items-center gap-2 rounded-full border border-border bg-cream px-3 py-2 text-sm">
+      <button type="button" onClick={onApply} className="font-medium text-brown">
+        <BookmarkPlus className="mr-2 inline h-4 w-4" />
+        {filterName}
+      </button>
+      <button
+        type="button"
+        onClick={async () => {
+          await removeFilter.mutateAsync();
+        }}
+        className="text-xs text-muted"
+      >
+        Remove
+      </button>
+    </div>
+  );
+}

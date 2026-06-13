@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { badRequest, can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
+import { ensureBranchScope, requireOpenShift, writeBranchAuditLog } from '@/lib/branches-server';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
 export async function GET(
@@ -21,7 +22,7 @@ export async function GET(
   const paymentMethod = searchParams.get('paymentMethod') ?? undefined;
 
   try {
-    if (ctx.isBranchScoped && ctx.branchId && ctx.branchId !== branchId) return forbidden();
+    ensureBranchScope(ctx, branchId);
 
     let query = service
       .schema('icecream_erp')
@@ -47,6 +48,7 @@ export async function GET(
         description: row.description,
         expenseDate: row.expense_date,
         paymentMethod: row.payment_method,
+        status: row.status ?? 'DRAFT',
       })),
       pagination: { page, pageSize, total: count ?? 0 },
     });
@@ -68,12 +70,13 @@ export async function POST(
   const service = createServiceRoleClient();
 
   try {
-    if (ctx.isBranchScoped && ctx.branchId && ctx.branchId !== branchId) return forbidden();
+    ensureBranchScope(ctx, branchId);
 
     const body = await request.json() as {
       amount: number;
       category: string;
       description: string;
+      shift?: string;
       paymentMethod: string;
       expenseDate?: string;
       receiptUrl?: string;
@@ -82,6 +85,9 @@ export async function POST(
     if (!body.amount || !body.category || !body.description || !body.paymentMethod) {
       return badRequest('amount, category, description, paymentMethod are required');
     }
+
+    const expenseDate = body.expenseDate ?? new Date().toISOString().slice(0, 10);
+    const openShift = body.shift ? await requireOpenShift(branchId, body.shift, expenseDate) : null;
 
     const { data: expense, error } = await service
       .schema('icecream_erp')
@@ -92,14 +98,19 @@ export async function POST(
         category: body.category,
         description: body.description,
         payment_method: body.paymentMethod,
-        expense_date: body.expenseDate ? new Date(`${body.expenseDate}T00:00:00.000Z`).toISOString() : new Date().toISOString(),
+        expense_date: new Date(`${expenseDate}T00:00:00.000Z`).toISOString(),
         receipt_url: body.receiptUrl ?? null,
+        shift_close_id: openShift?.id ?? null,
         created_by: ctx.userId,
+        status: 'POSTED',
+        posted_at: new Date().toISOString(),
+        posted_by: ctx.userId,
       })
       .select()
       .single();
 
     if (error) throw error;
+    await writeBranchAuditLog('BRANCH_EXPENSE_CREATED', expense.id, ctx.userId, { branchId, amount: body.amount, category: body.category }, 'branch_expense');
     return NextResponse.json(expense, { status: 201 });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Internal server error';

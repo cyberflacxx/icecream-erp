@@ -63,6 +63,56 @@ export interface AuditLogRow {
   user: string;
 }
 
+export interface SecurityEventRow {
+  created_at: string;
+  details: Record<string, unknown> | null;
+  event_type: string;
+  id: string;
+  ip_address: string | null;
+  status: string;
+  user_profile_id: string | null;
+}
+
+export interface SecuritySessionRow {
+  createdAt: string;
+  expiresAt: string;
+  id: string;
+  ipAddress: string | null;
+  lastActivityAt: string;
+  status: string;
+  userAgent: string | null;
+  userId: string;
+}
+
+export interface SecuritySettingsResponse {
+  failedLoginLimit: number;
+  lockoutDurationMinutes: number;
+  passwordMinLength: number;
+  requireLowercase: boolean;
+  requireNumber: boolean;
+  requireSpecialCharacter: boolean;
+  requireUppercase: boolean;
+  sensitiveActionPasswordRequired: boolean;
+  sessionTimeoutMinutes: number;
+}
+
+export interface SettingsDashboardResponse {
+  activeBranches: number;
+  activeProducts: number;
+  activeRawMaterials: number;
+  activeUsers: number;
+  activeWarehouses: number;
+  companyProfileStatus: string;
+  failedImports: number;
+  pendingImports: number;
+  recentExports: Array<Record<string, unknown>>;
+  systemWarnings: Array<Record<string, unknown>>;
+}
+
+export interface SettingsMasterDataRow {
+  [key: string]: boolean | number | string | null | Record<string, unknown> | Array<unknown> | undefined;
+}
+
 function toQueryString(params: QueryValue) {
   const searchParams = new URLSearchParams();
 
@@ -106,7 +156,7 @@ export function useUsers(filters: { page?: number; pageSize?: number; search?: s
     queryKey: ['settings', 'users', userId, filters],
     queryFn: () =>
       apiFetch<PaginatedResponse<SettingsUserRow>>(
-        `/api/users${toQueryString({
+        `/api/security/users${toQueryString({
           page: filters.page ?? 1,
           pageSize: filters.pageSize ?? 10,
           search: filters.search,
@@ -124,7 +174,7 @@ export function useRoles(filters: { page?: number; pageSize?: number; search?: s
     queryKey: ['settings', 'roles', userId, filters],
     queryFn: () =>
       apiFetch<PaginatedResponse<SettingsRoleRow>>(
-        `/api/roles${toQueryString({
+        `/api/security/roles${toQueryString({
           page: filters.page ?? 1,
           pageSize: filters.pageSize ?? 50,
           search: filters.search,
@@ -193,6 +243,31 @@ export function useUpdateSettingsOverview() {
   return useSettingsMutation('/api/settings/overview', 'PATCH');
 }
 
+export function useUpdateCompanyProfile() {
+  return useSettingsMutation('/api/settings/company-profile', 'PATCH');
+}
+
+export function useUpdateSystemSettings() {
+  return useSettingsMutation('/api/settings/system', 'PATCH');
+}
+
+export function useSeedSettingsDefaults() {
+  return useSettingsMutation('/api/settings/seed-defaults', 'POST');
+}
+
+export function useGenerateDocumentNumber() {
+  return useSettingsMutation<{ seriesType: string }>('/api/settings/number-sequences/generate', 'POST');
+}
+
+export function useRecordSettingsExport() {
+  return useSettingsMutation<{
+    dataType: string;
+    fileName: string;
+    filters?: Record<string, unknown>;
+    format?: string;
+  }>('/api/settings/export/history', 'POST');
+}
+
 export function useCreateUser() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -204,7 +279,7 @@ export function useCreateUser() {
       roleId: string;
       branchId?: string | null;
     }) =>
-      apiFetch('/api/users', {
+      apiFetch('/api/security/users', {
         method: 'POST',
         body: JSON.stringify({ ...body, role: body.roleId }),
       }),
@@ -219,11 +294,11 @@ export function useInviteUser() {
 }
 
 export function useAssignUserRoles(userId: string) {
-  return useSettingsMutation(`/api/users/${userId}`, 'PATCH');
+  return useSettingsMutation(`/api/settings/users/${userId}/roles`, 'PATCH');
 }
 
 export function useUpdateUserStatus(userId: string) {
-  return useSettingsMutation(`/api/users/${userId}`, 'PATCH');
+  return useSettingsMutation(`/api/settings/users/${userId}/status`, 'PATCH');
 }
 
 export function useCreateRole() {
@@ -236,6 +311,115 @@ export function useUpdateRole(roleId: string) {
 
 export function useAssignRolePermissions(roleId: string) {
   return useSettingsMutation(`/api/settings/roles/${roleId}/permissions`, 'PATCH');
+}
+
+export function useSecuritySessions() {
+  const { isLoaded, isSignedIn, userId } = useAppAuth();
+
+  return useQuery({
+    queryKey: ['security', 'sessions', userId],
+    queryFn: () => apiFetch<SecuritySessionRow[]>('/api/security/sessions'),
+    enabled: isLoaded && Boolean(isSignedIn),
+  });
+}
+
+export function useSettingsDashboard() {
+  const { isLoaded, isSignedIn, userId } = useAppAuth();
+
+  return useQuery({
+    queryKey: ['settings', 'dashboard', userId],
+    queryFn: () => apiFetch<SettingsDashboardResponse>('/api/settings/dashboard'),
+    enabled: isLoaded && Boolean(isSignedIn),
+  });
+}
+
+export function useSettingsCollection(path: string) {
+  const { isLoaded, isSignedIn, userId } = useAppAuth();
+
+  return useQuery({
+    queryKey: ['settings', 'collection', path, userId],
+    queryFn: () => apiFetch<SettingsMasterDataRow[]>(path),
+    enabled: isLoaded && Boolean(isSignedIn),
+  });
+}
+
+export function useSecurityEvents(filters: {
+  eventType?: string;
+  page?: number;
+  pageSize?: number;
+  status?: string;
+  userProfileId?: string;
+}) {
+  const { isLoaded, isSignedIn, userId } = useAppAuth();
+
+  return useQuery({
+    queryKey: ['security', 'events', userId, filters],
+    queryFn: () =>
+      apiFetch<PaginatedResponse<SecurityEventRow>>(
+        `/api/security/events${toQueryString({
+          eventType: filters.eventType,
+          page: filters.page ?? 1,
+          pageSize: filters.pageSize ?? 20,
+          status: filters.status,
+          userProfileId: filters.userProfileId,
+        })}`,
+      ),
+    enabled: isLoaded && Boolean(isSignedIn),
+  });
+}
+
+export function useSecuritySettings() {
+  const { isLoaded, isSignedIn, userId } = useAppAuth();
+
+  return useQuery({
+    queryKey: ['security', 'settings', userId],
+    queryFn: () => apiFetch<SecuritySettingsResponse>('/api/security/settings'),
+    enabled: isLoaded && Boolean(isSignedIn),
+  });
+}
+
+export function useUpdateSecuritySettings() {
+  return useSettingsMutation('/api/security/settings', 'PATCH');
+}
+
+export function useApprovalRules() {
+  const { isLoaded, isSignedIn, userId } = useAppAuth();
+
+  return useQuery({
+    queryKey: ['security', 'approval-rules', userId],
+    queryFn: () => apiFetch<Array<Record<string, unknown>>>('/api/security/approval-rules'),
+    enabled: isLoaded && Boolean(isSignedIn),
+  });
+}
+
+export function usePendingApprovals() {
+  const { isLoaded, isSignedIn, userId } = useAppAuth();
+
+  return useQuery({
+    queryKey: ['security', 'approvals', userId],
+    queryFn: () => apiFetch<Array<Record<string, unknown>>>('/api/security/approvals'),
+    enabled: isLoaded && Boolean(isSignedIn),
+  });
+}
+
+export function useBranchAssignments() {
+  const { isLoaded, isSignedIn, userId } = useAppAuth();
+
+  return useQuery({
+    queryKey: ['security', 'branch-assignments', userId],
+    queryFn: () => apiFetch<Array<Record<string, unknown>>>('/api/security/branch-assignments'),
+    enabled: isLoaded && Boolean(isSignedIn),
+  });
+}
+
+export function useWarehouseAssignments() {
+  const { isLoaded, isSignedIn, userId } = useAppAuth();
+
+  return useQuery({
+    queryKey: ['security', 'warehouse-assignments', userId],
+    queryFn: () => apiFetch<Array<Record<string, unknown>>>('/api/security/warehouse-assignments'),
+    enabled: isLoaded && Boolean(isSignedIn),
+  });
 }
 
 export { toQueryString };

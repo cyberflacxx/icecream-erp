@@ -39,7 +39,7 @@ export interface CurrentUser {
 }
 
 async function fetchCurrentUser(): Promise<CurrentUser> {
-  const response = await fetch('/api/auth/profile', { cache: 'no-store' });
+  const response = await fetch('/api/auth/me', { cache: 'no-store' });
   if (!response.ok) {
     const text = await response.text();
     throw new Error(text || `Request failed with status ${response.status}`);
@@ -61,7 +61,8 @@ export function useCurrentUser() {
     pathname.startsWith('/reports') ||
     pathname.startsWith('/settings') ||
     pathname.startsWith('/finance') ||
-    pathname.startsWith('/sales');
+    pathname.startsWith('/sales') ||
+    pathname.startsWith('/quality');
 
   return useQuery({
     queryKey: ['current-user', userId],

@@ -69,6 +69,7 @@ export async function GET(request: NextRequest) {
           address: b.address,
           manager: manager ? { id: manager.id, name: manager.full_name ?? `${manager.first_name ?? ''} ${manager.last_name ?? ''}`.trim() } : null,
           todaySales: salesMap.get(b.id as string) ?? 0,
+          stockStatus: b.status === 'ACTIVE' ? 'Operational' : 'Check Branch',
         };
       }),
       pagination: { page, pageSize, total: count ?? 0 },

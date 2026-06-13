@@ -8,8 +8,18 @@ import { apiFetch } from '@/lib/api';
 
 export interface FinanceDashboardResponse {
   stats: {
+    bankBalance: number;
+    branchProfitability: number;
+    cashBalance: number;
+    grossProfit: number;
+    netProfit: number;
+    paymentsCount: number;
+    pendingApprovals: number;
+    pettyCashBalance: number;
+    productionCost: number;
     revenue: number;
-    payments: number;
+    stockValuation: number;
+    totalExpenses: number;
     outstandingReceivables: number;
     outstandingPayables: number;
   };

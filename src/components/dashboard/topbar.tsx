@@ -32,6 +32,10 @@ const pageTitles: Array<{ match: (path: string) => boolean; title: string }> = [
   { match: (path) => path.startsWith('/maintenance'), title: 'Maintenance' },
   { match: (path) => path.startsWith('/budget'), title: 'Budgeting & Variance' },
   { match: (path) => path.startsWith('/reports'), title: 'Reports' },
+  { match: (path) => path.startsWith('/testing'), title: 'Testing, UAT & Handover' },
+  { match: (path) => path.startsWith('/workflows'), title: 'Workflow Control' },
+  { match: (path) => path.startsWith('/notifications'), title: 'Notifications' },
+  { match: (path) => path.startsWith('/admin'), title: 'Deployment Readiness' },
   { match: (path) => path.startsWith('/settings'), title: 'Settings' }
 ];
 
@@ -121,6 +125,8 @@ export function Topbar({ onOpenSidebar }: TopbarProps) {
               isRead: item.isRead,
               link: item.link,
               message: item.message,
+              module: item.module,
+              severity: item.severity,
               title: item.title
             }))}
             onNotificationClick={(notificationId: string) => {

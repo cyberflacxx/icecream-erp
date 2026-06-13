@@ -52,6 +52,65 @@ export interface InventoryMetaResponse {
   warehouses: InventoryWarehouseOption[];
 }
 
+export interface InventoryDashboardMetrics {
+  expiringSoonCount: number;
+  finishedGoodsValue: number;
+  lowStockCount: number;
+  nonConsumablesValue: number;
+  packagingMaterialValue: number;
+  pendingApprovalsCount: number;
+  rawMaterialValue: number;
+  supplierShortageCount: number;
+  todaysMovements: Array<{
+    createdAt: string;
+    id: string;
+    itemName: string;
+    movementType: string;
+    quantity: number;
+    referenceId: string | null;
+    referenceType: string | null;
+    warehouseName: string;
+  }>;
+  totalStockValue: number;
+  wipValue: number;
+}
+
+export interface SupplierShortageRow {
+  expectedResolutionDate: string | null;
+  itemCode: string | null;
+  itemId: string;
+  itemName: string;
+  orderedQuantity: number;
+  poNumber: string;
+  purchaseOrderId: string;
+  receivedQuantity: number;
+  shortageQuantity: number;
+  status: 'OPEN' | 'RESOLVED';
+  supplierId: string | null;
+  supplierName: string;
+}
+
+export interface InventoryApprovalRow {
+  id: string;
+  entity_id: string;
+  entity_type: string;
+  current_step: number;
+  status: string;
+  requested_at: string;
+  completed_at: string | null;
+  actions: Array<{
+    id: string;
+    action: string;
+    comments: string | null;
+    acted_at: string;
+  }>;
+}
+
+export interface InventoryReportResponse<T> {
+  data: T[];
+  summary: Record<string, number | string | null>;
+}
+
 export interface InventoryItemRow {
   id: string;
   code: string;

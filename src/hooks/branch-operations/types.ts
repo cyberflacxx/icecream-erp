@@ -65,6 +65,7 @@ export interface BranchExpenseRow {
   amount: number;
   paymentMethod: string;
   createdBy: string;
+  status?: string;
 }
 
 export interface BranchShiftCloseRow {
@@ -110,6 +111,63 @@ export interface BranchStockRow {
   quantityAvailable: number;
   unitCost: number;
   totalValue: number;
+}
+
+export interface BranchShiftRow {
+  id: string;
+  shift_date: string;
+  shift_type: string;
+  status: string;
+  opening_cash?: number;
+  expected_cash?: number;
+  actual_cash?: number;
+  cash_variance?: number;
+  stock_variance?: number;
+}
+
+export interface BranchCustomerRow {
+  id: string;
+  customer_code: string;
+  customer_name: string;
+  phone_number: string | null;
+  customer_type: string;
+  credit_allowed: boolean;
+  credit_limit: number;
+  current_balance: number;
+  is_active: boolean;
+}
+
+export interface BranchPaymentRow {
+  id: string;
+  payment_date: string;
+  payment_method: string;
+  amount_paid: number;
+  reference_number: string | null;
+  branch_sale_id: string | null;
+  branch_customer_id: string | null;
+  status: string;
+}
+
+export interface BranchReturnRow {
+  id: string;
+  return_number: string;
+  quantity_returned: number;
+  return_reason: string;
+  qc_status: string;
+  final_action: string | null;
+  status: string;
+  created_at: string;
+}
+
+export interface BranchStockLedgerRow {
+  id: string;
+  reference_type: string;
+  movement_type: string;
+  quantity: number;
+  unit_cost: number;
+  total_cost: number;
+  transaction_date: string;
+  item_id: string;
 }
 
 export interface BranchSalesFilters {

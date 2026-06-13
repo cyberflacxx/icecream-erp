@@ -5,14 +5,13 @@ import type { AppRouterInstance } from 'next/dist/shared/lib/app-router-context.
 import { createClient, hasSupabaseClientEnv } from '@/lib/supabase/client';
 
 export async function logoutAndRedirect(router: AppRouterInstance) {
-  if (!hasSupabaseClientEnv()) {
-    router.replace('/auth/login');
-    router.refresh();
-    return;
+  if (hasSupabaseClientEnv()) {
+    await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' }).catch(async () => {
+      const supabase = createClient();
+      await supabase.auth.signOut();
+    });
   }
 
-  const supabase = createClient();
-  await supabase.auth.signOut();
   router.replace('/auth/login');
   router.refresh();
 }

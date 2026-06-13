@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { badRequest, can, forbidden, getAuthContext, notFound, serverError, unauthorized } from '@/lib/api-auth';
+import { emitOperationalNotifications } from '@/lib/notifications-server';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
 const VALID_FROM = 'PLANNED';
@@ -53,6 +54,24 @@ export async function POST(
       entity_type: 'production_batch',
       new_values: { status: NEXT_STATUS },
       user_profile_id: ctx.userId,
+    });
+
+    await emitOperationalNotifications({
+      actorUserId: ctx.userId,
+      branchId: String((((batch.warehouses as { branch_id?: string } | Array<{ branch_id?: string }> | null) instanceof Array ? (batch.warehouses as Array<{ branch_id?: string }>)[0]?.branch_id : (batch.warehouses as { branch_id?: string } | null)?.branch_id) ?? '')),
+      documentId: id,
+      documentType: 'production_batch',
+      eventType: 'MATERIAL_REQUEST_PENDING',
+      message: `Production batch ${String(batch.batch_number ?? id)} is requesting materials.`,
+      metadata: {
+        batchNumber: String(batch.batch_number ?? id),
+      },
+      moduleName: 'production',
+      organizationId: ctx.organizationId,
+      recipientRoleNames: ['Production Manager', 'Procurement Officer', 'Stores Manager'],
+      severity: 'MEDIUM',
+      title: 'Production material request pending',
+      warehouseId: String(batch.warehouse_id ?? ''),
     });
 
     return NextResponse.json(updated);

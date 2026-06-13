@@ -173,10 +173,10 @@ export default function BranchDashboardPage() {
               <Link href={`/branches/${branchId}/sales?expense=true`}>Record Expense</Link>
             </Button>
             <Button asChild size="sm" variant="outline">
-              <Link href={`/branches/${branchId}/sales?view=stock`}>View Stock</Link>
+              <Link href={`/branches/${branchId}/stock`}>View Stock</Link>
             </Button>
             <Button asChild size="sm" variant="outline">
-              <Link href={`/branches/${branchId}/shift-close`}>Close Shift</Link>
+              <Link href={`/branches/${branchId}/reports`}>View Reports</Link>
             </Button>
           </div>
         </div>

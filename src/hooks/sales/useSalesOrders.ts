@@ -16,6 +16,26 @@ interface UseSalesOrdersParams {
   status?: string;
 }
 
+export interface SalesOrderListItem {
+  customer: { id: string; name: string } | null;
+  id: string;
+  itemsCount: number;
+  orderDate: string | null;
+  orderNumber: string;
+  requiredDate: string | null;
+  status: string;
+  total: number;
+}
+
+interface PaginatedResponse<T> {
+  data: T[];
+  pagination: {
+    page: number;
+    pageSize: number;
+    total: number;
+  };
+}
+
 function toQueryString(params: UseSalesOrdersParams) {
   const query = new URLSearchParams();
   if (params.page) query.set('page', String(params.page));
@@ -32,11 +52,11 @@ function toQueryString(params: UseSalesOrdersParams) {
 export function useSalesOrders(params: UseSalesOrdersParams = {}) {
   const { getToken, isLoaded, isSignedIn, userId } = useAppAuth();
 
-  return useQuery({
+  return useQuery<PaginatedResponse<SalesOrderListItem>>({
     queryKey: ['sales-orders', userId, params],
     queryFn: async () => {
       const token = await getToken();
-      return apiFetch(`${API_ROUTES.SALES.SALES_ORDERS}${toQueryString(params)}`, { token });
+      return apiFetch<PaginatedResponse<SalesOrderListItem>>(`${API_ROUTES.SALES.SALES_ORDERS}${toQueryString(params)}`, { token });
     },
     enabled: isLoaded && Boolean(isSignedIn)
   });

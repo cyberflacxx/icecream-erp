@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { badRequest, can, forbidden, getAuthContext, notFound, serverError, unauthorized } from '@/lib/api-auth';
+import { emitOperationalNotifications } from '@/lib/notifications-server';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
 export async function POST(
@@ -136,6 +137,44 @@ export async function POST(
       entity_type: 'branch_shift_close',
       user_profile_id: ctx.userId,
     });
+
+    await emitOperationalNotifications({
+      actorUserId: ctx.userId,
+      branchId,
+      documentId: id,
+      documentType: 'branch_shift_close',
+      eventType: 'BRANCH_SHIFT_CLOSED',
+      message: `Branch shift close was submitted with cash variance ${Number(updated.cash_variance ?? 0).toFixed(2)} and stock variance ${Number(updated.stock_variance ?? 0).toFixed(2)}.`,
+      metadata: {
+        cashVariance: Number(updated.cash_variance ?? 0),
+        stockVariance: Number(updated.stock_variance ?? 0),
+      },
+      moduleName: 'branch operations',
+      organizationId: ctx.organizationId,
+      recipientRoleNames: ['Branch Controller', 'Branch Manager'],
+      severity: Math.abs(Number(updated.cash_variance ?? 0)) > 0.01 || Math.abs(Number(updated.stock_variance ?? 0)) > 0.01 ? 'HIGH' : 'LOW',
+      title: 'Branch shift submitted',
+    });
+
+    if (Math.abs(Number(updated.cash_variance ?? 0)) > 0.01 || Math.abs(Number(updated.stock_variance ?? 0)) > 0.01) {
+      await emitOperationalNotifications({
+        actorUserId: ctx.userId,
+        branchId,
+        documentId: id,
+        documentType: 'branch_shift_close',
+        eventType: 'BRANCH_STOCK_VARIANCE',
+        message: 'Branch shift close recorded a variance that requires review.',
+        metadata: {
+          cashVariance: Number(updated.cash_variance ?? 0),
+          stockVariance: Number(updated.stock_variance ?? 0),
+        },
+        moduleName: 'branch operations',
+        organizationId: ctx.organizationId,
+        recipientRoleNames: ['Branch Manager', 'Accountant'],
+        severity: 'HIGH',
+        title: 'Branch variance alert',
+      });
+    }
 
     return NextResponse.json(updated);
   } catch (err) {

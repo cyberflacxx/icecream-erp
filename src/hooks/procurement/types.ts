@@ -110,3 +110,80 @@ export interface GRNFilters {
   startDate?: string;
   status?: string;
 }
+
+export interface ProcurementDashboardMetrics {
+  lateDeliveries: number;
+  openPurchaseOrders: number;
+  openPurchaseRequisitions: number;
+  partiallyReceivedPurchaseOrders: number;
+  pendingPurchaseApprovals: number;
+  pendingSupplierReturns: number;
+  supplierInvoicesDue: number;
+  supplierShortages: number;
+  topSuppliersByValue: Array<{ supplierName: string; totalValue: number }>;
+}
+
+export interface GoodsReceivingStatusRow {
+  id: string;
+  item: string;
+  orderedQuantity: number;
+  purchaseOrderNumber: string;
+  receivedQuantity: number;
+  rejectedQuantity: number;
+  shortageQuantity: number;
+  status: string;
+  supplier: string;
+}
+
+export interface SupplierShortageRow {
+  ageInDays: number;
+  expectedResolutionDate: string | null;
+  itemName: string;
+  orderedQuantity: number;
+  poNumber: string;
+  receivedQuantity: number;
+  shortageQuantity: number;
+  status: string;
+  supplierName: string;
+}
+
+export interface SupplierReturnRow {
+  id: string;
+  itemName: string;
+  qcStatus: string | null;
+  quantityReturned: number;
+  reason: string;
+  returnDate: string;
+  returnNumber: string;
+  status: string;
+  supplierName: string;
+}
+
+export interface SupplierInvoiceRow {
+  balance: number;
+  dueDate: string | null;
+  id: string;
+  invoiceDate: string;
+  invoiceNumber: string;
+  paidAmount: number;
+  purchaseOrderNumber: string | null;
+  status: string;
+  supplierName: string;
+  total: number;
+}
+
+export interface SupplierPaymentRow {
+  amountPaid: number;
+  id: string;
+  invoiceNumber: string | null;
+  method: string;
+  paymentDate: string;
+  reference: string | null;
+  status: string;
+  supplierName: string;
+}
+
+export interface ProcurementReportResponse<T> {
+  data: T[];
+  summary?: Record<string, number | string | null>;
+}

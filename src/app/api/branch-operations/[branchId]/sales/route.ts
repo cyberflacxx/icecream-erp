@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { badRequest, can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
+import { validateBranchSaleQuantity } from '@/lib/branches';
+import { ensureBranchScope, getActiveBranchWarehouse, requireOpenShift, writeBranchAuditLog } from '@/lib/branches-server';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
 export async function GET(
@@ -22,7 +24,7 @@ export async function GET(
   const shift = searchParams.get('shift') ?? undefined;
 
   try {
-    if (ctx.isBranchScoped && ctx.branchId && ctx.branchId !== branchId) return forbidden();
+    ensureBranchScope(ctx, branchId);
 
     let query = service
       .schema('icecream_erp')
@@ -50,6 +52,7 @@ export async function GET(
         itemsCount: Array.isArray(row.branch_sale_items) ? row.branch_sale_items.length : 0,
         totalAmount: Number(row.total_amount ?? 0),
         paymentMethod: row.payment_method,
+        status: row.status ?? 'POSTED',
       })),
       pagination: { page, pageSize, total: count ?? 0 },
     });
@@ -71,11 +74,15 @@ export async function POST(
   const service = createServiceRoleClient();
 
   try {
-    if (ctx.isBranchScoped && ctx.branchId && ctx.branchId !== branchId) return forbidden();
+    ensureBranchScope(ctx, branchId);
 
     const body = await request.json() as {
+      discountAmount?: number;
       paymentMethod: string;
+      paymentStatus?: string;
       shift: string;
+      remarks?: string;
+      taxAmount?: number;
       items: Array<{ itemId: string; quantity: number; unitPrice: number; totalPrice: number }>;
       customerId?: string;
       paymentReference?: string;
@@ -86,16 +93,9 @@ export async function POST(
       return badRequest('paymentMethod, shift, and items are required');
     }
 
-    // Validate branch warehouse
-    const { data: warehouse } = await service
-      .schema('icecream_erp')
-      .from('warehouses')
-      .select('id')
-      .eq('branch_id', branchId)
-      .eq('is_active', true)
-      .eq('type', 'BRANCH')
-      .maybeSingle();
-    if (!warehouse) return badRequest('No active branch warehouse found');
+    const saleDate = body.saleDate ?? new Date().toISOString().slice(0, 10);
+    const openShift = await requireOpenShift(branchId, body.shift, saleDate);
+    const warehouse = await getActiveBranchWarehouse(branchId);
 
     // Validate items
     const itemIds = [...new Set(body.items.map((i) => i.itemId))];
@@ -109,10 +109,26 @@ export async function POST(
       .in('id', itemIds);
     if ((items ?? []).length !== itemIds.length) return badRequest('One or more sale items are invalid');
 
-    // Generate sale number
+    const availableBalances = await service
+      .schema('icecream_erp')
+      .from('stock_balances')
+      .select('id, item_id, quantity_on_hand, quantity_available')
+      .eq('warehouse_id', warehouse.id)
+      .in('item_id', itemIds);
+
+    const stockByItemId = new Map((availableBalances.data ?? []).map((row) => [String(row.item_id), Number(row.quantity_available ?? 0)]));
+    for (const item of body.items) {
+      if (!validateBranchSaleQuantity(item.quantity, stockByItemId.get(item.itemId) ?? 0)) {
+        return badRequest(`Insufficient branch stock for item ${item.itemId}`);
+      }
+    }
+
     const { count } = await service.schema('icecream_erp').from('branch_sales').select('*', { count: 'exact', head: true });
     const saleNumber = `BS-${String((count ?? 0) + 1).padStart(5, '0')}`;
-    const totalAmount = body.items.reduce((s, i) => s + i.totalPrice, 0);
+    const grossAmount = body.items.reduce((s, i) => s + i.totalPrice, 0);
+    const discountAmount = Number(body.discountAmount ?? 0);
+    const taxAmount = Number(body.taxAmount ?? 0);
+    const totalAmount = grossAmount - discountAmount + taxAmount;
 
     const { data: sale, error: saleErr } = await service
       .schema('icecream_erp')
@@ -121,9 +137,17 @@ export async function POST(
         branch_id: branchId,
         sale_number: saleNumber,
         payment_method: body.paymentMethod,
+        payment_status: body.paymentStatus ?? (body.paymentMethod === 'CREDIT' ? 'CREDIT' : 'PAID'),
         shift: body.shift,
+        shift_close_id: openShift.id,
         total_amount: totalAmount,
-        sale_date: body.saleDate ? new Date(`${body.saleDate}T00:00:00.000Z`).toISOString() : new Date().toISOString(),
+        discount_amount: discountAmount,
+        tax_amount: taxAmount,
+        remarks: body.remarks ?? null,
+        status: 'POSTED',
+        posted_at: new Date().toISOString(),
+        posted_by: ctx.userId,
+        sale_date: new Date(`${saleDate}T00:00:00.000Z`).toISOString(),
         served_by: ctx.userId,
         customer_id: body.customerId ?? null,
         payment_reference: body.paymentReference ?? null,
@@ -170,16 +194,24 @@ export async function POST(
           reference_type: 'branch_sale',
           created_by: ctx.userId,
         });
+
+        await service.schema('icecream_erp').from('branch_stock_ledger').insert({
+          branch_id: branchId,
+          warehouse_id: warehouse.id,
+          item_id: item.itemId,
+          shift_close_id: openShift.id,
+          reference_id: sale.id,
+          reference_type: 'branch_sale',
+          movement_type: 'SALE',
+          quantity: item.quantity,
+          unit_cost: item.unitPrice,
+          total_cost: item.totalPrice,
+          created_by: ctx.userId,
+        });
       }
     }
 
-    await service.schema('icecream_erp').from('audit_logs').insert({
-      action: 'BRANCH_SALE_CREATED',
-      entity_id: sale.id,
-      entity_type: 'branch_sale',
-      new_values: { branchId, paymentMethod: body.paymentMethod, totalAmount },
-      user_profile_id: ctx.userId,
-    });
+    await writeBranchAuditLog('BRANCH_SALE_CREATED', sale.id, ctx.userId, { branchId, paymentMethod: body.paymentMethod, totalAmount }, 'branch_sale');
 
     const { data: full } = await service
       .schema('icecream_erp')

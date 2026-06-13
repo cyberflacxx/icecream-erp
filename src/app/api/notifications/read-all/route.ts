@@ -1,26 +1,22 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 
-import { getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
-import { createServiceRoleClient } from '@/lib/supabase/server';
+import { notificationError, notificationResponse, requireNotificationAuth } from '@/app/api/notifications/_helpers';
+import { markAllNotificationsRead } from '@/lib/notifications-server';
 
-export async function PATCH(_request: NextRequest) {
-  const ctx = await getAuthContext();
-  if (!ctx) return unauthorized();
-
-  const service = createServiceRoleClient();
-
+async function handle(request: NextRequest) {
+  const auth = await requireNotificationAuth(request);
+  if ('error' in auth) return auth.error;
   try {
-    const { error } = await service
-      .schema('icecream_erp')
-      .from('notifications')
-      .update({ is_read: true })
-      .eq('user_profile_id', ctx.userId)
-      .eq('is_read', false);
-
-    if (error) throw error;
-    return NextResponse.json({ updated: true });
-  } catch (err) {
-    const message = err instanceof Error ? err.message : 'Internal server error';
-    return serverError(message);
+    return notificationResponse(await markAllNotificationsRead(auth.ctx));
+  } catch (error) {
+    return notificationError(error);
   }
+}
+
+export async function PATCH(request: NextRequest) {
+  return handle(request);
+}
+
+export async function POST(request: NextRequest) {
+  return handle(request);
 }

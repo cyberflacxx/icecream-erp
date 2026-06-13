@@ -79,6 +79,7 @@ export async function PATCH(request: NextRequest) {
   const ctx = await getAuthContext();
   if (!ctx) return unauthorized();
   if (!can(ctx, 'settings.write')) return forbidden();
+  const currentUserId = ctx.userId;
 
   const service = createServiceRoleClient();
 
@@ -129,7 +130,7 @@ export async function PATCH(request: NextRequest) {
           file_url: fileUrl,
           file_size: Buffer.byteLength(content, 'utf8'),
           file_type: 'application/json',
-          uploaded_by: ctx.userId,
+          uploaded_by: currentUserId,
         }).eq('id', existing.id);
       } else {
         await service.schema('icecream_erp').from('document_files').insert({
@@ -138,7 +139,7 @@ export async function PATCH(request: NextRequest) {
           file_size: Buffer.byteLength(content, 'utf8'),
           file_type: 'application/json',
           reference_type: referenceType,
-          uploaded_by: ctx.userId,
+          uploaded_by: currentUserId,
         });
       }
     }

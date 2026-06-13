@@ -13,6 +13,32 @@ interface UseCustomersParams {
   status?: string;
 }
 
+export interface CustomerListItem {
+  code: string;
+  creditAllowed: boolean;
+  creditLimit: number;
+  currentBalance: number;
+  customerGroup: string | null;
+  customerType: string;
+  email: string | null;
+  id: string;
+  name: string;
+  paymentTerms: string | null;
+  phone: string | null;
+  priceListCode: string | null;
+  status: string;
+  taxNumber?: string | null;
+}
+
+interface PaginatedResponse<T> {
+  data: T[];
+  pagination: {
+    page: number;
+    pageSize: number;
+    total: number;
+  };
+}
+
 function toQueryString(params: UseCustomersParams) {
   const query = new URLSearchParams();
   if (params.page) query.set('page', String(params.page));
@@ -27,11 +53,11 @@ function toQueryString(params: UseCustomersParams) {
 export function useCustomers(params: UseCustomersParams = {}) {
   const { getToken, isLoaded, isSignedIn, userId } = useAppAuth();
 
-  return useQuery({
+  return useQuery<PaginatedResponse<CustomerListItem>>({
     queryKey: ['customers', userId, params],
     queryFn: async () => {
       const token = await getToken();
-      return apiFetch(`${API_ROUTES.SALES.CUSTOMERS}${toQueryString(params)}`, { token });
+      return apiFetch<PaginatedResponse<CustomerListItem>>(`${API_ROUTES.SALES.CUSTOMERS}${toQueryString(params)}`, { token });
     },
     enabled: isLoaded && Boolean(isSignedIn)
   });

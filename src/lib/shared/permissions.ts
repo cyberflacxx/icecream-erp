@@ -89,6 +89,11 @@ export const PERMISSIONS = {
     read: 'finance.read',
     manage: 'finance.manage'
   },
+  testing: {
+    read: 'testing.read',
+    manage: 'testing.manage',
+    approve: 'testing.approve'
+  },
   reports: {
     read: 'reports.read'
   },
@@ -152,6 +157,9 @@ export const PERMISSION_CODES = {
   PAYMENT_CREATE: PERMISSIONS.payment.create,
   FINANCE_READ: PERMISSIONS.finance.read,
   FINANCE_MANAGE: PERMISSIONS.finance.manage,
+  TESTING_READ: PERMISSIONS.testing.read,
+  TESTING_MANAGE: PERMISSIONS.testing.manage,
+  TESTING_APPROVE: PERMISSIONS.testing.approve,
   REPORTS_READ: PERMISSIONS.reports.read,
   USER_MANAGE: PERMISSIONS.user.manage,
   SETTINGS_MANAGE: PERMISSIONS.settings.manage,

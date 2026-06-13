@@ -1,12 +1,17 @@
 'use client';
 
 import Link from 'next/link';
-import { ClipboardList, FileCheck2, PackageCheck, Truck } from 'lucide-react';
+import { ClipboardList, FileCheck2, LayoutDashboard, PackageCheck, ReceiptText, ShieldAlert, Truck, Undo2, WalletCards } from 'lucide-react';
 import { usePathname } from 'next/navigation';
 
 import { cn } from '@/lib/utils';
 
 const links = [
+  {
+    href: '/procurement/dashboard',
+    icon: LayoutDashboard,
+    label: 'Dashboard'
+  },
   {
     href: '/procurement/suppliers',
     icon: Truck,
@@ -26,6 +31,26 @@ const links = [
     href: '/procurement/goods-received',
     icon: PackageCheck,
     label: 'Goods Received'
+  },
+  {
+    href: '/procurement/shortages',
+    icon: ShieldAlert,
+    label: 'Shortages'
+  },
+  {
+    href: '/procurement/returns',
+    icon: Undo2,
+    label: 'Returns'
+  },
+  {
+    href: '/procurement/invoices',
+    icon: ReceiptText,
+    label: 'Invoices'
+  },
+  {
+    href: '/procurement/payments',
+    icon: WalletCards,
+    label: 'Payments'
   }
 ] as const;
 

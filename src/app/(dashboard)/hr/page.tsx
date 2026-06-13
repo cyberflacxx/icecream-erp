@@ -1,184 +1,77 @@
 'use client';
 
 import Link from 'next/link';
-import {
-  ArrowRight,
-  Calendar,
-  Clock,
-  DollarSign,
-  Plus,
-  TrendingUp,
-  UserCheck,
-  Users
-} from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { ArrowRight, Calendar, Clock, DollarSign, Loader2, Target, Users } from 'lucide-react';
+
 import { PageHeader } from '@/components/dashboard/page-header';
 
-const hrStats = [
-  { label: 'Total Employees', value: '48', change: '3 on leave', icon: Users, color: 'text-indigo-400 border-indigo-400/20 bg-indigo-400/10' },
-  { label: 'Present Today', value: '43', change: '5 absent', icon: UserCheck, color: 'text-emerald-400 border-emerald-400/20 bg-emerald-400/10' },
-  { label: 'Overtime Hours', value: '126h', change: 'This month', icon: Clock, color: 'text-amber-400 border-amber-400/20 bg-amber-400/10' },
-  { label: 'Payroll This Month', value: '$28,400', change: 'Pending approval', icon: DollarSign, color: 'text-orange border-orange/20 bg-orange/10' },
-];
-
-const departments = [
-  { name: 'Production', headcount: 18, shift: 'Day & Night', color: 'bg-violet-500' },
-  { name: 'Stores & Inventory', headcount: 6, shift: 'Day', color: 'bg-emerald-500' },
-  { name: 'Sales & Distribution', headcount: 10, shift: 'Day', color: 'bg-blue-500' },
-  { name: 'Finance & Admin', headcount: 8, shift: 'Day', color: 'bg-orange-500' },
-  { name: 'Maintenance', headcount: 4, shift: 'On-call', color: 'bg-cyan-500' },
-  { name: 'Management', headcount: 2, shift: 'Day', color: 'bg-pink-500' },
-];
-
-const recentPayroll = [
-  { employee: 'John Mwangi', role: 'Production Operator', basic: '$620', net: '$580', status: 'APPROVED' },
-  { employee: 'Sarah Chikwanda', role: 'Store Keeper', basic: '$580', net: '$544', status: 'PENDING' },
-  { employee: 'David Sibanda', role: 'Sales Rep', basic: '$650', net: '$610', status: 'APPROVED' },
-  { employee: 'Grace Moyo', role: 'Accountant', basic: '$800', net: '$748', status: 'PENDING' },
-];
-
 const quickLinks = [
-  { href: '/hr/employees', icon: Users, label: 'Employees', desc: 'Staff records and profiles' },
-  { href: '/hr/attendance', icon: Calendar, label: 'Attendance', desc: 'Daily clock-in / clock-out tracking' },
-  { href: '/hr/payroll', icon: DollarSign, label: 'Payroll', desc: 'Process and approve payroll runs' },
+  { href: '/hr/employees', label: 'Employees', desc: 'Employee master data', icon: Users },
+  { href: '/hr/attendance', label: 'Attendance', desc: 'Shift attendance and approvals', icon: Calendar },
+  { href: '/hr/shifts', label: 'Shifts', desc: 'Shift definitions and schedules', icon: Clock },
+  { href: '/hr/productivity', label: 'Productivity', desc: 'Output per operator and shift', icon: Target },
+  { href: '/hr/payroll', label: 'Payroll', desc: 'Payroll periods and summaries', icon: DollarSign },
 ];
 
 export default function HRPage() {
+  const [data, setData] = useState<Record<string, unknown> | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetch('/api/hr/dashboard', { cache: 'no-store' })
+      .then((response) => response.json())
+      .then((payload) => setData(payload))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const stats = [
+    { label: 'Total Employees', value: Number(data?.totalEmployees ?? 0), sub: `${Number(data?.activeEmployees ?? 0)} active` },
+    { label: 'Today Attendance', value: Number(data?.todayAttendance ?? 0), sub: `${Number(data?.absentEmployees ?? 0)} absent` },
+    { label: 'Late Employees', value: Number(data?.lateEmployees ?? 0), sub: `${Number(data?.activeShifts ?? 0)} active shifts` },
+    { label: 'Payroll Pending', value: Number(data?.payrollPendingApproval ?? 0), sub: `${Number(data?.overtimePendingApproval ?? 0)} overtime pending` },
+  ];
+
   return (
     <div className="space-y-8">
       <PageHeader
-        title="HR & Payroll"
-        description="Employee records, attendance, leave management, shift allocations, and payroll processing."
+        title="HR & Productivity"
+        description="Employees, shifts, attendance, labour costing, productivity, overtime, and payroll-ready records."
         status="partial"
-        actions={
-          <Link
-            href="/hr/employees/new"
-            className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-700"
-          >
-            <Plus className="h-4 w-4" />
-            Add Employee
-          </Link>
-        }
       />
 
-      {/* Stats */}
+      {loading ? (
+        <div className="flex min-h-[180px] items-center justify-center rounded-2xl border border-white/8 bg-white/5">
+          <Loader2 className="h-5 w-5 animate-spin text-white/60" />
+        </div>
+      ) : null}
+
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        {hrStats.map((stat) => {
-          const Icon = stat.icon;
-          return (
-            <div key={stat.label} className={`rounded-2xl border p-5 ${stat.color}`}>
-              <div className="flex items-start justify-between">
-                <div>
-                  <p className="text-xs font-medium text-white/50">{stat.label}</p>
-                  <p className="mt-1.5 font-display text-2xl font-bold text-white">{stat.value}</p>
-                  <p className="mt-1 text-xs text-white/40">{stat.change}</p>
-                </div>
-                <div className="rounded-xl border border-current/20 bg-current/10 p-2">
-                  <Icon className="h-5 w-5" />
-                </div>
-              </div>
-            </div>
-          );
-        })}
+        {stats.map((stat) => (
+          <div key={stat.label} className="rounded-2xl border border-white/8 bg-white/5 p-5">
+            <p className="text-xs text-white/40">{stat.label}</p>
+            <p className="mt-2 font-display text-3xl font-bold text-white">{stat.value}</p>
+            <p className="mt-1 text-xs text-white/35">{stat.sub}</p>
+          </div>
+        ))}
       </div>
 
-      {/* Quick links */}
-      <div className="grid gap-4 sm:grid-cols-3">
-        {quickLinks.map((link) => {
-          const Icon = link.icon;
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        {quickLinks.map((item) => {
+          const Icon = item.icon;
           return (
-            <Link
-              key={link.href}
-              href={link.href}
-              className="group flex items-center justify-between rounded-2xl border border-white/8 bg-white/5 p-5 transition-all hover:border-indigo-500/30 hover:bg-white/10"
-            >
-              <div className="flex items-center gap-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-500/15 text-indigo-400">
+            <Link key={item.href} href={item.href} className="group rounded-2xl border border-white/8 bg-white/5 p-5 transition hover:bg-white/10">
+              <div className="flex items-center justify-between">
+                <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-orange/10 text-orange">
                   <Icon className="h-5 w-5" />
                 </div>
-                <div>
-                  <p className="font-semibold text-white">{link.label}</p>
-                  <p className="text-xs text-white/40">{link.desc}</p>
-                </div>
+                <ArrowRight className="h-4 w-4 text-white/30 transition group-hover:translate-x-1 group-hover:text-white" />
               </div>
-              <ArrowRight className="h-4 w-4 text-white/30 transition-transform group-hover:translate-x-1 group-hover:text-indigo-400" />
+              <p className="mt-4 font-semibold text-white">{item.label}</p>
+              <p className="mt-1 text-sm text-white/45">{item.desc}</p>
             </Link>
           );
         })}
-      </div>
-
-      {/* Departments */}
-      <div className="rounded-2xl border border-white/8 bg-white/5 p-5">
-        <h3 className="mb-4 font-display font-semibold text-white">Headcount by Department</h3>
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {departments.map((dept) => (
-            <div key={dept.name} className="flex items-center gap-3 rounded-xl border border-white/8 bg-white/5 px-4 py-3">
-              <div className={`h-10 w-1 flex-shrink-0 rounded-full ${dept.color}`} />
-              <div className="flex-1 min-w-0">
-                <p className="font-semibold text-white text-sm truncate">{dept.name}</p>
-                <p className="text-xs text-white/40">{dept.shift}</p>
-              </div>
-              <span className="font-display text-lg font-bold text-white">{dept.headcount}</span>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Shift breakdown */}
-      <div className="grid gap-4 sm:grid-cols-2">
-        <div className="rounded-2xl border border-white/8 bg-white/5 p-5">
-          <div className="mb-3 flex items-center gap-2">
-            <div className="h-2.5 w-2.5 rounded-full bg-orange" />
-            <h4 className="font-semibold text-white">Day Shift</h4>
-          </div>
-          <p className="font-display text-3xl font-bold text-white">26</p>
-          <p className="mt-1 text-xs text-white/40">employees assigned · 06:00 – 18:00</p>
-          <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-white/10">
-            <div className="h-full w-[54%] rounded-full bg-orange" />
-          </div>
-        </div>
-        <div className="rounded-2xl border border-white/8 bg-white/5 p-5">
-          <div className="mb-3 flex items-center gap-2">
-            <div className="h-2.5 w-2.5 rounded-full bg-indigo-400" />
-            <h4 className="font-semibold text-white">Night Shift</h4>
-          </div>
-          <p className="font-display text-3xl font-bold text-white">17</p>
-          <p className="mt-1 text-xs text-white/40">employees assigned · 18:00 – 06:00</p>
-          <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-white/10">
-            <div className="h-full w-[35%] rounded-full bg-indigo-400" />
-          </div>
-        </div>
-      </div>
-
-      {/* Recent payroll */}
-      <div className="rounded-2xl border border-white/8 bg-white/5">
-        <div className="flex items-center justify-between border-b border-white/8 px-5 py-4">
-          <h3 className="font-display font-semibold text-white">Payroll — Current Period</h3>
-          <div className="flex items-center gap-2">
-            <TrendingUp className="h-4 w-4 text-emerald-400" />
-            <span className="text-xs text-emerald-400">$28,400 total</span>
-          </div>
-        </div>
-        <div className="divide-y divide-white/5">
-          {recentPayroll.map((record) => (
-            <div key={record.employee} className="flex items-center justify-between px-5 py-4 transition hover:bg-white/5">
-              <div>
-                <p className="font-semibold text-white">{record.employee}</p>
-                <p className="text-xs text-white/40">{record.role}</p>
-              </div>
-              <div className="flex items-center gap-4">
-                <span className={`rounded-full px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
-                  record.status === 'APPROVED' ? 'bg-emerald-500/15 text-emerald-400' : 'bg-amber-500/15 text-amber-400'
-                }`}>
-                  {record.status}
-                </span>
-                <div className="text-right">
-                  <p className="text-sm font-semibold text-white">{record.net}</p>
-                  <p className="text-xs text-white/30">net · basic {record.basic}</p>
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
       </div>
     </div>
   );

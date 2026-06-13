@@ -1,26 +1,14 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 
-import { getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
-import { createServiceRoleClient } from '@/lib/supabase/server';
+import { notificationError, notificationResponse, requireNotificationAuth } from '@/app/api/notifications/_helpers';
+import { countUnreadNotifications } from '@/lib/notifications-server';
 
-export async function GET(_request: NextRequest) {
-  const ctx = await getAuthContext();
-  if (!ctx) return unauthorized();
-
-  const service = createServiceRoleClient();
-
+export async function GET(request: NextRequest) {
+  const auth = await requireNotificationAuth(request);
+  if ('error' in auth) return auth.error;
   try {
-    const { count, error } = await service
-      .schema('icecream_erp')
-      .from('notifications')
-      .select('*', { count: 'exact', head: true })
-      .eq('user_profile_id', ctx.userId)
-      .eq('is_read', false);
-
-    if (error) throw error;
-    return NextResponse.json({ count: count ?? 0 });
-  } catch (err) {
-    const message = err instanceof Error ? err.message : 'Internal server error';
-    return serverError(message);
+    return notificationResponse({ count: await countUnreadNotifications(auth.ctx) });
+  } catch (error) {
+    return notificationError(error);
   }
 }

@@ -1,12 +1,17 @@
 'use client';
 
 import Link from 'next/link';
-import { Boxes, ClockAlert, MoveRight, Package2, Rows3, Warehouse } from 'lucide-react';
+import { Boxes, ChartColumnBig, ClockAlert, ClipboardCheck, LayoutDashboard, MoveRight, Package2, Rows3, ShieldAlert, Warehouse } from 'lucide-react';
 import { usePathname } from 'next/navigation';
 
 import { cn } from '@/lib/utils';
 
 const navLinks = [
+  {
+    href: '/inventory/dashboard',
+    label: 'Dashboard',
+    icon: LayoutDashboard
+  },
   {
     href: '/inventory/items',
     label: 'Items',
@@ -31,6 +36,21 @@ const navLinks = [
     href: '/inventory/expiring',
     label: 'Expiring',
     icon: ClockAlert
+  },
+  {
+    href: '/inventory/supplier-shortages',
+    label: 'Shortages',
+    icon: ShieldAlert
+  },
+  {
+    href: '/inventory/approvals',
+    label: 'Approvals',
+    icon: ClipboardCheck
+  },
+  {
+    href: '/inventory/reports',
+    label: 'Reports',
+    icon: ChartColumnBig
   },
   {
     href: '/inventory/warehouses',

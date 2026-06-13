@@ -7,7 +7,22 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test:inventory": "tsc --outDir .tmp-tests tests/inventory-helpers.test.ts src/lib/inventory.ts --module commonjs --target es2020 --esModuleInterop --skipLibCheck && node --test .tmp-tests/tests/inventory-helpers.test.js",
+    "test:procurement": "tsc --outDir .tmp-tests tests/procurement-helpers.test.ts src/lib/procurement.ts src/lib/inventory.ts --module commonjs --target es2020 --esModuleInterop --skipLibCheck && node --test .tmp-tests/tests/procurement-helpers.test.js",
+    "test:production": "tsc --outDir .tmp-tests tests/production-helpers.test.ts src/lib/production.ts src/lib/inventory.ts --module commonjs --target es2020 --esModuleInterop --skipLibCheck && node --test .tmp-tests/tests/production-helpers.test.js",
+    "test:sales": "tsc --outDir .tmp-tests tests/sales-helpers.test.ts src/lib/sales.ts src/lib/inventory.ts --module commonjs --target es2020 --esModuleInterop --skipLibCheck && node --test .tmp-tests/tests/sales-helpers.test.js",
+    "test:branches": "tsc --outDir .tmp-tests tests/branch-helpers.test.ts src/lib/branches.ts src/lib/inventory.ts --module commonjs --target es2020 --esModuleInterop --skipLibCheck && node --test .tmp-tests/tests/branch-helpers.test.js",
+    "test:finance": "tsc --outDir .tmp-tests tests/finance-helpers.test.ts src/lib/finance.ts src/lib/inventory.ts --module commonjs --target es2020 --esModuleInterop --skipLibCheck && node --test .tmp-tests/tests/finance-helpers.test.js",
+    "test:quality": "tsc --outDir .tmp-tests tests/quality-helpers.test.ts src/lib/quality.ts src/lib/inventory.ts --module commonjs --target es2020 --esModuleInterop --skipLibCheck && node --test .tmp-tests/tests/quality-helpers.test.js",
+    "test:security": "tsc --outDir .tmp-tests tests/security-helpers.test.ts src/lib/security.ts --module commonjs --target es2020 --esModuleInterop --skipLibCheck && node --test .tmp-tests/tests/security-helpers.test.js",
+    "test:reports": "tsc --outDir .tmp-tests tests/reporting-helpers.test.ts src/lib/reporting.ts --module commonjs --target es2020 --esModuleInterop --skipLibCheck && node --test .tmp-tests/tests/reporting-helpers.test.js",
+    "test:hr": "tsc --outDir .tmp-tests tests/hr-helpers.test.ts src/lib/hr.ts --module commonjs --target es2020 --esModuleInterop --skipLibCheck && node --test .tmp-tests/tests/hr-helpers.test.js",
+    "test:settings": "tsc --outDir .tmp-tests tests/settings-helpers.test.ts src/lib/settings.ts --module commonjs --target es2020 --esModuleInterop --skipLibCheck && node --test .tmp-tests/tests/settings-helpers.test.js",
+    "test:workflow": "tsc --outDir .tmp-tests tests/workflow-helpers.test.ts src/lib/workflow.ts --module commonjs --target es2020 --esModuleInterop --skipLibCheck && node --test .tmp-tests/tests/workflow-helpers.test.js",
+    "test:notifications": "tsc --outDir .tmp-tests tests/notifications-helpers.test.ts src/lib/notifications.ts --module commonjs --target es2020 --esModuleInterop --skipLibCheck && node --test .tmp-tests/tests/notifications-helpers.test.js",
+    "test:admin": "tsc --outDir .tmp-tests tests/admin-readiness-helpers.test.ts src/lib/admin-readiness.ts src/lib/settings.ts --module commonjs --target es2020 --esModuleInterop --skipLibCheck && node --test .tmp-tests/tests/admin-readiness-helpers.test.js",
+    "test:testing": "tsc --outDir .tmp-tests tests/testing-helpers.test.ts src/lib/testing.ts --module commonjs --target es2020 --esModuleInterop --skipLibCheck && node --test .tmp-tests/tests/testing-helpers.test.js"
   },
   "dependencies": {
     "@radix-ui/react-accordion": "^1.2.11",
