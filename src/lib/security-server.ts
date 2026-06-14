@@ -1,6 +1,6 @@
 import { createHash, createHmac, randomBytes } from 'crypto';
 
-import { ROLE_PERMISSIONS } from '@/lib/auth-roles';
+import { ROLE_PERMISSIONS, ROLES } from '@/lib/auth-roles';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 import {
   getLockoutExpiry,
@@ -218,6 +218,18 @@ function getLegacyPermissions(role: string) {
   return ROLE_PERMISSIONS[role] ?? [];
 }
 
+function getFallbackResolvedRoles(legacyRole: string) {
+  const matchedRole = ROLES.find((role) => role.id === legacyRole) ?? ROLES.find((role) => role.id === 'staff');
+  if (!matchedRole) return [] as ResolvedRole[];
+
+  return [{
+    id: matchedRole.id,
+    name: matchedRole.name,
+    description: matchedRole.description,
+    isSystemRole: true,
+  }] satisfies ResolvedRole[];
+}
+
 async function resolveRolesForUser(userProfileId: string) {
   const service = securityService();
 
@@ -332,13 +344,14 @@ export async function findSecurityUserProfileByWorkId(workId: string) {
 }
 
 export async function buildSecurityContextProfile(profile: SecurityUserProfile) {
-  const [roles, branchAssignments, warehouseAssignments, settings] = await Promise.all([
+  const [resolvedRoles, branchAssignments, warehouseAssignments, settings] = await Promise.all([
     resolveRolesForUser(profile.id),
     resolveAssignments('user_branch_assignments', profile.id).catch(() => [] as string[]),
     resolveAssignments('user_warehouse_assignments', profile.id).catch(() => [] as string[]),
     getSystemSecuritySettings(),
   ]);
 
+  const roles = resolvedRoles.length > 0 ? resolvedRoles : getFallbackResolvedRoles(profile.role);
   const roleIds = roles.map((role) => role.id);
   const permissions = await resolvePermissionsForRoles(roleIds);
 
