@@ -68,6 +68,15 @@ function securityService() {
   return createServiceRoleClient().schema('icecream_erp');
 }
 
+async function getFallbackOrganizationId() {
+  const service = securityService();
+  try {
+    const { data } = await service.from('organizations').select('id').limit(1).maybeSingle();
+    if (data?.id) return String(data.id);
+  } catch {}
+  return 'absolute-ice-cream';
+}
+
 function passwordResetSecret() {
   return (
     process.env.PASSWORD_RESET_SECRET ||
@@ -239,7 +248,7 @@ async function resolveAssignments(table: 'user_branch_assignments' | 'user_wareh
     .filter((value): value is string => Boolean(value));
 }
 
-function normalizeProfileRow(row: Record<string, unknown>): SecurityUserProfile {
+function normalizeProfileRow(row: Record<string, unknown>, organizationId: string): SecurityUserProfile {
   return {
     id: String(row.id),
     userAccountId: row.user_account_id ? String(row.user_account_id) : null,
@@ -251,7 +260,7 @@ function normalizeProfileRow(row: Record<string, unknown>): SecurityUserProfile 
     workId: String(row.work_id ?? ''),
     status: normalizeUserStatus(String(row.status ?? 'ACTIVE')),
     branchId: row.branch_id ? String(row.branch_id) : null,
-    organizationId: String(row.organization_id ?? 'absolute-ice-cream'),
+    organizationId,
     role: String(row.role ?? 'staff'),
     failedLoginAttempts: Number(row.failed_login_attempts ?? 0),
     lockedUntil: row.locked_until ? String(row.locked_until) : null,
@@ -261,28 +270,30 @@ function normalizeProfileRow(row: Record<string, unknown>): SecurityUserProfile 
 
 export async function findSecurityUserProfileByAuthId(authId: string) {
   const service = securityService();
+  const organizationId = await getFallbackOrganizationId();
   const { data } = await service
     .from('users')
-    .select('id, auth_id, email, full_name, first_name, last_name, work_id, status, branch_id, organization_id, role, failed_login_attempts, locked_until, last_login, user_account_id')
+    .select('id, auth_id, email, full_name, first_name, last_name, work_id, status, branch_id, role, failed_login_attempts, locked_until, last_login, user_account_id')
     .eq('auth_id', authId)
     .is('deleted_at', null)
     .maybeSingle();
 
   if (!data) return null;
-  return normalizeProfileRow(data as Record<string, unknown>);
+  return normalizeProfileRow(data as Record<string, unknown>, organizationId);
 }
 
 export async function findSecurityUserProfileByWorkId(workId: string) {
   const service = securityService();
+  const organizationId = await getFallbackOrganizationId();
   const { data } = await service
     .from('users')
-    .select('id, auth_id, email, full_name, first_name, last_name, work_id, status, branch_id, organization_id, role, failed_login_attempts, locked_until, last_login, user_account_id')
+    .select('id, auth_id, email, full_name, first_name, last_name, work_id, status, branch_id, role, failed_login_attempts, locked_until, last_login, user_account_id')
     .ilike('work_id', workId)
     .is('deleted_at', null)
     .maybeSingle();
 
   if (!data) return null;
-  return normalizeProfileRow(data as Record<string, unknown>);
+  return normalizeProfileRow(data as Record<string, unknown>, organizationId);
 }
 
 export async function buildSecurityContextProfile(profile: SecurityUserProfile) {

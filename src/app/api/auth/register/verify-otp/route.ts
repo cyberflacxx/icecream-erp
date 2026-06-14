@@ -86,12 +86,11 @@ export async function POST(request: NextRequest) {
       full_name: fullName,
       id_number: payload.idNumber,
       last_name: payload.lastName,
-      organization_id: organizationId,
       role: role.legacyRole,
       status: 'active',
       work_id: workId,
     })
-    .select('id, organization_id')
+    .select('id')
     .single();
 
   if (profileError || !profile) {
@@ -129,7 +128,7 @@ export async function POST(request: NextRequest) {
 
   await recordSecurityEvent({
     eventType: 'REGISTRATION_COMPLETED',
-    organizationId: profile.organization_id ? String(profile.organization_id) : null,
+    organizationId,
     userProfileId: String(profile.id),
     status: 'SUCCESS',
     ipAddress: request.headers.get('x-forwarded-for'),
