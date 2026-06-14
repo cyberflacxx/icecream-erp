@@ -79,6 +79,31 @@ async function selectFirstAvailableUserColumns(candidates: string[]) {
   return candidates[candidates.length - 1] ?? 'id';
 }
 
+async function findUserRowBy(
+  field: 'auth_id' | 'work_id',
+  value: string,
+  selectClause: string,
+) {
+  const service = securityService();
+
+  const withDeletedAtFilter = field === 'auth_id'
+    ? service.from('users').select(selectClause).eq('auth_id', value).is('deleted_at', null).maybeSingle()
+    : service.from('users').select(selectClause).ilike('work_id', value).is('deleted_at', null).maybeSingle();
+
+  const { data, error } = await withDeletedAtFilter;
+  if (!error) return data;
+
+  if (!error.message.toLowerCase().includes('deleted_at')) {
+    return null;
+  }
+
+  const withoutDeletedAtFilter = field === 'auth_id'
+    ? service.from('users').select(selectClause).eq('auth_id', value).maybeSingle()
+    : service.from('users').select(selectClause).ilike('work_id', value).maybeSingle();
+
+  return (await withoutDeletedAtFilter).data ?? null;
+}
+
 async function getFallbackOrganizationId() {
   const service = securityService();
   try {
@@ -281,38 +306,26 @@ function normalizeProfileRow(row: Record<string, unknown>, organizationId: strin
 }
 
 export async function findSecurityUserProfileByAuthId(authId: string) {
-  const service = securityService();
   const organizationId = await getFallbackOrganizationId();
   const selectClause = await selectFirstAvailableUserColumns([
     'id, auth_id, email, full_name, first_name, last_name, work_id, status, branch_id, role, failed_login_attempts, locked_until, last_login, user_account_id',
     'id, auth_id, email, full_name, first_name, last_name, work_id, status, branch_id, role, last_login, user_account_id',
     'id, auth_id, email, full_name, first_name, last_name, work_id, status, branch_id, role',
   ]);
-  const { data } = await service
-    .from('users')
-    .select(selectClause)
-    .eq('auth_id', authId)
-    .is('deleted_at', null)
-    .maybeSingle();
+  const data = await findUserRowBy('auth_id', authId, selectClause);
 
   if (!data) return null;
   return normalizeProfileRow(data as Record<string, unknown>, organizationId);
 }
 
 export async function findSecurityUserProfileByWorkId(workId: string) {
-  const service = securityService();
   const organizationId = await getFallbackOrganizationId();
   const selectClause = await selectFirstAvailableUserColumns([
     'id, auth_id, email, full_name, first_name, last_name, work_id, status, branch_id, role, failed_login_attempts, locked_until, last_login, user_account_id',
     'id, auth_id, email, full_name, first_name, last_name, work_id, status, branch_id, role, last_login, user_account_id',
     'id, auth_id, email, full_name, first_name, last_name, work_id, status, branch_id, role',
   ]);
-  const { data } = await service
-    .from('users')
-    .select(selectClause)
-    .ilike('work_id', workId)
-    .is('deleted_at', null)
-    .maybeSingle();
+  const data = await findUserRowBy('work_id', workId, selectClause);
 
   if (!data) return null;
   return normalizeProfileRow(data as Record<string, unknown>, organizationId);
