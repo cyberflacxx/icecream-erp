@@ -700,6 +700,33 @@ async function ensureBranchShiftCloses(adminUserId, branches) {
   if (rows.length > 0) await insertRows('branch_shift_closes', rows);
 }
 
+async function ensureBranchSales(organizationId, branches, items) {
+  const finishedGoods = items.filter((item) => item.type === 'FINISHED_GOOD').slice(0, 4);
+  if (finishedGoods.length === 0) return;
+  const existing = await selectAll('branch_sales');
+  const existingKeys = new Set(existing.map((row) => `${row.branch_id}:${row.sale_date}:${row.item_id}`));
+  const rows = [];
+  for (let index = 0; index < 10; index += 1) {
+    const branch = branches[index % branches.length];
+    const item = finishedGoods[index % finishedGoods.length];
+    const saleDate = isoDate(-index);
+    const key = `${branch.id}:${saleDate}:${item.id}`;
+    if (existingKeys.has(key)) continue;
+    rows.push({
+      organization_id: organizationId,
+      branch_id: branch.id,
+      sale_date: saleDate,
+      shift: index % 2 === 0 ? 'DAY' : 'NIGHT',
+      item_id: item.id,
+      quantity: 12 + index,
+      unit_price: Number(item.selling_price ?? 0),
+      total_amount: (12 + index) * Number(item.selling_price ?? 0),
+      payment_method: index % 3 === 0 ? 'CARD' : index % 2 === 0 ? 'CASH' : 'ECOCASH',
+    });
+  }
+  if (rows.length > 0) await insertRows('branch_sales', rows);
+}
+
 async function runStep(name, operation) {
   try {
     const result = await operation();
@@ -810,6 +837,7 @@ async function main() {
   stepResults.push(await runStep('invoices', () => ensureInvoices(organization.id, adminUserId, master.customers, salesOrders)));
   stepResults.push(await runStep('budgets', () => ensureBudgets(organization.id, adminUserId, master.branches, master.accounts)));
   stepResults.push(await runStep('branch_shift_closes', () => ensureBranchShiftCloses(adminUserId, master.branches)));
+  stepResults.push(await runStep('branch_sales', () => ensureBranchSales(organization.id, master.branches, master.items)));
   const demoUsers = await ensureDemoUsers(master.branches);
 
   const summaryTables = [
@@ -838,6 +866,7 @@ async function main() {
     'budgets',
     'budget_lines',
     'branch_shift_closes',
+    'branch_sales',
   ];
 
   const counts = {};

@@ -53,7 +53,15 @@ export function DashboardOverview() {
   const { currentUser, isLoading } = useUserContext();
   const dashboardQuery = useDashboardMetrics();
   const dashboardData = dashboardQuery.data as Record<string, unknown> | undefined;
-  const role = String(dashboardData?.role ?? '');
+  const rawRole = String(dashboardData?.role ?? '');
+  const role =
+    rawRole === 'super_admin'
+      ? 'system_admin'
+      : rawRole === 'branch_manager'
+        ? 'branch_manager'
+        : rawRole === 'manager'
+          ? 'operations_specialist'
+          : rawRole;
   const branchId = currentUser?.branch?.id;
   const realtimeHandlers = useMemo(
     () => ({
@@ -108,7 +116,7 @@ export function DashboardOverview() {
 
   const roleLabel =
     role === 'system_admin'
-      ? 'System Admin'
+      ? 'Super Admin'
       : role === 'production_manager'
         ? 'Production Manager'
         : role === 'branch_manager'
@@ -176,7 +184,7 @@ export function DashboardOverview() {
                   <XAxis dataKey="day" stroke="rgba(255,255,255,0.3)" fontSize={12} />
                   <YAxis stroke="rgba(255,255,255,0.3)" fontSize={12} />
                   <Tooltip />
-                  <Bar dataKey="output" fill="#F97316" radius={[10, 10, 0, 0]} />
+                  <Bar dataKey="total" fill="#F97316" radius={[10, 10, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </div>

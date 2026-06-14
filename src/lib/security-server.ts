@@ -34,6 +34,8 @@ export interface SecurityUserProfile {
   userAccountId: string | null;
   authId: string | null;
   email: string;
+  phone: string | null;
+  avatarUrl: string | null;
   fullName: string;
   firstName: string;
   lastName: string;
@@ -303,6 +305,8 @@ function normalizeProfileRow(row: Record<string, unknown>, organizationId: strin
     userAccountId: row.user_account_id ? String(row.user_account_id) : null,
     authId: row.auth_id ? String(row.auth_id) : null,
     email: String(row.email ?? ''),
+    phone: row.phone ? String(row.phone) : null,
+    avatarUrl: row.avatar_url ? String(row.avatar_url) : null,
     fullName: String(row.full_name ?? `${row.first_name ?? ''} ${row.last_name ?? ''}`.trim()),
     firstName: String(row.first_name ?? ''),
     lastName: String(row.last_name ?? ''),
@@ -320,9 +324,9 @@ function normalizeProfileRow(row: Record<string, unknown>, organizationId: strin
 export async function findSecurityUserProfileByAuthId(authId: string) {
   const organizationId = await getFallbackOrganizationId();
   const selectClause = await selectFirstAvailableUserColumns([
-    'id, auth_id, email, full_name, first_name, last_name, work_id, status, branch_id, role, failed_login_attempts, locked_until, last_login, user_account_id',
-    'id, auth_id, email, full_name, first_name, last_name, work_id, status, branch_id, role, last_login, user_account_id',
-    'id, auth_id, email, full_name, first_name, last_name, work_id, status, branch_id, role',
+    'id, auth_id, email, phone, avatar_url, full_name, first_name, last_name, work_id, status, branch_id, role, failed_login_attempts, locked_until, last_login, user_account_id',
+    'id, auth_id, email, phone, avatar_url, full_name, first_name, last_name, work_id, status, branch_id, role, last_login, user_account_id',
+    'id, auth_id, email, phone, avatar_url, full_name, first_name, last_name, work_id, status, branch_id, role',
   ]);
   const data = await findUserRowBy('auth_id', authId, selectClause);
 
@@ -333,9 +337,9 @@ export async function findSecurityUserProfileByAuthId(authId: string) {
 export async function findSecurityUserProfileByWorkId(workId: string) {
   const organizationId = await getFallbackOrganizationId();
   const selectClause = await selectFirstAvailableUserColumns([
-    'id, auth_id, email, full_name, first_name, last_name, work_id, status, branch_id, role, failed_login_attempts, locked_until, last_login, user_account_id',
-    'id, auth_id, email, full_name, first_name, last_name, work_id, status, branch_id, role, last_login, user_account_id',
-    'id, auth_id, email, full_name, first_name, last_name, work_id, status, branch_id, role',
+    'id, auth_id, email, phone, avatar_url, full_name, first_name, last_name, work_id, status, branch_id, role, failed_login_attempts, locked_until, last_login, user_account_id',
+    'id, auth_id, email, phone, avatar_url, full_name, first_name, last_name, work_id, status, branch_id, role, last_login, user_account_id',
+    'id, auth_id, email, phone, avatar_url, full_name, first_name, last_name, work_id, status, branch_id, role',
   ]);
   const data = await findUserRowBy('work_id', workId, selectClause);
 

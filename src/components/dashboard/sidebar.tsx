@@ -180,7 +180,11 @@ const navItems = [
 export function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
-  const { currentUser } = useUserContext();
+  const { currentUser, isLoading } = useUserContext();
+  const roleLabel =
+    currentUser?.roles?.map((role) => role.name).join(' | ') ||
+    currentUser?.profile?.role?.replace(/_/g, ' ') ||
+    null;
 
   return (
     <aside className="flex h-full flex-col overflow-hidden bg-[#0D0500]">
@@ -208,9 +212,16 @@ export function Sidebar() {
           <div className="mt-1.5 flex items-center gap-1.5">
             <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
             <p className="truncate text-[10px] text-white/60">
-              {currentUser?.roles?.map((role) => role.name).join(' | ') || 'No role assigned'}
+              {isLoading ? 'Loading role...' : roleLabel ?? 'No role assigned'}
             </p>
           </div>
+          <Link
+            href="/dashboard"
+            className="mt-3 inline-flex items-center gap-2 rounded-lg bg-orange px-3 py-2 text-[11px] font-semibold text-white transition hover:bg-orange/90"
+          >
+            <LayoutDashboard className="h-3.5 w-3.5" />
+            Open dashboard
+          </Link>
         </div>
       </div>
 

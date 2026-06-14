@@ -35,8 +35,8 @@ export async function GET(request: Request) {
       lastName: resolved.lastName,
       fullName: resolved.fullName,
       email: resolved.email,
-      phone: null,
-      avatarUrl: null,
+      phone: profile.phone ?? null,
+      avatarUrl: profile.avatarUrl ?? null,
       branchId: resolved.branchId,
       workId: resolved.workId,
       status: resolved.status,
@@ -51,7 +51,7 @@ export async function PATCH(request: Request) {
   if (!ctx) return unauthorized();
 
   const body = (await request.json()) as Record<string, unknown>;
-  const allowed = ['first_name', 'last_name', 'full_name', 'phone'];
+  const allowed = ['first_name', 'last_name', 'full_name', 'phone', 'avatar_url'];
   const updates: Record<string, unknown> = {};
   for (const key of allowed) {
     if (key in body) {

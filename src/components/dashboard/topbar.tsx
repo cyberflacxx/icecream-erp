@@ -97,6 +97,12 @@ export function Topbar({ onOpenSidebar }: TopbarProps) {
             <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-brown/40 dark:text-white/30">Manufacturing ERP</p>
             <h2 className="text-base font-bold text-brown dark:text-white">{pageTitle}</h2>
           </div>
+          <Link
+            href="/dashboard"
+            className="hidden rounded-lg border border-brown/15 bg-brown/5 px-3 py-2 text-xs font-semibold text-brown transition hover:bg-brown/10 dark:border-white/10 dark:bg-white/5 dark:text-white dark:hover:bg-white/10 md:inline-flex"
+          >
+            Dashboard
+          </Link>
         </div>
 
         <div className="flex items-center gap-2">

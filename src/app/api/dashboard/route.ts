@@ -3,6 +3,19 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
+function isMissingColumnError(error: unknown, table: string, columnName: string) {
+  const message =
+    error instanceof Error
+      ? error.message
+      : typeof error === 'object' && error !== null && 'message' in error
+        ? String((error as { message?: unknown }).message ?? '')
+        : '';
+  return message.includes(`column ${table}.${columnName} does not exist`);
+}
+
+type QueryResultRow = Record<string, unknown>;
+type QueryResult = { data: QueryResultRow[] | null; error: { message: string } | null };
+
 export async function GET(_request: NextRequest) {
   const ctx = await getAuthContext();
   if (!ctx) return unauthorized();
@@ -29,7 +42,18 @@ export async function GET(_request: NextRequest) {
       .gte('sale_date', `${startDate}T00:00:00.000Z`)
       .lte('sale_date', `${endDate}T23:59:59.999Z`);
     if (branchFilter) salesQuery = salesQuery.eq('branch_id', branchFilter);
-    const { data: salesRows } = await salesQuery;
+    let salesResult = await salesQuery;
+    if (salesResult.error && isMissingColumnError(salesResult.error, 'branch_sales', 'deleted_at')) {
+      let fallbackQuery = service
+        .schema('icecream_erp')
+        .from('branch_sales')
+        .select('sale_date, total_amount, branch_id')
+        .gte('sale_date', startDate)
+        .lte('sale_date', endDate);
+      if (branchFilter) fallbackQuery = fallbackQuery.eq('branch_id', branchFilter);
+      salesResult = await fallbackQuery;
+    }
+    const salesRows = salesResult.data ?? [];
 
     const salesByDay = new Map<string, number>();
     let totalSales = 0;
@@ -55,22 +79,46 @@ export async function GET(_request: NextRequest) {
       if (whIds.length > 0) batchQuery = batchQuery.in('warehouse_id', whIds);
     }
 
-    const { data: batches } = await batchQuery;
+    let batchResult: QueryResult = await batchQuery;
+    if (
+      batchResult.error &&
+      (
+        isMissingColumnError(batchResult.error, 'production_batches', 'production_date') ||
+        isMissingColumnError(batchResult.error, 'production_batches', 'actual_output') ||
+        isMissingColumnError(batchResult.error, 'production_batches', 'efficiency_percentage') ||
+        isMissingColumnError(batchResult.error, 'production_batches', 'wastage_quantity') ||
+        isMissingColumnError(batchResult.error, 'production_batches', 'deleted_at')
+      )
+    ) {
+      let fallbackQuery = service
+        .schema('icecream_erp')
+        .from('production_batches')
+        .select('planned_date, status, actual_qty, yield_percent, wastage_qty, warehouse_id')
+        .gte('planned_date', startDate)
+        .lte('planned_date', endDate);
+      if (branchFilter) {
+        const { data: whs } = await service.schema('icecream_erp').from('warehouses').select('id').eq('branch_id', branchFilter);
+        const whIds = (whs ?? []).map((w: { id: string }) => w.id);
+        if (whIds.length > 0) fallbackQuery = fallbackQuery.in('warehouse_id', whIds);
+      }
+      batchResult = await fallbackQuery;
+    }
+    const batches = batchResult.data ?? [];
     const productionByDay = new Map<string, number>();
     let totalOutput = 0;
     let efficiencySum = 0;
     let wastageSum = 0;
     let completedBatches = 0;
     for (const b of batches ?? []) {
-      const day = b.production_date.slice(0, 10);
-      const out = Number(b.actual_output ?? 0);
+      const day = String((b as Record<string, unknown>).production_date ?? (b as Record<string, unknown>).planned_date ?? '').slice(0, 10);
+      const out = Number((b as Record<string, unknown>).actual_output ?? (b as Record<string, unknown>).actual_qty ?? 0);
       productionByDay.set(day, (productionByDay.get(day) ?? 0) + out);
       totalOutput += out;
-      efficiencySum += Number(b.efficiency_percentage ?? 0);
-      wastageSum += Number(b.wastage_quantity ?? 0);
+      efficiencySum += Number((b as Record<string, unknown>).efficiency_percentage ?? (b as Record<string, unknown>).yield_percent ?? 0);
+      wastageSum += Number((b as Record<string, unknown>).wastage_quantity ?? (b as Record<string, unknown>).wastage_qty ?? 0);
       if (b.status === 'COMPLETED') completedBatches++;
     }
-    const batchCount = batches?.length ?? 0;
+    const batchCount = batches.length;
 
     // Open production batches
     let openBatchQuery = service
@@ -88,15 +136,48 @@ export async function GET(_request: NextRequest) {
       if (whIds.length > 0) openBatchQuery = openBatchQuery.in('warehouse_id', whIds);
     }
 
-    const { data: openBatches } = await openBatchQuery;
+    let openBatchResult: QueryResult = await openBatchQuery;
+    if (
+      openBatchResult.error &&
+      (
+        isMissingColumnError(openBatchResult.error, 'production_batches', 'production_date') ||
+        isMissingColumnError(openBatchResult.error, 'production_batches', 'planned_quantity') ||
+        isMissingColumnError(openBatchResult.error, 'production_batches', 'actual_output') ||
+        isMissingColumnError(openBatchResult.error, 'production_batches', 'deleted_at')
+      )
+    ) {
+      let fallbackQuery = service
+        .schema('icecream_erp')
+        .from('production_batches')
+        .select('id, batch_number, status, planned_date, planned_qty, actual_qty, shift, warehouse_id')
+        .in('status', ['PLANNED', 'IN_PROGRESS', 'QUALITY_CHECK'])
+        .order('planned_date', { ascending: false })
+        .limit(5);
+      if (branchFilter) {
+        const { data: whs } = await service.schema('icecream_erp').from('warehouses').select('id').eq('branch_id', branchFilter);
+        const whIds = (whs ?? []).map((w: { id: string }) => w.id);
+        if (whIds.length > 0) fallbackQuery = fallbackQuery.in('warehouse_id', whIds);
+      }
+      openBatchResult = await fallbackQuery;
+    }
+    const openBatches = openBatchResult.data ?? [];
 
     // Low stock items
-    const { data: lowStock } = await service
+    let lowStockResult: QueryResult = await service
       .schema('icecream_erp')
       .from('stock_balances')
       .select('quantity_available, items!inner(name, reorder_level)')
       .not('items.reorder_level', 'is', null)
       .limit(5);
+    if (lowStockResult.error && isMissingColumnError(lowStockResult.error, 'stock_balances', 'quantity_available')) {
+      lowStockResult = await service
+        .schema('icecream_erp')
+        .from('stock_balances')
+        .select('quantity, items!inner(name, reorder_level)')
+        .not('items.reorder_level', 'is', null)
+        .limit(5);
+    }
+    const lowStock = lowStockResult.data ?? [];
 
     const lowStockTop5 = (lowStock ?? [])
       .map((row: Record<string, unknown>) => {
@@ -104,7 +185,7 @@ export async function GET(_request: NextRequest) {
         const item = Array.isArray(items) ? items[0] : items;
         return {
           name: String(item?.name ?? ''),
-          currentStock: Number(row.quantity_available ?? 0),
+          currentStock: Number(row.quantity_available ?? row.quantity ?? 0),
           reorderPoint: Number(item?.reorder_level ?? 0),
         };
       })
@@ -143,9 +224,10 @@ export async function GET(_request: NextRequest) {
         id: b.id,
         batchNumber: b.batch_number,
         status: b.status,
-        productionDate: b.production_date,
-        plannedQuantity: Number(b.planned_quantity ?? 0),
-        actualQuantity: b.actual_output !== null ? Number(b.actual_output) : null,
+        productionDate: b.production_date ?? b.planned_date,
+        plannedQuantity: Number(b.planned_quantity ?? b.planned_qty ?? 0),
+        actualQuantity: b.actual_output !== null && b.actual_output !== undefined ? Number(b.actual_output) : (b.actual_qty !== null && b.actual_qty !== undefined ? Number(b.actual_qty) : null),
+        shift: b.shift ?? null,
       })),
       recentAuditLogs: (recentAudit ?? []).map((log: Record<string, unknown>) => ({
         id: log.id,

@@ -116,8 +116,8 @@ export function deriveSupplierShortages(
 
     for (const row of items) {
       const item = asObject(row.items);
-      const orderedQuantity = toNumber(row.quantity_ordered);
-      const receivedQuantity = toNumber(row.quantity_received);
+      const orderedQuantity = toNumber(row.quantity_ordered ?? row.quantity);
+      const receivedQuantity = toNumber(row.quantity_received ?? row.received_qty);
       const shortageQuantity = Math.max(0, orderedQuantity - receivedQuantity);
 
       if (shortageQuantity <= 0) {
@@ -125,8 +125,8 @@ export function deriveSupplierShortages(
       }
 
       shortages.push({
-        expectedResolutionDate: order.expected_delivery_date
-          ? String(order.expected_delivery_date)
+        expectedResolutionDate: order.expected_delivery_date || order.expected_date
+          ? String(order.expected_delivery_date ?? order.expected_date)
           : null,
         itemCode: item?.code ? String(item.code) : null,
         itemId: String(row.item_id),
@@ -165,10 +165,10 @@ export function summarizeInventoryByType(
   };
 
   for (const row of rows) {
-    const quantityOnHand = toNumber(row.quantity_on_hand);
+    const quantityOnHand = toNumber(row.quantity_on_hand ?? row.quantity);
     const item = asObject(row.items);
-    const itemType = String(item?.item_type ?? '');
-    const unitCost = toNumber(item?.unit_cost);
+    const itemType = String(item?.item_type ?? item?.type ?? '');
+    const unitCost = toNumber(item?.unit_cost ?? item?.standard_cost);
     const value = quantityOnHand * unitCost;
 
     summary.totalStockValue += value;

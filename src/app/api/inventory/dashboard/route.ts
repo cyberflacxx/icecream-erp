@@ -4,6 +4,29 @@ import { can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib
 import { deriveSupplierShortages, summarizeInventoryByType, toNumber } from '@/lib/inventory';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
+function isMissingColumnError(error: unknown, table: string, columnName: string) {
+  const message =
+    error instanceof Error
+      ? error.message
+      : typeof error === 'object' && error !== null && 'message' in error
+        ? String((error as { message?: unknown }).message ?? '')
+        : '';
+  return message.includes(`column ${table}.${columnName} does not exist`);
+}
+
+function isMissingRelationError(error: unknown, relationName: string) {
+  const message =
+    error instanceof Error
+      ? error.message
+      : typeof error === 'object' && error !== null && 'message' in error
+        ? String((error as { message?: unknown }).message ?? '')
+        : '';
+  return (
+    message.includes(`relation "${relationName}" does not exist`) ||
+    message.includes(`Could not find the table 'icecream_erp.${relationName}'`)
+  );
+}
+
 export async function GET(request: NextRequest) {
   void request;
   const ctx = await getAuthContext();
@@ -28,7 +51,7 @@ export async function GET(request: NextRequest) {
     ] = await Promise.all([
       service
         .from('stock_balances')
-        .select('quantity_on_hand, items!item_id(item_type, unit_cost)'),
+        .select('quantity, items!item_id(type, standard_cost)'),
       service
         .from('stock_balances')
         .select('quantity_available, items!item_id(reorder_level)')
@@ -53,8 +76,8 @@ export async function GET(request: NextRequest) {
       service
         .from('purchase_orders')
         .select(
-          `id, po_number, expected_delivery_date, suppliers(id, name),
-           purchase_order_items(item_id, quantity_ordered, quantity_received, items(id, code, name))`,
+          `id, po_number, expected_date, suppliers(id, name),
+           purchase_order_items(item_id, quantity, received_qty, items(id, code, name))`,
         )
         .in('status', ['APPROVED', 'SENT_TO_SUPPLIER', 'PARTIAL_RECEIVED', 'FULLY_RECEIVED']),
       service
@@ -64,23 +87,40 @@ export async function GET(request: NextRequest) {
         .in('entity_type', ['stock_transfer', 'stock_adjustment', 'branch_transfer', 'goods_return']),
     ]);
 
-    if (balancesResult.error) return serverError(balancesResult.error.message);
-    if (lowStockResult.error) return serverError(lowStockResult.error.message);
-    if (expiringResult.error) return serverError(expiringResult.error.message);
+    const balancesFallbackNeeded = balancesResult.error && isMissingColumnError(balancesResult.error, 'items', 'item_type');
+    const effectiveBalancesData = balancesFallbackNeeded
+      ? (await service.from('stock_balances').select('quantity, items!item_id(type, standard_cost)')).data
+      : balancesResult.data;
+    const lowStockData = lowStockResult.error && isMissingColumnError(lowStockResult.error, 'stock_balances', 'quantity_available')
+      ? (await service.from('stock_balances').select('quantity, items!item_id(reorder_level)').not('items.reorder_level', 'is', null)).data
+      : lowStockResult.data;
+    if (
+      balancesResult.error &&
+      !(
+        isMissingColumnError(balancesResult.error, 'items', 'item_type')
+      )
+    ) return serverError(balancesResult.error.message);
+    if (lowStockResult.error && !isMissingColumnError(lowStockResult.error, 'stock_balances', 'quantity_available')) return serverError(lowStockResult.error.message);
+    const expiringCount = isMissingRelationError(expiringResult.error, 'inventory_batches')
+      ? 0
+      : (expiringResult.data?.length ?? 0);
+    if (expiringResult.error && !isMissingRelationError(expiringResult.error, 'inventory_batches')) return serverError(expiringResult.error.message);
     if (movementsResult.error) return serverError(movementsResult.error.message);
     if (purchaseOrdersResult.error) return serverError(purchaseOrdersResult.error.message);
     if (approvalsResult.error) return serverError(approvalsResult.error.message);
 
-    const lowStockCount = (lowStockResult.data ?? []).filter((row) => {
-      const item = Array.isArray(row.items) ? row.items[0] : row.items;
-      return toNumber(row.quantity_available) <= toNumber(item?.reorder_level) && toNumber(item?.reorder_level) > 0;
+    const lowStockCount = (lowStockData ?? []).filter((row) => {
+      const stockRow = row as Record<string, unknown>;
+      const relatedItems = stockRow.items as { reorder_level?: number } | Array<{ reorder_level?: number }> | null;
+      const item = Array.isArray(relatedItems) ? relatedItems[0] : relatedItems;
+      return toNumber(stockRow.quantity_available ?? stockRow.quantity) <= toNumber(item?.reorder_level) && toNumber(item?.reorder_level) > 0;
     }).length;
 
     const shortages = deriveSupplierShortages(
       (purchaseOrdersResult.data ?? []) as Array<Record<string, unknown>>,
     );
     const stockValueSummary = summarizeInventoryByType(
-      (balancesResult.data ?? []) as Array<Record<string, unknown>>,
+      (effectiveBalancesData ?? []) as Array<Record<string, unknown>>,
     );
 
     const todaysMovements = (movementsResult.data ?? []).map((movement) => {
@@ -101,7 +141,7 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({
       ...stockValueSummary,
-      expiringSoonCount: expiringResult.data?.length ?? 0,
+      expiringSoonCount: expiringCount,
       lowStockCount,
       pendingApprovalsCount: approvalsResult.count ?? 0,
       supplierShortageCount: shortages.length,
