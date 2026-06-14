@@ -16,6 +16,23 @@ export function hrService() {
   return createServiceRoleClient().schema('icecream_erp');
 }
 
+function getErrorMessage(error: unknown) {
+  if (error instanceof Error) return error.message;
+  if (typeof error === 'object' && error !== null && 'message' in error) {
+    return String((error as { message?: unknown }).message ?? '');
+  }
+  return '';
+}
+
+function isMissingColumnOrRelation(error: unknown, token: string) {
+  const message = getErrorMessage(error).toLowerCase();
+  return (
+    message.includes(`column ${token.toLowerCase()} does not exist`) ||
+    message.includes(`relation "${token.toLowerCase()}" does not exist`) ||
+    message.includes(`could not find the table 'icecream_erp.${token.toLowerCase()}'`)
+  );
+}
+
 export async function writeHrAuditLog(
   action: string,
   entityId: string,
@@ -117,46 +134,76 @@ export async function fetchHRDashboardMetrics(filters: {
   const service = hrService();
   const today = new Date().toISOString().slice(0, 10);
 
-  let employeeQuery = service
-    .from('employees')
-    .select('id, status, department, branch_id')
-    .eq('organization_id', filters.organizationId)
-    .is('deleted_at', null);
-  if (filters.branchId) {
-    employeeQuery = employeeQuery.eq('branch_id', filters.branchId);
+  const buildEmployeeQuery = () => {
+    let query = service
+      .from('employees')
+      .select('id, status, department, branch_id')
+      .eq('organization_id', filters.organizationId);
+    if (filters.branchId) {
+      query = query.eq('branch_id', filters.branchId);
+    }
+    return query;
+  };
+
+  const employeesPrimary = await buildEmployeeQuery().is('deleted_at', null);
+  const employeesRes =
+    employeesPrimary.error && isMissingColumnOrRelation(employeesPrimary.error, 'employees.deleted_at')
+      ? await buildEmployeeQuery()
+      : employeesPrimary;
+  if (employeesRes.error) throw employeesRes.error;
+
+  async function optionalRows(
+    queryFactory: () => PromiseLike<{ data: Array<Record<string, unknown>> | null; error: unknown }>,
+    missingToken: string,
+  ) {
+    const result = await queryFactory();
+    if (result.error) {
+      if (isMissingColumnOrRelation(result.error, missingToken)) {
+        return [] as Array<Record<string, unknown>>;
+      }
+      throw result.error;
+    }
+    return (result.data ?? []) as Array<Record<string, unknown>>;
   }
 
-  const [employeesRes, attendanceRes, schedulesRes, overtimeRes, payrollRes] = await Promise.all([
-    employeeQuery,
-    service
-      .from('hr_attendance_records')
-      .select('id, attendance_status, branch_id')
-      .eq('organization_id', filters.organizationId)
-      .eq('attendance_date', today),
-    service
-      .from('hr_shift_schedules')
-      .select('id, status, branch_id')
-      .eq('organization_id', filters.organizationId)
-      .eq('shift_date', today),
-    service
-      .from('hr_overtime_records')
-      .select('id, status, branch_id')
-      .eq('organization_id', filters.organizationId),
-    service
-      .from('hr_payroll_periods')
-      .select('id, status')
-      .eq('organization_id', filters.organizationId),
+  const [attendance, schedules, overtime, payrollPeriods] = await Promise.all([
+    optionalRows(
+      () =>
+        service
+          .from('hr_attendance_records')
+          .select('id, attendance_status, branch_id')
+          .eq('organization_id', filters.organizationId)
+          .eq('attendance_date', today),
+      'hr_attendance_records',
+    ),
+    optionalRows(
+      () =>
+        service
+          .from('hr_shift_schedules')
+          .select('id, status, branch_id')
+          .eq('organization_id', filters.organizationId)
+          .eq('shift_date', today),
+      'hr_shift_schedules',
+    ),
+    optionalRows(
+      () =>
+        service
+          .from('hr_overtime_records')
+          .select('id, status, branch_id')
+          .eq('organization_id', filters.organizationId),
+      'hr_overtime_records',
+    ),
+    optionalRows(
+      () =>
+        service
+          .from('hr_payroll_periods')
+          .select('id, status')
+          .eq('organization_id', filters.organizationId),
+      'hr_payroll_periods',
+    ),
   ]);
 
-  for (const result of [employeesRes, attendanceRes, schedulesRes, overtimeRes, payrollRes]) {
-    if (result.error) throw result.error;
-  }
-
   const employees = (employeesRes.data ?? []) as Array<Record<string, unknown>>;
-  const attendance = (attendanceRes.data ?? []) as Array<Record<string, unknown>>;
-  const schedules = (schedulesRes.data ?? []) as Array<Record<string, unknown>>;
-  const overtime = (overtimeRes.data ?? []) as Array<Record<string, unknown>>;
-  const payrollPeriods = (payrollRes.data ?? []) as Array<Record<string, unknown>>;
 
   return {
     absentEmployees: attendance.filter((row) => String(row.attendance_status ?? '') === 'ABSENT').length,
