@@ -48,7 +48,7 @@ async function fetchCurrentUser(): Promise<CurrentUser> {
 }
 
 export function useCurrentUser() {
-  const { isLoaded, isSignedIn, userId } = useAppAuth();
+  const { isLoaded, userId } = useAppAuth();
   const pathname = usePathname();
 
   const requiresAuth =
@@ -67,7 +67,10 @@ export function useCurrentUser() {
   return useQuery({
     queryKey: ['current-user', userId],
     queryFn: fetchCurrentUser,
-    enabled: requiresAuth && isLoaded && isSignedIn,
+    // Rely on the server auth cookie on protected routes so role/profile loading
+    // still works immediately after server-side login, even before the browser
+    // Supabase client has refreshed its local session state.
+    enabled: requiresAuth && isLoaded,
     retry: false,
   });
 }
