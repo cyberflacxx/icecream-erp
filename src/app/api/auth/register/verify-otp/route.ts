@@ -98,6 +98,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: profileError?.message ?? 'Failed to create user profile.' }, { status: 500 });
   }
 
+  let roleAssignmentWarning: string | null = null;
   try {
     await assignUserRole({
       assignedBy: null,
@@ -106,9 +107,7 @@ export async function POST(request: NextRequest) {
       userProfileId: String(profile.id),
     });
   } catch (roleError) {
-    await service.from('users').delete().eq('id', profile.id);
-    await createServiceRoleClient().auth.admin.deleteUser(authData.user.id);
-    return NextResponse.json({ error: roleError instanceof Error ? roleError.message : 'Failed to assign role.' }, { status: 500 });
+    roleAssignmentWarning = roleError instanceof Error ? roleError.message : 'Failed to assign role.';
   }
 
   try {
@@ -130,7 +129,8 @@ export async function POST(request: NextRequest) {
     eventType: 'REGISTRATION_COMPLETED',
     organizationId,
     userProfileId: String(profile.id),
-    status: 'SUCCESS',
+    status: roleAssignmentWarning ? 'WARNING' : 'SUCCESS',
+    details: roleAssignmentWarning ? { roleAssignmentWarning, selectedRole: role.id } : { selectedRole: role.id },
     ipAddress: request.headers.get('x-forwarded-for'),
     userAgent: request.headers.get('user-agent'),
   });
@@ -138,6 +138,7 @@ export async function POST(request: NextRequest) {
   return NextResponse.json({
     message: 'Account created successfully.',
     redirectTo: '/auth/login',
+    warning: roleAssignmentWarning,
     work_id: workId,
   }, { status: 201 });
 }
