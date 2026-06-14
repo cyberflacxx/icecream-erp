@@ -3,6 +3,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
+function isMissingColumnError(error: unknown, table: string, columnName: string) {
+  return error instanceof Error && error.message.includes(`column ${table}.${columnName} does not exist`);
+}
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function parsePagination(searchParams: URLSearchParams) {
@@ -62,10 +66,51 @@ export async function GET(request: NextRequest) {
     query = query.eq('sales_orders.branch_id', ctx.branchId);
   }
 
-  const { data, error } = await query;
-  if (error) return serverError(error.message);
+  const primary = await query;
+  if (primary.error) {
+    const compatibleLegacy =
+      isMissingColumnError(primary.error, 'invoices', 'total') ||
+      isMissingColumnError(primary.error, 'invoices', 'amount_paid') ||
+      isMissingColumnError(primary.error, 'invoices', 'invoice_items') ||
+      isMissingColumnError(primary.error, 'invoices', 'sales_orders') ||
+      isMissingColumnError(primary.error, 'invoices', 'deleted_at');
 
-  const mapped = (data ?? []).map((row: Record<string, unknown>) => {
+    if (!compatibleLegacy) return serverError(primary.error.message);
+
+    let fallback = service
+      .schema('icecream_erp')
+      .from('invoices')
+      .select('id, invoice_number, invoice_date, due_date, status, total_amount, paid_amount, balance_due, customers(id, name)')
+      .order('invoice_date', { ascending: false });
+
+    if (status) fallback = fallback.eq('status', status);
+    if (customerId) fallback = fallback.eq('customer_id', customerId);
+    if (startDate) fallback = fallback.gte('invoice_date', startDate);
+    if (endDate) fallback = fallback.lte('invoice_date', endDate);
+
+    const fallbackResult = await fallback;
+    if (fallbackResult.error) return serverError(fallbackResult.error.message);
+
+    const mapped = (fallbackResult.data ?? []).map((row: Record<string, unknown>) => {
+      const customer = row.customers as { id: string; name: string } | null;
+      return {
+        id: row.id,
+        invoiceNumber: row.invoice_number,
+        customer: customer ? { id: customer.id, name: customer.name } : null,
+        invoiceDate: row.invoice_date,
+        dueDate: row.due_date,
+        status: row.status,
+        total: row.total_amount ? Number(row.total_amount) : 0,
+        amountPaid: row.paid_amount ? Number(row.paid_amount) : 0,
+        balanceDue: row.balance_due ? Number(row.balance_due) : 0,
+        itemsCount: 0,
+      };
+    });
+
+    return NextResponse.json(paginate(mapped, page, pageSize));
+  }
+
+  const mapped = (primary.data ?? []).map((row: Record<string, unknown>) => {
     const customer = row.customers as { id: string; name: string } | null;
     const items = (row.invoice_items as unknown[]) ?? [];
     return {
@@ -209,10 +254,10 @@ export async function POST(request: NextRequest) {
 
   const invoiceNumber = `INV-${String((count ?? 0) + 1).padStart(5, '0')}`;
 
-  const { data: invoice, error: iErr } = await service
-    .schema('icecream_erp')
-    .from('invoices')
-    .insert({
+    const primaryInsert = await service
+      .schema('icecream_erp')
+      .from('invoices')
+      .insert({
       invoice_number: invoiceNumber,
       customer_id: body.customerId,
       sales_order_id: body.salesOrderId ?? null,
@@ -225,17 +270,52 @@ export async function POST(request: NextRequest) {
       total,
       amount_paid: 0,
       balance_due: total,
-      notes: body.notes ?? null,
-      created_by: ctx.userId,
-    })
-    .select()
-    .single();
+        notes: body.notes ?? null,
+        created_by: ctx.userId,
+      })
+      .select()
+      .single();
+    let invoice = primaryInsert.data;
+    let iErr = primaryInsert.error;
+
+    if (
+      iErr &&
+      (
+        isMissingColumnError(iErr, 'invoices', 'sales_order_id') ||
+        isMissingColumnError(iErr, 'invoices', 'discount_amount') ||
+        isMissingColumnError(iErr, 'invoices', 'total') ||
+        isMissingColumnError(iErr, 'invoices', 'amount_paid')
+      )
+    ) {
+      const fallbackInsert = await service
+        .schema('icecream_erp')
+        .from('invoices')
+        .insert({
+          organization_id: ctx.organizationId,
+          invoice_number: invoiceNumber,
+          order_id: body.salesOrderId ?? null,
+          customer_id: body.customerId,
+          invoice_date: body.invoiceDate ?? new Date().toISOString().slice(0, 10),
+          due_date: body.dueDate ?? null,
+          status: 'SENT',
+          subtotal,
+          tax_amount: taxAmount,
+          total_amount: total,
+          paid_amount: 0,
+          balance_due: total,
+          notes: body.notes ?? null,
+        })
+        .select()
+        .single();
+      invoice = fallbackInsert.data;
+      iErr = fallbackInsert.error;
+    }
 
   if (iErr || !invoice) return serverError(iErr?.message ?? 'Failed to create invoice');
 
   const inv = invoice as Record<string, unknown>;
 
-  const { error: itemsErr } = await service
+  const itemsInsert = await service
     .schema('icecream_erp')
     .from('invoice_items')
     .insert(
@@ -249,7 +329,9 @@ export async function POST(request: NextRequest) {
       })),
     );
 
-  if (itemsErr) return serverError(itemsErr.message);
+  if (itemsInsert.error) {
+    if (!itemsInsert.error.message.includes('invoice_items')) return serverError(itemsInsert.error.message);
+  }
 
   // Update customer balance
   const currentBalance = Number(cust.current_balance ?? 0);
@@ -267,19 +349,25 @@ export async function POST(request: NextRequest) {
     await service
       .schema('icecream_erp')
       .from('sales_orders')
-      .update({ status: 'invoiced', updated_at: new Date().toISOString() })
+      .update({ status: 'INVOICED', updated_at: new Date().toISOString() })
       .eq('id', body.salesOrderId);
   }
 
-  // Return full invoice
-  const { data: result, error: resultErr } = await service
+  const resultQuery = await service
     .schema('icecream_erp')
     .from('invoices')
     .select(`*, customers(*), invoice_items(*, items(*))`)
     .eq('id', inv.id as string)
     .single();
+  if (!resultQuery.error) return NextResponse.json(resultQuery.data, { status: 201 });
 
-  if (resultErr) return serverError(resultErr.message);
+  const legacyResult = await service
+    .schema('icecream_erp')
+    .from('invoices')
+    .select('*, customers(*)')
+    .eq('id', inv.id as string)
+    .single();
 
-  return NextResponse.json(result, { status: 201 });
+  if (legacyResult.error) return serverError(legacyResult.error.message);
+  return NextResponse.json(legacyResult.data, { status: 201 });
 }

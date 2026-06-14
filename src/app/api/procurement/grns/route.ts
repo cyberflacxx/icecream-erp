@@ -3,6 +3,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { badRequest, can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
+function isMissingColumnError(error: unknown, table: string, columnName: string) {
+  return error instanceof Error && error.message.includes(`column ${table}.${columnName} does not exist`);
+}
+
 export async function GET(request: NextRequest) {
   const ctx = await getAuthContext();
   if (!ctx) return unauthorized();
@@ -52,11 +56,65 @@ export async function GET(request: NextRequest) {
     }
 
     const from = (page - 1) * pageSize;
-    const { data, count, error } = await query.range(from, from + pageSize - 1);
+    const primary = await query.range(from, from + pageSize - 1);
 
-    if (error) return serverError(error.message);
+    if (primary.error) {
+      const compatibleLegacy =
+        isMissingColumnError(primary.error, 'goods_received_notes', 'purchase_order_id') ||
+        isMissingColumnError(primary.error, 'goods_received_notes', 'quality_status') ||
+        isMissingColumnError(primary.error, 'goods_received_notes', 'goods_received_note_items') ||
+        isMissingColumnError(primary.error, 'goods_received_notes', 'deleted_at');
 
-    const mapped = (data ?? []).map((r: Record<string, unknown>) => {
+      if (!compatibleLegacy) return serverError(primary.error.message);
+
+      let fallbackQuery = service
+        .from('goods_received_notes')
+        .select(
+          `id, grn_number, received_date, status, warehouse_id,
+           purchase_orders:purchase_orders!goods_received_notes_po_id_fkey(id, po_number, supplier_id, suppliers(id, name))`,
+          { count: 'exact' },
+        )
+        .eq('organization_id', ctx.organizationId)
+        .order('received_date', { ascending: false });
+
+      if (status) fallbackQuery = fallbackQuery.eq('status', status);
+      if (startDate) fallbackQuery = fallbackQuery.gte('received_date', startDate);
+      if (endDate) fallbackQuery = fallbackQuery.lte('received_date', endDate);
+      if (purchaseOrderId) fallbackQuery = fallbackQuery.eq('po_id', purchaseOrderId);
+      if (ctx.isBranchScoped && ctx.branchId) {
+        const { data: warehouseIds } = await service.from('warehouses').select('id').eq('branch_id', ctx.branchId).eq('is_active', true);
+        const ids = (warehouseIds ?? []).map((w: { id: string }) => w.id);
+        if (ids.length === 0) {
+          return NextResponse.json({ data: [], pagination: { page, pageSize, total: 0 } });
+        }
+        fallbackQuery = fallbackQuery.in('warehouse_id', ids);
+      }
+
+      const fallback = await fallbackQuery.range(from, from + pageSize - 1);
+      if (fallback.error) return serverError(fallback.error.message);
+
+      const mappedFallback = (fallback.data ?? []).map((r: Record<string, unknown>) => {
+        const po = r.purchase_orders as Record<string, unknown> | null;
+        const supplier = po?.suppliers as Record<string, unknown> | null;
+        return {
+          id: r.id,
+          grnNumber: r.grn_number,
+          receivedDate: r.received_date,
+          status: r.status,
+          qualityStatus: null,
+          purchaseOrder: po ? { id: po.id, poNumber: po.po_number } : null,
+          supplier: supplier ? { id: supplier.id, name: supplier.name } : null,
+          itemsCount: 0,
+        };
+      });
+
+      return NextResponse.json({
+        data: mappedFallback,
+        pagination: { page, pageSize, total: fallback.count ?? 0 },
+      });
+    }
+
+    const mapped = (primary.data ?? []).map((r: Record<string, unknown>) => {
       const po = r.purchase_orders as Record<string, unknown> | null;
       const supplier = po?.suppliers as Record<string, unknown> | null;
       return {
@@ -73,7 +131,7 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({
       data: mapped,
-      pagination: { page, pageSize, total: count ?? 0 },
+      pagination: { page, pageSize, total: primary.count ?? 0 },
     });
   } catch (err) {
     return serverError((err as Error).message);
@@ -120,7 +178,7 @@ export async function POST(request: NextRequest) {
     // Validate purchase order
     const { data: order, error: orderErr } = await service
       .from('purchase_orders')
-      .select('id, status, purchase_order_items(*)')
+      .select('id, supplier_id, status, purchase_order_items(*)')
       .is('deleted_at', null)
       .eq('organization_id', ctx.organizationId)
       .eq('id', body.purchaseOrderId)
@@ -173,9 +231,39 @@ export async function POST(request: NextRequest) {
       .select()
       .single();
 
-    if (grnErr) return serverError(grnErr.message);
+    let grnRow = grn;
+    let grnError = grnErr;
 
-    const grnId = (grn as Record<string, unknown>).id as string;
+    if (
+      grnError &&
+      (
+        isMissingColumnError(grnError, 'goods_received_notes', 'purchase_order_id') ||
+        isMissingColumnError(grnError, 'goods_received_notes', 'quality_notes') ||
+        isMissingColumnError(grnError, 'goods_received_notes', 'quality_status')
+      )
+    ) {
+      const fallback = await service
+        .from('goods_received_notes')
+        .insert({
+          grn_number: grnNumber,
+          po_id: body.purchaseOrderId,
+          warehouse_id: body.warehouseId,
+          organization_id: ctx.organizationId,
+          supplier_id: (order as Record<string, unknown>).supplier_id ?? null,
+          received_date: (body.receivedDate ?? new Date().toISOString()).slice(0, 10),
+          notes: body.notes ?? null,
+          invoice_ref: body.qualityNotes ?? null,
+          status: 'DRAFT',
+        })
+        .select()
+        .single();
+      grnRow = fallback.data;
+      grnError = fallback.error;
+    }
+
+    if (grnError || !grnRow) return serverError(grnError?.message ?? 'Failed to create GRN');
+
+    const grnId = (grnRow as Record<string, unknown>).id as string;
 
     // Build items: use provided or derive from PO items
     const poItems = (o.purchase_order_items as Record<string, unknown>[]) ?? [];
@@ -194,7 +282,7 @@ export async function POST(request: NextRequest) {
         }));
 
     if (itemsToInsert.length > 0) {
-      const { error: itemsErr } = await service.from('goods_received_note_items').insert(
+      const primaryItems = await service.from('goods_received_note_items').insert(
         itemsToInsert.map((item) => ({
           grn_id: grnId,
           item_id: item.itemId,
@@ -208,16 +296,42 @@ export async function POST(request: NextRequest) {
           quality_notes: item.qualityNotes ?? null,
         })),
       );
-      if (itemsErr) return serverError(itemsErr.message);
+      if (primaryItems.error) {
+        if (!primaryItems.error.message.includes('goods_received_note_items')) return serverError(primaryItems.error.message);
+        const fallbackItems = await service.from('grn_items').insert(
+          itemsToInsert.map((item) => ({
+            grn_id: grnId,
+            item_id: item.itemId,
+            po_item_id: item.poItemId,
+            ordered_qty: item.quantityExpected,
+            received_qty: item.quantityReceived,
+            rejected_qty: item.quantityRejected,
+            unit_cost: item.unitCost,
+            batch_number: item.batchNumber ?? null,
+            expiry_date: item.expiryDate ?? null,
+            quality_status: 'PENDING',
+            quality_notes: item.qualityNotes ?? null,
+          })),
+        );
+        if (fallbackItems.error) return serverError(fallbackItems.error.message);
+      }
     }
 
-    const { data: full } = await service
+    const primaryFull = await service
       .from('goods_received_notes')
       .select('*, goods_received_note_items(*), purchase_orders(id, po_number)')
       .eq('id', grnId)
       .single();
+    if (!primaryFull.error) return NextResponse.json(primaryFull.data, { status: 201 });
 
-    return NextResponse.json(full, { status: 201 });
+    const fallbackFull = await service
+      .from('goods_received_notes')
+      .select('*, purchase_orders:purchase_orders!goods_received_notes_po_id_fkey(id, po_number)')
+      .eq('id', grnId)
+      .single();
+    if (fallbackFull.error) return serverError(fallbackFull.error.message);
+
+    return NextResponse.json(fallbackFull.data, { status: 201 });
   } catch (err) {
     return serverError((err as Error).message);
   }

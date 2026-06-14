@@ -440,6 +440,8 @@ async function ensurePurchaseOrders(organizationId, adminUserId, suppliers, item
   const rawItems = items.filter((item) => item.type !== 'FINISHED_GOOD').slice(0, 5);
   const existingOrders = await selectAll('purchase_orders');
   const existingNumbers = new Set(existingOrders.map((row) => String(row.po_number)));
+  const existingItems = await selectAll('purchase_order_items');
+  const existingItemKeys = new Set(existingItems.map((row) => `${row.po_id}:${row.item_id}`));
 
   for (let index = 0; index < 10; index += 1) {
     const poNumber = `PO-${String(index + 1).padStart(5, '0')}`;
@@ -456,6 +458,27 @@ async function ensurePurchaseOrders(organizationId, adminUserId, suppliers, item
       });
       existingOrders.push(order);
     }
+
+    if (order) {
+      const lineRows = rawItems
+        .map((item, lineIndex) => {
+          const quantity = 20 + lineIndex * 5;
+          const key = `${order.id}:${item.id}`;
+          if (existingItemKeys.has(key)) return null;
+          existingItemKeys.add(key);
+          return {
+            po_id: order.id,
+            item_id: item.id,
+            quantity,
+            unit_price: Number(item.standard_cost ?? 1),
+            tax_rate: 0,
+            line_total: quantity * Number(item.standard_cost ?? 1),
+            received_qty: 0,
+          };
+        })
+        .filter(Boolean);
+      if (lineRows.length > 0) await insertRows('purchase_order_items', lineRows);
+    }
   }
 
   return await selectAll('purchase_orders');
@@ -464,6 +487,9 @@ async function ensurePurchaseOrders(organizationId, adminUserId, suppliers, item
 async function ensureGoodsReceivedNotes(organizationId, adminUserId, purchaseOrders, warehouses) {
   const existing = await selectAll('goods_received_notes');
   const existingNumbers = new Set(existing.map((row) => String(row.grn_number)));
+  const purchaseOrderItems = await selectAll('purchase_order_items');
+  const existingItems = await selectAll('grn_items');
+  const existingItemKeys = new Set(existingItems.map((row) => `${row.grn_id}:${row.item_id}`));
   const rows = [];
   for (let index = 0; index < 10; index += 1) {
     const grnNumber = `GRN-${String(index + 1).padStart(5, '0')}`;
@@ -472,13 +498,36 @@ async function ensureGoodsReceivedNotes(organizationId, adminUserId, purchaseOrd
       grn_number: grnNumber,
       warehouse_id: warehouses[index % warehouses.length]?.id ?? null,
       organization_id: organizationId,
+      po_id: purchaseOrders[index % purchaseOrders.length]?.id ?? null,
       supplier_id: purchaseOrders[index % purchaseOrders.length]?.supplier_id ?? null,
-      received_by: adminUserId,
       received_date: isoDate(-20 + index),
-      status: 'POSTED',
+      status: 'DRAFT',
     });
   }
-  if (rows.length > 0) await insertRows('goods_received_notes', rows);
+  const inserted = rows.length > 0 ? await insertRows('goods_received_notes', rows) : [];
+  const allNotes = existing.concat(inserted);
+
+  for (const note of allNotes.slice(0, 10)) {
+    const poItems = purchaseOrderItems.filter((row) => row.po_id === note.po_id).slice(0, 3);
+    const lineRows = poItems
+      .map((row) => {
+        const key = `${note.id}:${row.item_id}`;
+        if (existingItemKeys.has(key)) return null;
+        existingItemKeys.add(key);
+        return {
+          grn_id: note.id,
+          item_id: row.item_id,
+          po_item_id: row.id,
+          ordered_qty: Number(row.quantity ?? 0),
+          received_qty: Number(row.quantity ?? 0),
+          rejected_qty: 0,
+          unit_cost: Number(row.unit_price ?? 0),
+          quality_status: 'PENDING',
+        };
+      })
+      .filter(Boolean);
+    if (lineRows.length > 0) await insertRows('grn_items', lineRows);
+  }
 }
 
 async function ensureProductionBatches(organizationId, recipes, warehouses) {
@@ -494,7 +543,13 @@ async function ensureProductionBatches(organizationId, recipes, warehouses) {
       recipe_id: recipes[index % recipes.length]?.id ?? null,
       warehouse_id: warehouses[index % warehouses.length]?.id ?? null,
       shift: index % 2 === 0 ? 'DAY' : 'NIGHT',
-      status: 'COMPLETED',
+      planned_date: isoDate(-12 + index),
+      planned_qty: 100 + index * 10,
+      actual_qty: 96 + index * 9,
+      rejected_qty: 1,
+      wastage_qty: 3,
+      yield_percent: 96,
+      status: 'PLANNED',
     });
   }
   if (rows.length > 0) await insertRows('production_batches', rows);
@@ -504,6 +559,8 @@ async function ensureSalesOrders(organizationId, adminUserId, customers, warehou
   const finishedGoods = items.filter((item) => item.type === 'FINISHED_GOOD').slice(0, 4);
   const existingOrders = await selectAll('sales_orders');
   const existingNumbers = new Set(existingOrders.map((row) => String(row.order_number)));
+  const existingItems = await selectAll('sales_order_items');
+  const existingItemKeys = new Set(existingItems.map((row) => `${row.order_id}:${row.item_id}`));
 
   for (let index = 0; index < 10; index += 1) {
     const orderNumber = `SO-${String(index + 1).padStart(5, '0')}`;
@@ -523,6 +580,29 @@ async function ensureSalesOrders(organizationId, adminUserId, customers, warehou
       });
       existingOrders.push(order);
     }
+
+    if (order) {
+      const lineRows = finishedGoods
+        .map((item, lineIndex) => {
+          const quantity = 10 + lineIndex * 2;
+          const key = `${order.id}:${item.id}`;
+          if (existingItemKeys.has(key)) return null;
+          existingItemKeys.add(key);
+          return {
+            order_id: order.id,
+            item_id: item.id,
+            batch_number: null,
+            quantity,
+            unit_price: Number(item.selling_price ?? 0),
+            discount_pct: 0,
+            tax_rate: 0,
+            line_total: quantity * Number(item.selling_price ?? 0),
+            cogs: quantity * Number(item.standard_cost ?? 0),
+          };
+        })
+        .filter(Boolean);
+      if (lineRows.length > 0) await insertRows('sales_order_items', lineRows);
+    }
   }
 
   return await selectAll('sales_orders');
@@ -539,10 +619,16 @@ async function ensureInvoices(organizationId, adminUserId, customers, salesOrder
     rows.push({
       organization_id: organizationId,
       invoice_number: invoiceNumber,
+      order_id: salesOrders[index % salesOrders.length]?.id ?? null,
       customer_id: customers[index % customers.length].id,
       invoice_date: isoDate(-8 + index),
+      due_date: isoDate(14 + index),
       status: 'SENT',
+      subtotal: total,
+      tax_amount: 0,
       total_amount: total,
+      paid_amount: index % 3 === 0 ? total / 2 : 0,
+      balance_due: index % 3 === 0 ? total / 2 : total,
     });
   }
   if (rows.length > 0) await insertRows('invoices', rows);
@@ -561,10 +647,13 @@ async function ensureBudgets(organizationId, adminUserId, branches, accounts) {
       [budget] = await insertRows('budgets', {
         organization_id: organizationId,
         name: budgetName,
-        budget_year: 2026 + index,
-        budget_type: index % 2 === 0 ? 'OPERATING' : 'CAPEX',
-        status: 'APPROVED',
-        created_by: adminUserId,
+        department: ['Finance', 'Production', 'Sales', 'Stores', 'HR'][index % 5],
+        period_start: `${2026 + index}-01-01`,
+        period_end: `${2026 + index}-12-31`,
+        status: 'DRAFT',
+        total_budget: 10000 + index * 2500,
+        total_actual: 0,
+        variance: 10000 + index * 2500,
       });
       existingBudgets.push(budget);
     }
@@ -575,7 +664,11 @@ async function ensureBudgets(organizationId, adminUserId, branches, accounts) {
       .map((account, lineIndex) => ({
         budget_id: budget.id,
         account_id: account.id,
-        annual_total: 2500 + lineIndex * 1000 + index * 250,
+        description: `${account.name} allocation`,
+        budgeted_amount: 2500 + lineIndex * 1000 + index * 250,
+        actual_amount: 0,
+        variance: 2500 + lineIndex * 1000 + index * 250,
+        month: null,
       }));
     if (rows.length > 0) await insertRows('budget_lines', rows);
   }
@@ -593,10 +686,15 @@ async function ensureBranchShiftCloses(adminUserId, branches) {
     rows.push({
       organization_id: branch.organization_id,
       branch_id: branch.id,
-      shift_date: `${shiftDate}T00:00:00.000Z`,
+      shift_date: shiftDate,
       shift: index % 2 === 0 ? 'DAY' : 'NIGHT',
-      status: 'APPROVED',
-      closed_by: adminUserId,
+      opening_balance: 150 + index * 10,
+      total_sales: 600 + index * 50,
+      total_expenses: 90 + index * 5,
+      closing_balance: 660 + index * 55,
+      cash_counted: 655 + index * 54,
+      variance: -5 + index,
+      status: 'OPEN',
     });
   }
   if (rows.length > 0) await insertRows('branch_shift_closes', rows);

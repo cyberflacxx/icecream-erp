@@ -3,6 +3,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { badRequest, can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
+function isMissingColumnError(error: unknown, table: string, columnName: string) {
+  return error instanceof Error && error.message.includes(`column ${table}.${columnName} does not exist`);
+}
+
 export async function GET(request: NextRequest) {
   const ctx = await getAuthContext();
   if (!ctx) return unauthorized();
@@ -56,11 +60,63 @@ export async function GET(request: NextRequest) {
     }
 
     const from = (page - 1) * pageSize;
-    const { data, count, error } = await query.range(from, from + pageSize - 1);
-    if (error) throw error;
+    const primary = await query.range(from, from + pageSize - 1);
+    if (primary.error) {
+      const compatibleLegacy =
+        isMissingColumnError(primary.error, 'production_batches', 'production_date') ||
+        isMissingColumnError(primary.error, 'production_batches', 'production_line') ||
+        isMissingColumnError(primary.error, 'production_batches', 'quality_status') ||
+        isMissingColumnError(primary.error, 'production_batches', 'planned_quantity') ||
+        isMissingColumnError(primary.error, 'production_batches', 'deleted_at');
+
+      if (!compatibleLegacy) throw primary.error;
+
+      let fallbackQuery = service
+        .schema('icecream_erp')
+        .from('production_batches')
+        .select(`
+          id, batch_number, planned_date, shift, status,
+          planned_qty, actual_qty, rejected_qty, wastage_qty,
+          recipes!inner(id, code, name),
+          warehouses!inner(id, name)
+        `, { count: 'exact' })
+        .order('planned_date', { ascending: false });
+
+      if (status) fallbackQuery = fallbackQuery.eq('status', status);
+      if (warehouseId) fallbackQuery = fallbackQuery.eq('warehouse_id', warehouseId);
+      if (recipeId) fallbackQuery = fallbackQuery.eq('recipe_id', recipeId);
+      if (startDate) fallbackQuery = fallbackQuery.gte('planned_date', startDate);
+      if (endDate) fallbackQuery = fallbackQuery.lte('planned_date', endDate);
+      if (warehouseIds && warehouseIds.length > 0) fallbackQuery = fallbackQuery.in('warehouse_id', warehouseIds);
+      if (search) fallbackQuery = fallbackQuery.ilike('batch_number', `%${search}%`);
+
+      const fallback = await fallbackQuery.range(from, from + pageSize - 1);
+      if (fallback.error) throw fallback.error;
+
+      return NextResponse.json({
+        data: (fallback.data ?? []).map((row: Record<string, unknown>) => ({
+          id: row.id,
+          batchNumber: row.batch_number,
+          productionDate: row.planned_date,
+          shift: row.shift,
+          productionLine: null,
+          status: row.status,
+          qualityStatus: null,
+          plannedQuantity: Number(row.planned_qty ?? 0),
+          expectedOutput: Number(row.planned_qty ?? 0),
+          actualOutput: Number(row.actual_qty ?? 0),
+          workerCount: 0,
+          labourCost: Number(row.total_labour_cost ?? 0),
+          overheadCost: Number(row.total_overhead_cost ?? 0),
+          recipe: row.recipes,
+          warehouse: row.warehouses,
+        })),
+        pagination: { page, pageSize, total: fallback.count ?? 0 },
+      });
+    }
 
     return NextResponse.json({
-      data: (data ?? []).map((row: Record<string, unknown>) => ({
+      data: (primary.data ?? []).map((row: Record<string, unknown>) => ({
         id: row.id,
         batchNumber: row.batch_number,
         productionDate: row.production_date,
@@ -77,7 +133,7 @@ export async function GET(request: NextRequest) {
         recipe: row.recipes,
         warehouse: row.warehouses,
       })),
-      pagination: { page, pageSize, total: count ?? 0 },
+      pagination: { page, pageSize, total: primary.count ?? 0 },
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Internal server error';
@@ -140,7 +196,7 @@ export async function POST(request: NextRequest) {
       .select('*', { count: 'exact', head: true });
     const batchNumber = `PB-${String((count ?? 0) + 1).padStart(5, '0')}`;
 
-    const { data: batch, error: batchErr } = await service
+    const primaryInsert = await service
       .schema('icecream_erp')
       .from('production_batches')
       .insert({
@@ -164,17 +220,50 @@ export async function POST(request: NextRequest) {
       })
       .select()
       .single();
+    let batch = primaryInsert.data;
+    let batchErr = primaryInsert.error;
 
-    if (batchErr) throw batchErr;
+    if (
+      batchErr &&
+      (
+        isMissingColumnError(batchErr, 'production_batches', 'planned_quantity') ||
+        isMissingColumnError(batchErr, 'production_batches', 'expected_output') ||
+        isMissingColumnError(batchErr, 'production_batches', 'production_date') ||
+        isMissingColumnError(batchErr, 'production_batches', 'quality_status') ||
+        isMissingColumnError(batchErr, 'production_batches', 'actual_output')
+      )
+    ) {
+      const fallback = await service
+        .schema('icecream_erp')
+        .from('production_batches')
+        .insert({
+          organization_id: ctx.organizationId,
+          batch_number: batchNumber,
+          recipe_id: recipeId,
+          warehouse_id: warehouseId,
+          shift: shift ?? 'DAY',
+          planned_date: productionDate,
+          planned_qty: plannedQuantity,
+          status: 'PLANNED',
+          notes: productionLine ?? null,
+        })
+        .select()
+        .single();
+      batch = fallback.data;
+      batchErr = fallback.error;
+    }
+
+    if (batchErr || !batch) throw batchErr ?? new Error('Failed to create production batch');
 
     // Create output record
-    await service.schema('icecream_erp').from('production_batch_outputs').insert({
+    const outputInsert = await service.schema('icecream_erp').from('production_batch_outputs').insert({
       batch_id: batch.id,
       item_id: recipe.finished_item_id,
       unit_id: recipe.output_unit_id,
       expected_quantity: expectedOutput,
       actual_quantity: 0,
     });
+    if (outputInsert.error && !outputInsert.error.message.includes('production_batch_outputs')) throw outputInsert.error;
 
     // Audit log
     await service.schema('icecream_erp').from('audit_logs').insert({

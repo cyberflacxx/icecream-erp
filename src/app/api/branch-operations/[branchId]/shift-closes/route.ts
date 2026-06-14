@@ -3,6 +3,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { badRequest, can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
+function isMissingColumnError(error: unknown, table: string, columnName: string) {
+  return error instanceof Error && error.message.includes(`column ${table}.${columnName} does not exist`);
+}
+
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ branchId: string }> },
@@ -36,11 +40,49 @@ export async function GET(
     if (endDate) query = query.lte('shift_date', `${endDate}T23:59:59.999Z`);
 
     const from = (page - 1) * pageSize;
-    const { data, count, error } = await query.range(from, from + pageSize - 1);
-    if (error) throw error;
+    const primary = await query.range(from, from + pageSize - 1);
+    if (primary.error) {
+      const compatibleLegacy =
+        isMissingColumnError(primary.error, 'branch_shift_closes', 'shift_type') ||
+        isMissingColumnError(primary.error, 'branch_shift_closes', 'expected_cash') ||
+        isMissingColumnError(primary.error, 'branch_shift_closes', 'actual_cash') ||
+        isMissingColumnError(primary.error, 'branch_shift_closes', 'cash_variance') ||
+        isMissingColumnError(primary.error, 'branch_shift_closes', 'stock_variance') ||
+        isMissingColumnError(primary.error, 'branch_shift_closes', 'deleted_at');
+
+      if (!compatibleLegacy) throw primary.error;
+
+      let fallbackQuery = service
+        .schema('icecream_erp')
+        .from('branch_shift_closes')
+        .select('id, shift_date, shift, status, total_sales, cash_counted, variance', { count: 'exact' })
+        .eq('branch_id', branchId)
+        .order('shift_date', { ascending: false });
+
+      if (status) fallbackQuery = fallbackQuery.eq('status', status);
+      if (startDate) fallbackQuery = fallbackQuery.gte('shift_date', startDate);
+      if (endDate) fallbackQuery = fallbackQuery.lte('shift_date', endDate);
+
+      const fallback = await fallbackQuery.range(from, from + pageSize - 1);
+      if (fallback.error) throw fallback.error;
+
+      return NextResponse.json({
+        data: (fallback.data ?? []).map((row: Record<string, unknown>) => ({
+          id: row.id,
+          shiftDate: row.shift_date,
+          shiftType: row.shift,
+          status: row.status,
+          expectedCash: Number(row.total_sales ?? 0),
+          actualCash: Number(row.cash_counted ?? 0),
+          cashVariance: Number(row.variance ?? 0),
+          stockVariance: 0,
+        })),
+        pagination: { page, pageSize, total: fallback.count ?? 0 },
+      });
+    }
 
     return NextResponse.json({
-      data: (data ?? []).map((row: Record<string, unknown>) => ({
+      data: (primary.data ?? []).map((row: Record<string, unknown>) => ({
         id: row.id,
         shiftDate: row.shift_date,
         shiftType: row.shift_type,
@@ -50,7 +92,7 @@ export async function GET(
         cashVariance: Number(row.cash_variance ?? 0),
         stockVariance: Number(row.stock_variance ?? 0),
       })),
-      pagination: { page, pageSize, total: count ?? 0 },
+      pagination: { page, pageSize, total: primary.count ?? 0 },
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Internal server error';
@@ -114,7 +156,7 @@ export async function POST(
       return sum + Number(b.quantity_on_hand ?? 0) * unitCost;
     }, 0);
 
-    const { data: shiftClose, error } = await service
+    const primaryInsert = await service
       .schema('icecream_erp')
       .from('branch_shift_closes')
       .insert({
@@ -138,8 +180,42 @@ export async function POST(
       })
       .select()
       .single();
+    let shiftClose = primaryInsert.data;
+    let error = primaryInsert.error;
 
-    if (error) throw error;
+    if (
+      error &&
+      (
+        isMissingColumnError(error, 'branch_shift_closes', 'shift_type') ||
+        isMissingColumnError(error, 'branch_shift_closes', 'opening_stock_value') ||
+        isMissingColumnError(error, 'branch_shift_closes', 'expected_cash') ||
+        isMissingColumnError(error, 'branch_shift_closes', 'actual_cash')
+      )
+    ) {
+      const fallback = await service
+        .schema('icecream_erp')
+        .from('branch_shift_closes')
+        .insert({
+          organization_id: ctx.organizationId,
+          branch_id: branchId,
+          shift_date: body.date,
+          shift: body.shift,
+          opening_balance: 0,
+          total_sales: 0,
+          total_expenses: 0,
+          closing_balance: 0,
+          cash_counted: 0,
+          variance: 0,
+          status: 'OPEN',
+          notes: null,
+        })
+        .select()
+        .single();
+      shiftClose = fallback.data;
+      error = fallback.error;
+    }
+
+    if (error || !shiftClose) throw error ?? new Error('Failed to create branch shift close');
 
     await service.schema('icecream_erp').from('audit_logs').insert({
       action: 'BRANCH_SHIFT_OPENED',
