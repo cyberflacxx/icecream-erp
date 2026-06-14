@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { badRequest, can, forbidden, getAuthContext, notFound, serverError, unauthorized } from '@/lib/api-auth';
+import { firstRelation } from '@/lib/supabase-relations';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
 export async function POST(
@@ -34,7 +35,7 @@ export async function POST(
     if (error || !batch) return notFound('Production batch not found');
 
     if (ctx.isBranchScoped && ctx.branchId) {
-      const warehouse = batch.warehouses as { branch_id: string };
+      const warehouse = firstRelation(batch.warehouses as { branch_id: string } | Array<{ branch_id: string }> | null);
       if (warehouse?.branch_id !== ctx.branchId) return forbidden();
     }
 
@@ -42,11 +43,19 @@ export async function POST(
       return badRequest(`Cannot reserve materials: batch must be in MATERIALS_APPROVED status (current: ${batch.status})`);
     }
 
-    const recipe = batch.recipes as {
+    const recipe = firstRelation(batch.recipes as {
       expected_output_quantity: number;
-      recipe_items: Array<{ item_id: string; quantity_required: number; unit_id: string; items: { code: string; name: string }; units_of_measure: { abbreviation: string } }>;
+      recipe_items: Array<{ item_id: string; quantity_required: number; unit_id: string; items: { code: string; name: string } | Array<{ code: string; name: string }>; units_of_measure: { abbreviation: string } | Array<{ abbreviation: string }> }>;
       recipe_packaging_items: Array<{ item_id: string; quantity_required: number; unit_id: string }>;
-    };
+    } | Array<{
+      expected_output_quantity: number;
+      recipe_items: Array<{ item_id: string; quantity_required: number; unit_id: string; items: { code: string; name: string } | Array<{ code: string; name: string }>; units_of_measure: { abbreviation: string } | Array<{ abbreviation: string }> }>;
+      recipe_packaging_items: Array<{ item_id: string; quantity_required: number; unit_id: string }>;
+    }> | null);
+
+    if (!recipe) {
+      return badRequest('Cannot reserve materials: batch has no recipe attached');
+    }
 
     const baseOutput = Number(recipe.expected_output_quantity ?? 1);
     const scaleFactor = baseOutput > 0 ? Number(batch.planned_quantity) / baseOutput : 1;
@@ -68,14 +77,18 @@ export async function POST(
     const pkgUnitMap = new Map((packagingUnitsData ?? []).map((u: { id: string; abbreviation: string }) => [u.id, u]));
 
     const ingredients = [
-      ...recipe.recipe_items.map((ri) => ({
-        itemId: ri.item_id,
-        itemName: ri.items.name,
-        itemCode: ri.items.code,
-        unitId: ri.unit_id,
-        unitAbbreviation: ri.units_of_measure.abbreviation,
-        quantityRequired: Number(ri.quantity_required) * scaleFactor,
-      })),
+      ...recipe.recipe_items.map((ri) => {
+        const item = firstRelation(ri.items);
+        const unit = firstRelation(ri.units_of_measure);
+        return {
+          itemId: ri.item_id,
+          itemName: item?.name ?? 'Unknown',
+          itemCode: item?.code ?? 'N/A',
+          unitId: ri.unit_id,
+          unitAbbreviation: unit?.abbreviation ?? '-',
+          quantityRequired: Number(ri.quantity_required) * scaleFactor,
+        };
+      }),
       ...recipe.recipe_packaging_items.map((pi) => ({
         itemId: pi.item_id,
         itemName: pkgItemMap.get(pi.item_id)?.name ?? 'Unknown',

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { badRequest, can, forbidden, getAuthContext, notFound, serverError, unauthorized } from '@/lib/api-auth';
+import { firstRelation } from '@/lib/supabase-relations';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
 export async function POST(
@@ -37,7 +38,7 @@ export async function POST(
     if (error || !batch) return notFound('Production batch not found');
 
     if (ctx.isBranchScoped && ctx.branchId) {
-      const warehouse = batch.warehouses as { branch_id: string };
+      const warehouse = firstRelation(batch.warehouses as { branch_id: string } | Array<{ branch_id: string }> | null);
       if (warehouse?.branch_id !== ctx.branchId) return forbidden();
     }
 
@@ -107,10 +108,14 @@ export async function POST(
     const outputs = batch.production_batch_outputs as Array<{
       id: string; item_id: string; unit_id: string; expected_quantity: number; actual_quantity: number;
     }>;
-    const recipe = batch.recipes as { finished_item_id: string; output_unit_id: string };
+    const recipe = firstRelation(batch.recipes as { finished_item_id: string; output_unit_id: string } | Array<{ finished_item_id: string; output_unit_id: string }> | null);
 
     let totalActualOutput = 0;
-    const outputList = outputs.length > 0 ? outputs : [{ item_id: recipe.finished_item_id, actual_quantity: 0, expected_quantity: Number(batch.expected_output) }];
+    const outputList = outputs.length > 0
+      ? outputs
+      : recipe
+        ? [{ item_id: recipe.finished_item_id, actual_quantity: 0, expected_quantity: Number(batch.expected_output) }]
+        : [];
 
     for (const output of outputList) {
       const actualQty = Number(output.actual_quantity ?? 0);

@@ -40,21 +40,21 @@ const ticker = [
 ];
 
 const productionStages = [
-  { id: 'raw',      icon: '🥛',  label: 'Raw Materials', metric: '2.4t',    unit: 'Received Today', bg: 'bg-blue-500/10',    border: 'border-blue-500/25',    badgeBorder: 'border-blue-400/40',    metricColor: 'text-blue-400'    },
-  { id: 'past',     icon: '🌡️',  label: 'Pasteurise',    metric: '98°C',    unit: 'HTST',           bg: 'bg-violet-500/10',  border: 'border-violet-500/25',  badgeBorder: 'border-violet-400/40',  metricColor: 'text-violet-400'  },
-  { id: 'homog',    icon: '🌀',  label: 'Homogenise',    metric: '250bar',  unit: 'Pressure',       bg: 'bg-cyan-500/10',    border: 'border-cyan-500/25',    badgeBorder: 'border-cyan-400/40',    metricColor: 'text-cyan-400'    },
-  { id: 'freeze',   icon: '❄️',  label: 'Freeze',        metric: '-4°C',    unit: 'Continuous',     bg: 'bg-sky-500/10',     border: 'border-sky-500/25',     badgeBorder: 'border-sky-400/40',     metricColor: 'text-sky-400'     },
+  { id: 'raw',      icon: '🥛',  label: 'Raw Materials', metric: '2.4t',    unit: 'Received Today', bg: 'bg-amber-500/10',   border: 'border-amber-500/25',   badgeBorder: 'border-amber-400/40',   metricColor: 'text-amber-400'   },
+  { id: 'past',     icon: '🌡️',  label: 'Pasteurise',    metric: '98°C',    unit: 'HTST',           bg: 'bg-orange-500/10',  border: 'border-orange-500/25',  badgeBorder: 'border-orange-400/40',  metricColor: 'text-orange-400'  },
+  { id: 'homog',    icon: '🌀',  label: 'Homogenise',    metric: '250bar',  unit: 'Pressure',       bg: 'bg-cocoa/10',       border: 'border-cocoa/30',       badgeBorder: 'border-cocoa/40',       metricColor: 'text-cocoa'       },
+  { id: 'freeze',   icon: '❄️',  label: 'Freeze',        metric: '-4°C',    unit: 'Continuous',     bg: 'bg-vanilla/20',     border: 'border-vanilla/40',     badgeBorder: 'border-amber-300/40',   metricColor: 'text-amber-500'   },
   { id: 'mould',    icon: '🍦',  label: 'Moulding',      metric: '1,240',   unit: 'Units / hr',     bg: 'bg-orange-500/10',  border: 'border-orange-500/25',  badgeBorder: 'border-orange-400/40',  metricColor: 'text-orange-400'  },
-  { id: 'harden',   icon: '🧊',  label: 'Hardening',     metric: '-35°C',   unit: 'IQF Tunnel',     bg: 'bg-indigo-500/10',  border: 'border-indigo-500/25',  badgeBorder: 'border-indigo-400/40',  metricColor: 'text-indigo-400'  },
+  { id: 'harden',   icon: '🧊',  label: 'Hardening',     metric: '-35°C',   unit: 'IQF Tunnel',     bg: 'bg-brown/10',       border: 'border-brown/25',       badgeBorder: 'border-brown/40',       metricColor: 'text-brown'       },
   { id: 'pack',     icon: '📦',  label: 'Packaging',     metric: '98.2%',   unit: 'Fill Rate',      bg: 'bg-emerald-500/10', border: 'border-emerald-500/25', badgeBorder: 'border-emerald-400/40', metricColor: 'text-emerald-400' },
-  { id: 'dispatch', icon: '🚛',  label: 'Dispatch',      metric: '5',       unit: 'Routes Active',  bg: 'bg-pink-500/10',    border: 'border-pink-500/25',    badgeBorder: 'border-pink-400/40',    metricColor: 'text-pink-400'    },
+  { id: 'dispatch', icon: '🚛',  label: 'Dispatch',      metric: '5',       unit: 'Routes Active',  bg: 'bg-deepOrange/10',  border: 'border-deepOrange/25',  badgeBorder: 'border-deepOrange/35',  metricColor: 'text-deepOrange'  },
 ] as const;
 
 const liveMetrics = [
   { label: "Today's Output", value: '12,450',   sub: 'cones produced',  color: 'text-orange'      },
   { label: 'Batch Yield',    value: '97.8%',    sub: 'vs 95% target',   color: 'text-emerald-400' },
-  { label: 'Stock Coverage', value: '8.4 days', sub: 'raw materials',   color: 'text-blue-400'    },
-  { label: 'Active Workers', value: '34',        sub: 'across 2 shifts', color: 'text-violet-400'  },
+  { label: 'Stock Coverage', value: '8.4 days', sub: 'raw materials',   color: 'text-amber-500'   },
+  { label: 'Active Workers', value: '34',        sub: 'across 2 shifts', color: 'text-brown'       },
 ];
 
 const statsData = [
@@ -66,13 +66,13 @@ const statsData = [
 
 const modules = [
   { icon: LayoutDashboard, label: 'Dashboard', color: 'from-orange-500 to-amber-400', desc: 'Live KPIs across all departments' },
-  { icon: Truck, label: 'Procurement', color: 'from-blue-500 to-cyan-400', desc: 'PR → RFQ → PO → GRN workflow' },
+  { icon: Truck, label: 'Procurement', color: 'from-amber-500 to-orange-400', desc: 'PR → RFQ → PO → GRN workflow' },
   { icon: Warehouse, label: 'Inventory', color: 'from-emerald-500 to-green-400', desc: 'Raw materials, WIP & finished goods' },
-  { icon: Factory, label: 'Production', color: 'from-violet-500 to-purple-400', desc: 'Recipe-driven batch manufacturing' },
-  { icon: Building2, label: 'Branch Ops', color: 'from-pink-500 to-rose-400', desc: 'Independent branch management' },
+  { icon: Factory, label: 'Production', color: 'from-cocoa to-brown', desc: 'Recipe-driven batch manufacturing' },
+  { icon: Building2, label: 'Branch Ops', color: 'from-orange-500 to-deepOrange', desc: 'Independent branch management' },
   { icon: ShoppingCart, label: 'Sales', color: 'from-yellow-500 to-orange-400', desc: 'Quotation → Order → Invoice' },
   { icon: Wallet, label: 'Finance', color: 'from-teal-500 to-emerald-400', desc: 'Full double-entry accounting' },
-  { icon: UsersRound, label: 'HR & Payroll', color: 'from-indigo-500 to-blue-400', desc: 'Staff, shifts & payroll processing' },
+  { icon: UsersRound, label: 'HR & Payroll', color: 'from-brown to-chocolate', desc: 'Staff, shifts & payroll processing' },
   { icon: BarChart3, label: 'Reports', color: 'from-orange-600 to-red-400', desc: 'Management-ready analytics' },
   { icon: Settings, label: 'Settings', color: 'from-slate-500 to-gray-400', desc: 'Roles, permissions & master data' },
   { icon: DollarSign, label: 'Cost Accounting', color: 'from-amber-600 to-yellow-400', desc: 'Cost per cone, batch & product line' },
@@ -91,16 +91,16 @@ const workflow = [
 
 const roles = [
   { role: 'Store Keeper', perms: ['Inventory only', 'No finance access', 'Stock receives & issues'], color: 'bg-emerald-500/15 border-emerald-500/30 text-emerald-700' },
-  { role: 'Production Mgr', perms: ['Batch management', 'Material consumption', 'Quality records'], color: 'bg-violet-500/15 border-violet-500/30 text-violet-700' },
-  { role: 'Sales Rep', perms: ['Customer orders', 'Invoicing', 'View stock (not cost)'], color: 'bg-blue-500/15 border-blue-500/30 text-blue-700' },
-  { role: 'Branch Manager', perms: ['Branch sales', 'Expense approval', 'Local inventory'], color: 'bg-pink-500/15 border-pink-500/30 text-pink-700' },
+  { role: 'Production Mgr', perms: ['Batch management', 'Material consumption', 'Quality records'], color: 'bg-cocoa/15 border-cocoa/30 text-cocoa' },
+  { role: 'Sales Rep', perms: ['Customer orders', 'Invoicing', 'View stock (not cost)'], color: 'bg-amber-500/15 border-amber-500/30 text-amber-700' },
+  { role: 'Branch Manager', perms: ['Branch sales', 'Expense approval', 'Local inventory'], color: 'bg-orange-500/15 border-orange-500/30 text-orange-700' },
   { role: 'Accountant', perms: ['Full financial access', 'Manual sales journals', 'Budget mgmt'], color: 'bg-amber-500/15 border-amber-500/30 text-amber-700' },
-  { role: 'Procurement', perms: ['Purchase orders', 'Supplier mgmt', 'Cannot approve payments'], color: 'bg-cyan-500/15 border-cyan-500/30 text-cyan-700' },
+  { role: 'Procurement', perms: ['Purchase orders', 'Supplier mgmt', 'Cannot approve payments'], color: 'bg-vanilla/40 border-amber-400/30 text-brown' },
 ];
 
 const approvalLevels = [
-  { level: '1', title: 'Supervisor', trigger: 'Minor stock movements', color: 'bg-blue-500' },
-  { level: '2', title: 'Dept Manager', trigger: 'Purchase orders & transfers', color: 'bg-violet-500' },
+  { level: '1', title: 'Supervisor', trigger: 'Minor stock movements', color: 'bg-amber-500' },
+  { level: '2', title: 'Dept Manager', trigger: 'Purchase orders & transfers', color: 'bg-orange-500' },
   { level: '3', title: 'Finance Manager', trigger: 'Payments & credit sales', color: 'bg-orange-500' },
   { level: '4', title: 'Managing Director', trigger: 'Asset purchases & budget changes', color: 'bg-red-500' },
 ];
@@ -466,7 +466,7 @@ export default function HomePage() {
                 <p className="mt-6 text-muted dark:text-darkMuted">The system tracks three chocolate types, ice cream mix, and all packaging materials. Standard vs actual usage variances calculated automatically for every batch.</p>
               </div>
               <div className="mt-8 space-y-3">
-                {[{ label: 'Raw Materials', value: '62%', color: 'bg-orange' }, { label: 'Packaging', value: '18%', color: 'bg-amber-400' }, { label: 'Direct Labour', value: '12%', color: 'bg-blue-500' }, { label: 'Overhead', value: '8%', color: 'bg-violet-500' }].map((item, i) => (
+                {[{ label: 'Raw Materials', value: '62%', color: 'bg-orange' }, { label: 'Packaging', value: '18%', color: 'bg-amber-400' }, { label: 'Direct Labour', value: '12%', color: 'bg-orange-300' }, { label: 'Overhead', value: '8%', color: 'bg-stone-400' }].map((item, i) => (
                   <div key={item.label} data-animate data-delay={String(i * 100 + 200)}>
                     <div className="mb-1 flex justify-between text-sm"><span className="font-medium text-brown dark:text-darkText">{item.label}</span><span className="text-muted dark:text-darkMuted">{item.value}</span></div>
                     <div className="h-2 overflow-hidden rounded-full bg-border dark:bg-darkBorder"><div className={`h-full rounded-full ${item.color}`} style={{ width: item.value }} /></div>

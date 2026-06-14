@@ -5,6 +5,18 @@
 @tailwind utilities;
 
 @layer base {
+  :root {
+    --app-bg: #fff7e8;
+    --app-surface: #fffaf1;
+    --app-surface-strong: #fff1dd;
+    --app-border: #f3d7b6;
+    --app-text: #1f130d;
+    --app-muted: #6b4a3a;
+    --app-accent: #f97316;
+    --app-accent-strong: #c2410c;
+    --app-accent-soft: rgba(249, 115, 22, 0.12);
+  }
+
   * {
     @apply border-border;
   }
@@ -18,7 +30,8 @@
     background:
       radial-gradient(circle at top left, rgba(249, 115, 22, 0.14), transparent 32%),
       radial-gradient(circle at top right, rgba(255, 232, 184, 0.65), transparent 24%),
-      #fff7e8;
+      var(--app-bg);
+    color: var(--app-text);
   }
 
   ::selection {
@@ -41,10 +54,14 @@
 
   /* Dashboard card — theme-aware */
   .dash-card {
-    @apply rounded-xl border border-brown/10 bg-white shadow-sm dark:border-white/8 dark:bg-white/4;
+    @apply rounded-xl border shadow-sm dark:border-white/8 dark:bg-white/4;
+    border-color: color-mix(in srgb, var(--app-border) 80%, transparent);
+    background: var(--app-surface);
   }
   .dash-card-muted {
-    @apply rounded-xl border border-brown/8 bg-white/70 dark:border-white/6 dark:bg-white/3;
+    @apply rounded-xl border dark:border-white/6 dark:bg-white/3;
+    border-color: color-mix(in srgb, var(--app-border) 72%, transparent);
+    background: color-mix(in srgb, var(--app-surface-strong) 72%, white);
   }
 
   /* Glassmorphism */
@@ -63,7 +80,7 @@
     @apply bg-gradient-to-r from-orange via-amber-400 to-deepOrange bg-clip-text text-transparent;
   }
   .grad-text-cool {
-    background: linear-gradient(135deg, #60a5fa 0%, #a78bfa 50%, #f472b6 100%);
+    background: linear-gradient(135deg, #f97316 0%, #fbbf24 50%, #c2410c 100%);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
@@ -74,7 +91,7 @@
     box-shadow: 0 0 30px rgba(249, 115, 22, 0.35), 0 0 60px rgba(249, 115, 22, 0.15);
   }
   .glow-blue {
-    box-shadow: 0 0 30px rgba(96, 165, 250, 0.35), 0 0 60px rgba(96, 165, 250, 0.15);
+    box-shadow: 0 0 30px rgba(249, 115, 22, 0.3), 0 0 60px rgba(194, 65, 12, 0.14);
   }
 
   /* Interactive card tilt */

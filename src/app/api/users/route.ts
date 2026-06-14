@@ -56,6 +56,7 @@ export async function POST(request: NextRequest) {
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   const service = createServiceRoleClient();
+  const schemaService = service.schema('icecream_erp');
 
   // Verify caller is admin
   const { data: caller } = await schemaService.from('users').select('id, role').eq('auth_id', user.id).single();

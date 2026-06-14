@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { badRequest, can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
+import { firstRelation } from '@/lib/supabase-relations';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
 const REPORT_TYPES = [
@@ -93,18 +94,19 @@ export async function GET(request: NextRequest) {
         const byPayment = new Map<string, number>();
 
         for (const sale of rows ?? []) {
-          const branch = (sale.branches as { name: string })?.name ?? 'Unknown';
+          const branch = firstRelation(sale.branches as { name: string } | Array<{ name: string }> | null)?.name ?? 'Unknown';
           const total = Number(sale.total_amount ?? 0);
           byBranch.set(branch, (byBranch.get(branch) ?? 0) + total);
           byPayment.set(sale.payment_method as string, (byPayment.get(sale.payment_method as string) ?? 0) + total);
 
-          for (const item of (sale.branch_sale_items as Array<{ quantity: number; total_price: number; items: { name: string } }>) ?? []) {
+          for (const item of (sale.branch_sale_items as Array<{ quantity: number; total_price: number; items: { name: string } | Array<{ name: string }> }>) ?? []) {
+            const saleItem = firstRelation(item.items);
             if (productId) continue; // skip if productId filter not matching (simplified)
             data.push({
               saleNumber: sale.sale_number,
               date: (sale.sale_date as string).slice(0, 10),
               branch,
-              product: item.items?.name ?? 'Unknown',
+              product: saleItem?.name ?? 'Unknown',
               quantity: Number(item.quantity ?? 0),
               paymentMethod: sale.payment_method,
               total: Number(item.total_price ?? 0),
@@ -132,13 +134,17 @@ export async function GET(request: NextRequest) {
         if (warehouseId) query = query.eq('warehouse_id', warehouseId);
 
         const { data: balances } = await query;
-        const data = (balances ?? []).map((row: { quantity_on_hand: number; items: { name: string; unit_cost: number }; warehouses: { name: string } }) => ({
-          item: row.items?.name,
-          warehouse: row.warehouses?.name,
-          qty: Number(row.quantity_on_hand ?? 0),
-          unitCost: Number(row.items?.unit_cost ?? 0),
-          totalValue: Number(row.quantity_on_hand ?? 0) * Number(row.items?.unit_cost ?? 0),
-        }));
+        const data = (balances ?? []).map((row) => {
+          const item = firstRelation(row.items as { name: string; unit_cost: number } | Array<{ name: string; unit_cost: number }> | null);
+          const warehouse = firstRelation(row.warehouses as { name: string } | Array<{ name: string }> | null);
+          return {
+            item: item?.name ?? 'Unknown',
+            warehouse: warehouse?.name ?? 'Unknown',
+            qty: Number(row.quantity_on_hand ?? 0),
+            unitCost: Number(item?.unit_cost ?? 0),
+            totalValue: Number(row.quantity_on_hand ?? 0) * Number(item?.unit_cost ?? 0),
+          };
+        });
 
         return NextResponse.json({
           chart: data.slice(0, 25).map((row) => ({ item: row.item, value: row.totalValue })),
@@ -155,17 +161,22 @@ export async function GET(request: NextRequest) {
           .not('items.reorder_level', 'is', null);
 
         const data = (rows ?? [])
-          .filter((r: { quantity_available: number; items: { reorder_level: number } }) =>
-            r.quantity_available <= r.items.reorder_level
-          )
-          .map((r: { quantity_available: number; items: { name: string; reorder_level: number }; warehouses: { name: string } }) => ({
-            item: r.items.name,
-            warehouse: r.warehouses?.name,
-            reorderLevel: Number(r.items.reorder_level),
-            available: Number(r.quantity_available),
-            deficit: Number(r.items.reorder_level) - Number(r.quantity_available),
-          }))
-          .sort((a: { deficit: number }, b: { deficit: number }) => b.deficit - a.deficit);
+          .filter((row) => {
+            const item = firstRelation(row.items as { reorder_level: number } | Array<{ reorder_level: number }> | null);
+            return Number(row.quantity_available) <= Number(item?.reorder_level ?? 0);
+          })
+          .map((row) => {
+            const item = firstRelation(row.items as { name: string; reorder_level: number } | Array<{ name: string; reorder_level: number }> | null);
+            const warehouse = firstRelation(row.warehouses as { name: string } | Array<{ name: string }> | null);
+            return {
+              item: item?.name ?? 'Unknown',
+              warehouse: warehouse?.name ?? 'Unknown',
+              reorderLevel: Number(item?.reorder_level ?? 0),
+              available: Number(row.quantity_available),
+              deficit: Number(item?.reorder_level ?? 0) - Number(row.quantity_available),
+            };
+          })
+          .sort((a, b) => b.deficit - a.deficit);
 
         return NextResponse.json({
           chart: data.slice(0, 20).map((r: { item: string; deficit: number }) => ({ item: r.item, deficit: r.deficit })),
@@ -189,13 +200,17 @@ export async function GET(request: NextRequest) {
           .gt('quantity_remaining', 0)
           .order('expiry_date', { ascending: true });
 
-        const data = (rows ?? []).map((r: { batch_number: string; items: { name: string }; expiry_date: string; quantity_remaining: number; warehouses: { name: string } }) => ({
-          batchNumber: r.batch_number,
-          item: r.items?.name,
-          expiryDate: r.expiry_date?.slice(0, 10),
-          qty: Number(r.quantity_remaining ?? 0),
-          location: r.warehouses?.name,
-        }));
+        const data = (rows ?? []).map((row) => {
+          const item = firstRelation(row.items as { name: string } | Array<{ name: string }> | null);
+          const warehouse = firstRelation(row.warehouses as { name: string } | Array<{ name: string }> | null);
+          return {
+            batchNumber: row.batch_number,
+            item: item?.name ?? 'Unknown',
+            expiryDate: row.expiry_date?.slice(0, 10),
+            qty: Number(row.quantity_remaining ?? 0),
+            location: warehouse?.name ?? 'Unknown',
+          };
+        });
 
         return NextResponse.json({
           chart: data.map((r: { batch_number?: string; batchNumber?: string; qty: number }) => ({ batch: r.batchNumber, qty: r.qty })),
@@ -223,7 +238,10 @@ export async function GET(request: NextRequest) {
         }));
 
         const reasonMap = new Map<string, number>();
-        for (const r of data) reasonMap.set(r.reason, (reasonMap.get(r.reason) ?? 0) + r.wastageQty);
+        for (const r of data) {
+          const reason = String(r.reason ?? 'Unspecified');
+          reasonMap.set(reason, (reasonMap.get(reason) ?? 0) + r.wastageQty);
+        }
 
         return NextResponse.json({
           chart: Array.from(reasonMap.entries()).map(([reason, value]) => ({ reason, value })),
@@ -286,7 +304,8 @@ export async function GET(request: NextRequest) {
 
         for (const o of orders ?? []) {
           const key = o.supplier_id as string;
-          const current = grouped.get(key) ?? { supplier: (o.suppliers as { name: string })?.name ?? 'Unknown', pos: 0, grns: 0, spend: 0 };
+          const supplier = firstRelation(o.suppliers as { name: string } | Array<{ name: string }> | null);
+          const current = grouped.get(key) ?? { supplier: supplier?.name ?? 'Unknown', pos: 0, grns: 0, spend: 0 };
           current.pos++;
           current.grns += Array.isArray(o.goods_received_notes) ? o.goods_received_notes.length : 0;
           current.spend += Number(o.total ?? 0);
@@ -315,7 +334,7 @@ export async function GET(request: NextRequest) {
 
         const { data: rows } = await query;
         const data = (rows ?? []).map((r: Record<string, unknown>) => ({
-          branch: (r.branches as { name: string })?.name,
+          branch: firstRelation(r.branches as { name: string } | Array<{ name: string }> | null)?.name ?? 'Unknown',
           shiftDate: (r.shift_date as string).slice(0, 10),
           shiftType: r.shift_type,
           status: r.status,

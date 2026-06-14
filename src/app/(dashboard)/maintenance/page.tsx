@@ -14,7 +14,7 @@ import { PageHeader } from '@/components/dashboard/page-header';
 
 const maintenanceStats = [
   { label: 'Active Machines', value: '12', sub: 'All operational', icon: Settings, color: 'text-emerald-400 border-emerald-400/20 bg-emerald-400/10' },
-  { label: 'Scheduled This Week', value: '3', sub: 'Preventive tasks', icon: Clock, color: 'text-blue-400 border-blue-400/20 bg-blue-400/10' },
+  { label: 'Scheduled This Week', value: '3', sub: 'Preventive tasks', icon: Clock, color: 'text-orange-200 border-orange-200/20 bg-orange-200/10' },
   { label: 'Overdue', value: '1', sub: 'Requires attention', icon: AlertTriangle, color: 'text-amber-400 border-amber-400/20 bg-amber-400/10' },
   { label: 'Repair Cost MTD', value: '$840', sub: 'Parts + labour', icon: DollarSign, color: 'text-orange border-orange/20 bg-orange/10' },
 ];
@@ -42,7 +42,7 @@ const statusMachine: Record<string, { color: string; icon: typeof CheckCircle2 }
 };
 
 const typeColors: Record<string, string> = {
-  PREVENTIVE: 'bg-blue-500/15 text-blue-400',
+  PREVENTIVE: 'bg-orange-400/15 text-orange-200',
   CORRECTIVE: 'bg-amber-500/15 text-amber-400',
   BREAKDOWN: 'bg-red-500/15 text-red-400',
   INSPECTION: 'bg-emerald-500/15 text-emerald-400',
@@ -58,7 +58,7 @@ export default function MaintenancePage() {
         actions={
           <Link
             href="/maintenance/machines/new"
-            className="inline-flex items-center gap-2 rounded-xl bg-cyan-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-cyan-700"
+            className="inline-flex items-center gap-2 rounded-xl bg-orange px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-deepOrange"
           >
             <Wrench className="h-4 w-4" />
             Log Maintenance
@@ -136,7 +136,7 @@ export default function MaintenancePage() {
           {recentWork.map((record) => (
             <div key={record.id} className="flex items-center justify-between px-5 py-4 transition hover:bg-white/5">
               <div className="flex items-center gap-4">
-                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-cyan-500/10 text-cyan-400">
+                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-orange-400/10 text-orange-200">
                   <Wrench className="h-4 w-4" />
                 </div>
                 <div>

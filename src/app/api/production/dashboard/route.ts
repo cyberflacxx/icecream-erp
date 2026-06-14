@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
+import { firstRelation } from '@/lib/supabase-relations';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
 export async function GET(request: NextRequest) {
@@ -116,17 +117,22 @@ export async function GET(request: NextRequest) {
 
     const total = batches?.length ?? 0;
     const materialsAtRisk = (stockBalances ?? [])
-      .filter((row: { quantity_available: number; items: { reorder_level: number } }) =>
-        row.items && row.quantity_available <= row.items.reorder_level
-      )
-      .map((row: { items: { name: string; reorder_level: number }; warehouses: { name: string }; quantity_available: number }) => ({
-        item: row.items.name,
-        warehouse: row.warehouses.name,
-        available: Number(row.quantity_available),
-        reorderLevel: Number(row.items.reorder_level),
-        deficit: Math.max(0, Number(row.items.reorder_level) - Number(row.quantity_available)),
-      }))
-      .sort((a: { deficit: number }, b: { deficit: number }) => b.deficit - a.deficit)
+      .filter((row) => {
+        const item = firstRelation(row.items as { reorder_level: number } | Array<{ reorder_level: number }> | null);
+        return item && Number(row.quantity_available) <= Number(item.reorder_level);
+      })
+      .map((row) => {
+        const item = firstRelation(row.items as { name: string; reorder_level: number } | Array<{ name: string; reorder_level: number }> | null);
+        const warehouse = firstRelation(row.warehouses as { name: string } | Array<{ name: string }> | null);
+        return {
+          item: item?.name ?? 'Unknown',
+          warehouse: warehouse?.name ?? 'Unknown',
+          available: Number(row.quantity_available),
+          reorderLevel: Number(item?.reorder_level ?? 0),
+          deficit: Math.max(0, Number(item?.reorder_level ?? 0) - Number(row.quantity_available)),
+        };
+      })
+      .sort((a, b) => b.deficit - a.deficit)
       .slice(0, 8);
 
     return NextResponse.json({

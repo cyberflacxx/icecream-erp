@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { badRequest, can, forbidden, getAuthContext, notFound, serverError, unauthorized } from '@/lib/api-auth';
+import { firstRelation } from '@/lib/supabase-relations';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
 export async function PATCH(
@@ -39,7 +40,7 @@ export async function PATCH(
     if (error || !batch) return notFound('Production batch not found');
 
     if (ctx.isBranchScoped && ctx.branchId) {
-      const warehouse = batch.warehouses as { branch_id: string };
+      const warehouse = firstRelation(batch.warehouses as { branch_id: string } | Array<{ branch_id: string }> | null);
       if (warehouse?.branch_id !== ctx.branchId) return forbidden();
     }
 

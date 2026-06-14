@@ -64,6 +64,7 @@ export async function POST(request: NextRequest) {
   if (!can(ctx, 'users.write')) return forbidden();
 
   const service = createServiceRoleClient();
+  const schemaService = service.schema('icecream_erp');
 
   try {
     const body = (await request.json()) as {

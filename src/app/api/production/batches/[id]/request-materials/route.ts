@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { badRequest, can, forbidden, getAuthContext, notFound, serverError, unauthorized } from '@/lib/api-auth';
 import { emitOperationalNotifications } from '@/lib/notifications-server';
+import { firstRelation } from '@/lib/supabase-relations';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
 const VALID_FROM = 'PLANNED';
@@ -29,8 +30,9 @@ export async function POST(
 
     if (error || !batch) return notFound('Production batch not found');
 
+    const warehouse = firstRelation(batch.warehouses as { branch_id?: string } | Array<{ branch_id?: string }> | null);
+
     if (ctx.isBranchScoped && ctx.branchId) {
-      const warehouse = batch.warehouses as { branch_id: string };
       if (warehouse?.branch_id !== ctx.branchId) return forbidden();
     }
 
@@ -58,7 +60,7 @@ export async function POST(
 
     await emitOperationalNotifications({
       actorUserId: ctx.userId,
-      branchId: String((((batch.warehouses as { branch_id?: string } | Array<{ branch_id?: string }> | null) instanceof Array ? (batch.warehouses as Array<{ branch_id?: string }>)[0]?.branch_id : (batch.warehouses as { branch_id?: string } | null)?.branch_id) ?? '')),
+      branchId: String(warehouse?.branch_id ?? ''),
       documentId: id,
       documentType: 'production_batch',
       eventType: 'MATERIAL_REQUEST_PENDING',

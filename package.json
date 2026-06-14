@@ -7,6 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
+    "seed:demo": "node scripts/seed-demo-data.mjs",
     "typecheck": "tsc --noEmit",
     "test:inventory": "tsc --outDir .tmp-tests tests/inventory-helpers.test.ts src/lib/inventory.ts --module commonjs --target es2020 --esModuleInterop --skipLibCheck && node --test .tmp-tests/tests/inventory-helpers.test.js",
     "test:procurement": "tsc --outDir .tmp-tests tests/procurement-helpers.test.ts src/lib/procurement.ts src/lib/inventory.ts --module commonjs --target es2020 --esModuleInterop --skipLibCheck && node --test .tmp-tests/tests/procurement-helpers.test.js",

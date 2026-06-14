@@ -14,9 +14,9 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 
 const costStats = [
   { label: 'Cost Per Cone', value: '$0.47', change: '−3.2% vs budget', up: true, icon: Zap, color: 'text-orange border-orange/20 bg-orange/10' },
-  { label: 'Batch Cost Today', value: '$1,840', change: '6 batches', up: null, icon: Package, color: 'text-violet-400 border-violet-400/20 bg-violet-400/10' },
+  { label: 'Batch Cost Today', value: '$1,840', change: '6 batches', up: null, icon: Package, color: 'text-amber-300 border-amber-300/20 bg-amber-300/10' },
   { label: 'Material Variance', value: '+$124', change: 'Over standard', up: false, icon: TrendingUp, color: 'text-red-400 border-red-400/20 bg-red-400/10' },
-  { label: 'Labour Cost', value: '$340', change: 'Today · both shifts', up: null, icon: DollarSign, color: 'text-blue-400 border-blue-400/20 bg-blue-400/10' },
+  { label: 'Labour Cost', value: '$340', change: 'Today · both shifts', up: null, icon: DollarSign, color: 'text-orange-200 border-orange-200/20 bg-orange-200/10' },
 ];
 
 const batchCosts = [
@@ -30,8 +30,8 @@ const batchCosts = [
 const costBreakdown = [
   { category: 'Raw Materials', standard: 0.29, actual: 0.31, color: '#f97316' },
   { category: 'Packaging', standard: 0.085, actual: 0.082, color: '#fbbf24' },
-  { category: 'Direct Labour', standard: 0.056, actual: 0.058, color: '#60a5fa' },
-  { category: 'Overhead', standard: 0.038, actual: 0.038, color: '#a78bfa' },
+  { category: 'Direct Labour', standard: 0.056, actual: 0.058, color: '#fdba74' },
+  { category: 'Overhead', standard: 0.038, actual: 0.038, color: '#a8a29e' },
 ];
 
 const weeklyTrend = [

@@ -19,7 +19,7 @@ const machines = [
 const statusConfig: Record<string, { label: string; color: string; icon: string }> = {
   OPERATIONAL: { label: 'Operational', color: 'bg-emerald-500/15 text-emerald-400', icon: '●' },
   MAINTENANCE_DUE: { label: 'Service Due', color: 'bg-amber-500/15 text-amber-400', icon: '●' },
-  UNDER_MAINTENANCE: { label: 'In Service', color: 'bg-blue-500/15 text-blue-400', icon: '●' },
+  UNDER_MAINTENANCE: { label: 'In Service', color: 'bg-orange-400/15 text-orange-200', icon: '●' },
   BREAKDOWN: { label: 'Breakdown', color: 'bg-red-500/15 text-red-400', icon: '●' },
 };
 

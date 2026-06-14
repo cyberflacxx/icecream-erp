@@ -327,7 +327,7 @@ export async function findSecurityUserProfileByAuthId(authId: string) {
   const data = await findUserRowBy('auth_id', authId, selectClause);
 
   if (!data) return null;
-  return normalizeProfileRow(data as Record<string, unknown>, organizationId);
+  return normalizeProfileRow(data as unknown as Record<string, unknown>, organizationId);
 }
 
 export async function findSecurityUserProfileByWorkId(workId: string) {
@@ -340,7 +340,7 @@ export async function findSecurityUserProfileByWorkId(workId: string) {
   const data = await findUserRowBy('work_id', workId, selectClause);
 
   if (!data) return null;
-  return normalizeProfileRow(data as Record<string, unknown>, organizationId);
+  return normalizeProfileRow(data as unknown as Record<string, unknown>, organizationId);
 }
 
 export async function buildSecurityContextProfile(profile: SecurityUserProfile) {
@@ -590,7 +590,8 @@ export async function ensureActiveSession(profile: SecurityContextProfile, acces
     .eq('token', tokenHash)
     .maybeSingle();
 
-  const lastActivityAt = (data as Record<string, unknown> | null)?.updated_at ?? (data as Record<string, unknown> | null)?.expires_at ?? profile.lastLogin;
+  const sessionRow = data ? (data as unknown as Record<string, unknown>) : null;
+  const lastActivityAt = sessionRow?.updated_at ?? sessionRow?.expires_at ?? profile.lastLogin;
   if (isSessionExpired(lastActivityAt as string | null | undefined, profile.sessionTimeoutMinutes)) {
     try {
       await service.from('auth_sessions').delete().eq('token', tokenHash);

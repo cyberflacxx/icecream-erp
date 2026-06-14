@@ -11,19 +11,19 @@ import { PageHeader } from '@/components/dashboard/page-header';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
 const budgetStats = [
-  { label: 'Total Budget (Month)', value: '$48,200', sub: 'All departments', icon: DollarSign, color: 'text-blue-400 border-blue-400/20 bg-blue-400/10' },
+  { label: 'Total Budget (Month)', value: '$48,200', sub: 'All departments', icon: DollarSign, color: 'text-orange-200 border-orange-200/20 bg-orange-200/10' },
   { label: 'Total Actual', value: '$41,380', sub: '86% utilised', icon: BarChart3, color: 'text-orange border-orange/20 bg-orange/10' },
   { label: 'Favourable Variance', value: '$6,820', sub: 'Under budget', icon: TrendingDown, color: 'text-emerald-400 border-emerald-400/20 bg-emerald-400/10' },
   { label: 'Over Budget Depts', value: '1', sub: 'Maintenance', icon: TrendingUp, color: 'text-red-400 border-red-400/20 bg-red-400/10' },
 ];
 
 const departments = [
-  { name: 'Production', budget: 18000, actual: 16200, color: '#a78bfa' },
-  { name: 'Procurement', budget: 12000, actual: 11400, color: '#60a5fa' },
+  { name: 'Production', budget: 18000, actual: 16200, color: '#fdba74' },
+  { name: 'Procurement', budget: 12000, actual: 11400, color: '#f59e0b' },
   { name: 'Stores', budget: 3200, actual: 2940, color: '#34d399' },
   { name: 'Sales', budget: 6000, actual: 5800, color: '#fbbf24' },
   { name: 'Admin', budget: 4500, actual: 3800, color: '#f97316' },
-  { name: 'Finance', budget: 2800, actual: 2400, color: '#22d3ee' },
+  { name: 'Finance', budget: 2800, actual: 2400, color: '#d6a25e' },
   { name: 'Maintenance', budget: 1700, actual: 2040, color: '#f87171' },
 ];
 
