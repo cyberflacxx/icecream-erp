@@ -6,6 +6,10 @@ import Swal from 'sweetalert2';
 
 const workIdPattern = /^AQI-[0-9]{8}$/;
 
+function normalizeWorkId(value: string) {
+  return value.trim().toUpperCase().replace(/\s+/g, '');
+}
+
 export default function ForgotPasswordPage() {
   const [workId, setWorkId] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -14,7 +18,8 @@ export default function ForgotPasswordPage() {
   const [expiresAt, setExpiresAt] = useState<string | null>(null);
 
   function validateWorkId(value: string) {
-    if (!value.trim() || !workIdPattern.test(value)) {
+    const normalized = normalizeWorkId(value);
+    if (!normalized || !workIdPattern.test(normalized)) {
       return 'Please enter a valid Work ID (format: AQI-XXXXXXXX)';
     }
     return null;
@@ -32,7 +37,7 @@ export default function ForgotPasswordPage() {
       const response = await fetch('/api/auth/request-password-reset', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ workId: workId.trim().toUpperCase() }),
+        body: JSON.stringify({ workId: normalizeWorkId(workId) }),
       });
 
       const payload = (await response.json().catch(() => ({}))) as {
@@ -83,14 +88,18 @@ export default function ForgotPasswordPage() {
             <input
               value={workId}
               onChange={(event) => {
-                setWorkId(event.target.value.toUpperCase());
+                setWorkId(normalizeWorkId(event.target.value));
                 setWorkIdError(null);
               }}
-              onBlur={() => setWorkIdError(validateWorkId(workId))}
+              onBlur={() => {
+                const normalized = normalizeWorkId(workId);
+                setWorkId(normalized);
+                setWorkIdError(validateWorkId(normalized));
+              }}
               placeholder="e.g. AQI-20260034"
               autoComplete="username"
               className={`h-11 w-full rounded-xl border px-3 outline-none transition ${
-                workIdError ? 'border-red-500 bg-red-50' : workIdPattern.test(workId) ? 'border-green-500' : 'border-border'
+                workIdError ? 'border-red-500 bg-red-50' : workIdPattern.test(normalizeWorkId(workId)) ? 'border-green-500' : 'border-border'
               }`}
             />
             {workIdError ? <p className="text-xs text-red-600">{workIdError}</p> : null}

@@ -7,6 +7,10 @@ import Swal from 'sweetalert2';
 
 const workIdPattern = /^AQI-[0-9]{8}$/;
 
+function normalizeWorkId(value: string) {
+  return value.trim().toUpperCase().replace(/\s+/g, '');
+}
+
 export default function LoginPage() {
   const router = useRouter();
   const [workId, setWorkId] = useState('');
@@ -17,7 +21,8 @@ export default function LoginPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   function validateWorkId(value: string) {
-    if (!value.trim() || !workIdPattern.test(value)) {
+    const normalized = normalizeWorkId(value);
+    if (!normalized || !workIdPattern.test(normalized)) {
       return 'Please enter a valid Work ID (format: AQI-XXXXXXXX)';
     }
     return null;
@@ -28,7 +33,7 @@ export default function LoginPage() {
     return null;
   }
 
-  const canSubmit = Boolean(workIdPattern.test(workId) && password.length > 0 && !isSubmitting);
+  const canSubmit = Boolean(workIdPattern.test(normalizeWorkId(workId)) && password.length > 0 && !isSubmitting);
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
@@ -56,7 +61,7 @@ export default function LoginPage() {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ workId, password }),
+        body: JSON.stringify({ workId: normalizeWorkId(workId), password }),
       });
 
       if (!response.ok) {
@@ -135,14 +140,18 @@ export default function LoginPage() {
               <input
                 value={workId}
                 onChange={(e) => {
-                  setWorkId(e.target.value.toUpperCase());
+                  setWorkId(normalizeWorkId(e.target.value));
                   setWorkIdError(null);
                 }}
-                onBlur={() => setWorkIdError(validateWorkId(workId))}
+                onBlur={() => {
+                  const normalized = normalizeWorkId(workId);
+                  setWorkId(normalized);
+                  setWorkIdError(validateWorkId(normalized));
+                }}
                 placeholder="e.g. AQI-20260034"
                 autoComplete="username"
                 className={`h-11 w-full rounded-xl border px-3 outline-none transition ${
-                  workIdError ? 'border-red-500 bg-red-50' : workIdPattern.test(workId) ? 'border-green-500' : 'border-border'
+                  workIdError ? 'border-red-500 bg-red-50' : workIdPattern.test(normalizeWorkId(workId)) ? 'border-green-500' : 'border-border'
                 }`}
               />
               {workIdError ? <p className="text-xs text-red-600">{workIdError}</p> : null}

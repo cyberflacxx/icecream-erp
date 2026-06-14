@@ -68,6 +68,17 @@ function securityService() {
   return createServiceRoleClient().schema('icecream_erp');
 }
 
+async function selectFirstAvailableUserColumns(candidates: string[]) {
+  const service = securityService();
+
+  for (const selectClause of candidates) {
+    const { error } = await service.from('users').select(selectClause).limit(1);
+    if (!error) return selectClause;
+  }
+
+  return candidates[candidates.length - 1] ?? 'id';
+}
+
 async function getFallbackOrganizationId() {
   const service = securityService();
   try {
@@ -249,6 +260,7 @@ async function resolveAssignments(table: 'user_branch_assignments' | 'user_wareh
 }
 
 function normalizeProfileRow(row: Record<string, unknown>, organizationId: string): SecurityUserProfile {
+  const normalizedStatus = String(row.status ?? 'active').toUpperCase();
   return {
     id: String(row.id),
     userAccountId: row.user_account_id ? String(row.user_account_id) : null,
@@ -258,7 +270,7 @@ function normalizeProfileRow(row: Record<string, unknown>, organizationId: strin
     firstName: String(row.first_name ?? ''),
     lastName: String(row.last_name ?? ''),
     workId: String(row.work_id ?? ''),
-    status: normalizeUserStatus(String(row.status ?? 'ACTIVE')),
+    status: normalizeUserStatus(normalizedStatus),
     branchId: row.branch_id ? String(row.branch_id) : null,
     organizationId,
     role: String(row.role ?? 'staff'),
@@ -271,9 +283,14 @@ function normalizeProfileRow(row: Record<string, unknown>, organizationId: strin
 export async function findSecurityUserProfileByAuthId(authId: string) {
   const service = securityService();
   const organizationId = await getFallbackOrganizationId();
+  const selectClause = await selectFirstAvailableUserColumns([
+    'id, auth_id, email, full_name, first_name, last_name, work_id, status, branch_id, role, failed_login_attempts, locked_until, last_login, user_account_id',
+    'id, auth_id, email, full_name, first_name, last_name, work_id, status, branch_id, role, last_login, user_account_id',
+    'id, auth_id, email, full_name, first_name, last_name, work_id, status, branch_id, role',
+  ]);
   const { data } = await service
     .from('users')
-    .select('id, auth_id, email, full_name, first_name, last_name, work_id, status, branch_id, role, failed_login_attempts, locked_until, last_login, user_account_id')
+    .select(selectClause)
     .eq('auth_id', authId)
     .is('deleted_at', null)
     .maybeSingle();
@@ -285,9 +302,14 @@ export async function findSecurityUserProfileByAuthId(authId: string) {
 export async function findSecurityUserProfileByWorkId(workId: string) {
   const service = securityService();
   const organizationId = await getFallbackOrganizationId();
+  const selectClause = await selectFirstAvailableUserColumns([
+    'id, auth_id, email, full_name, first_name, last_name, work_id, status, branch_id, role, failed_login_attempts, locked_until, last_login, user_account_id',
+    'id, auth_id, email, full_name, first_name, last_name, work_id, status, branch_id, role, last_login, user_account_id',
+    'id, auth_id, email, full_name, first_name, last_name, work_id, status, branch_id, role',
+  ]);
   const { data } = await service
     .from('users')
-    .select('id, auth_id, email, full_name, first_name, last_name, work_id, status, branch_id, role, failed_login_attempts, locked_until, last_login, user_account_id')
+    .select(selectClause)
     .ilike('work_id', workId)
     .is('deleted_at', null)
     .maybeSingle();
@@ -506,7 +528,10 @@ export async function incrementFailedLogin(profile: SecurityUserProfile, setting
     updates.locked_until = getLockoutExpiry(new Date(), policy.lockoutDurationMinutes).toISOString();
   }
 
-  await service.from('users').update(updates).eq('id', profile.id);
+  const { error } = await service.from('users').update(updates).eq('id', profile.id);
+  if (error && !error.message.toLowerCase().includes('failed_login_attempts') && !error.message.toLowerCase().includes('locked_until')) {
+    throw error;
+  }
 
   return {
     failedLoginAttempts,
@@ -517,12 +542,15 @@ export async function incrementFailedLogin(profile: SecurityUserProfile, setting
 
 export async function clearFailedLogin(profileId: string) {
   const service = securityService();
-  await service.from('users').update({
+  const { error } = await service.from('users').update({
     failed_login_attempts: 0,
     locked_until: null,
     last_login: new Date().toISOString(),
     status: 'active',
   }).eq('id', profileId);
+  if (error && !error.message.toLowerCase().includes('failed_login_attempts') && !error.message.toLowerCase().includes('locked_until')) {
+    throw error;
+  }
 }
 
 export async function ensureActiveSession(profile: SecurityContextProfile, accessToken?: string | null) {
