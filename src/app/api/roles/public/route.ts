@@ -4,7 +4,13 @@ import { getPublicRegistrationRoles } from '@/lib/registration';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
 /** Public endpoint — no auth required. Used by the self-registration page. */
+export const dynamic = 'force-dynamic';
+
 export async function GET() {
+  if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    return NextResponse.json({ data: [] });
+  }
+
   const service = createServiceRoleClient().schema('icecream_erp');
   const roles = await getPublicRegistrationRoles(service);
 
