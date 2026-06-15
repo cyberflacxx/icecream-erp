@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { badRequest, can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
 import { hrService, writeHrAuditLog } from '@/lib/hr-server';
+import { isMissingColumnOrRelation } from '@/app/api/hr/utils';
 
 export async function GET(request: NextRequest) {
   const ctx = await getAuthContext();
@@ -22,6 +23,9 @@ export async function GET(request: NextRequest) {
     if (searchParams.get('status')) query = query.eq('status', searchParams.get('status'));
 
     const { data, error } = await query;
+    if (error && isMissingColumnOrRelation(error, 'hr_overtime_records')) {
+      return NextResponse.json([]);
+    }
     if (error) throw error;
     return NextResponse.json(data ?? []);
   } catch (error) {

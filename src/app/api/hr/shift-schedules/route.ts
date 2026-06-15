@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { badRequest, can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
 import { detectShiftOverlap, normalizeShiftName } from '@/lib/hr';
 import { ensureEmployeeAssignable, hrService, writeHrAuditLog } from '@/lib/hr-server';
+import { isMissingColumnOrRelation } from '@/app/api/hr/utils';
 
 export async function GET(request: NextRequest) {
   const ctx = await getAuthContext();
@@ -14,13 +15,7 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     let query = service
       .from('hr_shift_schedules')
-      .select(`
-        *, 
-        shiftDefinition:hr_shift_definitions(id, shift_name, start_time, end_time),
-        department:departments(id, code, name),
-        branch:branches(id, code, name),
-        employees:hr_shift_schedule_employees(id, employee_id, role_on_shift, employee:employees(id, employee_number, first_name, last_name, branch_id))
-      `)
+      .select('id, branch_id, department_id, shift_date, shift_definition_id, status, scheduled_by, created_at')
       .eq('organization_id', ctx.organizationId)
       .order('shift_date', { ascending: false });
 
@@ -31,8 +26,53 @@ export async function GET(request: NextRequest) {
     if (searchParams.get('shiftDate')) query = query.eq('shift_date', searchParams.get('shiftDate'));
 
     const { data, error } = await query;
+    if (error && isMissingColumnOrRelation(error, 'hr_shift_schedules')) {
+      return NextResponse.json([]);
+    }
     if (error) throw error;
-    return NextResponse.json(data ?? []);
+
+    const rows = (data ?? []) as Array<Record<string, unknown>>;
+    const shiftDefinitionIds = Array.from(new Set(rows.map((row) => String(row.shift_definition_id ?? '')).filter(Boolean)));
+    const departmentIds = Array.from(new Set(rows.map((row) => String(row.department_id ?? '')).filter(Boolean)));
+    const branchIds = Array.from(new Set(rows.map((row) => String(row.branch_id ?? '')).filter(Boolean)));
+    const scheduleIds = rows.map((row) => String(row.id ?? '')).filter(Boolean);
+
+    const [shiftDefinitionsRes, departmentsRes, branchesRes, scheduleEmployeesRes] = await Promise.all([
+      shiftDefinitionIds.length > 0
+        ? service.from('hr_shift_definitions').select('id, shift_name, start_time, end_time').in('id', shiftDefinitionIds)
+        : Promise.resolve({ data: [], error: null }),
+      departmentIds.length > 0
+        ? service.from('departments').select('id, code, name').in('id', departmentIds)
+        : Promise.resolve({ data: [], error: null }),
+      branchIds.length > 0
+        ? service.from('branches').select('id, code, name').in('id', branchIds)
+        : Promise.resolve({ data: [], error: null }),
+      scheduleIds.length > 0
+        ? service.from('hr_shift_schedule_employees').select('id, schedule_id, employee_id, role_on_shift').in('schedule_id', scheduleIds)
+        : Promise.resolve({ data: [], error: null }),
+    ]);
+
+    const shiftDefinitionMap = new Map((shiftDefinitionsRes.data ?? []).map((item: Record<string, unknown>) => [String(item.id), item]));
+    const departmentMap = new Map((departmentsRes.data ?? []).map((item: Record<string, unknown>) => [String(item.id), item]));
+    const branchMap = new Map((branchesRes.data ?? []).map((item: Record<string, unknown>) => [String(item.id), item]));
+    const employeesBySchedule = new Map<string, Array<Record<string, unknown>>>();
+
+    for (const item of scheduleEmployeesRes.data ?? []) {
+      const scheduleId = String(item.schedule_id ?? '');
+      const current = employeesBySchedule.get(scheduleId) ?? [];
+      current.push(item as Record<string, unknown>);
+      employeesBySchedule.set(scheduleId, current);
+    }
+
+    return NextResponse.json(
+      rows.map((row) => ({
+        ...row,
+        branch: branchMap.get(String(row.branch_id ?? '')) ?? null,
+        department: departmentMap.get(String(row.department_id ?? '')) ?? null,
+        employees: employeesBySchedule.get(String(row.id ?? '')) ?? [],
+        shiftDefinition: shiftDefinitionMap.get(String(row.shift_definition_id ?? '')) ?? null,
+      })),
+    );
   } catch (error) {
     return serverError(error instanceof Error ? error.message : 'Failed to load shift schedules.');
   }

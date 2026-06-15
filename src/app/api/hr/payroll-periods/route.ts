@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { badRequest, can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
 import { hrService, writeHrAuditLog } from '@/lib/hr-server';
+import { isMissingColumnOrRelation } from '@/app/api/hr/utils';
 
 export async function GET() {
   const ctx = await getAuthContext();
@@ -15,6 +16,9 @@ export async function GET() {
       .select('*')
       .eq('organization_id', ctx.organizationId)
       .order('start_date', { ascending: false });
+    if (error && isMissingColumnOrRelation(error, 'hr_payroll_periods')) {
+      return NextResponse.json([]);
+    }
     if (error) throw error;
     return NextResponse.json(data ?? []);
   } catch (error) {

@@ -28,6 +28,26 @@ export function isErrorResponse(value: Response | { ctx: AuthContext }): value i
   return value instanceof Response;
 }
 
+export function getErrorMessage(error: unknown) {
+  if (error instanceof Error) return error.message;
+  if (typeof error === 'object' && error !== null && 'message' in error) {
+    return String((error as { message?: unknown }).message ?? '');
+  }
+  return '';
+}
+
+export function isMissingColumnOrRelation(error: unknown, token: string) {
+  const message = getErrorMessage(error).toLowerCase();
+  const normalizedToken = token.toLowerCase();
+  return (
+    message.includes(`column ${normalizedToken} does not exist`) ||
+    message.includes(`relation "${normalizedToken}" does not exist`) ||
+    message.includes(`could not find the table 'icecream_erp.${normalizedToken}'`) ||
+    message.includes(`could not find the '${normalizedToken}' column`) ||
+    message.includes(`could not find a relationship between '${normalizedToken.split('.')[0]}'`)
+  );
+}
+
 export async function loadShiftDefinitionByName(organizationId: string, shiftName?: string | null) {
   const service = hrService();
   const normalizedShift = normalizeShiftName(shiftName);

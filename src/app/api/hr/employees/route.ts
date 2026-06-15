@@ -10,6 +10,7 @@ import {
 } from '@/lib/api-auth';
 import { EMPLOYEE_STATUSES } from '@/lib/hr';
 import { hrService, writeHrAuditLog } from '@/lib/hr-server';
+import { isMissingColumnOrRelation } from '@/app/api/hr/utils';
 
 export async function GET(request: NextRequest) {
   const ctx = await getAuthContext();
@@ -26,14 +27,16 @@ export async function GET(request: NextRequest) {
 
   const service = hrService();
 
-  let query = service
-    .from('employees')
-    .select(
-      '*, branch:branches(id, name, code), departmentRef:departments(id, code, name), jobRole:hr_job_roles(id, role_name)',
-      { count: 'exact' },
-    )
-    .eq('organization_id', ctx.organizationId)
-    .is('deleted_at', null);
+  const buildBaseQuery = () =>
+    service
+      .from('employees')
+      .select(
+        'id, employee_number, full_name, first_name, last_name, department, job_title, status, hire_date, branch_id, created_at',
+        { count: 'exact' },
+      )
+      .eq('organization_id', ctx.organizationId);
+
+  let query = buildBaseQuery().is('deleted_at', null);
 
   if (ctx.isBranchScoped) {
     query = query.eq('branch_id', ctx.branchId!);
@@ -50,9 +53,15 @@ export async function GET(request: NextRequest) {
   }
 
   const from = (page - 1) * pageSize;
-  const { data, count, error } = await query
+  let { data, count, error } = await query
     .order('created_at', { ascending: false })
     .range(from, from + pageSize - 1);
+
+  if (error && isMissingColumnOrRelation(error, 'employees.deleted_at')) {
+    ({ data, count, error } = await buildBaseQuery()
+      .order('created_at', { ascending: false })
+      .range(from, from + pageSize - 1));
+  }
 
   if (error) return serverError(error.message);
 
@@ -106,13 +115,24 @@ export async function POST(request: NextRequest) {
   }
 
   const service = hrService();
-  const { data: existing } = await service
+  let existingResult = await service
     .from('employees')
     .select('id')
     .eq('organization_id', ctx.organizationId)
     .eq('employee_number', employeeNumber)
     .is('deleted_at', null)
     .maybeSingle();
+
+  if (existingResult.error && isMissingColumnOrRelation(existingResult.error, 'employees.deleted_at')) {
+    existingResult = await service
+      .from('employees')
+      .select('id')
+      .eq('organization_id', ctx.organizationId)
+      .eq('employee_number', employeeNumber)
+      .maybeSingle();
+  }
+
+  const existing = existingResult.data;
 
   if (existing) {
     return NextResponse.json(

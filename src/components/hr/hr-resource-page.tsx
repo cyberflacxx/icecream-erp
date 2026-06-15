@@ -20,7 +20,7 @@ interface HrResourcePageProps {
 }
 
 function formatCell(value: unknown) {
-  if (value === null || value === undefined || value === '') return '—';
+  if (value === null || value === undefined || value === '') return '--';
   if (typeof value === 'object') {
     if (Array.isArray(value)) return `${value.length} item(s)`;
     const record = value as Record<string, unknown>;

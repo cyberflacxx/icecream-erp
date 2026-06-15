@@ -9,6 +9,7 @@ import {
   unauthorized,
 } from '@/lib/api-auth';
 import { computeAttendancePayload, hrService, writeHrAuditLog } from '@/lib/hr-server';
+import { isMissingColumnOrRelation } from '@/app/api/hr/utils';
 
 export async function GET(request: NextRequest) {
   const ctx = await getAuthContext();
@@ -28,7 +29,7 @@ export async function GET(request: NextRequest) {
   let query = service
     .from('hr_attendance_records')
     .select(
-      '*, employee:employees(id, first_name, last_name, full_name, employee_number, branch_id, department), shiftDefinition:hr_shift_definitions(id, shift_name, start_time, end_time)',
+      'id, employee_id, attendance_date, shift_name, attendance_status, hours_worked, late_minutes, overtime_hours, branch_id, created_at',
       { count: 'exact' },
     )
     .eq('organization_id', ctx.organizationId);
@@ -47,10 +48,38 @@ export async function GET(request: NextRequest) {
     .order('attendance_date', { ascending: false })
     .range(from, from + pageSize - 1);
 
+  if (error && isMissingColumnOrRelation(error, 'hr_attendance_records')) {
+    return NextResponse.json({
+      data: [],
+      pagination: { page, pageSize, total: 0 },
+    });
+  }
+
   if (error) return serverError(error.message);
 
+  const employeeIds = Array.from(
+    new Set((data ?? []).map((row: Record<string, unknown>) => String(row.employee_id ?? '')).filter(Boolean)),
+  );
+  const employeeMap = new Map<string, Record<string, unknown>>();
+
+  if (employeeIds.length > 0) {
+    const { data: employees, error: employeeError } = await service
+      .from('employees')
+      .select('id, first_name, last_name, full_name, employee_number, department, branch_id')
+      .in('id', employeeIds);
+
+    if (!employeeError) {
+      for (const employee of employees ?? []) {
+        employeeMap.set(String(employee.id), employee as Record<string, unknown>);
+      }
+    }
+  }
+
   return NextResponse.json({
-    data: data ?? [],
+    data: (data ?? []).map((row: Record<string, unknown>) => ({
+      ...row,
+      employee: employeeMap.get(String(row.employee_id ?? '')) ?? null,
+    })),
     pagination: { page, pageSize, total: count ?? 0 },
   });
 }

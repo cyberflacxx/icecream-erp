@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { badRequest, can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
 import { normalizeShiftName } from '@/lib/hr';
 import { hrService, writeHrAuditLog } from '@/lib/hr-server';
+import { isMissingColumnOrRelation } from '@/app/api/hr/utils';
 
 export async function GET() {
   const ctx = await getAuthContext();
@@ -16,6 +17,9 @@ export async function GET() {
       .select('*, department:departments(id, code, name)')
       .eq('organization_id', ctx.organizationId)
       .order('shift_name');
+    if (error && isMissingColumnOrRelation(error, 'hr_shift_definitions')) {
+      return NextResponse.json([]);
+    }
     if (error) throw error;
     return NextResponse.json(data ?? []);
   } catch (error) {

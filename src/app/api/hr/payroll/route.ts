@@ -9,6 +9,7 @@ import {
   unauthorized,
 } from '@/lib/api-auth';
 import { hrService, writeHrAuditLog } from '@/lib/hr-server';
+import { isMissingColumnOrRelation } from '@/app/api/hr/utils';
 
 export async function GET(request: NextRequest) {
   const ctx = await getAuthContext();
@@ -27,7 +28,7 @@ export async function GET(request: NextRequest) {
   let query = service
     .from('hr_payroll_summaries')
     .select(
-      '*, employee:employees(id, first_name, last_name, employee_number, branch_id, department), period:hr_payroll_periods(id, period_name, start_date, end_date)',
+      'id, employee_id, payroll_period_id, basic_pay, overtime_pay, gross_pay, net_pay, status, created_at',
       { count: 'exact' },
     )
     .eq('organization_id', ctx.organizationId);
@@ -40,9 +41,41 @@ export async function GET(request: NextRequest) {
     .order('created_at', { ascending: false })
     .range(from, from + pageSize - 1);
 
+  if (error && isMissingColumnOrRelation(error, 'hr_payroll_summaries')) {
+    return NextResponse.json({
+      data: [],
+      pagination: { page, pageSize, total: 0 },
+    });
+  }
+
   if (error) return serverError(error.message);
 
-  const filtered = (data ?? []).filter((row: Record<string, unknown>) => {
+  const employeeIds = Array.from(
+    new Set((data ?? []).map((row: Record<string, unknown>) => String(row.employee_id ?? '')).filter(Boolean)),
+  );
+  const periodIds = Array.from(
+    new Set((data ?? []).map((row: Record<string, unknown>) => String(row.payroll_period_id ?? '')).filter(Boolean)),
+  );
+
+  const [employeesRes, periodsRes] = await Promise.all([
+    employeeIds.length > 0
+      ? service.from('employees').select('id, first_name, last_name, full_name, employee_number, branch_id, department').in('id', employeeIds)
+      : Promise.resolve({ data: [], error: null }),
+    periodIds.length > 0
+      ? service.from('hr_payroll_periods').select('id, period_name, start_date, end_date').in('id', periodIds)
+      : Promise.resolve({ data: [], error: null }),
+  ]);
+
+  const employeeMap = new Map((employeesRes.data ?? []).map((row: Record<string, unknown>) => [String(row.id), row]));
+  const periodMap = new Map((periodsRes.data ?? []).map((row: Record<string, unknown>) => [String(row.id), row]));
+
+  const enriched = (data ?? []).map((row: Record<string, unknown>) => ({
+    ...row,
+    employee: employeeMap.get(String(row.employee_id ?? '')) ?? null,
+    period: periodMap.get(String(row.payroll_period_id ?? '')) ?? null,
+  }));
+
+  const filtered = enriched.filter((row: Record<string, unknown>) => {
     const employee = row.employee as Record<string, unknown> | null;
     if (ctx.isBranchScoped) return String(employee?.branch_id ?? '') === ctx.branchId;
     if (branchId) return String(employee?.branch_id ?? '') === branchId;
@@ -104,6 +137,9 @@ export async function POST(request: NextRequest) {
     .select()
     .single();
 
+  if (error && isMissingColumnOrRelation(error, 'hr_payroll_summaries')) {
+    return serverError('Payroll tables are not available in the current database schema yet.');
+  }
   if (error) return serverError(error.message);
 
   await writeHrAuditLog('HR_PAYROLL_SUMMARY_CREATED', String(data.id), ctx.userId, data as Record<string, unknown>, 'payroll_summary');
