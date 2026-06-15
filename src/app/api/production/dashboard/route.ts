@@ -4,6 +4,23 @@ import { can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib
 import { firstRelation } from '@/lib/supabase-relations';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
+function getErrorMessage(error: unknown) {
+  if (error instanceof Error) return error.message;
+  if (typeof error === 'object' && error !== null && 'message' in error) {
+    return String((error as { message?: unknown }).message ?? '');
+  }
+  return '';
+}
+
+function isMissingColumn(error: unknown, table: string, column: string) {
+  return getErrorMessage(error).toLowerCase().includes(`column ${table.toLowerCase()}.${column.toLowerCase()} does not exist`);
+}
+
+type QueryRows = {
+  data: Array<Record<string, unknown>> | null;
+  error: unknown;
+};
+
 export async function GET(request: NextRequest) {
   const ctx = await getAuthContext();
   if (!ctx) return unauthorized();
@@ -52,8 +69,35 @@ export async function GET(request: NextRequest) {
       batchQuery = batchQuery.in('warehouse_id', warehouseIds);
     }
 
-    const { data: batches, error: batchError } = await batchQuery;
-    if (batchError) throw batchError;
+    let batchResult = await batchQuery as QueryRows;
+    if (
+      batchResult.error &&
+      (
+        isMissingColumn(batchResult.error, 'production_batches', 'quality_status') ||
+        isMissingColumn(batchResult.error, 'production_batches', 'deleted_at') ||
+        isMissingColumn(batchResult.error, 'production_batches', 'production_date') ||
+        isMissingColumn(batchResult.error, 'production_batches', 'actual_output') ||
+        isMissingColumn(batchResult.error, 'production_batches', 'efficiency_percentage') ||
+        isMissingColumn(batchResult.error, 'production_batches', 'wastage_quantity') ||
+        isMissingColumn(batchResult.error, 'production_batches', 'planned_quantity')
+      )
+    ) {
+      let fallbackQuery = service
+        .schema('icecream_erp')
+        .from('production_batches')
+        .select('id, batch_number, status, planned_date, production_line, shift, actual_qty, yield_percent, wastage_qty, planned_qty, warehouse_id')
+        .gte('planned_date', resolvedStart)
+        .lte('planned_date', resolvedEnd)
+        .order('planned_date', { ascending: true });
+
+      if (warehouseIds && warehouseIds.length > 0) {
+        fallbackQuery = fallbackQuery.in('warehouse_id', warehouseIds);
+      }
+
+      batchResult = await fallbackQuery as QueryRows;
+    }
+    if (batchResult.error) throw batchResult.error;
+    const batches = batchResult.data ?? [];
 
     // Open batches
     let openBatchQuery = service
@@ -69,7 +113,31 @@ export async function GET(request: NextRequest) {
       openBatchQuery = openBatchQuery.in('warehouse_id', warehouseIds);
     }
 
-    const { data: openBatches } = await openBatchQuery;
+    let openBatchResult = await openBatchQuery as QueryRows;
+    if (
+      openBatchResult.error &&
+      (
+        isMissingColumn(openBatchResult.error, 'production_batches', 'deleted_at') ||
+        isMissingColumn(openBatchResult.error, 'production_batches', 'production_date') ||
+        isMissingColumn(openBatchResult.error, 'production_batches', 'actual_output')
+      )
+    ) {
+      let fallbackOpenBatchQuery = service
+        .schema('icecream_erp')
+        .from('production_batches')
+        .select('id, batch_number, status, planned_date, production_line, shift, actual_qty, warehouse_id')
+        .in('status', ['PLANNED', 'IN_PROGRESS', 'QUALITY_CHECK'])
+        .order('planned_date', { ascending: false })
+        .limit(8);
+
+      if (warehouseIds && warehouseIds.length > 0) {
+        fallbackOpenBatchQuery = fallbackOpenBatchQuery.in('warehouse_id', warehouseIds);
+      }
+
+      openBatchResult = await fallbackOpenBatchQuery as QueryRows;
+    }
+    if (openBatchResult.error) throw openBatchResult.error;
+    const openBatches = openBatchResult.data ?? [];
 
     // Quality check counts
     const { count: qualityFailed } = await service
@@ -95,7 +163,28 @@ export async function GET(request: NextRequest) {
       stockQuery = stockQuery.in('warehouse_id', warehouseIds);
     }
 
-    const { data: stockBalances } = await stockQuery;
+    let stockResult = await stockQuery as QueryRows;
+    if (
+      stockResult.error &&
+      (
+        isMissingColumn(stockResult.error, 'stock_balances', 'quantity_available') ||
+        isMissingColumn(stockResult.error, 'stock_balances', 'quantity_on_hand')
+      )
+    ) {
+      let fallbackStockQuery = service
+        .schema('icecream_erp')
+        .from('stock_balances')
+        .select('id, quantity, item_id, warehouse_id, items!inner(id, name, reorder_level), warehouses!inner(id, name)')
+        .not('items.reorder_level', 'is', null);
+
+      if (warehouseIds && warehouseIds.length > 0) {
+        fallbackStockQuery = fallbackStockQuery.in('warehouse_id', warehouseIds);
+      }
+
+      stockResult = await fallbackStockQuery as QueryRows;
+    }
+    if (stockResult.error) throw stockResult.error;
+    const stockBalances = stockResult.data ?? [];
 
     // Aggregate from batches
     const statusMap = new Map<string, number>();
@@ -104,32 +193,39 @@ export async function GET(request: NextRequest) {
     let efficiencySum = 0;
     let wastageSum = 0;
 
-    for (const batch of batches ?? []) {
-      statusMap.set(batch.status, (statusMap.get(batch.status) ?? 0) + 1);
-      const day = batch.production_date.slice(0, 10);
-      outputMap.set(day, (outputMap.get(day) ?? 0) + Number(batch.actual_output ?? 0));
-      efficiencySum += Number(batch.efficiency_percentage ?? 0);
-      wastageSum += Number(batch.wastage_quantity ?? 0);
-      if (batch.status === 'COMPLETED' && day === todayKey) {
+    for (const batch of batches as Array<Record<string, unknown>>) {
+      const status = String(batch.status ?? '');
+      const day = String(batch.production_date ?? batch.planned_date ?? '').slice(0, 10);
+      const output = Number(batch.actual_output ?? batch.actual_qty ?? 0);
+      const efficiency = Number(batch.efficiency_percentage ?? batch.yield_percent ?? 0);
+      const wastage = Number(batch.wastage_quantity ?? batch.wastage_qty ?? 0);
+
+      statusMap.set(status, (statusMap.get(status) ?? 0) + 1);
+      outputMap.set(day, (outputMap.get(day) ?? 0) + output);
+      efficiencySum += efficiency;
+      wastageSum += wastage;
+      if (status === 'COMPLETED' && day === todayKey) {
         completedToday += 1;
       }
     }
 
-    const total = batches?.length ?? 0;
-    const materialsAtRisk = (stockBalances ?? [])
+    const total = batches.length;
+    const materialsAtRisk = stockBalances
       .filter((row) => {
         const item = firstRelation(row.items as { reorder_level: number } | Array<{ reorder_level: number }> | null);
-        return item && Number(row.quantity_available) <= Number(item.reorder_level);
+        return item && Number(row.quantity_available ?? row.quantity ?? 0) <= Number(item.reorder_level);
       })
       .map((row) => {
         const item = firstRelation(row.items as { name: string; reorder_level: number } | Array<{ name: string; reorder_level: number }> | null);
         const warehouse = firstRelation(row.warehouses as { name: string } | Array<{ name: string }> | null);
+        const available = Number(row.quantity_available ?? row.quantity ?? 0);
+        const reorderLevel = Number(item?.reorder_level ?? 0);
         return {
           item: item?.name ?? 'Unknown',
           warehouse: warehouse?.name ?? 'Unknown',
-          available: Number(row.quantity_available),
-          reorderLevel: Number(item?.reorder_level ?? 0),
-          deficit: Math.max(0, Number(item?.reorder_level ?? 0) - Number(row.quantity_available)),
+          available,
+          reorderLevel,
+          deficit: Math.max(0, reorderLevel - available),
         };
       })
       .sort((a, b) => b.deficit - a.deficit)
@@ -150,13 +246,13 @@ export async function GET(request: NextRequest) {
         outputLast7Days: Array.from(outputMap.entries()).map(([day, output]) => ({ day, output })),
         statusBreakdown: Array.from(statusMap.entries()).map(([status, count]) => ({ status, count })),
       },
-      openBatches: (openBatches ?? []).map((b: { batch_number: string; actual_output: number; production_date: string; production_line: string; shift: string; status: string }) => ({
-        batchNumber: b.batch_number,
-        output: Number(b.actual_output ?? 0),
-        productionDate: b.production_date.slice(0, 10),
-        productionLine: b.production_line,
-        shift: b.shift,
-        status: b.status,
+      openBatches: openBatches.map((b: Record<string, unknown>) => ({
+        batchNumber: String(b.batch_number ?? ''),
+        output: Number(b.actual_output ?? b.actual_qty ?? 0),
+        productionDate: String(b.production_date ?? b.planned_date ?? '').slice(0, 10),
+        productionLine: String(b.production_line ?? ''),
+        shift: String(b.shift ?? ''),
+        status: String(b.status ?? ''),
       })),
       materialsAtRisk,
       qualityAlerts: {
