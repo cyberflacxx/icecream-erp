@@ -76,6 +76,7 @@ export async function GET(request: NextRequest) {
         isMissingColumn(batchResult.error, 'production_batches', 'quality_status') ||
         isMissingColumn(batchResult.error, 'production_batches', 'deleted_at') ||
         isMissingColumn(batchResult.error, 'production_batches', 'production_date') ||
+        isMissingColumn(batchResult.error, 'production_batches', 'production_line') ||
         isMissingColumn(batchResult.error, 'production_batches', 'actual_output') ||
         isMissingColumn(batchResult.error, 'production_batches', 'efficiency_percentage') ||
         isMissingColumn(batchResult.error, 'production_batches', 'wastage_quantity') ||
@@ -85,7 +86,7 @@ export async function GET(request: NextRequest) {
       let fallbackQuery = service
         .schema('icecream_erp')
         .from('production_batches')
-        .select('id, batch_number, status, planned_date, production_line, shift, actual_qty, yield_percent, wastage_qty, planned_qty, warehouse_id')
+        .select('id, batch_number, status, planned_date, shift, actual_qty, yield_percent, wastage_qty, planned_qty, warehouse_id')
         .gte('planned_date', resolvedStart)
         .lte('planned_date', resolvedEnd)
         .order('planned_date', { ascending: true });
@@ -119,13 +120,14 @@ export async function GET(request: NextRequest) {
       (
         isMissingColumn(openBatchResult.error, 'production_batches', 'deleted_at') ||
         isMissingColumn(openBatchResult.error, 'production_batches', 'production_date') ||
+        isMissingColumn(openBatchResult.error, 'production_batches', 'production_line') ||
         isMissingColumn(openBatchResult.error, 'production_batches', 'actual_output')
       )
     ) {
       let fallbackOpenBatchQuery = service
         .schema('icecream_erp')
         .from('production_batches')
-        .select('id, batch_number, status, planned_date, production_line, shift, actual_qty, warehouse_id')
+        .select('id, batch_number, status, planned_date, shift, actual_qty, warehouse_id')
         .in('status', ['PLANNED', 'IN_PROGRESS', 'QUALITY_CHECK'])
         .order('planned_date', { ascending: false })
         .limit(8);
@@ -250,7 +252,7 @@ export async function GET(request: NextRequest) {
         batchNumber: String(b.batch_number ?? ''),
         output: Number(b.actual_output ?? b.actual_qty ?? 0),
         productionDate: String(b.production_date ?? b.planned_date ?? '').slice(0, 10),
-        productionLine: String(b.production_line ?? ''),
+        productionLine: String(b.production_line ?? 'N/A'),
         shift: String(b.shift ?? ''),
         status: String(b.status ?? ''),
       })),
