@@ -24,8 +24,9 @@ import {
 } from 'lucide-react';
 import { usePathname, useRouter } from 'next/navigation';
 
-import { PermissionGate, cn } from '@/components/ui-library';
+import { cn } from '@/components/ui-library';
 import { PERMISSIONS } from '@/lib/shared';
+import { hasAnyPermission, isSuperAdminPermissions } from '@/lib/dashboard-access';
 
 import { useUserContext } from '@/contexts/UserContext';
 import { logoutAndRedirect } from '@/lib/logout';
@@ -35,7 +36,17 @@ const navItems = [
     href: '/dashboard',
     icon: LayoutDashboard,
     label: 'Dashboard',
-    permission: PERMISSIONS.dashboard.read,
+    permissions: [
+      PERMISSIONS.dashboard.read,
+      'sales.read',
+      'procurement.read',
+      'inventory.read',
+      'production.read',
+      'finance.read',
+      'hr.read',
+      'quality.read',
+      'reports.read',
+    ],
     color: 'text-orange',
     bgActive: 'bg-orange/15',
   },
@@ -43,7 +54,7 @@ const navItems = [
     href: '/procurement/suppliers',
     icon: Truck,
     label: 'Procurement',
-    permission: PERMISSIONS.supplier.read,
+    permissions: [PERMISSIONS.supplier.read, 'procurement.read'],
     color: 'text-amber-300',
     bgActive: 'bg-amber-500/15',
   },
@@ -51,7 +62,7 @@ const navItems = [
     href: '/inventory',
     icon: Warehouse,
     label: 'Inventory',
-    permission: PERMISSIONS.inventory.read,
+    permissions: [PERMISSIONS.inventory.read, 'inventory.read'],
     color: 'text-emerald-400',
     bgActive: 'bg-emerald-500/15',
   },
@@ -59,7 +70,7 @@ const navItems = [
     href: '/production',
     icon: Factory,
     label: 'Production',
-    permission: PERMISSIONS.productionBatch.read,
+    permissions: [PERMISSIONS.productionBatch.read, 'production.read'],
     color: 'text-orange-300',
     bgActive: 'bg-orange-500/15',
   },
@@ -67,7 +78,7 @@ const navItems = [
     href: '/branches',
     icon: Building2,
     label: 'Branch Ops',
-    permission: PERMISSIONS.branchSales.read,
+    permissions: [PERMISSIONS.branchSales.read, 'branches.read', 'sales.read'],
     color: 'text-rose-300',
     bgActive: 'bg-rose-500/15',
   },
@@ -75,7 +86,7 @@ const navItems = [
     href: '/sales',
     icon: ShoppingCart,
     label: 'Sales',
-    permission: PERMISSIONS.branchSales.read,
+    permissions: [PERMISSIONS.branchSales.read, 'sales.read', PERMISSIONS.customer.read, PERMISSIONS.invoice.read],
     color: 'text-yellow-400',
     bgActive: 'bg-yellow-500/15',
   },
@@ -83,7 +94,7 @@ const navItems = [
     href: '/finance',
     icon: Wallet,
     label: 'Finance',
-    permission: PERMISSIONS.finance.read,
+    permissions: [PERMISSIONS.finance.read, 'finance.read', 'budget.read'],
     color: 'text-teal-400',
     bgActive: 'bg-teal-500/15',
   },
@@ -91,7 +102,7 @@ const navItems = [
     href: '/hr',
     icon: UsersRound,
     label: 'HR & Payroll',
-    permission: PERMISSIONS.finance.read,
+    permissions: ['hr.read', 'payroll.read'],
     color: 'text-stone-300',
     bgActive: 'bg-stone-500/15',
   },
@@ -99,7 +110,7 @@ const navItems = [
     href: '/quality',
     icon: FlaskConical,
     label: 'Quality Control',
-    permission: PERMISSIONS.inventory.read,
+    permissions: ['quality.read', PERMISSIONS.productionQuality.read],
     color: 'text-lime-400',
     bgActive: 'bg-lime-500/15',
   },
@@ -107,7 +118,7 @@ const navItems = [
     href: '/cost-accounting',
     icon: DollarSign,
     label: 'Cost Accounting',
-    permission: PERMISSIONS.finance.read,
+    permissions: [PERMISSIONS.finance.read, 'finance.read'],
     color: 'text-amber-400',
     bgActive: 'bg-amber-500/15',
   },
@@ -115,7 +126,7 @@ const navItems = [
     href: '/maintenance',
     icon: Wrench,
     label: 'Maintenance',
-    permission: PERMISSIONS.inventory.read,
+    permissions: ['maintenance.read'],
     color: 'text-orange-200',
     bgActive: 'bg-orange-400/15',
   },
@@ -123,7 +134,7 @@ const navItems = [
     href: '/budget',
     icon: Receipt,
     label: 'Budget',
-    permission: PERMISSIONS.finance.read,
+    permissions: [PERMISSIONS.finance.read, 'budget.read', 'finance.read'],
     color: 'text-teal-300',
     bgActive: 'bg-teal-500/15',
   },
@@ -131,7 +142,7 @@ const navItems = [
     href: '/reports',
     icon: BarChart3,
     label: 'Reports',
-    permission: PERMISSIONS.reports.read,
+    permissions: [PERMISSIONS.reports.read, 'reports.read'],
     color: 'text-orange-400',
     bgActive: 'bg-orange-500/15',
   },
@@ -139,7 +150,7 @@ const navItems = [
     href: '/admin/migration',
     icon: ServerCog,
     label: 'Admin Ops',
-    permission: PERMISSIONS.settings.manage,
+    permissions: [PERMISSIONS.settings.manage, 'manage_roles'],
     color: 'text-orange-200',
     bgActive: 'bg-orange-500/15',
   },
@@ -147,7 +158,17 @@ const navItems = [
     href: '/notifications',
     icon: Bell,
     label: 'Notifications',
-    permission: PERMISSIONS.dashboard.read,
+    permissions: [
+      PERMISSIONS.dashboard.read,
+      'sales.read',
+      'procurement.read',
+      'inventory.read',
+      'production.read',
+      'finance.read',
+      'hr.read',
+      'quality.read',
+      'reports.read',
+    ],
     color: 'text-rose-300',
     bgActive: 'bg-rose-500/15',
   },
@@ -155,7 +176,7 @@ const navItems = [
     href: '/testing',
     icon: ClipboardCheck,
     label: 'Testing & UAT',
-    permission: PERMISSIONS.reports.read,
+    permissions: [PERMISSIONS.reports.read, 'testing.read', 'reports.read'],
     color: 'text-green-300',
     bgActive: 'bg-green-500/15',
   },
@@ -163,7 +184,7 @@ const navItems = [
     href: '/workflows',
     icon: GitBranchPlus,
     label: 'Workflows',
-    permission: PERMISSIONS.settings.manage,
+    permissions: [PERMISSIONS.settings.manage, 'manage_roles'],
     color: 'text-fuchsia-400',
     bgActive: 'bg-fuchsia-500/15',
   },
@@ -171,7 +192,7 @@ const navItems = [
     href: '/settings',
     icon: Settings,
     label: 'Settings',
-    permission: PERMISSIONS.settings.manage,
+    permissions: [PERMISSIONS.settings.manage, 'manage_roles'],
     color: 'text-slate-400',
     bgActive: 'bg-slate-500/15',
   },
@@ -185,6 +206,8 @@ export function Sidebar() {
     currentUser?.roles?.map((role) => role.name).join(' | ') ||
     currentUser?.profile?.role?.replace(/_/g, ' ') ||
     null;
+  const permissions = currentUser?.permissions ?? [];
+  const isSuperAdmin = isSuperAdminPermissions(permissions);
 
   return (
     <aside className="flex h-full flex-col overflow-hidden bg-[#0D0500]">
@@ -230,30 +253,34 @@ export function Sidebar() {
         {navItems.map((item) => {
           const Icon = item.icon;
           const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`);
+          const isVisible = isSuperAdmin || hasAnyPermission(permissions, item.permissions);
+
+          if (!isVisible) {
+            return null;
+          }
 
           return (
-            <PermissionGate key={item.label} permission={item.permission}>
-              <Link
-                href={item.href}
-                className={cn(
-                  'group flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-200',
-                  isActive
-                    ? `${item.bgActive} ${item.color}`
-                    : 'text-white/60 hover:bg-white/10 hover:text-white',
-                )}
-              >
-                <div className={cn(
-                  'flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg transition-colors duration-200',
-                  isActive ? `${item.bgActive}` : 'group-hover:bg-white/10'
-                )}>
-                  <Icon className="h-4 w-4" />
-                </div>
-                <span className="truncate">{item.label}</span>
-                {isActive && (
-                  <span className={cn('ml-auto h-1.5 w-1.5 flex-shrink-0 rounded-full', item.color.replace('text-', 'bg-'))} />
-                )}
-              </Link>
-            </PermissionGate>
+            <Link
+              key={item.label}
+              href={item.href}
+              className={cn(
+                'group flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-200',
+                isActive
+                  ? `${item.bgActive} ${item.color}`
+                  : 'text-white/60 hover:bg-white/10 hover:text-white',
+              )}
+            >
+              <div className={cn(
+                'flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg transition-colors duration-200',
+                isActive ? `${item.bgActive}` : 'group-hover:bg-white/10'
+              )}>
+                <Icon className="h-4 w-4" />
+              </div>
+              <span className="truncate">{item.label}</span>
+              {isActive && (
+                <span className={cn('ml-auto h-1.5 w-1.5 flex-shrink-0 rounded-full', item.color.replace('text-', 'bg-'))} />
+              )}
+            </Link>
           );
         })}
       </nav>

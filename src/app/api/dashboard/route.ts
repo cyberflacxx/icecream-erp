@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
+import { resolveDashboardPersona } from '@/lib/dashboard-access';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
 function isMissingColumnError(error: unknown, table: string, columnName: string) {
@@ -23,6 +24,12 @@ export async function GET(_request: NextRequest) {
   const service = createServiceRoleClient();
 
   try {
+    const persona = resolveDashboardPersona({
+      permissions: ctx.permissions,
+      role: ctx.role,
+      roleNames: ctx.roles.map((role) => role.name),
+    });
+
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const sevenDaysAgo = new Date(today);
@@ -201,7 +208,8 @@ export async function GET(_request: NextRequest) {
       .limit(5);
 
     return NextResponse.json({
-      role: ctx.role,
+      persona,
+      role: persona,
       stats: {
         production: {
           batches: batchCount,

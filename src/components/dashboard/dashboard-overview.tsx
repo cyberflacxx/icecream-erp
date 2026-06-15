@@ -41,6 +41,7 @@ import { WelcomeModal } from '@/components/dashboard/welcome-modal';
 import { useUserContext } from '@/contexts/UserContext';
 import { useBranchRealtime } from '@/hooks/branch-operations/useBranchRealtime';
 import { useDashboardMetrics } from '@/hooks/reports/useReports';
+import { getDashboardRoleLabel, resolveDashboardPersona } from '@/lib/dashboard-access';
 
 function formatNumber(value: unknown) {
   const numeric = typeof value === 'number' ? value : Number(value ?? 0);
@@ -53,15 +54,11 @@ export function DashboardOverview() {
   const { currentUser, isLoading } = useUserContext();
   const dashboardQuery = useDashboardMetrics();
   const dashboardData = dashboardQuery.data as Record<string, unknown> | undefined;
-  const rawRole = String(dashboardData?.role ?? '');
-  const role =
-    rawRole === 'super_admin'
-      ? 'system_admin'
-      : rawRole === 'branch_manager'
-        ? 'branch_manager'
-        : rawRole === 'manager'
-          ? 'operations_specialist'
-          : rawRole;
+  const role = resolveDashboardPersona({
+    permissions: currentUser?.permissions ?? [],
+    role: String(dashboardData?.role ?? currentUser?.profile?.role ?? ''),
+    roleNames: currentUser?.roles?.map((item) => item.name) ?? [],
+  });
   const branchId = currentUser?.branch?.id;
   const realtimeHandlers = useMemo(
     () => ({
@@ -114,14 +111,7 @@ export function DashboardOverview() {
     );
   }
 
-  const roleLabel =
-    role === 'system_admin'
-      ? 'Super Admin'
-      : role === 'production_manager'
-        ? 'Production Manager'
-        : role === 'branch_manager'
-          ? 'Branch Manager'
-          : 'Operations Specialist';
+  const roleLabel = getDashboardRoleLabel(role);
 
   if (role === 'system_admin') {
     const stats = (dashboardData.stats ?? {}) as {
@@ -439,6 +429,96 @@ export function DashboardOverview() {
             />
           }
         />
+      </div>
+    );
+  }
+
+  if (role === 'sales_lead') {
+    const stats = (dashboardData.stats ?? {}) as {
+      production?: Record<string, number>;
+      sales?: Record<string, number>;
+    };
+    const salesSummary = stats.sales ?? {};
+    const salesLast7Days =
+      ((dashboardData.charts as { salesLast7Days?: Array<Record<string, unknown>> } | undefined)
+        ?.salesLast7Days ?? []) as Array<Record<string, unknown>>;
+    const lowStockTop5 = (dashboardData.lowStockTop5 ?? []) as Array<Record<string, unknown>>;
+    const recentAuditLogs = (dashboardData.recentAuditLogs ?? []) as Array<Record<string, unknown>>;
+
+    return (
+      <div className="space-y-8">
+        <PageHeader
+          title={`Welcome back, ${currentUser?.profile?.firstName ?? 'team'}`}
+          description={`${roleLabel} dashboard focused on sales, transactions, and saleable stock visibility.`}
+        />
+
+        <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-4">
+          <StatCard
+            title="7-Day Sales"
+            value={formatNumber(salesSummary.totalSales)}
+            icon={<DollarSign className="h-5 w-5" />}
+            color="success"
+          />
+          <StatCard
+            title="Transactions"
+            value={formatNumber(salesSummary.totalTransactions)}
+            icon={<ClipboardList className="h-5 w-5" />}
+            trendValue="Recorded sales"
+          />
+          <StatCard
+            title="Branch Scope"
+            value={currentUser?.branch?.code ?? 'GLOBAL'}
+            icon={<Boxes className="h-5 w-5" />}
+            color="warning"
+          />
+          <StatCard
+            title="Low Stock Alerts"
+            value={formatNumber(lowStockTop5.length)}
+            icon={<AlertTriangle className="h-5 w-5" />}
+            color="warning"
+          />
+        </div>
+
+        <ChartCard title="Sales Trend (Last 7 Days)">
+          <div className="h-72">
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={salesLast7Days}>
+                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
+                <XAxis dataKey="day" stroke="rgba(255,255,255,0.3)" fontSize={12} />
+                <YAxis stroke="rgba(255,255,255,0.3)" fontSize={12} />
+                <Tooltip />
+                <Line type="monotone" dataKey="total" stroke="#f97316" strokeWidth={3} />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        </ChartCard>
+
+        <div className="grid gap-6 xl:grid-cols-2">
+          <DataTable
+            columns={[
+              { key: 'name', header: 'Item' },
+              { key: 'currentStock', header: 'Current Stock' },
+              { key: 'reorderPoint', header: 'Reorder Point' },
+            ]}
+            data={lowStockTop5}
+            emptyState={<EmptyState icon={<AlertCircle className="h-6 w-6" />} title="No low stock alerts" description="Saleable stock thresholds look healthy." />}
+          />
+
+          <DataTable
+            columns={[
+              { key: 'action', header: 'Action' },
+              { key: 'entityType', header: 'Entity' },
+              {
+                key: 'createdAt',
+                header: 'Timestamp',
+                render: (row: Record<string, unknown>) =>
+                  row.createdAt ? new Date(String(row.createdAt)).toLocaleString() : 'N/A'
+              }
+            ]}
+            data={recentAuditLogs}
+            emptyState={<EmptyState icon={<AlertCircle className="h-6 w-6" />} title="No recent activity" description="No audit activity was returned for this scope." />}
+          />
+        </div>
       </div>
     );
   }
