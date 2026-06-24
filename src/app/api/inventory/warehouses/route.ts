@@ -126,6 +126,7 @@ export async function POST(request: NextRequest) {
   const { data, error } = await service
     .from('warehouses')
     .insert({
+      organization_id: ctx.organizationId,
       code,
       name,
       type,

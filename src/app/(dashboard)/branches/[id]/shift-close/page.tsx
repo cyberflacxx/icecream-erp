@@ -140,7 +140,7 @@ export default function BranchShiftClosePage() {
           }
         />
       ) : (
-        <div className="space-y-4 rounded-2xl border border-border bg-white p-6 shadow-sm">
+        <div className="surface-card-lg space-y-4">
           <div className="flex items-start justify-between gap-3">
             <div>
               <p className="text-xs uppercase tracking-[0.18em] text-muted">Today</p>
@@ -224,7 +224,7 @@ export default function BranchShiftClosePage() {
                   rows={3}
                   value={notes}
                   onChange={(event) => setNotes(event.target.value)}
-                  className="w-full rounded-2xl border border-border bg-cream px-4 py-3 text-brown outline-none"
+                  className="surface-textarea-soft"
                 />
               </label>
 

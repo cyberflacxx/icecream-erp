@@ -147,8 +147,38 @@ async function createAuthUser({ email, password, emailConfirm = true }) {
   return data.user ?? data;
 }
 
+async function updateAuthUser(userId, updates) {
+  const response = await fetch(`${SUPABASE_URL}/auth/v1/admin/users/${userId}`, {
+    method: 'PUT',
+    headers: {
+      apikey: SUPABASE_ANON_KEY,
+      authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify(updates),
+  });
+
+  const data = await response.json();
+  if (!response.ok) {
+    const error = new Error(data?.msg || data?.message || 'Failed to update auth user');
+    error.status = response.status;
+    throw error;
+  }
+
+  return data.user ?? data;
+}
+
 function workIdToEmail(workId) {
   return `${workId.toLowerCase()}@ice.erp`;
+}
+
+function serializeUserPhoneMeta(accessProfile, phone = null) {
+  const normalizedAccessProfile = String(accessProfile ?? '').trim();
+  const normalizedPhone = phone == null ? '' : String(phone).trim();
+  if (!normalizedAccessProfile) {
+    return normalizedPhone || null;
+  }
+  return `@r:${normalizedAccessProfile}${normalizedPhone ? `|${normalizedPhone}` : ''}`;
 }
 
 function nextWorkId(existingWorkIds) {
@@ -745,21 +775,23 @@ async function ensureDemoUsers(branches) {
   const workIds = existingUsers.map((user) => String(user.work_id));
   const authUsers = await listAuthUsers();
   const authByEmail = new Map(authUsers.map((user) => [String(user.email).toLowerCase(), user]));
+  const hasBranchAssignments = await tableExists('user_branch_assignments');
+  const branchAssignments = hasBranchAssignments ? await selectAll('user_branch_assignments') : [];
 
   const desiredAccounts = [
-    ['Super', 'Admin', 'super_admin', null, 'super.admin@absoluteicecream.local'],
-    ['Branch', 'Manager', 'branch_manager', branches[0]?.id ?? null, 'branch.manager@absoluteicecream.local'],
-    ['Operations', 'Manager', 'manager', branches[1]?.id ?? null, 'operations.manager@absoluteicecream.local'],
-    ['Production', 'Lead', 'manager', branches[2]?.id ?? null, 'production.lead@absoluteicecream.local'],
-    ['Sales', 'Lead', 'manager', branches[3]?.id ?? null, 'sales.lead@absoluteicecream.local'],
-    ['Finance', 'Clerk', 'staff', branches[4]?.id ?? null, 'finance.clerk@absoluteicecream.local'],
-    ['Store', 'Clerk', 'staff', branches[5]?.id ?? null, 'store.clerk@absoluteicecream.local'],
-    ['Quality', 'Officer', 'staff', branches[6]?.id ?? null, 'quality.officer@absoluteicecream.local'],
+    ['Super', 'Admin', 'super_admin', 'Super Admin', null, 'super.admin@absoluteicecream.local'],
+    ['Branch', 'Manager', 'branch_manager', 'Branch Manager', branches[0]?.id ?? null, 'branch.manager@absoluteicecream.local'],
+    ['Operations', 'Manager', 'manager', 'Operations Manager', branches[1]?.id ?? null, 'operations.manager@absoluteicecream.local'],
+    ['Production', 'Lead', 'manager', 'Production Manager', branches[2]?.id ?? null, 'production.lead@absoluteicecream.local'],
+    ['Sales', 'Lead', 'manager', 'Sales Lead', branches[3]?.id ?? null, 'sales.lead@absoluteicecream.local'],
+    ['Finance', 'Lead', 'manager', 'Finance Lead', branches[4]?.id ?? null, 'finance.clerk@absoluteicecream.local'],
+    ['Store', 'Lead', 'manager', 'Inventory Lead', branches[5]?.id ?? null, 'store.clerk@absoluteicecream.local'],
+    ['Quality', 'Lead', 'manager', 'Quality Lead', branches[6]?.id ?? null, 'quality.officer@absoluteicecream.local'],
   ];
 
   const created = [];
 
-  for (const [firstName, lastName, role, branchId, email] of desiredAccounts) {
+  for (const [firstName, lastName, role, roleName, branchId, email] of desiredAccounts) {
     let user = existingUsers.find((row) => String(row.email).toLowerCase() === email.toLowerCase());
     if (!user) {
       const workId = nextWorkId(workIds);
@@ -777,6 +809,7 @@ async function ensureDemoUsers(branches) {
       if (!authUser?.id) {
         throw new Error(`Unable to resolve auth user for ${authEmail}`);
       }
+      await updateAuthUser(authUser.id, { password: DEMO_PASSWORD, email_confirm: true });
 
       [user] = await insertRows('users', {
         auth_id: authUser.id,
@@ -785,22 +818,72 @@ async function ensureDemoUsers(branches) {
         full_name: `${firstName} ${lastName}`,
         first_name: firstName,
         last_name: lastName,
+        phone: serializeUserPhoneMeta(roleName.toLowerCase().replace(/\s+/g, '_')),
         role,
         branch_id: branchId,
         status: 'active',
         id_number: `90000000A${String(created.length + 10).padStart(2, '0')}`,
       });
       existingUsers.push(user);
-      created.push({ workId, role, email });
+      if (hasBranchAssignments && branchId) {
+        const [createdAssignment] = await insertRows('user_branch_assignments', {
+          user_profile_id: user.id,
+          branch_id: branchId,
+          role_name: roleName,
+          effective_date: isoDate(0),
+          is_active: true,
+        });
+        branchAssignments.push(createdAssignment);
+      }
+      created.push({ workId, role: roleName, email });
       continue;
     }
 
     const updates = {};
     if (String(user.role ?? '') !== role) updates.role = role;
     if ((user.branch_id ?? null) !== branchId) updates.branch_id = branchId;
+    if (String(user.phone ?? '') !== serializeUserPhoneMeta(roleName.toLowerCase().replace(/\s+/g, '_'))) {
+      updates.phone = serializeUserPhoneMeta(roleName.toLowerCase().replace(/\s+/g, '_'));
+    }
     if (Object.keys(updates).length > 0) {
       const [patched] = await patchRows('users', [`id=eq.${user.id}`], updates);
       Object.assign(user, patched ?? updates);
+    }
+
+    const authEmail = workIdToEmail(String(user.work_id));
+    let authUser = authByEmail.get(authEmail.toLowerCase());
+    if (!authUser) {
+      const refreshedUsers = await listAuthUsers();
+      authUser = refreshedUsers.find((candidate) => String(candidate.email).toLowerCase() === authEmail.toLowerCase());
+      if (authUser) authByEmail.set(authEmail.toLowerCase(), authUser);
+    }
+    if (authUser?.id) {
+      await updateAuthUser(authUser.id, { password: DEMO_PASSWORD, email_confirm: true });
+    }
+
+    if (hasBranchAssignments && branchId) {
+      const activeAssignment = branchAssignments.find(
+        (assignment) => assignment.user_profile_id === user.id && assignment.is_active === true,
+      );
+
+      if (activeAssignment) {
+        const assignmentUpdates = {};
+        if (activeAssignment.branch_id !== branchId) assignmentUpdates.branch_id = branchId;
+        if (String(activeAssignment.role_name ?? '') !== roleName) assignmentUpdates.role_name = roleName;
+        if (Object.keys(assignmentUpdates).length > 0) {
+          const [patchedAssignment] = await patchRows('user_branch_assignments', [`id=eq.${activeAssignment.id}`], assignmentUpdates);
+          Object.assign(activeAssignment, patchedAssignment ?? assignmentUpdates);
+        }
+      } else {
+        const [createdAssignment] = await insertRows('user_branch_assignments', {
+          user_profile_id: user.id,
+          branch_id: branchId,
+          role_name: roleName,
+          effective_date: isoDate(0),
+          is_active: true,
+        });
+        branchAssignments.push(createdAssignment);
+      }
     }
   }
 

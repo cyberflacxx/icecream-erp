@@ -42,6 +42,13 @@ function AuthenticatedUserProvider({ children }: { children: ReactNode }) {
     '/settings',
     '/finance',
     '/sales',
+    '/hr',
+    '/notifications',
+    '/workflows',
+    '/testing',
+    '/budget',
+    '/cost-accounting',
+    '/maintenance',
   ];
   const isProtectedRoute = protectedPrefixes.some(
     (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),

@@ -36,7 +36,7 @@ const itemTypeOptions = [
 ] as const;
 
 const itemFormSchema = z.object({
-  categoryId: z.string().min(1, 'Category is required.'),
+  categoryId: z.string().optional(),
   code: z.string().trim().min(1, 'Item code is required.'),
   description: z.string().trim().optional(),
   isActive: z.boolean(),
@@ -302,7 +302,7 @@ export default function InventoryItemsPage() {
                 required
                 value={formState.code}
                 onChange={(event) => setFormState((current) => ({ ...current, code: event.target.value }))}
-                className="h-11 w-full rounded-2xl border border-border bg-cream px-4 text-brown outline-none"
+                className="surface-input-soft"
               />
             </label>
             <label className="space-y-2 text-sm text-muted">
@@ -311,7 +311,7 @@ export default function InventoryItemsPage() {
                 required
                 value={formState.name}
                 onChange={(event) => setFormState((current) => ({ ...current, name: event.target.value }))}
-                className="h-11 w-full rounded-2xl border border-border bg-cream px-4 text-brown outline-none"
+                className="surface-input-soft"
               />
             </label>
           </div>
@@ -324,7 +324,7 @@ export default function InventoryItemsPage() {
               onChange={(event) =>
                 setFormState((current) => ({ ...current, description: event.target.value }))
               }
-              className="w-full rounded-2xl border border-border bg-cream px-4 py-3 text-brown outline-none"
+              className="surface-textarea-soft"
             />
           </label>
 
@@ -337,7 +337,7 @@ export default function InventoryItemsPage() {
                 onChange={(event) =>
                   setFormState((current) => ({ ...current, itemType: event.target.value }))
                 }
-                className="h-11 w-full rounded-2xl border border-border bg-cream px-4 text-brown outline-none"
+                className="surface-input-soft"
               >
                 {itemTypeOptions.map((option) => (
                   <option key={option.value} value={option.value}>
@@ -354,7 +354,7 @@ export default function InventoryItemsPage() {
                 onChange={(event) =>
                   setFormState((current) => ({ ...current, categoryId: event.target.value }))
                 }
-                className="h-11 w-full rounded-2xl border border-border bg-cream px-4 text-brown outline-none"
+                className="surface-input-soft"
               >
                 <option value="">Select category</option>
                 {metaQuery.data?.categories.map((category) => (
@@ -372,7 +372,7 @@ export default function InventoryItemsPage() {
                 onChange={(event) =>
                   setFormState((current) => ({ ...current, unitOfMeasureId: event.target.value }))
                 }
-                className="h-11 w-full rounded-2xl border border-border bg-cream px-4 text-brown outline-none"
+                className="surface-input-soft"
               >
                 <option value="">Select UOM</option>
                 {metaQuery.data?.unitsOfMeasure.map((unit) => (
@@ -393,7 +393,7 @@ export default function InventoryItemsPage() {
                 onChange={(event) =>
                   setFormState((current) => ({ ...current, reorderLevel: event.target.value }))
                 }
-                className="h-11 w-full rounded-2xl border border-border bg-cream px-4 text-brown outline-none"
+                className="surface-input-soft"
               />
             </label>
             <label className="space-y-2 text-sm text-muted">
@@ -407,7 +407,7 @@ export default function InventoryItemsPage() {
                 onChange={(event) =>
                   setFormState((current) => ({ ...current, reorderQuantity: event.target.value }))
                 }
-                className="h-11 w-full rounded-2xl border border-border bg-cream px-4 text-brown outline-none"
+                className="surface-input-soft"
               />
             </label>
             <label className="space-y-2 text-sm text-muted">
@@ -421,7 +421,7 @@ export default function InventoryItemsPage() {
                 onChange={(event) =>
                   setFormState((current) => ({ ...current, unitCost: event.target.value }))
                 }
-                className="h-11 w-full rounded-2xl border border-border bg-cream px-4 text-brown outline-none"
+                className="surface-input-soft"
               />
             </label>
             <label className="space-y-2 text-sm text-muted">
@@ -435,7 +435,7 @@ export default function InventoryItemsPage() {
                 onChange={(event) =>
                   setFormState((current) => ({ ...current, sellingPrice: event.target.value }))
                 }
-                className="h-11 w-full rounded-2xl border border-border bg-cream px-4 text-brown outline-none"
+                className="surface-input-soft"
               />
             </label>
           </div>

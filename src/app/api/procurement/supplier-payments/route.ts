@@ -17,7 +17,12 @@ export async function GET(_request: NextRequest) {
     .is('deleted_at', null)
     .order('payment_date', { ascending: false });
 
-  if (error) return serverError(error.message);
+  if (error) {
+    if (error.message.includes("Could not find the table 'icecream_erp.supplier_payments'")) {
+      return NextResponse.json([]);
+    }
+    return serverError(error.message);
+  }
 
   return NextResponse.json((data ?? []).map((row) => {
     const supplier = Array.isArray(row.suppliers) ? row.suppliers[0] : row.suppliers;
@@ -55,6 +60,10 @@ export async function POST(request: NextRequest) {
   }
 
   const service = createServiceRoleClient();
+  const tableCheck = await service.from('supplier_payments').select('id', { count: 'exact', head: true });
+  if (tableCheck.error?.message.includes("Could not find the table 'icecream_erp.supplier_payments'")) {
+    return serverError('Supplier payments table is not deployed in Supabase yet.');
+  }
   const [invoiceResult, paymentsResult] = await Promise.all([
     service.from('supplier_invoices').select('id, invoice_total, status').eq('id', body.supplierInvoiceId).single(),
     service.from('supplier_payments').select('amount_paid').eq('supplier_invoice_id', body.supplierInvoiceId),

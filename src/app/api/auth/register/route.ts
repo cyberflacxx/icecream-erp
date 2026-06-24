@@ -20,6 +20,7 @@ import { createServiceRoleClient } from '@/lib/supabase/server';
 export async function POST(request: NextRequest) {
   const body = (await request.json()) as {
     admin_key?: string;
+    branch_id?: string | null;
     confirm_password?: string;
     email?: string;
     first_name?: string;
@@ -31,6 +32,7 @@ export async function POST(request: NextRequest) {
 
   const { fieldErrors, normalized } = validateRegistrationPayload({
     adminKey: body.admin_key,
+    branchId: body.branch_id,
     confirmPassword: body.confirm_password,
     email: body.email,
     firstName: body.first_name,
@@ -55,6 +57,22 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Selected role is not available.', fieldErrors: { role: 'Selected role is not available.' } }, { status: 400 });
   }
 
+  const normalizedBranchId = normalized.branchId || null;
+  if (role.requiresBranch && !normalizedBranchId) {
+    return NextResponse.json({ error: 'Branch selection is required for this role.', fieldErrors: { branch_id: 'Please select a branch.' } }, { status: 400 });
+  }
+
+  if (normalizedBranchId) {
+    const { data: branch } = await service
+      .from('branches')
+      .select('id, status')
+      .eq('id', normalizedBranchId)
+      .maybeSingle();
+    if (!branch || String(branch.status ?? '').toUpperCase() !== 'ACTIVE') {
+      return NextResponse.json({ error: 'Selected branch is not available.', fieldErrors: { branch_id: 'Selected branch is not available.' } }, { status: 400 });
+    }
+  }
+
   const [{ data: existingUser }, { data: existingIdUser }, organizationId] = await Promise.all([
     service.from('users').select('id').ilike('email', normalized.email).maybeSingle(),
     service.from('users').select('id').eq('id_number', normalized.idNumber).maybeSingle(),
@@ -72,6 +90,7 @@ export async function POST(request: NextRequest) {
   const expiresAt = registrationOtpExpiresAt();
   const requestId = randomUUID();
   const payload = encryptRegistrationPayload({
+    branchId: normalizedBranchId,
     email: normalized.email,
     firstName: normalized.firstName,
     idNumber: normalized.idNumber,

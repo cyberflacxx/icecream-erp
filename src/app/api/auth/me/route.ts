@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server';
 import { getAuthContext, unauthorized } from '@/lib/api-auth';
 import { buildSecurityContextProfile, findSecurityUserProfileByAuthId, recordAuditLog } from '@/lib/security-server';
 import { createClient } from '@/lib/supabase/server';
+import { serializeUserPhoneValue } from '@/lib/user-access-profile';
 
 export async function GET(request: Request) {
   const ctx = await getAuthContext(request);
@@ -19,6 +20,21 @@ export async function GET(request: Request) {
   if (!profile) return unauthorized();
 
   const resolved = await buildSecurityContextProfile(profile);
+  const service = (await import('@/lib/supabase/server')).createServiceRoleClient();
+  let branch: { id: string; code?: string | null; name?: string | null } | null = null;
+  if (resolved.branchId) {
+    try {
+      const { data } = await service
+        .schema('icecream_erp')
+        .from('branches')
+        .select('id, code, name')
+        .eq('id', resolved.branchId)
+        .maybeSingle();
+      branch = data ? { id: String(data.id), code: data.code ? String(data.code) : null, name: data.name ? String(data.name) : null } : null;
+    } catch {
+      branch = null;
+    }
+  }
 
   return NextResponse.json({
     clerkUserId: resolved.authId ?? resolved.id,
@@ -26,7 +42,11 @@ export async function GET(request: Request) {
     organizationId: resolved.organizationId,
     permissions: resolved.permissions,
     rawPermissions: resolved.permissions,
-    branch: resolved.branchId ? { id: resolved.branchId, code: resolved.branchId, name: resolved.branchId } : null,
+    branch: branch
+      ? { id: String(branch.id), code: String(branch.code ?? ''), name: String(branch.name ?? '') }
+      : resolved.branchId
+        ? { id: resolved.branchId, code: resolved.branchId, name: resolved.branchId }
+        : null,
     profile: {
       id: resolved.id,
       clerkUserId: resolved.authId ?? resolved.id,
@@ -55,7 +75,12 @@ export async function PATCH(request: Request) {
   const updates: Record<string, unknown> = {};
   for (const key of allowed) {
     if (key in body) {
-      updates[key] = body[key];
+      updates[key] = key === 'phone'
+        ? serializeUserPhoneValue({
+            accessProfile: ctx.role,
+            phone: body[key] ? String(body[key]) : null,
+          })
+        : body[key];
     }
   }
 

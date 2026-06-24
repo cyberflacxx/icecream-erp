@@ -26,23 +26,20 @@ export async function GET(request: NextRequest) {
 
   let query = service
     .from('stock_transfers')
-    .select(
-      `id, transfer_number, transfer_date, status, notes, created_at,
-       from_warehouse:warehouses!from_warehouse_id(id, name, branch_id),
-       to_warehouse:warehouses!to_warehouse_id(id, name, branch_id),
-       stock_transfer_items(id)`,
-      { count: 'exact' },
-    )
-    .is('deleted_at', null);
+    .select('id, transfer_number, transfer_date, status, notes, created_at, from_warehouse, to_warehouse', { count: 'exact' })
+    .eq('organization_id', ctx.organizationId);
 
   if (status) query = query.eq('status', status);
-  if (fromWarehouseId) query = query.eq('from_warehouse_id', fromWarehouseId);
-  if (toWarehouseId) query = query.eq('to_warehouse_id', toWarehouseId);
+  if (fromWarehouseId) query = query.eq('from_warehouse', fromWarehouseId);
+  if (toWarehouseId) query = query.eq('to_warehouse', toWarehouseId);
   if (ctx.isBranchScoped && ctx.branchId) {
-    // Only show transfers where from or to warehouse belongs to the user's branch
-    query = query.or(
-      `from_warehouse.branch_id.eq.${ctx.branchId},to_warehouse.branch_id.eq.${ctx.branchId}`,
-    );
+    const { data: scopedWarehouses, error: scopedError } = await service
+      .from('warehouses')
+      .select('id')
+      .eq('branch_id', ctx.branchId);
+    if (scopedError) return serverError(scopedError.message);
+    const ids = (scopedWarehouses ?? []).map((row) => row.id);
+    query = ids.length ? query.or(`from_warehouse.in.(${ids.join(',')}),to_warehouse.in.(${ids.join(',')})`) : query.in('from_warehouse', ['00000000-0000-0000-0000-000000000000']);
   }
 
   const from = (page - 1) * pageSize;
@@ -52,14 +49,24 @@ export async function GET(request: NextRequest) {
 
   if (error) return serverError(error.message);
 
-  type WHObj = { id?: string; name?: string } | null;
+  const warehouseIds = [...new Set((data ?? []).flatMap((row) => [row.from_warehouse, row.to_warehouse]).map(String).filter(Boolean))];
+  const transferIds = (data ?? []).map((row) => String(row.id));
+  const [warehousesResult, itemsResult] = await Promise.all([
+    warehouseIds.length ? service.from('warehouses').select('id, name').in('id', warehouseIds) : Promise.resolve({ data: [], error: null }),
+    transferIds.length ? service.from('stock_transfer_items').select('id, transfer_id').in('transfer_id', transferIds) : Promise.resolve({ data: [], error: null }),
+  ]);
+  if (warehousesResult.error) return serverError(warehousesResult.error.message);
+  if (itemsResult.error) return serverError(itemsResult.error.message);
+  const warehouses = new Map((warehousesResult.data ?? []).map((row) => [String(row.id), row]));
+  const itemsCount = new Map<string, number>();
+  for (const item of itemsResult.data ?? []) {
+    const key = String(item.transfer_id);
+    itemsCount.set(key, (itemsCount.get(key) ?? 0) + 1);
+  }
 
   const mapped = (data ?? []).map((row: Record<string, unknown>) => {
-    const rawFW = row.from_warehouse as WHObj | WHObj[];
-    const from_warehouse: WHObj = Array.isArray(rawFW) ? (rawFW[0] ?? null) : rawFW;
-    const rawTW = row.to_warehouse as WHObj | WHObj[];
-    const to_warehouse: WHObj = Array.isArray(rawTW) ? (rawTW[0] ?? null) : rawTW;
-    const items = row.stock_transfer_items as Array<unknown> | null;
+    const from_warehouse = warehouses.get(String(row.from_warehouse ?? ''));
+    const to_warehouse = warehouses.get(String(row.to_warehouse ?? ''));
     return {
       id: row.id,
       transferNumber: row.transfer_number,
@@ -68,7 +75,7 @@ export async function GET(request: NextRequest) {
       notes: row.notes ?? null,
       fromWarehouse: from_warehouse ? { id: from_warehouse.id, name: from_warehouse.name } : null,
       toWarehouse: to_warehouse ? { id: to_warehouse.id, name: to_warehouse.name } : null,
-      itemsCount: items?.length ?? 0,
+      itemsCount: itemsCount.get(String(row.id)) ?? 0,
     };
   });
 
@@ -135,8 +142,9 @@ export async function POST(request: NextRequest) {
     .from('stock_transfers')
     .insert({
       transfer_number: transferNumber,
-      from_warehouse_id: fromWarehouseId,
-      to_warehouse_id: toWarehouseId,
+      organization_id: ctx.organizationId,
+      from_warehouse: fromWarehouseId,
+      to_warehouse: toWarehouseId,
       notes: body.notes ?? null,
       status: 'COMPLETED',
       transfer_date: new Date().toISOString(),
@@ -167,15 +175,15 @@ export async function POST(request: NextRequest) {
     // Get or create source balance
     const { data: srcBalance, error: srcBalErr } = await service
       .from('stock_balances')
-      .select('id, quantity_on_hand, quantity_available, quantity_reserved')
+      .select('id, quantity, reserved_qty')
       .eq('item_id', itemRow.itemId)
       .eq('warehouse_id', fromWarehouseId)
       .maybeSingle();
     if (srcBalErr) return serverError(srcBalErr.message);
 
-    const srcOnHand = Number(srcBalance?.quantity_on_hand ?? 0);
-    const srcAvailable = Number(srcBalance?.quantity_available ?? 0);
-    const srcReserved = Number(srcBalance?.quantity_reserved ?? 0);
+    const srcOnHand = Number(srcBalance?.quantity ?? 0);
+    const srcReserved = Number(srcBalance?.reserved_qty ?? 0);
+    const srcAvailable = srcOnHand - srcReserved;
 
     if (srcAvailable < qty) {
       return badRequest(
@@ -188,10 +196,9 @@ export async function POST(request: NextRequest) {
       const { error: deductErr } = await service
         .from('stock_balances')
         .update({
-          quantity_on_hand: srcOnHand - qty,
-          quantity_available: srcAvailable - qty,
-          quantity_reserved: srcReserved,
-          last_updated: new Date().toISOString(),
+          quantity: srcOnHand - qty,
+          reserved_qty: srcReserved,
+          updated_at: new Date().toISOString(),
         })
         .eq('id', srcBalance.id);
       if (deductErr) return serverError(deductErr.message);
@@ -200,20 +207,18 @@ export async function POST(request: NextRequest) {
     // Get or create destination balance
     const { data: dstBalance } = await service
       .from('stock_balances')
-      .select('id, quantity_on_hand, quantity_available, quantity_reserved')
+      .select('id, quantity, reserved_qty')
       .eq('item_id', itemRow.itemId)
       .eq('warehouse_id', toWarehouseId)
       .maybeSingle();
 
     if (dstBalance) {
-      const dstOnHand = Number(dstBalance.quantity_on_hand);
-      const dstReserved = Number(dstBalance.quantity_reserved);
+      const dstOnHand = Number(dstBalance.quantity);
       const { error: addErr } = await service
         .from('stock_balances')
         .update({
-          quantity_on_hand: dstOnHand + qty,
-          quantity_available: dstOnHand + qty - dstReserved,
-          last_updated: new Date().toISOString(),
+          quantity: dstOnHand + qty,
+          updated_at: new Date().toISOString(),
         })
         .eq('id', dstBalance.id);
       if (addErr) return serverError(addErr.message);
@@ -221,10 +226,10 @@ export async function POST(request: NextRequest) {
       const { error: createErr } = await service.from('stock_balances').insert({
         item_id: itemRow.itemId,
         warehouse_id: toWarehouseId,
-        quantity_on_hand: qty,
-        quantity_available: qty,
-        quantity_reserved: 0,
-        last_updated: new Date().toISOString(),
+        organization_id: ctx.organizationId,
+        quantity: qty,
+        reserved_qty: 0,
+        updated_at: new Date().toISOString(),
       });
       if (createErr) return serverError(createErr.message);
     }
@@ -261,9 +266,7 @@ export async function POST(request: NextRequest) {
     await service.from('stock_transfer_items').insert({
       transfer_id: transfer.id,
       item_id: itemRow.itemId,
-      quantity_requested: qty,
-      quantity_sent: qty,
-      quantity_received: qty,
+      quantity: qty,
     });
   }
 

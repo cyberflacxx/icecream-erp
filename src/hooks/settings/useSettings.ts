@@ -45,6 +45,12 @@ export interface SettingsUserRow {
   status: string;
 }
 
+export interface AssignableRoleRow {
+  description: string | null;
+  id: string;
+  name: string;
+}
+
 export interface SettingsRoleRow {
   description: string | null;
   id: string;
@@ -281,7 +287,20 @@ export function useCreateUser() {
     }) =>
       apiFetch('/api/security/users', {
         method: 'POST',
-        body: JSON.stringify({ ...body, role: body.roleId }),
+        body: JSON.stringify(body),
+      }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['settings', 'users'] });
+    },
+  });
+}
+
+export function useDeleteUser(userId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async () =>
+      apiFetch(`/api/settings/users/${userId}`, {
+        method: 'DELETE',
       }),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['settings', 'users'] });
@@ -319,6 +338,19 @@ export function useSecuritySessions() {
   return useQuery({
     queryKey: ['security', 'sessions', userId],
     queryFn: () => apiFetch<SecuritySessionRow[]>('/api/security/sessions'),
+    enabled: isLoaded && Boolean(isSignedIn),
+  });
+}
+
+export function useAssignableRoles() {
+  const { isLoaded, isSignedIn, userId } = useAppAuth();
+
+  return useQuery({
+    queryKey: ['settings', 'assignable-roles', userId],
+    queryFn: async () => {
+      const payload = await apiFetch<{ data: AssignableRoleRow[] }>('/api/roles');
+      return payload.data ?? [];
+    },
     enabled: isLoaded && Boolean(isSignedIn),
   });
 }

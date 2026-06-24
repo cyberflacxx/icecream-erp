@@ -34,7 +34,7 @@ export default function SettingsSecurityEventsPage() {
       />
       <SettingsNav />
 
-      <section className="rounded-2xl border border-border bg-white p-6 shadow-sm dark:border-darkBorder dark:bg-darkCard">
+      <section className="surface-card-lg">
         <div className="space-y-3">
           {events.length === 0 ? (
             <p className="text-sm text-muted dark:text-darkMuted">No security events recorded yet.</p>

@@ -238,7 +238,7 @@ export async function fetchProductivityRows(filters: {
       id, batch_id, employee_id, schedule_id, shift_name, accepted_quantity, rejected_quantity, hours_worked_snapshot,
       quantity_produced, created_at,
       employee:employees(id, employee_number, first_name, last_name, department, branch_id),
-      batch:production_batches(id, batch_number, shift, production_date, actual_output, warehouse_id, recipes(name), warehouses(branch_id, name)),
+      batch:production_batches(id, batch_number, shift, planned_date, actual_qty, warehouse_id, recipes(name), warehouses(branch_id, name)),
       product:items(id, code, name)
     `)
     .order('created_at', { ascending: false });
@@ -248,7 +248,12 @@ export async function fetchProductivityRows(filters: {
   if (filters.dateTo) query = query.lte('created_at', `${filters.dateTo}T23:59:59.999Z`);
 
   const { data, error } = await query;
-  if (error) throw error;
+  if (error) {
+    if (isMissingColumnOrRelation(error, 'hr_production_worker_outputs')) {
+      return [];
+    }
+    throw error;
+  }
 
   return (data ?? [])
     .filter((row: Record<string, unknown>) => {

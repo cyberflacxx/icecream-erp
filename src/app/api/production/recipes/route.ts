@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { badRequest, can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
 import { ensurePositiveQuantity } from '@/lib/inventory';
-import { generateReferenceNumber, productionService, writeProductionAuditLog } from '@/lib/production-server';
+import { generateReferenceNumber, isMissingProductionTable, productionErrorMessage, productionService, writeProductionAuditLog } from '@/lib/production-server';
 
 type RecipeIngredientInput = {
   itemId: string;
@@ -21,21 +21,16 @@ export async function GET() {
     const { data, error } = await service
       .from('recipes')
       .select(`
-        id, code, name, version, status, expected_output_quantity, instructions, packaging_requirement,
-        finished_item_id, output_unit_id, flavour_id, chocolate_type_id,
-        items!finished_item_id(id, code, name),
-        units_of_measure!output_unit_id(id, abbreviation),
-        production_flavours(id, code, name),
-        production_chocolate_types(id, code, name),
-        recipe_items(id, item_id, quantity_required, unit_id, wastage_allowance_percent, items(id, code, name), units_of_measure(id, abbreviation))
+        id, code, name, version, status, batch_size, expected_yield,
+        finished_item_id, batch_unit_id, notes
       `)
-      .is('deleted_at', null)
       .order('updated_at', { ascending: false });
 
     if (error) throw error;
     return NextResponse.json(data ?? []);
   } catch (err) {
-    return serverError(err instanceof Error ? err.message : 'Internal server error');
+    if (isMissingProductionTable(err)) return NextResponse.json([]);
+    return serverError(productionErrorMessage(err) || 'Internal server error');
   }
 }
 

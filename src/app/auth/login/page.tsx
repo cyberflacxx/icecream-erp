@@ -5,6 +5,8 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Swal from 'sweetalert2';
 
+import { AuthShell } from '@/components/auth/auth-shell';
+
 const workIdPattern = /^AQI-[0-9]{8}$/;
 
 function normalizeWorkId(value: string) {
@@ -114,98 +116,79 @@ export default function LoginPage() {
   }
 
   return (
-    <main className="grid min-h-screen bg-cream lg:grid-cols-2">
-      <section className="hidden bg-[#3B1F12] p-10 text-[#F8EBD8] lg:flex lg:flex-col lg:justify-between">
-        <div>
-          <p className="text-sm uppercase tracking-[0.22em] text-[#F4C89B]">Absolute Ice Cream ERP</p>
-          <h1 className="mt-6 text-5xl font-semibold leading-tight">Staff Login Portal</h1>
-          <p className="mt-4 max-w-lg text-base text-[#f1dbc3]">Sign in with your Work ID and password.</p>
-        </div>
-        <div className="rounded-3xl border border-[#f4c89b33] bg-[#4b2817] p-6">
-          <p className="text-sm text-[#f1dbc3]">Absolute Quality Icecream</p>
-        </div>
-      </section>
+    <AuthShell
+      eyebrow="Secure Staff Access"
+      title="Staff Login Portal"
+      description="Sign in with your Work ID and password to access your role-specific dashboard and operational tools."
+    >
+      <div className="auth-card">
+        <h2 className="text-3xl font-semibold text-brown dark:text-darkText">Welcome Back</h2>
+        <p className="mt-2 text-sm text-muted dark:text-darkMuted">Sign in with your Work ID and password.</p>
+        <Link href="/" className="auth-link mt-3 inline-flex text-sm">
+          Return to main page
+        </Link>
 
-      <section className="flex items-center justify-center px-6 py-10">
-        <div className="w-full max-w-xl rounded-2xl bg-white p-8 shadow-soft">
-          <h2 className="text-3xl font-semibold text-brown">Welcome Back</h2>
-          <p className="mt-2 text-sm text-muted">Sign in with your Work ID and password.</p>
-          <Link href="/" className="mt-3 inline-flex text-sm font-semibold text-orange transition hover:text-[#ea6a0a]">
-            Return to main page
-          </Link>
+        <form className="mt-8 space-y-5" onSubmit={handleSubmit}>
+          <label className="auth-field">
+            <span className="auth-label">Work ID</span>
+            <input
+              value={workId}
+              onChange={(e) => {
+                setWorkId(normalizeWorkId(e.target.value));
+                setWorkIdError(null);
+              }}
+              onBlur={() => {
+                const normalized = normalizeWorkId(workId);
+                setWorkId(normalized);
+                setWorkIdError(validateWorkId(normalized));
+              }}
+              placeholder="e.g. AQI-20260034"
+              autoComplete="username"
+              className={`auth-input ${workIdError ? 'auth-input-error' : workIdPattern.test(normalizeWorkId(workId)) ? 'auth-input-valid' : ''}`}
+            />
+            {workIdError ? <p className="text-xs text-red-600">{workIdError}</p> : null}
+          </label>
 
-          <form className="mt-8 space-y-5" onSubmit={handleSubmit}>
-            <label className="block space-y-2">
-              <span className="text-sm font-medium text-brown">Work ID</span>
+          <label className="auth-field">
+            <span className="auth-label">Password</span>
+            <div className={`auth-input-shell ${passwordError ? 'auth-input-error' : password ? 'auth-input-valid' : ''}`}>
               <input
-                value={workId}
+                value={password}
                 onChange={(e) => {
-                  setWorkId(normalizeWorkId(e.target.value));
-                  setWorkIdError(null);
+                  setPassword(e.target.value);
+                  setPasswordError(null);
                 }}
-                onBlur={() => {
-                  const normalized = normalizeWorkId(workId);
-                  setWorkId(normalized);
-                  setWorkIdError(validateWorkId(normalized));
-                }}
-                placeholder="e.g. AQI-20260034"
-                autoComplete="username"
-                className={`h-11 w-full rounded-xl border px-3 outline-none transition ${
-                  workIdError ? 'border-red-500 bg-red-50' : workIdPattern.test(normalizeWorkId(workId)) ? 'border-green-500' : 'border-border'
-                }`}
+                onBlur={() => setPasswordError(validatePassword(password))}
+                type={showPassword ? 'text' : 'password'}
+                placeholder="Enter your password"
+                autoComplete="current-password"
+                className="w-full bg-transparent outline-none"
               />
-              {workIdError ? <p className="text-xs text-red-600">{workIdError}</p> : null}
-            </label>
-
-            <label className="block space-y-2">
-              <span className="text-sm font-medium text-brown">Password</span>
-              <div
-                className={`flex h-11 items-center rounded-xl border px-3 transition ${
-                  passwordError ? 'border-red-500 bg-red-50' : password ? 'border-green-500' : 'border-border'
-                }`}
+              <button
+                type="button"
+                onClick={() => setShowPassword((value) => !value)}
+                className="text-xs font-semibold text-orange"
               >
-                <input
-                  value={password}
-                  onChange={(e) => {
-                    setPassword(e.target.value);
-                    setPasswordError(null);
-                  }}
-                  onBlur={() => setPasswordError(validatePassword(password))}
-                  type={showPassword ? 'text' : 'password'}
-                  placeholder="Enter your password"
-                  autoComplete="current-password"
-                  className="w-full bg-transparent outline-none"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword((value) => !value)}
-                  className="text-xs font-semibold text-orange"
-                >
-                  {showPassword ? 'Hide' : 'Show'}
-                </button>
-              </div>
-              {passwordError ? <p className="text-xs text-red-600">{passwordError}</p> : null}
-            </label>
+                {showPassword ? 'Hide' : 'Show'}
+              </button>
+            </div>
+            {passwordError ? <p className="text-xs text-red-600">{passwordError}</p> : null}
+          </label>
 
-            <button
-              type="submit"
-              disabled={!canSubmit}
-              className="h-11 w-full rounded-xl bg-[#F97316] font-semibold text-white transition hover:bg-[#ea6a0a] disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {isSubmitting ? 'Signing In...' : 'Sign In'}
-            </button>
-          </form>
+          <button type="submit" disabled={!canSubmit} className="auth-primary-button">
+            {isSubmitting ? 'Signing In...' : 'Sign In'}
+          </button>
+        </form>
 
-          <div className="mt-5 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
-            <Link href="/auth/register" className="font-semibold text-orange transition hover:text-[#ea6a0a]">
-              Create account
-            </Link>
-            <Link href="/auth/forgot-password" className="font-semibold text-orange transition hover:text-[#ea6a0a]">
-              Forgot password?
-            </Link>
-          </div>
+        <div className="mt-5 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
+          <Link href="/auth/register" className="auth-link">
+            Create account
+          </Link>
+          <Link href="/auth/forgot-password" className="auth-link">
+            Forgot password?
+          </Link>
         </div>
-      </section>
-    </main>
+      </div>
+    </AuthShell>
   );
 }

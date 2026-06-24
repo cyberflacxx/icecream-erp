@@ -303,7 +303,7 @@ export default function GoodsReceivedPage() {
                 onChange={(event) =>
                   setFormState((current) => ({ ...current, purchaseOrderId: event.target.value }))
                 }
-                className="h-11 w-full rounded-2xl border border-border bg-cream px-4 text-brown outline-none"
+                className="surface-input-soft"
               >
                 <option value="">Select PO</option>
                 {(metaQuery.data?.purchaseOrders ?? []).map((order) => (
@@ -319,7 +319,7 @@ export default function GoodsReceivedPage() {
                 required
                 value={formState.warehouseId}
                 onChange={(event) => setFormState((current) => ({ ...current, warehouseId: event.target.value }))}
-                className="h-11 w-full rounded-2xl border border-border bg-cream px-4 text-brown outline-none"
+                className="surface-input-soft"
               >
                 <option value="">Select warehouse</option>
                 {(metaQuery.data?.warehouses ?? []).map((warehouse) => (
@@ -339,7 +339,7 @@ export default function GoodsReceivedPage() {
               onChange={(event) =>
                 setFormState((current) => ({ ...current, qualityNotes: event.target.value }))
               }
-              className="w-full rounded-2xl border border-border bg-cream px-4 py-3 text-brown outline-none"
+              className="surface-textarea-soft"
             />
           </label>
 
@@ -350,7 +350,7 @@ export default function GoodsReceivedPage() {
                 <input
                   readOnly
                   value={item.quantityExpected}
-                  className="h-11 rounded-2xl border border-border bg-white px-4 text-brown outline-none"
+                  className="surface-input-soft"
                 />
                 <input
                   min="0"
@@ -364,7 +364,7 @@ export default function GoodsReceivedPage() {
                       ),
                     )
                   }
-                  className="h-11 rounded-2xl border border-border bg-white px-4 text-brown outline-none"
+                  className="surface-input-soft"
                 />
                 <input
                   min="0"
@@ -378,7 +378,7 @@ export default function GoodsReceivedPage() {
                       ),
                     )
                   }
-                  className="h-11 rounded-2xl border border-border bg-white px-4 text-brown outline-none"
+                  className="surface-input-soft"
                 />
                 <input
                   placeholder="Batch #"
@@ -390,7 +390,7 @@ export default function GoodsReceivedPage() {
                       ),
                     )
                   }
-                  className="h-11 rounded-2xl border border-border bg-white px-4 text-brown outline-none"
+                  className="surface-input-soft"
                 />
                 <input
                   type="date"
@@ -402,7 +402,7 @@ export default function GoodsReceivedPage() {
                       ),
                     )
                   }
-                  className="h-11 rounded-2xl border border-border bg-white px-4 text-brown outline-none"
+                  className="surface-input-soft"
                 />
                 <input
                   placeholder="Over-receive reason (required if over ordered)"
@@ -414,7 +414,7 @@ export default function GoodsReceivedPage() {
                       ),
                     )
                   }
-                  className="md:col-span-5 h-11 rounded-2xl border border-border bg-white px-4 text-brown outline-none"
+                  className="surface-input-soft md:col-span-5"
                 />
               </div>
             ))}
@@ -426,7 +426,7 @@ export default function GoodsReceivedPage() {
               rows={2}
               value={formState.notes}
               onChange={(event) => setFormState((current) => ({ ...current, notes: event.target.value }))}
-              className="w-full rounded-2xl border border-border bg-cream px-4 py-3 text-brown outline-none"
+              className="surface-textarea-soft"
             />
           </label>
 

@@ -50,8 +50,8 @@ export async function GET(request: NextRequest) {
     (() => {
       let q = service
         .from('items')
-        .select('id, code, name, item_type, unit_of_measure_id, category_id')
-        .is('deleted_at', null)
+        .select('id, code, name, type, unit_id, category_id')
+        .eq('organization_id', ctx.organizationId)
         .order('name', { ascending: true });
       if (!includeInactiveItems) {
         q = q.eq('is_active', true);
@@ -71,6 +71,10 @@ export async function GET(request: NextRequest) {
     unitsOfMeasure: unitsOfMeasureResult.data ?? [],
     branches: branchesResult.data ?? [],
     warehouses: warehousesResult.data ?? [],
-    items: itemsResult.data ?? [],
+    items: (itemsResult.data ?? []).map((item) => ({
+      ...item,
+      item_type: item.type,
+      unit_of_measure_id: item.unit_id,
+    })),
   });
 }

@@ -36,7 +36,7 @@ export default function AdminMigrationPage() {
         <StatCard title="Imported" value={String(stats.successfulMigrations ?? 0)} icon={<DatabaseZap className="h-5 w-5" />} color="success" />
       </div>
 
-      <section className="space-y-4 rounded-2xl border border-border bg-white p-6 shadow-sm dark:border-darkBorder dark:bg-darkCard">
+      <section className="surface-card-lg space-y-4">
         <h3 className="text-lg font-semibold text-brown dark:text-darkText">Quick Upload</h3>
         <div className="grid gap-4 md:grid-cols-[1fr_auto]">
           <div className="text-sm text-muted dark:text-darkMuted">

@@ -304,7 +304,7 @@ export default function SuppliersPage() {
               <input
                 value={formState.code}
                 onChange={(event) => setFormState((current) => ({ ...current, code: event.target.value }))}
-                className="h-11 w-full rounded-2xl border border-border bg-cream px-4 text-brown outline-none"
+                className="surface-input-soft"
               />
             </label>
             <label className="space-y-2 text-sm text-muted">
@@ -313,7 +313,7 @@ export default function SuppliersPage() {
                 required
                 value={formState.name}
                 onChange={(event) => setFormState((current) => ({ ...current, name: event.target.value }))}
-                className="h-11 w-full rounded-2xl border border-border bg-cream px-4 text-brown outline-none"
+                className="surface-input-soft"
               />
             </label>
             <label className="space-y-2 text-sm text-muted">
@@ -324,7 +324,7 @@ export default function SuppliersPage() {
                 onChange={(event) =>
                   setFormState((current) => ({ ...current, categoryId: event.target.value }))
                 }
-                className="h-11 w-full rounded-2xl border border-border bg-cream px-4 text-brown outline-none"
+                className="surface-input-soft"
               >
                 <option value="">Select category</option>
                 {(categoriesQuery.data ?? []).map((category) => (
@@ -341,7 +341,7 @@ export default function SuppliersPage() {
                 onChange={(event) =>
                   setFormState((current) => ({ ...current, contactPerson: event.target.value }))
                 }
-                className="h-11 w-full rounded-2xl border border-border bg-cream px-4 text-brown outline-none"
+                className="surface-input-soft"
               />
             </label>
             <label className="space-y-2 text-sm text-muted">
@@ -349,7 +349,7 @@ export default function SuppliersPage() {
               <input
                 value={formState.phone}
                 onChange={(event) => setFormState((current) => ({ ...current, phone: event.target.value }))}
-                className="h-11 w-full rounded-2xl border border-border bg-cream px-4 text-brown outline-none"
+                className="surface-input-soft"
               />
             </label>
             <label className="space-y-2 text-sm text-muted">
@@ -358,7 +358,7 @@ export default function SuppliersPage() {
                 type="email"
                 value={formState.email}
                 onChange={(event) => setFormState((current) => ({ ...current, email: event.target.value }))}
-                className="h-11 w-full rounded-2xl border border-border bg-cream px-4 text-brown outline-none"
+                className="surface-input-soft"
               />
             </label>
             <label className="space-y-2 text-sm text-muted">
@@ -368,7 +368,7 @@ export default function SuppliersPage() {
                 onChange={(event) =>
                   setFormState((current) => ({ ...current, taxNumber: event.target.value }))
                 }
-                className="h-11 w-full rounded-2xl border border-border bg-cream px-4 text-brown outline-none"
+                className="surface-input-soft"
               />
             </label>
             <label className="space-y-2 text-sm text-muted">
@@ -378,7 +378,7 @@ export default function SuppliersPage() {
                 onChange={(event) =>
                   setFormState((current) => ({ ...current, paymentTerms: event.target.value }))
                 }
-                className="h-11 w-full rounded-2xl border border-border bg-cream px-4 text-brown outline-none"
+                className="surface-input-soft"
               />
             </label>
             <label className="space-y-2 text-sm text-muted">
@@ -391,7 +391,7 @@ export default function SuppliersPage() {
                 onChange={(event) =>
                   setFormState((current) => ({ ...current, creditLimit: event.target.value }))
                 }
-                className="h-11 w-full rounded-2xl border border-border bg-cream px-4 text-brown outline-none"
+                className="surface-input-soft"
               />
             </label>
             <label className="space-y-2 text-sm text-muted">
@@ -399,7 +399,7 @@ export default function SuppliersPage() {
               <select
                 value={formState.status}
                 onChange={(event) => setFormState((current) => ({ ...current, status: event.target.value }))}
-                className="h-11 w-full rounded-2xl border border-border bg-cream px-4 text-brown outline-none"
+                className="surface-input-soft"
               >
                 <option value="ACTIVE">ACTIVE</option>
                 <option value="INACTIVE">INACTIVE</option>
@@ -414,7 +414,7 @@ export default function SuppliersPage() {
               rows={3}
               value={formState.address}
               onChange={(event) => setFormState((current) => ({ ...current, address: event.target.value }))}
-              className="w-full rounded-2xl border border-border bg-cream px-4 py-3 text-brown outline-none"
+              className="surface-textarea-soft"
             />
           </label>
 

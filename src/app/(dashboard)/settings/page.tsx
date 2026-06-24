@@ -137,7 +137,7 @@ export default function SettingsOverviewPage() {
       </div>
 
       <section className="grid gap-4 lg:grid-cols-3">
-        <div className="rounded-2xl border border-border bg-white p-5 shadow-sm dark:border-darkBorder dark:bg-darkCard">
+        <div className="surface-card">
           <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-muted dark:text-darkMuted">
             <Shield className="h-4 w-4" />
             Security Snapshot
@@ -148,7 +148,7 @@ export default function SettingsOverviewPage() {
             <p>Audit entries: {String(summary.auditCount ?? 0)}</p>
           </div>
         </div>
-        <div className="rounded-2xl border border-border bg-white p-5 shadow-sm dark:border-darkBorder dark:bg-darkCard">
+        <div className="surface-card">
           <div className="text-xs font-semibold uppercase tracking-[0.18em] text-muted dark:text-darkMuted">Master Data Coverage</div>
           <div className="mt-3 space-y-2 text-sm text-brown dark:text-darkText">
             <p>Warehouses active: {String(dashboard.activeWarehouses ?? 0)}</p>
@@ -156,7 +156,7 @@ export default function SettingsOverviewPage() {
             <p>Profile status: {String(dashboard.companyProfileStatus ?? 'PENDING')}</p>
           </div>
         </div>
-        <div className="rounded-2xl border border-border bg-white p-5 shadow-sm dark:border-darkBorder dark:bg-darkCard">
+        <div className="surface-card">
           <div className="text-xs font-semibold uppercase tracking-[0.18em] text-muted dark:text-darkMuted">Data Movement</div>
           <div className="mt-3 space-y-2 text-sm text-brown dark:text-darkText">
             <p>Pending imports: {String(dashboard.pendingImports ?? 0)}</p>
@@ -166,7 +166,7 @@ export default function SettingsOverviewPage() {
         </div>
       </section>
 
-      <section className="space-y-4 rounded-2xl border border-border bg-white p-6 shadow-sm dark:border-darkBorder dark:bg-darkCard">
+      <section className="surface-card-lg space-y-4">
         <h3 className="text-lg font-semibold text-brown dark:text-darkText">Company Profile</h3>
         <div className="grid gap-4 md:grid-cols-2">
           {(
@@ -193,14 +193,14 @@ export default function SettingsOverviewPage() {
                     }
                   }))
                 }
-                className="h-11 w-full rounded-xl border border-border bg-cream px-3 text-brown outline-none dark:border-darkBorder dark:bg-darkCard dark:text-darkText"
+                className="surface-input"
               />
             </label>
           ))}
         </div>
       </section>
 
-      <section className="space-y-4 rounded-2xl border border-border bg-white p-6 shadow-sm dark:border-darkBorder dark:bg-darkCard">
+      <section className="surface-card-lg space-y-4">
         <h3 className="text-lg font-semibold text-brown dark:text-darkText">Number Series</h3>
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {(
@@ -226,18 +226,18 @@ export default function SettingsOverviewPage() {
                     }
                   }))
                 }
-                className="h-11 w-full rounded-xl border border-border bg-cream px-3 text-brown outline-none dark:border-darkBorder dark:bg-darkCard dark:text-darkText"
+                className="surface-input"
               />
             </label>
           ))}
         </div>
       </section>
 
-      <section className="space-y-4 rounded-2xl border border-border bg-white p-6 shadow-sm dark:border-darkBorder dark:bg-darkCard">
+      <section className="surface-card-lg space-y-4">
         <h3 className="text-lg font-semibold text-brown dark:text-darkText">Notification Settings</h3>
         <div className="grid gap-3 sm:grid-cols-2">
           {Object.entries(formState.notificationSettings).map(([key, value]) => (
-            <label key={key} className="flex items-center gap-3 rounded-xl border border-border bg-cream px-4 py-3 text-sm text-brown dark:border-darkBorder dark:bg-darkBg dark:text-darkText">
+            <label key={key} className="surface-checkbox-row">
               <input
                 type="checkbox"
                 checked={value}
@@ -258,7 +258,7 @@ export default function SettingsOverviewPage() {
       </section>
 
       {message ? (
-        <div className="rounded-xl border border-border bg-white px-4 py-3 text-sm text-brown dark:border-darkBorder dark:bg-darkCard dark:text-darkText">
+        <div className="surface-message">
           {message}
         </div>
       ) : null}

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { badRequest, can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
 import { calculateRequiredMaterials } from '@/lib/production';
-import { fetchStockBalanceMap, generateReferenceNumber, productionService, writeProductionAuditLog } from '@/lib/production-server';
+import { fetchStockBalanceMap, generateReferenceNumber, isMissingProductionTable, productionErrorMessage, productionService, writeProductionAuditLog } from '@/lib/production-server';
 
 export async function GET() {
   const ctx = await getAuthContext();
@@ -23,7 +23,8 @@ export async function GET() {
     if (error) throw error;
     return NextResponse.json(data ?? []);
   } catch (err) {
-    return serverError(err instanceof Error ? err.message : 'Internal server error');
+    if (isMissingProductionTable(err)) return NextResponse.json([]);
+    return serverError(productionErrorMessage(err) || 'Internal server error');
   }
 }
 

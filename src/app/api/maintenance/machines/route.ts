@@ -21,20 +21,32 @@ export async function GET(request: NextRequest) {
     let query = service
       .schema('icecream_erp')
       .from('machines')
-      .select('*', { count: 'exact' })
-      .is('deleted_at', null)
+      .select('id, organization_id, asset_number, name, description, location, purchase_date, purchase_cost, status, last_maintenance, next_maintenance, created_at', { count: 'exact' })
+      .eq('organization_id', ctx.organizationId)
       .order('created_at', { ascending: false });
 
-    if (machineType) query = query.eq('machine_type', machineType);
     if (status) query = query.eq('status', status);
-    if (isActive !== null && isActive !== '') query = query.eq('is_active', isActive === 'true');
-    if (search) query = query.or(`code.ilike.%${search}%,name.ilike.%${search}%,location.ilike.%${search}%`);
+    if (isActive !== null && isActive !== '' && isActive === 'false') {
+      query = query.eq('status', 'INACTIVE');
+    }
+    if (search) query = query.or(`asset_number.ilike.%${search}%,name.ilike.%${search}%,location.ilike.%${search}%`);
 
     const from = (page - 1) * limit;
     const { data, count, error } = await query.range(from, from + limit - 1);
     if (error) throw error;
 
-    return NextResponse.json({ data: data ?? [], total: count ?? 0, page, limit, totalPages: Math.ceil((count ?? 0) / limit) });
+    return NextResponse.json({
+      data: (data ?? []).map((machine) => ({
+        ...machine,
+        code: machine.asset_number,
+        machine_type: machineType ?? 'GENERAL',
+        is_active: machine.status !== 'INACTIVE',
+      })),
+      total: count ?? 0,
+      page,
+      limit,
+      totalPages: Math.ceil((count ?? 0) / limit),
+    });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Internal server error';
     return serverError(message);
@@ -69,8 +81,8 @@ export async function POST(request: NextRequest) {
       .schema('icecream_erp')
       .from('machines')
       .select('id')
-      .eq('code', body.code)
-      .is('deleted_at', null)
+      .eq('organization_id', ctx.organizationId)
+      .eq('asset_number', body.code)
       .maybeSingle();
 
     if (existing) return badRequest(`Machine code ${body.code} already exists`);
@@ -79,14 +91,13 @@ export async function POST(request: NextRequest) {
       .schema('icecream_erp')
       .from('machines')
       .insert({
-        code: body.code,
+        organization_id: ctx.organizationId,
+        asset_number: body.code,
         name: body.name,
-        machine_type: body.machineType,
         status: body.status ?? 'OPERATIONAL',
         location: body.location ?? null,
         purchase_date: body.purchaseDate ? new Date(body.purchaseDate).toISOString() : null,
-        warranty_expiry: body.warrantyExpiry ? new Date(body.warrantyExpiry).toISOString() : null,
-        is_active: body.isActive ?? true,
+        description: body.machineType,
       })
       .select()
       .single();

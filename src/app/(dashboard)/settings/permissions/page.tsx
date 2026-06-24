@@ -45,7 +45,7 @@ export default function SettingsPermissionsPage() {
 
       <div className="grid gap-6 md:grid-cols-2">
         {modules.map((moduleName) => (
-          <section key={moduleName} className="rounded-2xl border border-border bg-white p-6 shadow-sm dark:border-darkBorder dark:bg-darkCard">
+          <section key={moduleName} className="surface-card-lg">
             <h3 className="text-lg font-semibold text-brown dark:text-darkText">{moduleName}</h3>
             <ul className="mt-4 space-y-2">
               {grouped[moduleName]?.map((permission) => (

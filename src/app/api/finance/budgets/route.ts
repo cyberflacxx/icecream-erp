@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { badRequest, can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
-import { financeService, generateFinanceReferenceNumber, writeFinanceAuditLog } from '@/lib/finance-server';
+import { financeErrorMessage, financeService, generateFinanceReferenceNumber, isMissingFinanceTable, writeFinanceAuditLog } from '@/lib/finance-server';
 
 function isMissingColumnError(error: unknown, table: string, columnName: string) {
-  return error instanceof Error && error.message.includes(`column ${table}.${columnName} does not exist`);
+  return financeErrorMessage(error).includes(`column ${table}.${columnName} does not exist`);
 }
 
 export async function GET(request: NextRequest) {
@@ -59,7 +59,8 @@ export async function GET(request: NextRequest) {
       total_budgeted: row.total_budget ?? 0,
     })));
   } catch (err) {
-    return serverError(err instanceof Error ? err.message : 'Internal server error');
+    if (isMissingFinanceTable(err)) return NextResponse.json([]);
+    return serverError(financeErrorMessage(err) || 'Internal server error');
   }
 }
 

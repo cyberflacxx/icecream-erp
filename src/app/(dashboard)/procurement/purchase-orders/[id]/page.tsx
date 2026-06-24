@@ -117,7 +117,7 @@ export default function PurchaseOrderDetailPage({ params }: PurchaseOrderDetailP
 
       {order ? (
         <>
-          <div className="grid gap-4 rounded-2xl border border-border bg-white p-5 shadow-sm sm:grid-cols-2 lg:grid-cols-4">
+          <div className="surface-card grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <div>
               <p className="text-xs uppercase tracking-[0.18em] text-muted">Supplier</p>
               <p className="mt-2 text-sm font-semibold text-brown">{order.supplier.name}</p>
@@ -172,12 +172,12 @@ export default function PurchaseOrderDetailPage({ params }: PurchaseOrderDetailP
             }
           />
 
-          <div className="rounded-2xl border border-border bg-white p-5 shadow-sm">
+          <div className="surface-card">
             <h2 className="text-lg font-semibold text-brown">Goods Received Notes</h2>
             <div className="mt-4 space-y-3">
               {order.grns.length ? (
                 order.grns.map((grn) => (
-                  <div key={grn.id} className="rounded-2xl bg-cream px-4 py-3">
+                  <div key={grn.id} className="surface-tile">
                     <p className="font-medium text-brown">{grn.grnNumber}</p>
                     <p className="mt-1 text-sm text-muted">
                       {new Date(grn.receivedDate).toLocaleDateString()} | {grn.itemsCount} items | {grn.status}

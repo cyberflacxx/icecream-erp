@@ -54,7 +54,7 @@ export default function InventoryDashboardPage() {
       </div>
 
       <div className="grid gap-4 xl:grid-cols-2">
-        <div className="rounded-2xl border border-border bg-white p-5 shadow-sm">
+        <div className="surface-card">
           <h2 className="text-lg font-semibold text-brown">Stock composition</h2>
           <div className="mt-4 grid gap-3 sm:grid-cols-2">
             <ValueTile label="Raw materials" value={metrics?.rawMaterialValue ?? 0} />
@@ -64,7 +64,7 @@ export default function InventoryDashboardPage() {
           </div>
         </div>
 
-        <div className="rounded-2xl border border-border bg-white p-5 shadow-sm">
+        <div className="surface-card">
           <h2 className="text-lg font-semibold text-brown">Risk watchlist</h2>
           <div className="mt-4 grid gap-3 sm:grid-cols-3">
             <CountTile label="Expiring soon" value={metrics?.expiringSoonCount ?? 0} />
@@ -74,12 +74,12 @@ export default function InventoryDashboardPage() {
         </div>
       </div>
 
-      <div className="rounded-2xl border border-border bg-white p-5 shadow-sm">
+      <div className="surface-card">
         <h2 className="text-lg font-semibold text-brown">Today&apos;s stock movements</h2>
         <div className="mt-4 space-y-3">
           {metrics?.todaysMovements?.length ? (
             metrics.todaysMovements.map((movement) => (
-              <div key={movement.id} className="flex flex-col gap-2 rounded-2xl bg-cream px-4 py-3 md:flex-row md:items-center md:justify-between">
+              <div key={movement.id} className="surface-tile flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
                 <div>
                   <p className="font-medium text-brown">{movement.itemName}</p>
                   <p className="text-sm text-muted">{movement.warehouseName}</p>
@@ -115,7 +115,7 @@ function MetricCard({
   value: string;
 }) {
   return (
-    <div className="rounded-2xl border border-border bg-white p-5 shadow-sm">
+    <div className="surface-card">
       <div className="flex items-center justify-between">
         <p className="text-sm font-semibold uppercase tracking-[0.18em] text-orange">{label}</p>
         {icon}
@@ -128,7 +128,7 @@ function MetricCard({
 
 function ValueTile({ label, value }: { label: string; value: number }) {
   return (
-    <div className="rounded-2xl bg-cream px-4 py-3">
+    <div className="surface-tile">
       <p className="text-sm text-muted">{label}</p>
       <p className="mt-2 text-lg font-semibold text-brown">{currencyFormatter.format(value)}</p>
     </div>
@@ -137,7 +137,7 @@ function ValueTile({ label, value }: { label: string; value: number }) {
 
 function CountTile({ label, value }: { label: string; value: number }) {
   return (
-    <div className="rounded-2xl bg-cream px-4 py-3">
+    <div className="surface-tile">
       <p className="text-sm text-muted">{label}</p>
       <p className="mt-2 text-lg font-semibold text-brown">{value}</p>
     </div>

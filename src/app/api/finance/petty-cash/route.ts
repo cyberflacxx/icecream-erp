@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { badRequest, can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
-import { financeService, generateFinanceReferenceNumber, writeFinanceAuditLog } from '@/lib/finance-server';
+import { financeErrorMessage, financeService, generateFinanceReferenceNumber, isMissingFinanceTable, writeFinanceAuditLog } from '@/lib/finance-server';
 
 export async function GET(_request: NextRequest) {
   const ctx = await getAuthContext();
@@ -17,7 +17,8 @@ export async function GET(_request: NextRequest) {
     if (error) throw error;
     return NextResponse.json(data ?? []);
   } catch (err) {
-    return serverError(err instanceof Error ? err.message : 'Internal server error');
+    if (isMissingFinanceTable(err)) return NextResponse.json([]);
+    return serverError(financeErrorMessage(err) || 'Internal server error');
   }
 }
 

@@ -47,7 +47,7 @@ export default function ProcurementReportsPage() {
       />
       <ProcurementNav />
 
-      <div className="flex flex-col gap-4 rounded-2xl border border-border bg-white p-5 shadow-sm lg:flex-row lg:items-end lg:justify-between">
+      <div className="surface-card flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <FilterBar
           filters={[{ key: 'reportType', label: 'Report', type: 'select', value: reportType, options: reportOptions }]}
           onFilterChange={(_, value) => setReportType(value)}

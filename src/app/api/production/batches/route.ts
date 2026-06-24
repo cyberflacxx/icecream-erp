@@ -4,7 +4,12 @@ import { badRequest, can, forbidden, getAuthContext, serverError, unauthorized }
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
 function isMissingColumnError(error: unknown, table: string, columnName: string) {
-  return error instanceof Error && error.message.includes(`column ${table}.${columnName} does not exist`);
+  const message = error instanceof Error
+    ? error.message
+    : typeof error === 'object' && error !== null && 'message' in error
+      ? String((error as { message?: unknown }).message ?? '')
+      : '';
+  return message.includes(`column ${table}.${columnName} does not exist`);
 }
 
 export async function GET(request: NextRequest) {
@@ -168,10 +173,9 @@ export async function POST(request: NextRequest) {
     const { data: recipe } = await service
       .schema('icecream_erp')
       .from('recipes')
-      .select('id, code, name, finished_item_id, output_unit_id')
+      .select('id, code, name, finished_item_id, batch_unit_id')
       .eq('id', recipeId)
       .eq('status', 'ACTIVE')
-      .is('deleted_at', null)
       .single();
     if (!recipe) return badRequest('Recipe not found or inactive.');
 
@@ -200,6 +204,7 @@ export async function POST(request: NextRequest) {
       .schema('icecream_erp')
       .from('production_batches')
       .insert({
+        organization_id: ctx.organizationId,
         batch_number: batchNumber,
         recipe_id: recipeId,
         warehouse_id: warehouseId,
@@ -259,7 +264,7 @@ export async function POST(request: NextRequest) {
     const outputInsert = await service.schema('icecream_erp').from('production_batch_outputs').insert({
       batch_id: batch.id,
       item_id: recipe.finished_item_id,
-      unit_id: recipe.output_unit_id,
+      unit_id: recipe.batch_unit_id,
       expected_quantity: expectedOutput,
       actual_quantity: 0,
     });
@@ -267,6 +272,7 @@ export async function POST(request: NextRequest) {
 
     // Audit log
     await service.schema('icecream_erp').from('audit_logs').insert({
+      organization_id: ctx.organizationId,
       action: 'PRODUCTION_BATCH_CREATED',
       entity_id: batch.id,
       entity_type: 'production_batch',

@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { badRequest, can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
-import { financeService, writeFinanceAuditLog } from '@/lib/finance-server';
+import { financeErrorMessage, financeService, isMissingFinanceTable, writeFinanceAuditLog } from '@/lib/finance-server';
 
 function isMissingColumnError(error: unknown, columnName: string) {
-  return error instanceof Error && error.message.includes(`column accounts.${columnName} does not exist`);
+  return financeErrorMessage(error).includes(`column accounts.${columnName} does not exist`);
 }
 
 function normalizeAccountRow(row: Record<string, unknown>) {
@@ -47,6 +47,7 @@ export async function GET(_request: NextRequest) {
     if (fallback.error) throw fallback.error;
     return NextResponse.json((fallback.data ?? []).map((row) => normalizeAccountRow(row as Record<string, unknown>)));
   } catch (err) {
+    if (isMissingFinanceTable(err)) return NextResponse.json([]);
     return serverError(err instanceof Error ? err.message : 'Internal server error');
   }
 }

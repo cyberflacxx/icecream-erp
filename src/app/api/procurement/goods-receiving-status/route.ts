@@ -12,26 +12,42 @@ export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const status = searchParams.get('status') ?? '';
 
-  let query = service
+  const query = service
     .from('purchase_order_items')
-    .select(
-      `id, quantity_ordered, quantity_received, purchase_orders!purchase_order_id(po_number, status, suppliers(name)),
-       items!item_id(name)`,
-    )
-    .order('created_at', { ascending: false });
-
-  if (status) query = query.eq('purchase_orders.status', status);
+    .select('id, po_id, item_id, quantity, received_qty');
 
   const { data, error } = await query;
   if (error) return serverError(error.message);
 
+  const poIds = [...new Set((data ?? []).map((row) => String(row.po_id ?? '')).filter(Boolean))];
+  const itemIds = [...new Set((data ?? []).map((row) => String(row.item_id ?? '')).filter(Boolean))];
+  const [ordersResult, itemsResult] = await Promise.all([
+    poIds.length ? service.from('purchase_orders').select('id, po_number, status, supplier_id').in('id', poIds) : Promise.resolve({ data: [], error: null }),
+    itemIds.length ? service.from('items').select('id, name').in('id', itemIds) : Promise.resolve({ data: [], error: null }),
+  ]);
+  if (ordersResult.error) return serverError(ordersResult.error.message);
+  if (itemsResult.error) return serverError(itemsResult.error.message);
+
+  const supplierIds = [...new Set((ordersResult.data ?? []).map((row) => String(row.supplier_id ?? '')).filter(Boolean))];
+  const suppliersResult = supplierIds.length ? await service.from('suppliers').select('id, name').in('id', supplierIds) : { data: [], error: null };
+  if (suppliersResult.error) return serverError(suppliersResult.error.message);
+
+  const orders = new Map((ordersResult.data ?? []).map((row) => [String(row.id), row]));
+  const items = new Map((itemsResult.data ?? []).map((row) => [String(row.id), row]));
+  const suppliers = new Map((suppliersResult.data ?? []).map((row) => [String(row.id), row]));
+
   return NextResponse.json(
-    (data ?? []).map((row) => {
-      const order = Array.isArray(row.purchase_orders) ? row.purchase_orders[0] : row.purchase_orders;
-      const supplier = Array.isArray(order?.suppliers) ? order.suppliers[0] : order?.suppliers;
-      const item = Array.isArray(row.items) ? row.items[0] : row.items;
-      const ordered = Number(row.quantity_ordered ?? 0);
-      const received = Number(row.quantity_received ?? 0);
+    (data ?? [])
+      .filter((row) => {
+        const order = orders.get(String(row.po_id));
+        return !status || String(order?.status ?? '') === status;
+      })
+      .map((row) => {
+      const order = orders.get(String(row.po_id));
+      const supplier = suppliers.get(String(order?.supplier_id ?? ''));
+      const item = items.get(String(row.item_id ?? ''));
+      const ordered = Number(row.quantity ?? 0);
+      const received = Number(row.received_qty ?? 0);
       return {
         id: row.id,
         item: item?.name ?? 'Unknown item',

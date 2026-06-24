@@ -31,12 +31,12 @@ export async function GET(request: NextRequest) {
     service
       .from('employees')
       .select(
-        'id, employee_number, full_name, first_name, last_name, department, job_title, status, hire_date, branch_id, created_at',
+        'id, employee_number, first_name, last_name, department, position, status, hire_date, branch_id, created_at',
         { count: 'exact' },
       )
       .eq('organization_id', ctx.organizationId);
 
-  let query = buildBaseQuery().is('deleted_at', null);
+  let query = buildBaseQuery();
 
   if (ctx.isBranchScoped) {
     query = query.eq('branch_id', ctx.branchId!);
@@ -44,11 +44,11 @@ export async function GET(request: NextRequest) {
     query = query.eq('branch_id', branchId);
   }
 
-  if (department) query = query.or(`department.eq.${department},department_id.eq.${department}`);
+  if (department) query = query.eq('department', department);
   if (status) query = query.eq('status', status);
   if (search) {
     query = query.or(
-      `first_name.ilike.%${search}%,last_name.ilike.%${search}%,full_name.ilike.%${search}%,employee_number.ilike.%${search}%,email.ilike.%${search}%`,
+      `first_name.ilike.%${search}%,last_name.ilike.%${search}%,employee_number.ilike.%${search}%,email.ilike.%${search}%`,
     );
   }
 
@@ -66,7 +66,11 @@ export async function GET(request: NextRequest) {
   if (error) return serverError(error.message);
 
   return NextResponse.json({
-    data: data ?? [],
+    data: (data ?? []).map((employee) => ({
+      ...employee,
+      full_name: [employee.first_name, employee.last_name].filter(Boolean).join(' '),
+      job_title: employee.position,
+    })),
     pagination: { page, pageSize, total: count ?? 0 },
   });
 }
@@ -120,7 +124,6 @@ export async function POST(request: NextRequest) {
     .select('id')
     .eq('organization_id', ctx.organizationId)
     .eq('employee_number', employeeNumber)
-    .is('deleted_at', null)
     .maybeSingle();
 
   if (existingResult.error && isMissingColumnOrRelation(existingResult.error, 'employees.deleted_at')) {
@@ -147,25 +150,19 @@ export async function POST(request: NextRequest) {
   const { data, error } = await service
     .from('employees')
     .insert({
-      basic_rate: Number(body.basic_rate ?? body.basic_salary ?? 0),
+      basic_salary: Number(body.basic_salary ?? body.basic_rate ?? 0),
       branch_id: body.branch_id ?? null,
       department: departmentName,
-      department_id: body.department_id ?? null,
       email: body.email || null,
       employee_number: employeeNumber,
-      employment_type: body.employment_type ?? null,
       first_name: firstName,
-      full_name: fullName,
       hire_date: body.hire_date,
-      hourly_rate: Number(body.hourly_rate ?? 0),
-      job_role_id: body.job_role_id ?? null,
-      job_title: jobRoleName,
       last_name: lastName,
       organization_id: ctx.organizationId,
       phone: body.phone || null,
-      shift_rate: Number(body.shift_rate ?? 0),
+      position: jobRoleName,
+      shift: body.employment_type ?? null,
       status: String(body.status ?? 'ACTIVE').toUpperCase(),
-      warehouse_id: body.warehouse_id ?? null,
     })
     .select()
     .single();

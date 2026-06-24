@@ -130,7 +130,7 @@ export default function BranchDashboardPage() {
       </div>
 
       <div className="grid gap-4 xl:grid-cols-[1.2fr_1fr]">
-        <div className="rounded-2xl border border-border bg-white p-5 shadow-sm">
+        <div className="surface-card">
           <div className="flex items-center justify-between gap-3">
             <h2 className="text-lg font-semibold text-brown">Shift Close Status</h2>
             <StatusBadge status={branchShift?.status ?? 'NONE'} />
@@ -163,7 +163,7 @@ export default function BranchDashboardPage() {
           </div>
         </div>
 
-        <div className="rounded-2xl border border-border bg-white p-5 shadow-sm">
+        <div className="surface-card">
           <h2 className="text-lg font-semibold text-brown">Quick Actions</h2>
           <div className="mt-4 grid grid-cols-2 gap-3">
             <Button asChild size="sm" variant="outline">

@@ -14,11 +14,23 @@ export async function GET(_request: NextRequest) {
     service.from('supplier_payments').select('supplier_invoice_id, amount_paid').eq('organization_id', ctx.organizationId).is('deleted_at', null),
   ]);
 
-  if (invoices.error) return serverError(invoices.error.message);
-  if (payments.error) return serverError(payments.error.message);
+  if (invoices.error) {
+    if (invoices.error.message.includes("Could not find the table 'icecream_erp.supplier_invoices'")) {
+      return NextResponse.json([]);
+    }
+    return serverError(invoices.error.message);
+  }
+  let paymentsData = payments.data ?? [];
+  if (payments.error) {
+    if (payments.error.message.includes("Could not find the table 'icecream_erp.supplier_payments'")) {
+      paymentsData = [];
+    } else {
+      return serverError(payments.error.message);
+    }
+  }
 
   const paidByInvoice = new Map<string, number>();
-  for (const payment of payments.data ?? []) {
+  for (const payment of paymentsData) {
     const key = String(payment.supplier_invoice_id);
     paidByInvoice.set(key, (paidByInvoice.get(key) ?? 0) + Number(payment.amount_paid ?? 0));
   }
@@ -64,6 +76,10 @@ export async function POST(request: NextRequest) {
 
   const total = body.items.reduce((sum, item) => sum + Number(item.quantityInvoiced) * Number(item.unitCost), 0);
   const service = createServiceRoleClient();
+  const tableCheck = await service.from('supplier_invoices').select('id', { count: 'exact', head: true });
+  if (tableCheck.error?.message.includes("Could not find the table 'icecream_erp.supplier_invoices'")) {
+    return serverError('Supplier invoices table is not deployed in Supabase yet.');
+  }
   const { data: invoice, error } = await service
     .from('supplier_invoices')
     .insert({

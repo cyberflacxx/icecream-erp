@@ -62,7 +62,14 @@ export function useCurrentUser() {
     pathname.startsWith('/settings') ||
     pathname.startsWith('/finance') ||
     pathname.startsWith('/sales') ||
-    pathname.startsWith('/quality');
+    pathname.startsWith('/quality') ||
+    pathname.startsWith('/hr') ||
+    pathname.startsWith('/notifications') ||
+    pathname.startsWith('/workflows') ||
+    pathname.startsWith('/testing') ||
+    pathname.startsWith('/budget') ||
+    pathname.startsWith('/cost-accounting') ||
+    pathname.startsWith('/maintenance');
 
   return useQuery({
     queryKey: ['current-user', userId],

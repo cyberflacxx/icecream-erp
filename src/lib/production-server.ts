@@ -4,6 +4,23 @@ export function productionService() {
   return createServiceRoleClient().schema('icecream_erp');
 }
 
+export function productionErrorMessage(error: unknown) {
+  if (error instanceof Error) return error.message;
+  if (typeof error === 'object' && error !== null && 'message' in error) {
+    return String((error as { message?: unknown }).message ?? '');
+  }
+  return '';
+}
+
+export function isMissingProductionTable(error: unknown) {
+  const message = productionErrorMessage(error);
+  return (
+    message.includes("Could not find the table 'icecream_erp.") ||
+    message.includes('Could not find a relationship between') ||
+    message.includes('does not exist')
+  );
+}
+
 export async function resolveBranchWarehouseIds(branchId: string | null) {
   if (!branchId) return null;
 

@@ -85,17 +85,17 @@ export default function StockBalancesPage() {
       <InventoryNav />
 
       <div className="grid gap-4 md:grid-cols-3">
-        <div className="rounded-2xl border border-border bg-white p-5 shadow-sm">
+        <div className="surface-card">
           <p className="text-sm font-semibold uppercase tracking-[0.18em] text-orange">Low stock</p>
           <p className="mt-3 text-3xl font-semibold text-brown">{lowStockQuery.data?.length ?? 0}</p>
           <p className="mt-2 text-sm text-muted">Items already at or below reorder threshold.</p>
         </div>
-        <div className="rounded-2xl border border-border bg-white p-5 shadow-sm">
+        <div className="surface-card">
           <p className="text-sm font-semibold uppercase tracking-[0.18em] text-orange">Expiring soon</p>
           <p className="mt-3 text-3xl font-semibold text-brown">{expiringQuery.data?.length ?? 0}</p>
           <p className="mt-2 text-sm text-muted">Batches expiring within the next 30 days.</p>
         </div>
-        <div className="rounded-2xl border border-border bg-white p-5 shadow-sm">
+        <div className="surface-card">
           <p className="text-sm font-semibold uppercase tracking-[0.18em] text-orange">Visible balances</p>
           <p className="mt-3 text-3xl font-semibold text-brown">{pagination?.total ?? 0}</p>
           <p className="mt-2 text-sm text-muted">Current filtered stock positions across the organization.</p>
@@ -217,14 +217,14 @@ export default function StockBalancesPage() {
       ) : null}
 
       <div className="grid gap-4 lg:grid-cols-2">
-        <div className="rounded-2xl border border-border bg-white p-5 shadow-sm">
+        <div className="surface-card">
           <div className="flex items-center gap-3">
             <AlertTriangle className="h-5 w-5 text-warning" />
             <h2 className="text-lg font-semibold text-brown">Low stock pressure points</h2>
           </div>
           <div className="mt-4 space-y-3">
             {(lowStockQuery.data ?? []).slice(0, 4).map((row) => (
-              <div key={row.id} className="rounded-2xl bg-cream px-4 py-3">
+              <div key={row.id} className="surface-tile">
                 <p className="font-medium text-brown">{row.item.name}</p>
                 <p className="mt-1 text-sm text-muted">
                   {row.warehouse.name}: {quantityFormatter.format(row.quantityAvailable)} available against reorder level{' '}
@@ -238,14 +238,14 @@ export default function StockBalancesPage() {
           </div>
         </div>
 
-        <div className="rounded-2xl border border-border bg-white p-5 shadow-sm">
+        <div className="surface-card">
           <div className="flex items-center gap-3">
             <ShieldAlert className="h-5 w-5 text-orange" />
             <h2 className="text-lg font-semibold text-brown">Expiry watchlist</h2>
           </div>
           <div className="mt-4 space-y-3">
             {(expiringQuery.data ?? []).slice(0, 4).map((batch) => (
-              <div key={batch.id} className="rounded-2xl bg-cream px-4 py-3">
+              <div key={batch.id} className="surface-tile">
                 <p className="font-medium text-brown">{batch.item.name}</p>
                 <p className="mt-1 text-sm text-muted">
                   Batch {batch.batchNumber} in {batch.warehouse.name} expires{' '}

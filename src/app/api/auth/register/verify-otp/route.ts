@@ -10,10 +10,13 @@ import {
   hashOtpCode,
   otpExpiryLabel,
   resolveRegistrationRole,
+  syncUserBranchAssignment,
+  toStoredUserRole,
   verifyRegistrationRequestToken,
 } from '@/lib/registration';
 import { recordSecurityEvent } from '@/lib/security-server';
 import { createServiceRoleClient } from '@/lib/supabase/server';
+import { serializeUserPhoneValue } from '@/lib/user-access-profile';
 
 export async function POST(request: NextRequest) {
   const body = (await request.json()) as { otp?: string; requestId?: string };
@@ -48,6 +51,7 @@ export async function POST(request: NextRequest) {
   }
 
   const normalizedEmail = payload.email.trim().toLowerCase();
+  const normalizedBranchId = payload.branchId ? String(payload.branchId) : null;
   const [{ data: emailUser }, { data: idUser }] = await Promise.all([
     service.from('users').select('id').ilike('email', normalizedEmail).maybeSingle(),
     service.from('users').select('id').eq('id_number', payload.idNumber).maybeSingle(),
@@ -58,6 +62,21 @@ export async function POST(request: NextRequest) {
   }
   if (idUser) {
     return NextResponse.json({ error: 'An account with this ID number already exists.' }, { status: 409 });
+  }
+
+  if (role.requiresBranch && !normalizedBranchId) {
+    return NextResponse.json({ error: 'Branch selection is required for this role.' }, { status: 400 });
+  }
+
+  if (normalizedBranchId) {
+    const { data: branch } = await service
+      .from('branches')
+      .select('id, status')
+      .eq('id', normalizedBranchId)
+      .maybeSingle();
+    if (!branch || String(branch.status ?? '').toUpperCase() !== 'ACTIVE') {
+      return NextResponse.json({ error: 'Selected branch is not available.' }, { status: 400 });
+    }
   }
 
   const [workId, organizationId] = await Promise.all([
@@ -86,7 +105,9 @@ export async function POST(request: NextRequest) {
       full_name: fullName,
       id_number: payload.idNumber,
       last_name: payload.lastName,
-      role: role.legacyRole,
+      phone: serializeUserPhoneValue({ accessProfile: role.legacyRole }),
+      branch_id: normalizedBranchId,
+      role: toStoredUserRole(role.legacyRole),
       status: 'active',
       work_id: workId,
     })
@@ -103,6 +124,13 @@ export async function POST(request: NextRequest) {
     await assignUserRole({
       assignedBy: null,
       roleId: role.id,
+      service,
+      userProfileId: String(profile.id),
+    });
+    await syncUserBranchAssignment({
+      assignedBy: null,
+      branchId: normalizedBranchId,
+      roleName: role.name,
       service,
       userProfileId: String(profile.id),
     });

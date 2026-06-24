@@ -262,7 +262,7 @@ export default function TransfersPage() {
                 onChange={(event) =>
                   setFormState((current) => ({ ...current, fromWarehouseId: event.target.value }))
                 }
-                className="h-11 w-full rounded-2xl border border-border bg-cream px-4 text-brown outline-none"
+                className="surface-input-soft"
               >
                 <option value="">Select source</option>
                 {metaQuery.data?.warehouses.map((warehouse) => (
@@ -280,7 +280,7 @@ export default function TransfersPage() {
                 onChange={(event) =>
                   setFormState((current) => ({ ...current, toWarehouseId: event.target.value }))
                 }
-                className="h-11 w-full rounded-2xl border border-border bg-cream px-4 text-brown outline-none"
+                className="surface-input-soft"
               >
                 <option value="">Select destination</option>
                 {metaQuery.data?.warehouses.map((warehouse) => (
@@ -326,7 +326,7 @@ export default function TransfersPage() {
                         )
                       }))
                     }
-                    className="h-11 rounded-2xl border border-border bg-white px-4 text-brown outline-none"
+                    className="surface-input-soft"
                   >
                     <option value="">Select item</option>
                     {metaQuery.data?.items.map((item) => (
@@ -348,7 +348,7 @@ export default function TransfersPage() {
                         )
                       }))
                     }
-                    className="h-11 rounded-2xl border border-border bg-white px-4 text-brown outline-none"
+                    className="surface-input-soft"
                   />
                   <Button
                     type="button"
@@ -376,7 +376,7 @@ export default function TransfersPage() {
               rows={4}
               value={formState.notes}
               onChange={(event) => setFormState((current) => ({ ...current, notes: event.target.value }))}
-              className="w-full rounded-2xl border border-border bg-cream px-4 py-3 text-brown outline-none"
+              className="surface-textarea-soft"
             />
           </label>
 
@@ -391,7 +391,7 @@ export default function TransfersPage() {
         </form>
       </FormDrawer>
 
-      <div className="rounded-2xl border border-border bg-white p-5 shadow-sm">
+      <div className="surface-card">
         <div className="flex items-center gap-3">
           <MoveRight className="h-5 w-5 text-orange" />
           <h2 className="text-lg font-semibold text-brown">Transfer discipline</h2>

@@ -18,27 +18,27 @@ export async function GET() {
         .from('sales_orders')
         .select('id')
         .eq('branch_id', ctx.branchId)
-        .is('deleted_at', null);
+        ;
       if (ordersError) throw ordersError;
       scopedOrderIds = (scopedOrders ?? []).map((row) => String(row.id));
     }
 
     let invoiceQuery = service
       .from('invoices')
-      .select('invoice_date, due_date, total, balance_due, sales_order_id, status')
-      .is('deleted_at', null);
+        .select('invoice_date, due_date, total_amount, balance_due, order_id, status')
+        .eq('organization_id', ctx.organizationId);
     if (scopedOrderIds) {
       if (scopedOrderIds.length === 0) {
-        invoiceQuery = invoiceQuery.in('sales_order_id', ['00000000-0000-0000-0000-000000000000']);
+        invoiceQuery = invoiceQuery.in('order_id', ['00000000-0000-0000-0000-000000000000']);
       } else {
-        invoiceQuery = invoiceQuery.in('sales_order_id', scopedOrderIds);
+        invoiceQuery = invoiceQuery.in('order_id', scopedOrderIds);
       }
     }
 
     let dispatchQuery = service
       .from('sales_dispatch_notes')
       .select('id, status')
-      .is('deleted_at', null);
+      ;
 
     if (ctx.isBranchScoped && ctx.branchId) {
       const { data: warehouseIds, error: warehouseError } = await service
@@ -56,12 +56,12 @@ export async function GET() {
     const [invoiceResult, dispatchResult, customerResult, finishedGoodsResult] = await Promise.all([
       invoiceQuery,
       dispatchQuery,
-      service.from('customers').select('credit_allowed, credit_limit, current_balance').is('deleted_at', null),
-      service.from('items').select('id').eq('item_type', 'FINISHED_GOOD').is('deleted_at', null),
+      service.from('customers').select('credit_limit, outstanding_balance').eq('organization_id', ctx.organizationId),
+      service.from('items').select('id').eq('organization_id', ctx.organizationId).eq('type', 'FINISHED_GOOD'),
     ]);
 
     if (invoiceResult.error) throw invoiceResult.error;
-    if (dispatchResult.error) throw dispatchResult.error;
+    if (dispatchResult.error && !dispatchResult.error.message.includes("Could not find the table 'icecream_erp.sales_dispatch_notes'")) throw dispatchResult.error;
     if (customerResult.error) throw customerResult.error;
     if (finishedGoodsResult.error) throw finishedGoodsResult.error;
 
@@ -70,7 +70,7 @@ export async function GET() {
     if (finishedGoodsIds.length > 0) {
       let stockQuery = service
         .from('stock_balances')
-        .select('quantity_available, warehouse_id')
+        .select('quantity, reserved_qty, warehouse_id')
         .in('item_id', finishedGoodsIds);
 
       if (ctx.isBranchScoped && ctx.branchId) {
@@ -97,7 +97,7 @@ export async function GET() {
 
     const todaySales = invoices
       .filter((row) => String(row.invoice_date ?? '') === today && String(row.status ?? '').toUpperCase() !== 'CANCELLED')
-      .reduce((sum, row) => sum + Number(row.total ?? 0), 0);
+      .reduce((sum, row) => sum + Number(row.total_amount ?? 0), 0);
 
     const overdueInvoices = invoices.filter((row) => {
       const dueDate = String(row.due_date ?? '');
@@ -106,14 +106,13 @@ export async function GET() {
     }).length;
 
     const creditAlerts = customers.filter((row) => {
-      const creditAllowed = Boolean(row.credit_allowed);
       const creditLimit = Number(row.credit_limit ?? 0);
-      const currentBalance = Number(row.current_balance ?? 0);
-      return creditAllowed && creditLimit > 0 && currentBalance > creditLimit;
+      const currentBalance = Number(row.outstanding_balance ?? 0);
+      return creditLimit > 0 && currentBalance > creditLimit;
     }).length;
 
     const pendingDispatches = dispatches.filter((row) => !['POSTED', 'CANCELLED'].includes(String(row.status ?? '').toUpperCase())).length;
-    const stockAvailableForSale = stockRows.reduce((sum, row) => sum + Number(row.quantity_available ?? 0), 0);
+    const stockAvailableForSale = stockRows.reduce((sum, row) => sum + Math.max(0, Number(row.quantity ?? 0) - Number(row.reserved_qty ?? 0)), 0);
 
     return NextResponse.json({
       stats: {

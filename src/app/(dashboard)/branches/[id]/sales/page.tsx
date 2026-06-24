@@ -333,7 +333,7 @@ export default function BranchSalesPage() {
               <select
                 value={shift}
                 onChange={(event) => setShift(event.target.value as 'DAY' | 'NIGHT')}
-                className="h-11 w-full rounded-2xl border border-border bg-cream px-4 text-brown outline-none"
+                className="surface-input-soft"
               >
                 <option value="DAY">DAY</option>
                 <option value="NIGHT">NIGHT</option>
@@ -344,7 +344,7 @@ export default function BranchSalesPage() {
               <select
                 value={paymentMethod}
                 onChange={(event) => setPaymentMethod(event.target.value as 'CASH' | 'ECOCASH' | 'CARD')}
-                className="h-11 w-full rounded-2xl border border-border bg-cream px-4 text-brown outline-none"
+                className="surface-input-soft"
               >
                 <option value="CASH">CASH</option>
                 <option value="ECOCASH">ECOCASH</option>
@@ -358,7 +358,7 @@ export default function BranchSalesPage() {
             <input
               value={paymentReference}
               onChange={(event) => setPaymentReference(event.target.value)}
-              className="h-11 w-full rounded-2xl border border-border bg-cream px-4 text-brown outline-none"
+              className="surface-input-soft"
             />
           </label>
 
@@ -386,7 +386,7 @@ export default function BranchSalesPage() {
                       ),
                     )
                   }
-                  className="h-11 rounded-2xl border border-border bg-cream px-3 text-brown outline-none sm:col-span-2"
+                  className="surface-input-soft sm:col-span-2"
                 >
                   <option value="">Select item</option>
                   {stockOptions.map((option) => (
@@ -407,7 +407,7 @@ export default function BranchSalesPage() {
                       ),
                     )
                   }
-                  className="h-11 rounded-2xl border border-border bg-cream px-3 text-brown outline-none"
+                  className="surface-input-soft"
                 />
                 <input
                   min="0"
@@ -421,7 +421,7 @@ export default function BranchSalesPage() {
                       ),
                     )
                   }
-                  className="h-11 rounded-2xl border border-border bg-cream px-3 text-brown outline-none"
+                  className="surface-input-soft"
                 />
                 <div className="text-sm text-muted sm:col-span-4">
                   Line Total:{' '}
@@ -446,7 +446,7 @@ export default function BranchSalesPage() {
             ))}
           </div>
 
-          <div className="rounded-2xl border border-border bg-cream px-4 py-3 text-sm text-muted">
+          <div className="surface-tile text-sm text-muted">
             Grand Total: <span className="font-semibold text-brown">{currencyFormatter.format(grandTotal)}</span>
           </div>
 
@@ -479,7 +479,7 @@ export default function BranchSalesPage() {
               required
               value={expenseCategory}
               onChange={(event) => setExpenseCategory(event.target.value)}
-              className="h-11 w-full rounded-2xl border border-border bg-cream px-4 text-brown outline-none"
+              className="surface-input-soft"
             />
           </label>
           <label className="space-y-2 text-sm text-muted">
@@ -489,7 +489,7 @@ export default function BranchSalesPage() {
               rows={3}
               value={expenseDescription}
               onChange={(event) => setExpenseDescription(event.target.value)}
-              className="w-full rounded-2xl border border-border bg-cream px-4 py-3 text-brown outline-none"
+              className="surface-textarea-soft"
             />
           </label>
           <div className="grid gap-4 sm:grid-cols-2">
@@ -501,7 +501,7 @@ export default function BranchSalesPage() {
                 type="number"
                 value={expenseAmount}
                 onChange={(event) => setExpenseAmount(event.target.value)}
-                className="h-11 w-full rounded-2xl border border-border bg-cream px-4 text-brown outline-none"
+                className="surface-input-soft"
               />
             </label>
             <label className="space-y-2 text-sm text-muted">
@@ -511,7 +511,7 @@ export default function BranchSalesPage() {
                 onChange={(event) =>
                   setExpensePaymentMethod(event.target.value as 'CASH' | 'ECOCASH' | 'CARD')
                 }
-                className="h-11 w-full rounded-2xl border border-border bg-cream px-4 text-brown outline-none"
+                className="surface-input-soft"
               >
                 <option value="CASH">CASH</option>
                 <option value="ECOCASH">ECOCASH</option>

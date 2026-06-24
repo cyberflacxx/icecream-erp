@@ -1,7 +1,9 @@
 import { createHash, createHmac, randomBytes } from 'crypto';
 
 import { ROLE_PERMISSIONS, ROLES } from '@/lib/auth-roles';
+import { deriveLegacyRole } from '@/lib/registration';
 import { createServiceRoleClient } from '@/lib/supabase/server';
+import { parseUserPhoneValue } from '@/lib/user-access-profile';
 import {
   getLockoutExpiry,
   isLoginAllowed,
@@ -220,6 +222,15 @@ function getLegacyPermissions(role: string) {
   return ROLE_PERMISSIONS[role] ?? [];
 }
 
+function sanitizePermissionsForRole(role: string, permissions: string[]) {
+  if (role === 'branch_manager') {
+    const allowed = new Set(getLegacyPermissions(role));
+    return permissions.filter((permission) => allowed.has(permission));
+  }
+
+  return permissions;
+}
+
 function getFallbackResolvedRoles(legacyRole: string) {
   const matchedRole = ROLES.find((role) => role.id === legacyRole) ?? ROLES.find((role) => role.id === 'staff');
   if (!matchedRole) return [] as ResolvedRole[];
@@ -298,14 +309,35 @@ async function resolveAssignments(table: 'user_branch_assignments' | 'user_wareh
     .filter((value): value is string => Boolean(value));
 }
 
+async function resolveBranchAssignmentsDetailed(userProfileId: string) {
+  const service = securityService();
+  const { data, error } = await service
+    .from('user_branch_assignments')
+    .select('branch_id, role_name, is_active')
+    .eq('user_profile_id', userProfileId)
+    .eq('is_active', true);
+
+  if (error) {
+    throw error;
+  }
+
+  return (data ?? [])
+    .map((row) => ({
+      branchId: row.branch_id ? String(row.branch_id) : null,
+      roleName: row.role_name ? String(row.role_name) : null,
+    }))
+    .filter((row) => row.branchId);
+}
+
 function normalizeProfileRow(row: Record<string, unknown>, organizationId: string): SecurityUserProfile {
   const normalizedStatus = String(row.status ?? 'active').toUpperCase();
+  const phoneMeta = parseUserPhoneValue(row.phone);
   return {
     id: String(row.id),
     userAccountId: row.user_account_id ? String(row.user_account_id) : null,
     authId: row.auth_id ? String(row.auth_id) : null,
     email: String(row.email ?? ''),
-    phone: row.phone ? String(row.phone) : null,
+    phone: phoneMeta.phone,
     avatarUrl: row.avatar_url ? String(row.avatar_url) : null,
     fullName: String(row.full_name ?? `${row.first_name ?? ''} ${row.last_name ?? ''}`.trim()),
     firstName: String(row.first_name ?? ''),
@@ -314,7 +346,7 @@ function normalizeProfileRow(row: Record<string, unknown>, organizationId: strin
     status: normalizeUserStatus(normalizedStatus),
     branchId: row.branch_id ? String(row.branch_id) : null,
     organizationId,
-    role: String(row.role ?? 'staff'),
+    role: phoneMeta.accessProfile ?? String(row.role ?? 'staff'),
     failedLoginAttempts: Number(row.failed_login_attempts ?? 0),
     lockedUntil: row.locked_until ? String(row.locked_until) : null,
     lastLogin: row.last_login ? String(row.last_login) : null,
@@ -348,23 +380,32 @@ export async function findSecurityUserProfileByWorkId(workId: string) {
 }
 
 export async function buildSecurityContextProfile(profile: SecurityUserProfile) {
-  const [resolvedRoles, branchAssignments, warehouseAssignments, settings] = await Promise.all([
+  const [resolvedRoles, branchAssignmentDetails, warehouseAssignments, settings] = await Promise.all([
     resolveRolesForUser(profile.id),
-    resolveAssignments('user_branch_assignments', profile.id).catch(() => [] as string[]),
+    resolveBranchAssignmentsDetailed(profile.id).catch(() => [] as Array<{ branchId: string | null; roleName: string | null }>),
     resolveAssignments('user_warehouse_assignments', profile.id).catch(() => [] as string[]),
     getSystemSecuritySettings(),
   ]);
 
-  const roles = resolvedRoles.length > 0 ? resolvedRoles : getFallbackResolvedRoles(profile.role);
+  const detailedRoleName = branchAssignmentDetails.find((assignment) => assignment.roleName)?.roleName ?? null;
+  const effectiveLegacyRole = detailedRoleName ? deriveLegacyRole(detailedRoleName, profile.role) : profile.role;
+  const roles = resolvedRoles.length > 0 ? resolvedRoles : getFallbackResolvedRoles(effectiveLegacyRole);
   const roleIds = roles.map((role) => role.id);
   const permissions = await resolvePermissionsForRoles(roleIds);
+  const branchAssignments = branchAssignmentDetails
+    .map((assignment) => assignment.branchId)
+    .filter((value): value is string => Boolean(value));
 
   return {
     ...profile,
+    role: effectiveLegacyRole,
     roles,
-    permissions: mergePermissions(
-      permissions.map((permission) => permission.code),
-      getLegacyPermissions(profile.role),
+    permissions: sanitizePermissionsForRole(
+      effectiveLegacyRole,
+      mergePermissions(
+        permissions.map((permission) => permission.code),
+        getLegacyPermissions(effectiveLegacyRole),
+      ),
     ),
     branchAssignments: branchAssignments.length > 0 ? branchAssignments : profile.branchId ? [profile.branchId] : [],
     warehouseAssignments,

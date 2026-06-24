@@ -330,7 +330,7 @@ export default function RequisitionsPage() {
                 required
                 value={formState.department}
                 onChange={(event) => setFormState((current) => ({ ...current, department: event.target.value }))}
-                className="h-11 w-full rounded-2xl border border-border bg-cream px-4 text-brown outline-none"
+                className="surface-input-soft"
               />
             </label>
             <label className="space-y-2 text-sm text-muted">
@@ -341,7 +341,7 @@ export default function RequisitionsPage() {
                 onChange={(event) =>
                   setFormState((current) => ({ ...current, neededByDate: event.target.value }))
                 }
-                className="h-11 w-full rounded-2xl border border-border bg-cream px-4 text-brown outline-none"
+                className="surface-input-soft"
               />
             </label>
           </div>
@@ -352,7 +352,7 @@ export default function RequisitionsPage() {
               rows={3}
               value={formState.remarks}
               onChange={(event) => setFormState((current) => ({ ...current, remarks: event.target.value }))}
-              className="w-full rounded-2xl border border-border bg-cream px-4 py-3 text-brown outline-none"
+              className="surface-textarea-soft"
             />
           </label>
 
@@ -388,7 +388,7 @@ export default function RequisitionsPage() {
                       )
                     }))
                   }
-                  className="h-11 rounded-2xl border border-border bg-white px-4 text-brown outline-none"
+                  className="surface-input-soft"
                 >
                   <option value="">Select item</option>
                   {(metaQuery.data?.items ?? []).map((row) => (
@@ -410,7 +410,7 @@ export default function RequisitionsPage() {
                       )
                     }))
                   }
-                  className="h-11 rounded-2xl border border-border bg-white px-4 text-brown outline-none"
+                  className="surface-input-soft"
                 />
                 <select
                   value={item.unitOfMeasureId}
@@ -422,7 +422,7 @@ export default function RequisitionsPage() {
                       )
                     }))
                   }
-                  className="h-11 rounded-2xl border border-border bg-white px-4 text-brown outline-none"
+                  className="surface-input-soft"
                 >
                   <option value="">UOM</option>
                   {(metaQuery.data?.units ?? []).map((row) => (
@@ -444,7 +444,7 @@ export default function RequisitionsPage() {
                       )
                     }))
                   }
-                  className="h-11 rounded-2xl border border-border bg-white px-4 text-brown outline-none"
+                  className="surface-input-soft"
                 />
                 <Button
                   type="button"

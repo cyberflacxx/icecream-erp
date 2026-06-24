@@ -45,11 +45,10 @@ export async function GET(request: NextRequest) {
     .schema('icecream_erp')
     .from('sales_orders')
     .select(`
-      id, order_number, order_date, required_date, status, total, branch_id,
+      id, order_number, order_date, delivery_date, status, total_amount, branch_id,
       customers!inner(id, name),
       sales_order_items(id)
     `)
-    .is('deleted_at', null)
     .order('order_date', { ascending: false });
 
   // Branch scoping
@@ -75,10 +74,10 @@ export async function GET(request: NextRequest) {
       orderNumber: row.order_number,
       customer: customer ? { id: customer.id, name: customer.name } : null,
       orderDate: row.order_date,
-      requiredDate: row.required_date,
+      requiredDate: row.delivery_date,
       status: row.status,
       itemsCount: items.length,
-      total: row.total ? Number(row.total) : 0,
+      total: row.total_amount ? Number(row.total_amount) : 0,
     };
   });
 
@@ -202,14 +201,15 @@ export async function POST(request: NextRequest) {
       branch_id: body.branchId ?? wh.branch_id ?? null,
       quotation_id: body.quotationId ?? null,
       order_date: body.orderDate ?? new Date().toISOString().slice(0, 10),
-      required_date: body.requiredDate ?? null,
+      delivery_date: body.requiredDate ?? null,
       status: 'draft',
       subtotal,
       tax_amount: taxAmount,
       discount_amount: discountAmount,
-      total,
+      total_amount: total,
       notes: body.notes ?? null,
       created_by: ctx.userId,
+      organization_id: ctx.organizationId,
     })
     .select()
     .single();
@@ -223,13 +223,12 @@ export async function POST(request: NextRequest) {
     .from('sales_order_items')
     .insert(
       normalizedItems.map((item) => ({
-        sales_order_id: o.id,
+        order_id: o.id,
         item_id: item.itemId,
-        quantity_ordered: item.quantity,
-        quantity_delivered: 0,
+        quantity: item.quantity,
         unit_price: item.unitPrice,
-        discount_percent: item.discountPercent ?? null,
-        total_price: item.quantity * item.unitPrice * (1 - (item.discountPercent ?? 0) / 100),
+        discount_pct: item.discountPercent ?? null,
+        line_total: item.quantity * item.unitPrice * (1 - (item.discountPercent ?? 0) / 100),
       })),
     );
 

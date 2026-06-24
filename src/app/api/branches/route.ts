@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { badRequest, can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
+import { syncUserBranchAssignment } from '@/lib/registration';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
 export async function GET(request: NextRequest) {
@@ -19,7 +20,7 @@ export async function GET(request: NextRequest) {
     let query = service
       .schema('icecream_erp')
       .from('branches')
-      .select('id, code, name, phone, status, address, manager_id, users!branches_manager_id_fkey(id, full_name, first_name, last_name)', { count: 'exact' })
+      .select('id, code, name, phone, status, address, manager_id', { count: 'exact' })
       .is('deleted_at', null)
       .order('name', { ascending: true });
 
@@ -47,7 +48,6 @@ export async function GET(request: NextRequest) {
       .schema('icecream_erp')
       .from('branch_sales')
       .select('branch_id, total_amount')
-      .is('deleted_at', null)
       .in('branch_id', branchIds)
       .gte('sale_date', today.toISOString())
       .lte('sale_date', todayEnd.toISOString());
@@ -59,7 +59,6 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({
       data: (branches ?? []).map((b: Record<string, unknown>) => {
-        const manager = b.users as { id: string; full_name?: string; first_name?: string; last_name?: string } | null;
         return {
           id: b.id,
           code: b.code,
@@ -67,7 +66,7 @@ export async function GET(request: NextRequest) {
           phone: b.phone,
           status: b.status,
           address: b.address,
-          manager: manager ? { id: manager.id, name: manager.full_name ?? `${manager.first_name ?? ''} ${manager.last_name ?? ''}`.trim() } : null,
+          manager: null,
           todaySales: salesMap.get(b.id as string) ?? 0,
           stockStatus: b.status === 'ACTIVE' ? 'Operational' : 'Check Branch',
         };
@@ -75,7 +74,7 @@ export async function GET(request: NextRequest) {
       pagination: { page, pageSize, total: count ?? 0 },
     });
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Internal server error';
+    const message = err instanceof Error ? err.message : typeof err === 'object' && err !== null && 'message' in err ? String((err as { message?: unknown }).message ?? '') : 'Internal server error';
     return serverError(message);
   }
 }
@@ -113,6 +112,7 @@ export async function POST(request: NextRequest) {
       .schema('icecream_erp')
       .from('branches')
       .insert({
+        organization_id: ctx.organizationId,
         code: body.code,
         name: body.name,
         phone: body.phone ?? null,
@@ -124,6 +124,23 @@ export async function POST(request: NextRequest) {
       .single();
 
     if (error) throw error;
+
+    if (body.managerId) {
+      await service
+        .schema('icecream_erp')
+        .from('users')
+        .update({ branch_id: branch.id })
+        .eq('id', body.managerId);
+
+      await syncUserBranchAssignment({
+        assignedBy: ctx.userId,
+        branchId: String(branch.id),
+        roleName: 'Branch Manager',
+        service: service.schema('icecream_erp'),
+        userProfileId: body.managerId,
+      });
+    }
+
     return NextResponse.json(branch, { status: 201 });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Internal server error';

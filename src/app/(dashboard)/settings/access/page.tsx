@@ -36,7 +36,7 @@ export default function SettingsAccessPage() {
       />
       <SettingsNav />
 
-      <section className="rounded-2xl border border-border bg-white p-6 shadow-sm dark:border-darkBorder dark:bg-darkCard">
+      <section className="surface-card-lg">
         <h3 className="text-lg font-semibold text-brown dark:text-darkText">Branch Access</h3>
         <div className="mt-4 space-y-3">
           {branchAssignments.length === 0 ? (
@@ -51,7 +51,7 @@ export default function SettingsAccessPage() {
         </div>
       </section>
 
-      <section className="rounded-2xl border border-border bg-white p-6 shadow-sm dark:border-darkBorder dark:bg-darkCard">
+      <section className="surface-card-lg">
         <h3 className="text-lg font-semibold text-brown dark:text-darkText">Warehouse Access</h3>
         <div className="mt-4 space-y-3">
           {warehouseAssignments.length === 0 ? (

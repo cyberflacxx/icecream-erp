@@ -356,7 +356,7 @@ export default function PurchaseOrdersPage() {
                 required
                 value={formState.supplierId}
                 onChange={(event) => setFormState((current) => ({ ...current, supplierId: event.target.value }))}
-                className="h-11 w-full rounded-2xl border border-border bg-cream px-4 text-brown outline-none"
+                className="surface-input-soft"
               >
                 <option value="">Select supplier</option>
                 {(metaQuery.data?.suppliers ?? []).map((supplier) => (
@@ -373,7 +373,7 @@ export default function PurchaseOrdersPage() {
                 onChange={(event) =>
                   setFormState((current) => ({ ...current, requisitionId: event.target.value }))
                 }
-                className="h-11 w-full rounded-2xl border border-border bg-cream px-4 text-brown outline-none"
+                className="surface-input-soft"
               />
             </label>
             <label className="space-y-2 text-sm text-muted">
@@ -382,7 +382,7 @@ export default function PurchaseOrdersPage() {
                 type="date"
                 value={formState.orderDate}
                 onChange={(event) => setFormState((current) => ({ ...current, orderDate: event.target.value }))}
-                className="h-11 w-full rounded-2xl border border-border bg-cream px-4 text-brown outline-none"
+                className="surface-input-soft"
               />
             </label>
             <label className="space-y-2 text-sm text-muted">
@@ -393,7 +393,7 @@ export default function PurchaseOrdersPage() {
                 onChange={(event) =>
                   setFormState((current) => ({ ...current, expectedDeliveryDate: event.target.value }))
                 }
-                className="h-11 w-full rounded-2xl border border-border bg-cream px-4 text-brown outline-none"
+                className="surface-input-soft"
               />
             </label>
             <label className="space-y-2 text-sm text-muted">
@@ -404,7 +404,7 @@ export default function PurchaseOrdersPage() {
                 type="number"
                 value={formState.taxAmount}
                 onChange={(event) => setFormState((current) => ({ ...current, taxAmount: event.target.value }))}
-                className="h-11 w-full rounded-2xl border border-border bg-cream px-4 text-brown outline-none"
+                className="surface-input-soft"
               />
             </label>
             <label className="space-y-2 text-sm text-muted">
@@ -417,7 +417,7 @@ export default function PurchaseOrdersPage() {
                 onChange={(event) =>
                   setFormState((current) => ({ ...current, discountAmount: event.target.value }))
                 }
-                className="h-11 w-full rounded-2xl border border-border bg-cream px-4 text-brown outline-none"
+                className="surface-input-soft"
               />
             </label>
           </div>
@@ -428,7 +428,7 @@ export default function PurchaseOrdersPage() {
               rows={3}
               value={formState.notes}
               onChange={(event) => setFormState((current) => ({ ...current, notes: event.target.value }))}
-              className="w-full rounded-2xl border border-border bg-cream px-4 py-3 text-brown outline-none"
+              className="surface-textarea-soft"
             />
           </label>
 
@@ -464,7 +464,7 @@ export default function PurchaseOrdersPage() {
                       )
                     }))
                   }
-                  className="h-11 rounded-2xl border border-border bg-white px-4 text-brown outline-none"
+                  className="surface-input-soft"
                 >
                   <option value="">Select item</option>
                   {(metaQuery.data?.items ?? []).map((row) => (
@@ -486,7 +486,7 @@ export default function PurchaseOrdersPage() {
                       )
                     }))
                   }
-                  className="h-11 rounded-2xl border border-border bg-white px-4 text-brown outline-none"
+                  className="surface-input-soft"
                 />
                 <input
                   min="0"
@@ -501,7 +501,7 @@ export default function PurchaseOrdersPage() {
                       )
                     }))
                   }
-                  className="h-11 rounded-2xl border border-border bg-white px-4 text-brown outline-none"
+                  className="surface-input-soft"
                 />
                 <select
                   value={item.unitOfMeasureId}
@@ -513,7 +513,7 @@ export default function PurchaseOrdersPage() {
                       )
                     }))
                   }
-                  className="h-11 rounded-2xl border border-border bg-white px-4 text-brown outline-none"
+                  className="surface-input-soft"
                 >
                   <option value="">UOM</option>
                   {(metaQuery.data?.units ?? []).map((row) => (

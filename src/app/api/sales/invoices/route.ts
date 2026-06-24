@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
+import { isMissingSalesTable, salesErrorMessage } from '@/lib/sales-server';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
 function isMissingColumnError(error: unknown, table: string, columnName: string) {
-  return error instanceof Error && error.message.includes(`column ${table}.${columnName} does not exist`);
+  return salesErrorMessage(error).includes(`column ${table}.${columnName} does not exist`);
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -73,7 +74,8 @@ export async function GET(request: NextRequest) {
       isMissingColumnError(primary.error, 'invoices', 'amount_paid') ||
       isMissingColumnError(primary.error, 'invoices', 'invoice_items') ||
       isMissingColumnError(primary.error, 'invoices', 'sales_orders') ||
-      isMissingColumnError(primary.error, 'invoices', 'deleted_at');
+      isMissingColumnError(primary.error, 'invoices', 'deleted_at') ||
+      isMissingSalesTable(primary.error);
 
     if (!compatibleLegacy) return serverError(primary.error.message);
 

@@ -55,7 +55,7 @@ export default function InventoryReportsPage() {
 
       <InventoryNav />
 
-      <div className="flex flex-col gap-4 rounded-2xl border border-border bg-white p-5 shadow-sm lg:flex-row lg:items-end lg:justify-between">
+      <div className="surface-card flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <div className="flex-1">
           <FilterBar
             filters={[

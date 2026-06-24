@@ -22,11 +22,9 @@ export async function GET(request: NextRequest) {
       .from('suppliers')
       .select(
         `id, code, name, contact_person, phone, email, address,
-         tax_number, payment_terms, credit_limit, current_balance, status,
-         supplier_categories(id, name)`,
+         category_id, payment_terms, credit_limit, credit_days, status, rating, notes`,
         { count: 'exact' },
       )
-      .is('deleted_at', null)
       .eq('organization_id', ctx.organizationId)
       .order('name');
 
@@ -43,26 +41,36 @@ export async function GET(request: NextRequest) {
 
     if (error) return serverError(error.message);
 
-    const mapped = (data ?? []).map((r: Record<string, unknown>) => ({
+    const categoryIds = [...new Set((data ?? []).map((row) => String(row.category_id ?? '')).filter(Boolean))];
+    const categoriesResult = categoryIds.length
+      ? await service.from('supplier_categories').select('id, name').in('id', categoryIds)
+      : { data: [], error: null };
+    if (categoriesResult.error) return serverError(categoriesResult.error.message);
+    const categories = new Map((categoriesResult.data ?? []).map((row) => [String(row.id), row as Record<string, unknown>]));
+
+    const mapped = (data ?? []).map((r: Record<string, unknown>) => {
+      const category = categories.get(String(r.category_id ?? '')) ?? null;
+      return {
       id: r.id,
       code: r.code,
       name: r.name,
-      category: r.supplier_categories
+      category: category
         ? {
-            id: (r.supplier_categories as Record<string, unknown>).id,
-            name: (r.supplier_categories as Record<string, unknown>).name,
+            id: category.id,
+            name: category.name,
           }
         : null,
       contactPerson: r.contact_person,
       phone: r.phone,
       email: r.email,
       address: r.address,
-      taxNumber: r.tax_number,
+      taxNumber: null,
       paymentTerms: r.payment_terms,
       creditLimit: Number(r.credit_limit ?? 0),
-      currentBalance: Number(r.current_balance ?? 0),
+      currentBalance: 0,
       status: r.status,
-    }));
+    };
+    });
 
     return NextResponse.json({
       data: mapped,
@@ -100,16 +108,39 @@ export async function POST(request: NextRequest) {
     return badRequest('Invalid JSON body');
   }
 
-  if (!body.name || !body.categoryId || !body.status) {
-    return badRequest('name, categoryId, and status are required');
+  if (!body.name || !body.status) {
+    return badRequest('name and status are required');
   }
 
   try {
+    let categoryId = body.categoryId;
+    if (!categoryId) {
+      const existing = await service
+        .from('supplier_categories')
+        .select('id')
+        .eq('organization_id', ctx.organizationId)
+        .ilike('name', 'General')
+        .maybeSingle();
+      if (existing.error) return serverError(existing.error.message);
+
+      if (existing.data?.id) {
+        categoryId = existing.data.id;
+      } else {
+        const created = await service
+          .from('supplier_categories')
+          .insert({ organization_id: ctx.organizationId, name: 'General' })
+          .select('id')
+          .single();
+        if (created.error || !created.data) return serverError(created.error?.message ?? 'Failed to create default supplier category.');
+        categoryId = created.data.id;
+      }
+    }
+
     // Validate category
     const { data: category, error: catErr } = await service
       .from('supplier_categories')
       .select('id')
-      .eq('id', body.categoryId)
+      .eq('id', categoryId)
       .eq('organization_id', ctx.organizationId)
       .single();
 
@@ -137,20 +168,18 @@ export async function POST(request: NextRequest) {
       .from('suppliers')
       .insert({
         name: body.name,
-        category_id: body.categoryId,
+        category_id: categoryId,
         code,
         contact_person: body.contactPerson ?? null,
         phone: body.phone ?? null,
         email: body.email ?? null,
         address: body.address ?? null,
-        tax_number: body.taxNumber ?? null,
         payment_terms: body.paymentTerms ?? null,
         credit_limit: body.creditLimit ?? null,
         status: body.status,
         organization_id: ctx.organizationId,
-        created_by: ctx.userId,
       })
-      .select('*, supplier_categories(id, name)')
+      .select()
       .single();
 
     if (supErr) {

@@ -26,7 +26,7 @@ import { usePathname, useRouter } from 'next/navigation';
 
 import { cn } from '@/components/ui-library';
 import { PERMISSIONS } from '@/lib/shared';
-import { hasAnyPermission, isSuperAdminPermissions } from '@/lib/dashboard-access';
+import { hasAnyPermission, isSuperAdminPermissions, resolveDashboardPersona, type DashboardPersona } from '@/lib/dashboard-access';
 
 import { useUserContext } from '@/contexts/UserContext';
 import { logoutAndRedirect } from '@/lib/logout';
@@ -47,6 +47,7 @@ const navItems = [
       'quality.read',
       'reports.read',
     ],
+    personas: ['system_admin', 'branch_manager', 'operations_manager', 'production_manager', 'sales_lead', 'finance_lead', 'procurement_lead', 'inventory_lead', 'hr_lead', 'quality_lead', 'operations_specialist'],
     color: 'text-orange',
     bgActive: 'bg-orange/15',
   },
@@ -55,6 +56,7 @@ const navItems = [
     icon: Truck,
     label: 'Procurement',
     permissions: [PERMISSIONS.supplier.read, 'procurement.read'],
+    personas: ['system_admin', 'procurement_lead', 'operations_manager'],
     color: 'text-amber-300',
     bgActive: 'bg-amber-500/15',
   },
@@ -63,6 +65,7 @@ const navItems = [
     icon: Warehouse,
     label: 'Inventory',
     permissions: [PERMISSIONS.inventory.read, 'inventory.read'],
+    personas: ['system_admin', 'inventory_lead', 'production_manager', 'procurement_lead', 'branch_manager', 'operations_manager'],
     color: 'text-emerald-400',
     bgActive: 'bg-emerald-500/15',
   },
@@ -71,6 +74,7 @@ const navItems = [
     icon: Factory,
     label: 'Production',
     permissions: [PERMISSIONS.productionBatch.read, 'production.read'],
+    personas: ['system_admin', 'production_manager', 'quality_lead', 'operations_manager'],
     color: 'text-orange-300',
     bgActive: 'bg-orange-500/15',
   },
@@ -79,6 +83,7 @@ const navItems = [
     icon: Building2,
     label: 'Branch Ops',
     permissions: [PERMISSIONS.branchSales.read, 'branches.read', 'sales.read'],
+    personas: ['system_admin', 'branch_manager', 'operations_manager'],
     color: 'text-rose-300',
     bgActive: 'bg-rose-500/15',
   },
@@ -87,6 +92,7 @@ const navItems = [
     icon: ShoppingCart,
     label: 'Sales',
     permissions: [PERMISSIONS.branchSales.read, 'sales.read', PERMISSIONS.customer.read, PERMISSIONS.invoice.read],
+    personas: ['system_admin', 'sales_lead', 'branch_manager', 'operations_manager'],
     color: 'text-yellow-400',
     bgActive: 'bg-yellow-500/15',
   },
@@ -95,6 +101,7 @@ const navItems = [
     icon: Wallet,
     label: 'Finance',
     permissions: [PERMISSIONS.finance.read, 'finance.read', 'budget.read'],
+    personas: ['system_admin', 'finance_lead'],
     color: 'text-teal-400',
     bgActive: 'bg-teal-500/15',
   },
@@ -103,6 +110,7 @@ const navItems = [
     icon: UsersRound,
     label: 'HR & Payroll',
     permissions: ['hr.read', 'payroll.read'],
+    personas: ['system_admin', 'hr_lead'],
     color: 'text-stone-300',
     bgActive: 'bg-stone-500/15',
   },
@@ -111,6 +119,7 @@ const navItems = [
     icon: FlaskConical,
     label: 'Quality Control',
     permissions: ['quality.read', PERMISSIONS.productionQuality.read],
+    personas: ['system_admin', 'quality_lead', 'production_manager', 'operations_manager'],
     color: 'text-lime-400',
     bgActive: 'bg-lime-500/15',
   },
@@ -119,6 +128,7 @@ const navItems = [
     icon: DollarSign,
     label: 'Cost Accounting',
     permissions: [PERMISSIONS.finance.read, 'finance.read'],
+    personas: ['system_admin', 'finance_lead'],
     color: 'text-amber-400',
     bgActive: 'bg-amber-500/15',
   },
@@ -127,6 +137,7 @@ const navItems = [
     icon: Wrench,
     label: 'Maintenance',
     permissions: ['maintenance.read'],
+    personas: ['system_admin', 'operations_manager'],
     color: 'text-orange-200',
     bgActive: 'bg-orange-400/15',
   },
@@ -135,6 +146,7 @@ const navItems = [
     icon: Receipt,
     label: 'Budget',
     permissions: [PERMISSIONS.finance.read, 'budget.read', 'finance.read'],
+    personas: ['system_admin', 'finance_lead'],
     color: 'text-teal-300',
     bgActive: 'bg-teal-500/15',
   },
@@ -143,6 +155,7 @@ const navItems = [
     icon: BarChart3,
     label: 'Reports',
     permissions: [PERMISSIONS.reports.read, 'reports.read'],
+    personas: ['system_admin', 'branch_manager', 'operations_manager', 'production_manager', 'sales_lead', 'finance_lead', 'procurement_lead', 'inventory_lead', 'hr_lead', 'quality_lead', 'operations_specialist'],
     color: 'text-orange-400',
     bgActive: 'bg-orange-500/15',
   },
@@ -151,6 +164,7 @@ const navItems = [
     icon: ServerCog,
     label: 'Admin Ops',
     permissions: [PERMISSIONS.settings.manage, 'manage_roles'],
+    personas: ['system_admin'],
     color: 'text-orange-200',
     bgActive: 'bg-orange-500/15',
   },
@@ -169,6 +183,7 @@ const navItems = [
       'quality.read',
       'reports.read',
     ],
+    personas: ['system_admin', 'branch_manager', 'operations_manager', 'production_manager', 'sales_lead', 'finance_lead', 'procurement_lead', 'inventory_lead', 'hr_lead', 'quality_lead', 'operations_specialist'],
     color: 'text-rose-300',
     bgActive: 'bg-rose-500/15',
   },
@@ -177,6 +192,7 @@ const navItems = [
     icon: ClipboardCheck,
     label: 'Testing & UAT',
     permissions: [PERMISSIONS.reports.read, 'testing.read', 'reports.read'],
+    personas: ['system_admin'],
     color: 'text-green-300',
     bgActive: 'bg-green-500/15',
   },
@@ -185,6 +201,7 @@ const navItems = [
     icon: GitBranchPlus,
     label: 'Workflows',
     permissions: [PERMISSIONS.settings.manage, 'manage_roles'],
+    personas: ['system_admin'],
     color: 'text-fuchsia-400',
     bgActive: 'bg-fuchsia-500/15',
   },
@@ -193,6 +210,7 @@ const navItems = [
     icon: Settings,
     label: 'Settings',
     permissions: [PERMISSIONS.settings.manage, 'manage_roles'],
+    personas: ['system_admin'],
     color: 'text-slate-400',
     bgActive: 'bg-slate-500/15',
   },
@@ -208,6 +226,11 @@ export function Sidebar() {
     null;
   const permissions = currentUser?.permissions ?? [];
   const isSuperAdmin = isSuperAdminPermissions(permissions);
+  const persona = resolveDashboardPersona({
+    permissions,
+    role: currentUser?.profile?.role,
+    roleNames: currentUser?.roles?.map((role) => role.name) ?? [],
+  });
 
   return (
     <aside className="flex h-full flex-col overflow-hidden bg-[#0D0500]">
@@ -253,7 +276,10 @@ export function Sidebar() {
         {navItems.map((item) => {
           const Icon = item.icon;
           const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`);
-          const isVisible = isSuperAdmin || hasAnyPermission(permissions, item.permissions);
+          const isVisible =
+            isSuperAdmin ||
+            (hasAnyPermission(permissions, item.permissions) &&
+              (item.personas as readonly DashboardPersona[]).includes(persona));
 
           if (!isVisible) {
             return null;

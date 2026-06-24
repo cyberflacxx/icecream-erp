@@ -16,7 +16,12 @@ export async function GET(_request: NextRequest) {
     .is('deleted_at', null)
     .order('return_date', { ascending: false });
 
-  if (error) return serverError(error.message);
+  if (error) {
+    if (error.message.includes("Could not find the table 'icecream_erp.supplier_returns'")) {
+      return NextResponse.json([]);
+    }
+    return serverError(error.message);
+  }
 
   return NextResponse.json((data ?? []).map((row) => {
     const supplier = Array.isArray(row.suppliers) ? row.suppliers[0] : row.suppliers;
@@ -54,6 +59,10 @@ export async function POST(request: NextRequest) {
   }
 
   const service = createServiceRoleClient();
+  const tableCheck = await service.from('supplier_returns').select('id', { count: 'exact', head: true });
+  if (tableCheck.error?.message.includes("Could not find the table 'icecream_erp.supplier_returns'")) {
+    return serverError('Supplier returns table is not deployed in Supabase yet.');
+  }
   const { count } = await service.from('supplier_returns').select('id', { count: 'exact', head: true }).eq('organization_id', ctx.organizationId);
   const returnNumber = `SRN-${String((count ?? 0) + 1).padStart(5, '0')}`;
 

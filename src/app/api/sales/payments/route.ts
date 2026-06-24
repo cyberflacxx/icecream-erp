@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { badRequest, can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
 import { canRecordPayment } from '@/lib/sales';
-import { generateSalesReferenceNumber, salesService, writeSalesAuditLog } from '@/lib/sales-server';
+import { generateSalesReferenceNumber, isMissingSalesTable, salesErrorMessage, salesService, writeSalesAuditLog } from '@/lib/sales-server';
 
 export async function GET() {
   const ctx = await getAuthContext();
@@ -18,7 +18,8 @@ export async function GET() {
     if (error) throw error;
     return NextResponse.json(data ?? []);
   } catch (err) {
-    return serverError(err instanceof Error ? err.message : 'Internal server error');
+    if (isMissingSalesTable(err)) return NextResponse.json([]);
+    return serverError(salesErrorMessage(err) || 'Internal server error');
   }
 }
 

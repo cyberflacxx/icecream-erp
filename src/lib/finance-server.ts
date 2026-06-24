@@ -32,3 +32,19 @@ export function mapNestedRow<T>(value: T | T[] | null | undefined): T | null {
   if (!value) return null;
   return Array.isArray(value) ? value[0] ?? null : value;
 }
+
+export function financeErrorMessage(error: unknown) {
+  if (error instanceof Error) return error.message;
+  if (typeof error === 'object' && error !== null && 'message' in error) {
+    return String((error as { message?: unknown }).message ?? '');
+  }
+  return '';
+}
+
+export function isMissingFinanceTable(error: unknown) {
+  const message = financeErrorMessage(error);
+  return (
+    message.includes("Could not find the table 'icecream_erp.") ||
+    message.includes('Could not find a relationship between')
+  );
+}

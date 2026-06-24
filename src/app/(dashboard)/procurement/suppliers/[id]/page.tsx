@@ -96,7 +96,7 @@ export default function SupplierDetailPage({ params }: SupplierDetailPageProps) 
       <ProcurementNav />
 
       {supplier ? (
-        <div className="grid gap-4 rounded-2xl border border-border bg-white p-5 shadow-sm sm:grid-cols-2 lg:grid-cols-4">
+        <div className="surface-card grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <div>
             <p className="text-xs uppercase tracking-[0.18em] text-muted">Supplier Code</p>
             <p className="mt-2 text-sm font-semibold text-brown">{supplier.code}</p>
@@ -118,7 +118,7 @@ export default function SupplierDetailPage({ params }: SupplierDetailPageProps) 
         </div>
       ) : null}
 
-      <div className="rounded-2xl border border-border bg-white p-2 shadow-sm">
+      <div className="surface-card p-2">
         <div className="flex flex-wrap gap-2">
           {tabs.map((tab) => (
             <a
@@ -139,7 +139,7 @@ export default function SupplierDetailPage({ params }: SupplierDetailPageProps) 
       </div>
 
       {activeTab === 'overview' ? (
-        <div className="rounded-2xl border border-border bg-white p-6 shadow-sm">
+        <div className="surface-card-lg">
           <h2 className="text-lg font-semibold text-brown">Overview</h2>
           <p className="mt-3 text-sm text-muted">
             Payment terms: {supplier?.paymentTerms || '-'} | Credit limit: {supplier?.creditLimit ?? 0} | Current

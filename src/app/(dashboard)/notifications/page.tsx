@@ -31,10 +31,10 @@ export default function NotificationCenterPage() {
         actions={<Button onClick={() => markAll.mutate()}>Mark all read</Button>}
       />
       <NotificationNav />
-      <section className="grid gap-4 rounded-2xl border border-border bg-white p-5 shadow-sm dark:border-darkBorder dark:bg-darkCard md:grid-cols-2">
+      <section className="surface-card grid gap-4 md:grid-cols-2">
         <label className="space-y-2 text-sm text-muted dark:text-darkMuted">
           <span>Severity filter</span>
-          <select value={severity} onChange={(event) => setSeverity(event.target.value)} className="h-11 w-full rounded-xl border border-border bg-cream px-3 text-brown dark:border-darkBorder dark:bg-darkBg dark:text-darkText">
+          <select value={severity} onChange={(event) => setSeverity(event.target.value)} className="surface-input">
             <option value="">All severities</option>
             <option value="CRITICAL">Critical</option>
             <option value="HIGH">High</option>
@@ -45,7 +45,7 @@ export default function NotificationCenterPage() {
         </label>
         <label className="space-y-2 text-sm text-muted dark:text-darkMuted">
           <span>Module filter</span>
-          <input value={moduleName} onChange={(event) => setModuleName(event.target.value)} placeholder="inventory, finance, sales..." className="h-11 w-full rounded-xl border border-border bg-cream px-3 text-brown dark:border-darkBorder dark:bg-darkBg dark:text-darkText" />
+          <input value={moduleName} onChange={(event) => setModuleName(event.target.value)} placeholder="inventory, finance, sales..." className="surface-input" />
         </label>
       </section>
       <DataTable

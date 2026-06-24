@@ -64,6 +64,53 @@
     background: color-mix(in srgb, var(--app-surface-strong) 72%, white);
   }
 
+  .surface-card {
+    @apply rounded-2xl border p-5 shadow-sm;
+    border-color: color-mix(in srgb, var(--app-border) 80%, transparent);
+    background: var(--app-surface);
+  }
+
+  .surface-card-lg {
+    @apply rounded-2xl border p-6 shadow-sm;
+    border-color: color-mix(in srgb, var(--app-border) 80%, transparent);
+    background: var(--app-surface);
+  }
+
+  .surface-tile {
+    @apply rounded-2xl px-4 py-3;
+    background: color-mix(in srgb, var(--app-surface-strong) 72%, white);
+  }
+
+  .surface-input {
+    @apply h-11 w-full rounded-xl border px-3 text-brown outline-none transition dark:text-darkText;
+    border-color: color-mix(in srgb, var(--app-border) 80%, transparent);
+    background: color-mix(in srgb, var(--app-surface-strong) 72%, white);
+  }
+
+  .surface-input-soft {
+    @apply h-11 w-full rounded-2xl border px-4 text-brown outline-none transition dark:text-darkText;
+    border-color: color-mix(in srgb, var(--app-border) 80%, transparent);
+    background: color-mix(in srgb, var(--app-surface-strong) 72%, white);
+  }
+
+  .surface-textarea-soft {
+    @apply w-full rounded-2xl border px-4 py-3 text-brown outline-none transition dark:text-darkText;
+    border-color: color-mix(in srgb, var(--app-border) 80%, transparent);
+    background: color-mix(in srgb, var(--app-surface-strong) 72%, white);
+  }
+
+  .surface-checkbox-row {
+    @apply flex items-center gap-3 rounded-xl border px-4 py-3 text-sm text-brown transition dark:text-darkText;
+    border-color: color-mix(in srgb, var(--app-border) 80%, transparent);
+    background: color-mix(in srgb, var(--app-surface-strong) 72%, white);
+  }
+
+  .surface-message {
+    @apply rounded-xl border px-4 py-3 text-sm text-brown dark:text-darkText;
+    border-color: color-mix(in srgb, var(--app-border) 80%, transparent);
+    background: var(--app-surface);
+  }
+
   .dark .dash-card {
     border-color: rgba(255, 255, 255, 0.08);
     background: rgba(255, 255, 255, 0.04);
@@ -71,6 +118,22 @@
 
   .dark .dash-card-muted {
     border-color: rgba(255, 255, 255, 0.06);
+    background: rgba(255, 255, 255, 0.03);
+  }
+
+  .dark .surface-card,
+  .dark .surface-card-lg,
+  .dark .surface-message {
+    border-color: rgba(255, 255, 255, 0.08);
+    background: rgba(255, 255, 255, 0.04);
+  }
+
+  .dark .surface-tile,
+  .dark .surface-checkbox-row,
+  .dark .surface-input,
+  .dark .surface-input-soft,
+  .dark .surface-textarea-soft {
+    border-color: rgba(255, 255, 255, 0.08);
     background: rgba(255, 255, 255, 0.03);
   }
 
@@ -220,6 +283,54 @@
   }
   .module-line:hover::after {
     width: 100%;
+  }
+
+  .auth-card {
+    @apply w-full max-w-xl rounded-2xl border border-border bg-white p-8 shadow-soft dark:border-darkBorder dark:bg-darkCard;
+  }
+
+  .auth-field {
+    @apply block space-y-2;
+  }
+
+  .auth-label {
+    @apply text-sm font-medium text-brown dark:text-darkText;
+  }
+
+  .auth-input {
+    @apply h-11 w-full rounded-xl border border-border bg-white px-3 text-brown outline-none transition dark:border-darkBorder dark:bg-darkCard dark:text-darkText;
+  }
+
+  .auth-input-shell {
+    @apply flex h-11 items-center rounded-xl border border-border bg-white px-3 text-brown transition dark:border-darkBorder dark:bg-darkCard dark:text-darkText;
+  }
+
+  .auth-input-error {
+    @apply border-red-500 bg-red-50 dark:bg-red-950/20;
+  }
+
+  .auth-input-valid {
+    @apply border-green-500;
+  }
+
+  .auth-input-disabled {
+    @apply bg-slate-50 text-slate-500 dark:bg-white/5 dark:text-white/40;
+  }
+
+  .auth-primary-button {
+    @apply h-11 w-full rounded-xl bg-orange font-semibold text-white transition hover:bg-deepOrange disabled:cursor-not-allowed disabled:opacity-60;
+  }
+
+  .auth-secondary-button {
+    @apply h-11 w-full rounded-xl border border-border font-semibold text-brown transition hover:bg-brown/5 disabled:cursor-not-allowed disabled:opacity-60 dark:border-darkBorder dark:text-darkText dark:hover:bg-white/5;
+  }
+
+  .auth-link {
+    @apply font-semibold text-orange transition hover:text-deepOrange;
+  }
+
+  .auth-alert {
+    @apply rounded-xl border px-4 py-3 text-sm;
   }
 }
 

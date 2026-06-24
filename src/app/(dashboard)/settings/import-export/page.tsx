@@ -17,7 +17,7 @@ export default function SettingsImportExportPage() {
       <SettingsNav />
 
       <section className="grid gap-4 md:grid-cols-3">
-        <div className="rounded-2xl border border-border bg-white p-5 shadow-sm dark:border-darkBorder dark:bg-darkCard">
+        <div className="surface-card">
           <div className="flex items-center gap-2 text-sm font-semibold text-brown dark:text-darkText">
             <FileUp className="h-4 w-4" />
             Guided Imports
@@ -26,7 +26,7 @@ export default function SettingsImportExportPage() {
             Templates cover units, item categories, payment methods, tax codes, and numbering rules.
           </p>
         </div>
-        <div className="rounded-2xl border border-border bg-white p-5 shadow-sm dark:border-darkBorder dark:bg-darkCard">
+        <div className="surface-card">
           <div className="flex items-center gap-2 text-sm font-semibold text-brown dark:text-darkText">
             <FileDown className="h-4 w-4" />
             Controlled Exports
@@ -35,7 +35,7 @@ export default function SettingsImportExportPage() {
             Export master data snapshots for offline review, reconciliations, and structured corrections.
           </p>
         </div>
-        <div className="rounded-2xl border border-border bg-white p-5 shadow-sm dark:border-darkBorder dark:bg-darkCard">
+        <div className="surface-card">
           <div className="flex items-center gap-2 text-sm font-semibold text-brown dark:text-darkText">
             <Sparkles className="h-4 w-4" />
             Default Seeding

@@ -29,8 +29,7 @@ export async function GET(
     let query = service
       .schema('icecream_erp')
       .from('branch_sales')
-      .select('id, sale_number, sale_date, shift, total_amount, payment_method, served_by, branch_sale_items(id)', { count: 'exact' })
-      .is('deleted_at', null)
+      .select('id, sale_date, shift, item_id, quantity, unit_price, total_amount, payment_method, served_by', { count: 'exact' })
       .eq('branch_id', branchId)
       .order('sale_date', { ascending: false });
 
@@ -46,10 +45,10 @@ export async function GET(
     return NextResponse.json({
       data: (data ?? []).map((row: Record<string, unknown>) => ({
         id: row.id,
-        saleNumber: row.sale_number,
+        saleNumber: row.id,
         saleDate: row.sale_date,
         shift: row.shift,
-        itemsCount: Array.isArray(row.branch_sale_items) ? row.branch_sale_items.length : 0,
+        itemsCount: 1,
         totalAmount: Number(row.total_amount ?? 0),
         paymentMethod: row.payment_method,
         status: row.status ?? 'POSTED',

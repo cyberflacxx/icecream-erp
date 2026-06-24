@@ -9,8 +9,7 @@ import { SettingsNav } from '@/components/settings/settings-nav';
 import { Button } from '@/components/ui/button';
 import { useSecuritySettings, useUpdateSecuritySettings, type SecuritySettingsResponse } from '@/hooks/settings/useSettings';
 
-const inputClass =
-  'h-11 w-full rounded-xl border border-border bg-cream px-3 text-brown outline-none dark:border-darkBorder dark:bg-darkCard dark:text-darkText';
+const inputClass = 'surface-input';
 
 export default function SettingsSecuritySettingsPage() {
   const settingsQuery = useSecuritySettings();
@@ -54,7 +53,7 @@ export default function SettingsSecuritySettingsPage() {
       />
       <SettingsNav />
 
-      <section className="grid gap-4 rounded-2xl border border-border bg-white p-6 shadow-sm md:grid-cols-2 dark:border-darkBorder dark:bg-darkCard">
+      <section className="surface-card-lg grid gap-4 md:grid-cols-2">
         {(
           [
             ['sessionTimeoutMinutes', 'Session timeout (minutes)'],
@@ -76,7 +75,7 @@ export default function SettingsSecuritySettingsPage() {
         ))}
       </section>
 
-      <section className="grid gap-3 rounded-2xl border border-border bg-white p-6 shadow-sm md:grid-cols-2 dark:border-darkBorder dark:bg-darkCard">
+      <section className="surface-card-lg grid gap-3 md:grid-cols-2">
         {(
           [
             ['requireUppercase', 'Require uppercase letters'],
@@ -86,7 +85,7 @@ export default function SettingsSecuritySettingsPage() {
             ['sensitiveActionPasswordRequired', 'Require password on sensitive actions'],
           ] as Array<[keyof SecuritySettingsResponse, string]>
         ).map(([key, label]) => (
-          <label key={key} className="flex items-center gap-3 rounded-xl border border-border bg-cream px-4 py-3 text-sm dark:border-darkBorder dark:bg-darkBg">
+          <label key={key} className="surface-checkbox-row">
             <input
               type="checkbox"
               checked={Boolean(form[key])}

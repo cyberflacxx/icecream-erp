@@ -5,8 +5,16 @@ import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 import Swal from 'sweetalert2';
 
+import { AuthShell } from '@/components/auth/auth-shell';
+
 interface RoleOption {
   description?: string | null;
+  id: string;
+  name: string;
+}
+
+interface BranchOption {
+  code?: string | null;
   id: string;
   name: string;
 }
@@ -20,6 +28,7 @@ function sanitizeIdNumber(value: string) {
 export default function RegisterPage() {
   const router = useRouter();
   const [roles, setRoles] = useState<RoleOption[]>([]);
+  const [branches, setBranches] = useState<BranchOption[]>([]);
   const [isRolesLoading, setIsRolesLoading] = useState(true);
   const [firstName, setFirstName] = useState('');
   const [surname, setSurname] = useState('');
@@ -28,6 +37,7 @@ export default function RegisterPage() {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [roleId, setRoleId] = useState('');
+  const [branchId, setBranchId] = useState('');
   const [adminKey, setAdminKey] = useState('');
   const [otp, setOtp] = useState('');
   const [otpRequestId, setOtpRequestId] = useState<string | null>(null);
@@ -64,6 +74,17 @@ export default function RegisterPage() {
         if (mounted) {
           setIsRolesLoading(false);
         }
+      }
+    })();
+
+    (async () => {
+      try {
+        const response = await fetch('/api/branches/public');
+        const payload = (await response.json()) as { data?: BranchOption[] };
+        if (!mounted) return;
+        setBranches(payload.data ?? []);
+      } catch {
+        if (mounted) setBranches([]);
       }
     })();
 
@@ -109,6 +130,9 @@ export default function RegisterPage() {
     if (!roleId) {
       errors.role = 'Please select a role.';
     }
+    if (roleId !== 'super_admin' && !branchId) {
+      errors.branch_id = 'Please select a branch.';
+    }
     if (!adminKey.trim()) {
       errors.admin_key = 'Admin registration key is required.';
     }
@@ -142,6 +166,7 @@ export default function RegisterPage() {
           confirm_password: confirmPassword,
           email: email.trim().toLowerCase(),
           first_name: firstName.trim(),
+          branch_id: branchId || null,
           id_number: idNumber,
           last_name: surname.trim(),
           password,
@@ -305,43 +330,34 @@ export default function RegisterPage() {
     passwordChecks.special &&
     confirmPassword === password &&
     Boolean(roleId) &&
+    (roleId === 'super_admin' || Boolean(branchId)) &&
     Boolean(adminKey.trim()) &&
     !isSubmitting;
 
   const canVerifyOtp = Boolean(otpRequestId && /^[0-9]{6}$/.test(otp.trim()) && !isSubmitting);
 
   return (
-    <main className="grid min-h-screen bg-cream lg:grid-cols-2">
-      <section className="hidden bg-[#3B1F12] p-10 text-[#F8EBD8] lg:flex lg:flex-col lg:justify-between">
-        <div>
-          <p className="text-sm uppercase tracking-[0.22em] text-[#F4C89B]">Absolute Ice Cream ERP</p>
-          <h1 className="mt-6 text-5xl font-semibold leading-tight">Staff Registration Portal</h1>
-          <p className="mt-4 max-w-lg text-base text-[#f1dbc3]">
-            Register with your assigned role, verify your email by OTP, then sign in using the work ID sent by the system.
-          </p>
-        </div>
-        <div className="rounded-3xl border border-[#f4c89b33] bg-[#4b2817] p-6">
-          <p className="text-sm text-[#f1dbc3]">Absolute Quality Icecream</p>
-        </div>
-      </section>
-
-      <section className="flex items-center justify-center px-6 py-10">
-        <div className="w-full max-w-xl rounded-2xl bg-white p-8 shadow-soft">
-          <h2 className="text-3xl font-semibold text-brown">Create Your Account</h2>
-          <p className="mt-2 text-sm text-muted">Enter your details, request an OTP, then verify it to create the account.</p>
+    <AuthShell
+      eyebrow="Controlled Account Provisioning"
+      title="Staff Registration Portal"
+      description="Register with your assigned role, verify your email by OTP, then sign in using the work ID issued by the system."
+    >
+      <div className="auth-card">
+        <h2 className="text-3xl font-semibold text-brown dark:text-darkText">Create Your Account</h2>
+        <p className="mt-2 text-sm text-muted dark:text-darkMuted">Enter your details, request an OTP, then verify it to create the account.</p>
 
           {formError ? (
-            <div className="mt-6 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+            <div className="auth-alert mt-6 border-red-200 bg-red-50 text-red-700 dark:bg-red-950/20">
               {formError}
             </div>
           ) : null}
           {rolesError ? (
-            <div className="mt-6 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+            <div className="auth-alert mt-6 border-amber-200 bg-amber-50 text-amber-700 dark:bg-amber-950/20">
               {rolesError}
             </div>
           ) : null}
           {otpRequestId ? (
-            <div className="mt-6 rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700">
+            <div className="auth-alert mt-6 border-green-200 bg-green-50 text-green-700 dark:bg-green-950/20">
               OTP sent to {otpEmail ?? email}. {otpExpiry ? `It expires in ${otpExpiry}.` : ''}
             </div>
           ) : null}
@@ -464,6 +480,29 @@ export default function RegisterPage() {
               {fieldErrors.role ? <p className="text-xs text-red-600">{fieldErrors.role}</p> : null}
             </label>
 
+            <label className="block space-y-2">
+              <span className="text-sm font-medium text-brown">Select Branch</span>
+              <select
+                value={branchId}
+                disabled={registrationLocked}
+                onChange={(event) => {
+                  setBranchId(event.target.value);
+                  setFieldErrors((current) => ({ ...current, branch_id: '' }));
+                }}
+                className={`h-11 w-full rounded-xl border bg-white px-3 outline-none ${
+                  fieldErrors.branch_id ? 'border-red-500' : branchId ? 'border-green-500' : 'border-border'
+                } ${registrationLocked ? 'bg-slate-50 text-slate-500' : ''}`}
+              >
+                <option value="">Select branch</option>
+                {branches.map((branch) => (
+                  <option key={branch.id} value={branch.id}>
+                    {branch.code ? `${branch.code} - ${branch.name}` : branch.name}
+                  </option>
+                ))}
+              </select>
+              {fieldErrors.branch_id ? <p className="text-xs text-red-600">{fieldErrors.branch_id}</p> : null}
+            </label>
+
             <PasswordField
               disabled={registrationLocked}
               error={fieldErrors.admin_key}
@@ -486,11 +525,11 @@ export default function RegisterPage() {
                 <input
                   value={otp}
                   onChange={(event) => {
-                    setOtp(event.target.value.replace(/\D/g, '').slice(0, 6));
-                    setFieldErrors((current) => ({ ...current, otp: '' }));
-                  }}
-                  placeholder="Enter 6-digit OTP"
-                  className={`h-11 w-full rounded-xl border px-3 outline-none ${
+                setOtp(event.target.value.replace(/\D/g, '').slice(0, 6));
+                setFieldErrors((current) => ({ ...current, otp: '' }));
+              }}
+              placeholder="Enter 6-digit OTP"
+                  className={`auth-input ${
                     fieldErrors.otp ? 'border-red-500' : otp.length === 6 ? 'border-green-500' : 'border-border'
                   }`}
                 />
@@ -504,7 +543,7 @@ export default function RegisterPage() {
                   type="button"
                   disabled={!canRequestOtp}
                   onClick={requestOtp}
-                  className="h-11 w-full rounded-xl bg-[#F97316] font-semibold text-white transition disabled:cursor-not-allowed disabled:opacity-60"
+                  className="auth-primary-button"
                 >
                   {isSubmitting ? 'Sending OTP...' : 'Send OTP'}
                 </button>
@@ -514,7 +553,7 @@ export default function RegisterPage() {
                     type="button"
                     disabled={!canVerifyOtp}
                     onClick={verifyOtpAndCreateAccount}
-                    className="h-11 w-full rounded-xl bg-[#F97316] font-semibold text-white transition disabled:cursor-not-allowed disabled:opacity-60"
+                    className="auth-primary-button"
                   >
                     {isSubmitting ? 'Creating Account...' : 'Verify OTP and Create Account'}
                   </button>
@@ -522,7 +561,7 @@ export default function RegisterPage() {
                     type="button"
                     disabled={isSubmitting}
                     onClick={resetOtpState}
-                    className="h-11 w-full rounded-xl border border-border font-semibold text-brown transition disabled:cursor-not-allowed disabled:opacity-60"
+                    className="auth-secondary-button"
                   >
                     Edit Registration Details
                   </button>
@@ -533,13 +572,12 @@ export default function RegisterPage() {
 
           <p className="mt-5 text-sm text-muted">
             Already have an account?{' '}
-            <Link href="/auth/login" className="font-semibold text-orange">
+            <Link href="/auth/login" className="auth-link">
               Sign in with your Work ID
             </Link>
           </p>
-        </div>
-      </section>
-    </main>
+      </div>
+    </AuthShell>
   );
 }
 
@@ -561,16 +599,16 @@ function InputField({
   value: string;
 }) {
   return (
-    <label className="block space-y-2">
-      <span className="text-sm font-medium text-brown">{label}</span>
+    <label className="auth-field">
+      <span className="auth-label">{label}</span>
       <input
         disabled={disabled}
         value={value}
         onChange={(event) => onChange(event.target.value)}
         placeholder={placeholder}
-        className={`h-11 w-full rounded-xl border px-3 outline-none ${
-          error ? 'border-red-500' : isValid ? 'border-green-500' : 'border-border'
-        } ${disabled ? 'bg-slate-50 text-slate-500' : ''}`}
+        className={`auth-input ${
+          error ? 'auth-input-error' : isValid ? 'auth-input-valid' : ''
+        } ${disabled ? 'auth-input-disabled' : ''}`}
       />
       {error ? <p className="text-xs text-red-600">{error}</p> : null}
     </label>
@@ -601,9 +639,9 @@ function PasswordField({
   value: string;
 }) {
   return (
-    <label className="block space-y-2">
-      <span className="text-sm font-medium text-brown">{label}</span>
-      <div className={`flex h-11 items-center rounded-xl border px-3 ${error ? 'border-red-500' : isValid ? 'border-green-500' : 'border-border'} ${disabled ? 'bg-slate-50 text-slate-500' : ''}`}>
+    <label className="auth-field">
+      <span className="auth-label">{label}</span>
+      <div className={`auth-input-shell ${error ? 'auth-input-error' : isValid ? 'auth-input-valid' : ''} ${disabled ? 'auth-input-disabled' : ''}`}>
         <input
           disabled={disabled}
           value={value}

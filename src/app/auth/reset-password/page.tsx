@@ -5,6 +5,8 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useMemo, useState } from 'react';
 import Swal from 'sweetalert2';
 
+import { AuthShell } from '@/components/auth/auth-shell';
+
 function ResetPasswordForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -86,15 +88,18 @@ function ResetPasswordForm() {
   }
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-cream px-6 py-10">
-      <div className="w-full max-w-xl rounded-2xl bg-white p-8 shadow-soft">
-        <p className="text-sm uppercase tracking-[0.22em] text-orange">Absolute Ice Cream ERP</p>
-        <h1 className="mt-3 text-3xl font-semibold text-brown">Reset Password</h1>
-        <p className="mt-2 text-sm text-muted">Use your reset token and create a new password.</p>
+    <AuthShell
+      eyebrow="Credential Recovery"
+      title="Reset Password"
+      description="Apply a valid reset token and create a new password that meets the current security policy."
+    >
+      <div className="auth-card">
+        <h1 className="text-3xl font-semibold text-brown dark:text-darkText">Reset Password</h1>
+        <p className="mt-2 text-sm text-muted dark:text-darkMuted">Use your reset token and create a new password.</p>
 
         <form className="mt-8 space-y-5" onSubmit={handleSubmit}>
-          <label className="block space-y-2">
-            <span className="text-sm font-medium text-brown">Reset Token</span>
+          <label className="auth-field">
+            <span className="auth-label">Reset Token</span>
             <textarea
               value={token}
               onChange={(event) => {
@@ -102,20 +107,16 @@ function ResetPasswordForm() {
                 setFieldErrors((current) => ({ ...current, token: '' }));
               }}
               rows={3}
-              className={`w-full rounded-xl border px-3 py-3 outline-none transition ${
-                fieldErrors.token ? 'border-red-500 bg-red-50' : token.trim() ? 'border-green-500' : 'border-border'
+              className={`w-full rounded-xl border px-3 py-3 outline-none transition dark:bg-darkCard dark:text-darkText ${
+                fieldErrors.token ? 'auth-input-error' : token.trim() ? 'auth-input-valid' : 'border-border dark:border-darkBorder'
               }`}
             />
             {fieldErrors.token ? <p className="text-xs text-red-600">{fieldErrors.token}</p> : null}
           </label>
 
-          <label className="block space-y-2">
-            <span className="text-sm font-medium text-brown">New Password</span>
-            <div
-              className={`flex h-11 items-center rounded-xl border px-3 transition ${
-                fieldErrors.password ? 'border-red-500 bg-red-50' : password ? 'border-green-500' : 'border-border'
-              }`}
-            >
+          <label className="auth-field">
+            <span className="auth-label">New Password</span>
+            <div className={`auth-input-shell ${fieldErrors.password ? 'auth-input-error' : password ? 'auth-input-valid' : ''}`}>
               <input
                 value={password}
                 onChange={(event) => {
@@ -132,13 +133,9 @@ function ResetPasswordForm() {
             {fieldErrors.password ? <p className="text-xs text-red-600">{fieldErrors.password}</p> : null}
           </label>
 
-          <label className="block space-y-2">
-            <span className="text-sm font-medium text-brown">Confirm Password</span>
-            <div
-              className={`flex h-11 items-center rounded-xl border px-3 transition ${
-                fieldErrors.confirmPassword ? 'border-red-500 bg-red-50' : confirmPassword ? 'border-green-500' : 'border-border'
-              }`}
-            >
+          <label className="auth-field">
+            <span className="auth-label">Confirm Password</span>
+            <div className={`auth-input-shell ${fieldErrors.confirmPassword ? 'auth-input-error' : confirmPassword ? 'auth-input-valid' : ''}`}>
               <input
                 value={confirmPassword}
                 onChange={(event) => {
@@ -155,31 +152,27 @@ function ResetPasswordForm() {
             {fieldErrors.confirmPassword ? <p className="text-xs text-red-600">{fieldErrors.confirmPassword}</p> : null}
           </label>
 
-          <button
-            type="submit"
-            disabled={isSubmitting}
-            className="h-11 w-full rounded-xl bg-[#F97316] font-semibold text-white transition hover:bg-[#ea6a0a] disabled:cursor-not-allowed disabled:opacity-50"
-          >
+          <button type="submit" disabled={isSubmitting} className="auth-primary-button">
             {isSubmitting ? 'Resetting Password...' : 'Reset Password'}
           </button>
         </form>
 
         <div className="mt-6 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
-          <Link href="/auth/forgot-password" className="font-semibold text-orange transition hover:text-[#ea6a0a]">
+          <Link href="/auth/forgot-password" className="auth-link">
             Back to forgot password
           </Link>
-          <Link href="/auth/login" className="font-semibold text-orange transition hover:text-[#ea6a0a]">
+          <Link href="/auth/login" className="auth-link">
             Back to login
           </Link>
         </div>
       </div>
-    </main>
+    </AuthShell>
   );
 }
 
 export default function ResetPasswordPage() {
   return (
-    <Suspense fallback={<main className="flex min-h-screen items-center justify-center bg-cream px-6 py-10"><div className="text-sm text-brown">Loading reset form...</div></main>}>
+    <Suspense fallback={<div className="flex min-h-screen items-center justify-center bg-cream px-6 py-10 text-sm text-brown dark:bg-darkBg dark:text-darkText">Loading reset form...</div>}>
       <ResetPasswordForm />
     </Suspense>
   );

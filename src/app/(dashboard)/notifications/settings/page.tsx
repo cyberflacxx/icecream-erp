@@ -20,7 +20,7 @@ import {
 
 function Card({ title, children }: { children: ReactNode; title: string }) {
   return (
-    <section className="space-y-4 rounded-2xl border border-border bg-white p-6 shadow-sm dark:border-darkBorder dark:bg-darkCard">
+    <section className="surface-card-lg space-y-4">
       <h3 className="text-lg font-semibold text-brown dark:text-darkText">{title}</h3>
       {children}
     </section>
@@ -227,7 +227,7 @@ export default function NotificationSettingsPage() {
         </Card>
       </div>
 
-      {message ? <div className="rounded-xl border border-border bg-white px-4 py-3 text-sm text-brown dark:border-darkBorder dark:bg-darkCard dark:text-darkText">{message}</div> : null}
+      {message ? <div className="surface-message">{message}</div> : null}
     </div>
   );
 }

@@ -3,7 +3,7 @@
 import { useInventoryMutation } from './useInventoryRequest';
 
 export interface CreateItemPayload {
-  categoryId: string;
+  categoryId?: string;
   code: string;
   description?: string | null;
   isActive: boolean;

@@ -214,7 +214,7 @@ export default function StockMovementsPage() {
         />
       ) : null}
 
-      <div className="rounded-2xl border border-border bg-white p-5 shadow-sm">
+      <div className="surface-card">
         <div className="flex items-center gap-3">
           <ArrowRightLeft className="h-5 w-5 text-orange" />
           <h2 className="text-lg font-semibold text-brown">Audit trail posture</h2>

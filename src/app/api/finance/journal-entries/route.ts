@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { badRequest, can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
+import { financeErrorMessage, isMissingFinanceTable } from '@/lib/finance-server';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
 function validateBalance(lines: Array<{ debitAmount: number; creditAmount: number }>) {
@@ -51,7 +52,13 @@ export async function GET(request: NextRequest) {
       pagination: { page, pageSize, total: count ?? 0 },
     });
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Internal server error';
+    if (isMissingFinanceTable(err)) {
+      return NextResponse.json({
+        data: [],
+        pagination: { page, pageSize, total: 0 },
+      });
+    }
+    const message = financeErrorMessage(err) || 'Internal server error';
     return serverError(message);
   }
 }
@@ -145,7 +152,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json(mapEntry(full!), { status: 201 });
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Internal server error';
+    const message = financeErrorMessage(err) || 'Internal server error';
     return serverError(message);
   }
 }

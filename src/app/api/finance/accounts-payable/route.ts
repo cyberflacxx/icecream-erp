@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
 import { buildPayablesRows, calculatePayableBalance } from '@/lib/finance';
-import { financeService, mapNestedRow } from '@/lib/finance-server';
+import { financeErrorMessage, financeService, isMissingFinanceTable, mapNestedRow } from '@/lib/finance-server';
 
 export async function GET(_request: NextRequest) {
   const ctx = await getAuthContext();
@@ -22,11 +22,14 @@ export async function GET(_request: NextRequest) {
         .eq('organization_id', ctx.organizationId)
         .is('deleted_at', null),
     ]);
-    if (invoiceResult.error) throw invoiceResult.error;
-    if (paymentResult.error) throw paymentResult.error;
+    if (invoiceResult.error) {
+      if (isMissingFinanceTable(invoiceResult.error)) return NextResponse.json([]);
+      throw invoiceResult.error;
+    }
+    if (paymentResult.error && !isMissingFinanceTable(paymentResult.error)) throw paymentResult.error;
 
     const paymentsByInvoice = new Map<string, number>();
-    for (const row of paymentResult.data ?? []) {
+    for (const row of paymentResult.error ? [] : paymentResult.data ?? []) {
       paymentsByInvoice.set(
         String(row.supplier_invoice_id),
         (paymentsByInvoice.get(String(row.supplier_invoice_id)) ?? 0) + Number(row.amount_paid ?? 0),
@@ -50,6 +53,7 @@ export async function GET(_request: NextRequest) {
 
     return NextResponse.json(rows);
   } catch (err) {
-    return serverError(err instanceof Error ? err.message : 'Internal server error');
+    if (isMissingFinanceTable(err)) return NextResponse.json([]);
+    return serverError(financeErrorMessage(err) || 'Internal server error');
   }
 }

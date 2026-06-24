@@ -133,7 +133,7 @@ export default function WarehousesPage() {
                 required
                 value={formState.code}
                 onChange={(event) => setFormState((current) => ({ ...current, code: event.target.value }))}
-                className="h-11 w-full rounded-2xl border border-border bg-cream px-4 text-brown outline-none"
+                className="surface-input-soft"
               />
             </label>
             <label className="space-y-2 text-sm text-muted">
@@ -142,7 +142,7 @@ export default function WarehousesPage() {
                 required
                 value={formState.name}
                 onChange={(event) => setFormState((current) => ({ ...current, name: event.target.value }))}
-                className="h-11 w-full rounded-2xl border border-border bg-cream px-4 text-brown outline-none"
+                className="surface-input-soft"
               />
             </label>
             <label className="space-y-2 text-sm text-muted">
@@ -151,7 +151,7 @@ export default function WarehousesPage() {
                 required
                 value={formState.type}
                 onChange={(event) => setFormState((current) => ({ ...current, type: event.target.value }))}
-                className="h-11 w-full rounded-2xl border border-border bg-cream px-4 text-brown outline-none"
+                className="surface-input-soft"
               >
                 {warehouseTypes.map((type) => (
                   <option key={type.value} value={type.value}>
@@ -165,7 +165,7 @@ export default function WarehousesPage() {
               <select
                 value={formState.branchId}
                 onChange={(event) => setFormState((current) => ({ ...current, branchId: event.target.value }))}
-                className="h-11 w-full rounded-2xl border border-border bg-cream px-4 text-brown outline-none"
+                className="surface-input-soft"
               >
                 <option value="">No branch assigned</option>
                 {metaQuery.data?.branches.map((branch) => (
@@ -183,11 +183,11 @@ export default function WarehousesPage() {
               rows={4}
               value={formState.address}
               onChange={(event) => setFormState((current) => ({ ...current, address: event.target.value }))}
-              className="w-full rounded-2xl border border-border bg-cream px-4 py-3 text-brown outline-none"
+              className="surface-textarea-soft"
             />
           </label>
 
-          <label className="flex items-center gap-3 rounded-2xl border border-border bg-cream/60 px-4 py-3 text-sm text-brown">
+          <label className="surface-checkbox-row">
             <input
               type="checkbox"
               checked={formState.isActive}
@@ -213,7 +213,7 @@ export default function WarehousesPage() {
 
 function WarehouseCardView({ warehouse }: { warehouse: WarehouseCard }) {
   return (
-    <div className="rounded-2xl border border-border bg-white p-6 shadow-sm">
+    <div className="surface-card-lg">
       <div className="flex items-start justify-between gap-4">
         <div>
           <p className="text-sm font-semibold uppercase tracking-[0.18em] text-orange">{warehouse.code}</p>
@@ -223,19 +223,19 @@ function WarehouseCardView({ warehouse }: { warehouse: WarehouseCard }) {
       </div>
 
       <div className="mt-5 grid gap-4 sm:grid-cols-2">
-        <div className="rounded-2xl bg-cream px-4 py-3">
+        <div className="surface-tile">
           <p className="text-xs uppercase tracking-[0.18em] text-muted">Branch</p>
           <p className="mt-2 text-sm font-medium text-brown">{warehouse.branch?.name ?? 'Central warehouse'}</p>
         </div>
-        <div className="rounded-2xl bg-cream px-4 py-3">
+        <div className="surface-tile">
           <p className="text-xs uppercase tracking-[0.18em] text-muted">Item count</p>
           <p className="mt-2 text-sm font-medium text-brown">{warehouse.itemCount}</p>
         </div>
-        <div className="rounded-2xl bg-cream px-4 py-3">
+        <div className="surface-tile">
           <p className="text-xs uppercase tracking-[0.18em] text-muted">Total value</p>
           <p className="mt-2 text-sm font-medium text-brown">{currencyFormatter.format(warehouse.totalValue)}</p>
         </div>
-        <div className="rounded-2xl bg-cream px-4 py-3">
+        <div className="surface-tile">
           <p className="text-xs uppercase tracking-[0.18em] text-muted">Status</p>
           <div className="mt-2">
             <StatusBadge status={warehouse.isActive ? 'Active' : 'Inactive'} variant={warehouse.isActive ? 'success' : 'neutral'} />

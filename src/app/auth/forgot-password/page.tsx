@@ -4,6 +4,8 @@ import Link from 'next/link';
 import { useState } from 'react';
 import Swal from 'sweetalert2';
 
+import { AuthShell } from '@/components/auth/auth-shell';
+
 const workIdPattern = /^AQI-[0-9]{8}$/;
 
 function normalizeWorkId(value: string) {
@@ -76,15 +78,18 @@ export default function ForgotPasswordPage() {
   }
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-cream px-6 py-10">
-      <div className="w-full max-w-xl rounded-2xl bg-white p-8 shadow-soft">
-        <p className="text-sm uppercase tracking-[0.22em] text-orange">Absolute Ice Cream ERP</p>
-        <h1 className="mt-3 text-3xl font-semibold text-brown">Forgot Password</h1>
-        <p className="mt-2 text-sm text-muted">Enter your Work ID to generate a password reset token.</p>
+    <AuthShell
+      eyebrow="Credential Recovery"
+      title="Forgot Password"
+      description="Generate a reset token for a staff account using the assigned Work ID."
+    >
+      <div className="auth-card">
+        <h1 className="text-3xl font-semibold text-brown dark:text-darkText">Forgot Password</h1>
+        <p className="mt-2 text-sm text-muted dark:text-darkMuted">Enter your Work ID to generate a password reset token.</p>
 
         <form className="mt-8 space-y-5" onSubmit={handleSubmit}>
-          <label className="block space-y-2">
-            <span className="text-sm font-medium text-brown">Work ID</span>
+          <label className="auth-field">
+            <span className="auth-label">Work ID</span>
             <input
               value={workId}
               onChange={(event) => {
@@ -98,30 +103,24 @@ export default function ForgotPasswordPage() {
               }}
               placeholder="e.g. AQI-20260034"
               autoComplete="username"
-              className={`h-11 w-full rounded-xl border px-3 outline-none transition ${
-                workIdError ? 'border-red-500 bg-red-50' : workIdPattern.test(normalizeWorkId(workId)) ? 'border-green-500' : 'border-border'
-              }`}
+              className={`auth-input ${workIdError ? 'auth-input-error' : workIdPattern.test(normalizeWorkId(workId)) ? 'auth-input-valid' : ''}`}
             />
             {workIdError ? <p className="text-xs text-red-600">{workIdError}</p> : null}
           </label>
 
-          <button
-            type="submit"
-            disabled={isSubmitting}
-            className="h-11 w-full rounded-xl bg-[#F97316] font-semibold text-white transition hover:bg-[#ea6a0a] disabled:cursor-not-allowed disabled:opacity-50"
-          >
+          <button type="submit" disabled={isSubmitting} className="auth-primary-button">
             {isSubmitting ? 'Generating Token...' : 'Generate Reset Token'}
           </button>
         </form>
 
         {resetToken ? (
-          <div className="mt-6 rounded-2xl border border-orange/20 bg-[#fff7e8] p-4">
-            <p className="text-sm font-semibold text-brown">Reset token</p>
-            <p className="mt-2 break-all rounded-xl bg-white px-3 py-2 font-mono text-xs text-brown">{resetToken}</p>
-            <p className="mt-2 text-xs text-muted">Expires: {expiresAt ? new Date(expiresAt).toLocaleString() : 'Within 1 hour'}</p>
+          <div className="auth-alert mt-6 border-orange/20 bg-[#fff7e8] text-brown dark:bg-orange/10 dark:text-darkText">
+            <p className="text-sm font-semibold">Reset token</p>
+            <p className="mt-2 break-all rounded-xl bg-white px-3 py-2 font-mono text-xs dark:bg-darkCard">{resetToken}</p>
+            <p className="mt-2 text-xs text-muted dark:text-darkMuted">Expires: {expiresAt ? new Date(expiresAt).toLocaleString() : 'Within 1 hour'}</p>
             <Link
               href={`/auth/reset-password?token=${encodeURIComponent(resetToken)}`}
-              className="mt-4 inline-flex rounded-xl bg-[#3B1F12] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[#4b2817]"
+              className="mt-4 inline-flex rounded-xl bg-brown px-4 py-2 text-sm font-semibold text-white transition hover:bg-brown/90"
             >
               Continue to reset password
             </Link>
@@ -129,14 +128,14 @@ export default function ForgotPasswordPage() {
         ) : null}
 
         <div className="mt-6 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
-          <Link href="/auth/login" className="font-semibold text-orange transition hover:text-[#ea6a0a]">
+          <Link href="/auth/login" className="auth-link">
             Back to login
           </Link>
-          <Link href="/" className="font-semibold text-orange transition hover:text-[#ea6a0a]">
+          <Link href="/" className="auth-link">
             Return to main page
           </Link>
         </div>
       </div>
-    </main>
+    </AuthShell>
   );
 }

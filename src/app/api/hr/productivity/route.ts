@@ -46,6 +46,10 @@ export async function POST(request: NextRequest) {
     if (Number(body.quantity_produced ?? 0) < 0) return badRequest('Production output quantity must not be negative.');
 
     const service = hrService();
+    const tableCheck = await service.from('hr_production_worker_outputs').select('id', { count: 'exact', head: true });
+    if (tableCheck.error?.message.includes("Could not find the table 'icecream_erp.hr_production_worker_outputs'")) {
+      return serverError('Productivity records table is not deployed in Supabase yet.');
+    }
     const { data, error } = await service
       .from('hr_production_worker_outputs')
       .insert({

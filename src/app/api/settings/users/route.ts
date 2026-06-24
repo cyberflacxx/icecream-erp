@@ -2,8 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { badRequest, can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
 import { workIdToEmail } from '@/lib/auth-roles';
-import { assignUserRole, generateNextWorkId, getPrimaryOrganizationId, resolveRegistrationRole } from '@/lib/registration';
+import { assignUserRole, generateNextWorkId, getPrimaryOrganizationId, resolveRegistrationRole, syncUserBranchAssignment, toStoredUserRole } from '@/lib/registration';
 import { createServiceRoleClient } from '@/lib/supabase/server';
+import { parseUserPhoneValue, serializeUserPhoneValue } from '@/lib/user-access-profile';
 
 export async function GET(request: NextRequest) {
   const ctx = await getAuthContext();
@@ -16,13 +17,13 @@ export async function GET(request: NextRequest) {
   const search = searchParams.get('search') ?? undefined;
   const status = searchParams.get('status') ?? undefined;
 
-    const service = createServiceRoleClient();
-    const schemaService = service.schema('icecream_erp');
+  const service = createServiceRoleClient();
+  const schemaService = service.schema('icecream_erp');
 
   try {
-    let query = service
+    let query = schemaService
       .from('users')
-      .select('id, work_id, email, full_name, first_name, last_name, role, status, branch_id', { count: 'exact' })
+      .select('id, work_id, email, full_name, first_name, last_name, phone, role, status, branch_id, branches(id, code, name)', { count: 'exact' })
       .is('deleted_at', null)
       .order('created_at', { ascending: false });
 
@@ -40,15 +41,39 @@ export async function GET(request: NextRequest) {
 
     if (error) throw error;
 
+    const userIds = (users ?? []).map((user) => String((user as Record<string, unknown>).id ?? ''));
+    let assignmentRoleMap = new Map<string, string>();
+    if (userIds.length > 0) {
+      try {
+        const { data: assignments } = await schemaService
+          .from('user_branch_assignments')
+          .select('user_profile_id, role_name')
+          .in('user_profile_id', userIds)
+          .eq('is_active', true);
+        assignmentRoleMap = new Map(
+          (assignments ?? [])
+            .filter((assignment) => assignment.user_profile_id && assignment.role_name)
+            .map((assignment) => [String(assignment.user_profile_id), String(assignment.role_name)]),
+        );
+      } catch {}
+    }
+
     return NextResponse.json({
       data: (users ?? []).map((u: Record<string, unknown>) => ({
-        id: u.id,
-        email: u.email,
-        fullName: u.full_name ?? `${u.first_name ?? ''} ${u.last_name ?? ''}`.trim(),
-        workId: u.work_id,
-        status: String(u.status ?? 'active').toLowerCase(),
-        roles: [{ id: String(u.role ?? 'staff'), name: String(u.role ?? 'staff') }],
-        branch: null,
+        ...(() => {
+          const phoneMeta = parseUserPhoneValue(u.phone);
+          const accessProfile = phoneMeta.accessProfile ?? assignmentRoleMap.get(String(u.id)) ?? String(u.role ?? 'staff');
+          return {
+            id: u.id,
+            email: u.email,
+            fullName: u.full_name ?? `${u.first_name ?? ''} ${u.last_name ?? ''}`.trim(),
+            workId: u.work_id,
+            role: accessProfile,
+            status: String(u.status ?? 'active').toLowerCase(),
+            roles: [{ id: String(u.role ?? 'staff'), name: accessProfile }],
+            branch: formatBranch(u.branches as { id?: string; code?: string; name?: string } | Array<{ id?: string; code?: string; name?: string }> | null | undefined),
+          };
+        })(),
       })),
       pagination: { page, pageSize, total: count ?? 0 },
     });
@@ -97,6 +122,18 @@ export async function POST(request: NextRequest) {
 
     const role = await resolveRegistrationRole(schemaService, roleId);
     if (!role) return badRequest('Role is not available.');
+    if (role.requiresBranch && !branchId) return badRequest('Branch is required for the selected role.');
+
+    if (branchId) {
+      const { data: branch } = await schemaService
+        .from('branches')
+        .select('id, status')
+        .eq('id', branchId)
+        .maybeSingle();
+      if (!branch || String(branch.status ?? '').toUpperCase() !== 'ACTIVE') {
+        return badRequest('Selected branch is not available.');
+      }
+    }
 
     const [workId, organizationId] = await Promise.all([
       generateNextWorkId(schemaService),
@@ -121,7 +158,7 @@ export async function POST(request: NextRequest) {
 
     // Insert user profile
     const fullName = `${firstName.trim()} ${lastName.trim()}`;
-    const { data: profile, error: profileError } = await service
+    const { data: profile, error: profileError } = await schemaService
       .from('users')
       .insert({
         auth_id: authData.user.id,
@@ -131,8 +168,9 @@ export async function POST(request: NextRequest) {
         first_name: firstName.trim(),
         last_name: lastName.trim(),
         id_number: idNumber.trim().toUpperCase(),
+        phone: serializeUserPhoneValue({ accessProfile: role.legacyRole }),
         organization_id: organizationId,
-        role: role.legacyRole,
+        role: toStoredUserRole(role.legacyRole),
         branch_id: branchId ?? null,
         status: 'active',
       })
@@ -147,6 +185,13 @@ export async function POST(request: NextRequest) {
     await assignUserRole({
       assignedBy: ctx.userId,
       roleId: role.id,
+      service: schemaService,
+      userProfileId: String(profile.id),
+    });
+    await syncUserBranchAssignment({
+      assignedBy: ctx.userId,
+      branchId: branchId ?? null,
+      roleName: role.name,
       service: schemaService,
       userProfileId: String(profile.id),
     });
@@ -167,10 +212,33 @@ export async function POST(request: NextRequest) {
       workId,
       status: 'active',
       roles: [{ id: role.id, name: role.name }],
-      branch: null,
+      branch: branchId ? await resolveBranchSummary(schemaService, branchId) : null,
     }, { status: 201 });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Internal server error';
     return serverError(message);
   }
+}
+
+function formatBranch(
+  branchValue:
+    | { id?: string; code?: string; name?: string }
+    | Array<{ id?: string; code?: string; name?: string }>
+    | null
+    | undefined,
+) {
+  const branch = Array.isArray(branchValue) ? branchValue[0] : branchValue;
+  if (!branch?.id) return null;
+  return {
+    id: String(branch.id),
+    name: String(branch.name ?? branch.code ?? branch.id),
+  };
+}
+
+async function resolveBranchSummary(
+  service: ReturnType<ReturnType<typeof createServiceRoleClient>['schema']>,
+  branchId: string,
+) {
+  const { data } = await service.from('branches').select('id, code, name').eq('id', branchId).maybeSingle();
+  return data ? { id: String(data.id), name: String(data.name ?? data.code ?? data.id) } : null;
 }

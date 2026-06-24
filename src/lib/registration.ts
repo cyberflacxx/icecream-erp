@@ -4,6 +4,7 @@ import { ROLES, generateWorkId } from '@/lib/auth-roles';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
 export interface RegistrationPayload {
+  branchId?: string | null;
   email: string;
   firstName: string;
   idNumber: string;
@@ -17,6 +18,7 @@ export interface RegistrationRoleRecord {
   id: string;
   legacyRole: string;
   name: string;
+  requiresBranch: boolean;
 }
 
 type SupabaseSchemaClient = ReturnType<ReturnType<typeof createServiceRoleClient>['schema']>;
@@ -50,6 +52,11 @@ function normalizeRoleName(roleName: string) {
   return roleName.trim().toLowerCase();
 }
 
+function isMissingRelation(error: unknown, table: string) {
+  const message = error instanceof Error ? error.message : typeof error === 'object' && error !== null && 'message' in error ? String((error as { message?: unknown }).message ?? '') : '';
+  return message.includes(`Could not find the table 'icecream_erp.${table}'`) || message.toLowerCase().includes(`${table.toLowerCase()} does not exist`);
+}
+
 export function sanitizeIdNumber(value: string) {
   return value.toUpperCase().replace(/[^0-9A-Z]/g, '');
 }
@@ -62,6 +69,7 @@ export function validateRegistrationPayload(input: {
   idNumber?: string;
   lastName?: string;
   password?: string;
+  branchId?: string | null;
   role?: string;
 }) {
   const fieldErrors: Record<string, string> = {};
@@ -72,6 +80,7 @@ export function validateRegistrationPayload(input: {
   const password = String(input.password ?? '');
   const confirmPassword = String(input.confirmPassword ?? '');
   const role = String(input.role ?? '').trim();
+  const branchId = input.branchId ? String(input.branchId).trim() : '';
   const adminKey = String(input.adminKey ?? '').trim();
 
   if (!/^[A-Za-z]{2,}$/.test(firstName)) {
@@ -103,6 +112,7 @@ export function validateRegistrationPayload(input: {
     fieldErrors,
     normalized: {
       adminKey,
+      branchId,
       email,
       firstName,
       idNumber,
@@ -237,11 +247,43 @@ export function deriveLegacyRole(roleName: string, roleId?: string) {
   if (normalized.includes('branch manager') || normalized === 'branch_manager') {
     return 'branch_manager';
   }
+  if (normalized.includes('operations manager') || normalized === 'operations_manager') {
+    return 'operations_manager';
+  }
+  if (normalized.includes('production')) {
+    return 'production_manager';
+  }
+  if (normalized.includes('sales')) {
+    return 'sales_lead';
+  }
+  if (normalized.includes('finance') || normalized.includes('account')) {
+    return 'finance_lead';
+  }
+  if (normalized.includes('procurement') || normalized.includes('purchase')) {
+    return 'procurement_lead';
+  }
+  if (normalized.includes('inventory') || normalized.includes('store')) {
+    return 'inventory_lead';
+  }
+  if (normalized.includes('hr') || normalized.includes('payroll')) {
+    return 'hr_lead';
+  }
+  if (normalized.includes('quality')) {
+    return 'quality_lead';
+  }
   if (normalized.includes('manager') || normalized === 'manager') {
     return 'manager';
   }
 
   return 'staff';
+}
+
+export function toStoredUserRole(role: string) {
+  const normalized = normalizeRoleName(role);
+  if (normalized === 'super_admin') return 'super_admin';
+  if (normalized === 'branch_manager') return 'branch_manager';
+  if (normalized === 'staff') return 'staff';
+  return 'manager';
 }
 
 export async function getPublicRegistrationRoles(service: SupabaseSchemaClient) {
@@ -250,21 +292,48 @@ export async function getPublicRegistrationRoles(service: SupabaseSchemaClient) 
     .select('id, name, description')
     .order('name', { ascending: true });
 
+  const staticRoles = ROLES.map((role) => ({
+    id: role.id,
+    name: role.name,
+    description: role.description,
+    legacyRole: role.id,
+    requiresBranch: role.id !== 'super_admin',
+  })) satisfies RegistrationRoleRecord[];
+
   if (error || !data?.length) {
-    return ROLES.map((role) => ({
-      id: role.id,
-      name: role.name,
-      description: role.description,
-      legacyRole: role.id,
-    })) satisfies RegistrationRoleRecord[];
+    return staticRoles;
   }
 
-  return data.map((role) => ({
-    id: String(role.id),
-    name: String(role.name),
-    description: role.description ? String(role.description) : null,
-    legacyRole: deriveLegacyRole(String(role.name), String(role.id)),
-  })) satisfies RegistrationRoleRecord[];
+  const merged = new Map<string, RegistrationRoleRecord>();
+
+  for (const role of staticRoles) {
+    merged.set(normalizeRoleName(role.name), role);
+    merged.set(normalizeRoleName(role.id), role);
+  }
+
+  for (const role of data) {
+    const legacyRole = deriveLegacyRole(String(role.name), String(role.id));
+    const entry = {
+      id: String(role.id),
+      name: String(role.name),
+      description: role.description ? String(role.description) : null,
+      legacyRole,
+      requiresBranch: legacyRole !== 'super_admin',
+    } satisfies RegistrationRoleRecord;
+    merged.set(normalizeRoleName(entry.name), entry);
+    merged.set(normalizeRoleName(entry.id), entry);
+    if (!merged.has(normalizeRoleName(legacyRole))) {
+      merged.set(normalizeRoleName(legacyRole), entry);
+    }
+  }
+
+  const seen = new Set<string>();
+  return Array.from(merged.values()).filter((role) => {
+    const key = normalizeRoleName(role.name);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 export async function resolveRegistrationRole(service: SupabaseSchemaClient, selectedRole: string) {
@@ -304,14 +373,70 @@ export async function assignUserRole(input: {
   service: SupabaseSchemaClient;
   userProfileId: string;
 }) {
+  const { data: roleRecord, error: roleLookupError } = await input.service
+    .from('roles')
+    .select('id')
+    .eq('id', input.roleId)
+    .maybeSingle();
+
+  if (roleLookupError && !isMissingRelation(roleLookupError, 'roles')) {
+    throw roleLookupError;
+  }
+
+  if (!roleRecord?.id) {
+    return;
+  }
+
   const { error } = await input.service.from('user_roles').upsert({
     assigned_at: new Date().toISOString(),
     assigned_by: input.assignedBy ?? null,
-    role_id: input.roleId,
+    role_id: roleRecord.id,
     user_profile_id: input.userProfileId,
   }, { onConflict: 'user_profile_id,role_id' });
 
   if (error) {
+    if (isMissingRelation(error, 'user_roles')) {
+      return;
+    }
+    throw error;
+  }
+}
+
+export async function syncUserBranchAssignment(input: {
+  assignedBy?: string | null;
+  branchId?: string | null;
+  roleName?: string | null;
+  service: SupabaseSchemaClient;
+  userProfileId: string;
+}) {
+  try {
+    await input.service
+      .from('user_branch_assignments')
+      .update({ is_active: false, updated_by: input.assignedBy ?? null })
+      .eq('user_profile_id', input.userProfileId)
+      .eq('is_active', true);
+  } catch (error) {
+    if (!isMissingRelation(error, 'user_branch_assignments')) {
+      throw error;
+    }
+    return;
+  }
+
+  if (!input.branchId) {
+    return;
+  }
+
+  const { error } = await input.service.from('user_branch_assignments').insert({
+    user_profile_id: input.userProfileId,
+    branch_id: input.branchId,
+    role_name: input.roleName ?? null,
+    effective_date: new Date().toISOString().slice(0, 10),
+    is_active: true,
+    created_by: input.assignedBy ?? null,
+    updated_by: input.assignedBy ?? null,
+  });
+
+  if (error && !isMissingRelation(error, 'user_branch_assignments')) {
     throw error;
   }
 }
