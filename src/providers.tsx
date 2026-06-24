@@ -11,11 +11,21 @@ interface ProvidersProps {
   children: ReactNode;
 }
 
+function addMediaQueryListener(query: MediaQueryList, listener: () => void) {
+  if (typeof query.addEventListener === 'function') {
+    query.addEventListener('change', listener);
+    return () => query.removeEventListener('change', listener);
+  }
+
+  query.addListener(listener);
+  return () => query.removeListener(listener);
+}
+
 function MobileLightThemeGuard() {
   const { setTheme } = useTheme();
 
   useEffect(() => {
-    if (typeof window === 'undefined') {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
       return;
     }
 
@@ -27,11 +37,7 @@ function MobileLightThemeGuard() {
     };
 
     forceLightOnMobile();
-    media.addEventListener('change', forceLightOnMobile);
-
-    return () => {
-      media.removeEventListener('change', forceLightOnMobile);
-    };
+    return addMediaQueryListener(media, forceLightOnMobile);
   }, [setTheme]);
 
   return null;

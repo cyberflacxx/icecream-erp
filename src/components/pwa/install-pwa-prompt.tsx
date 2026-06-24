@@ -17,11 +17,22 @@ function isIosMobile() {
 }
 
 function isInStandaloneMode() {
-  if (typeof window === 'undefined') {
+  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
     return false;
   }
 
-  return window.matchMedia('(display-mode: standalone)').matches;
+  const navigatorWithStandalone = navigator as Navigator & { standalone?: boolean };
+  return window.matchMedia('(display-mode: standalone)').matches || navigatorWithStandalone.standalone === true;
+}
+
+function addMediaQueryListener(query: MediaQueryList, listener: () => void) {
+  if (typeof query.addEventListener === 'function') {
+    query.addEventListener('change', listener);
+    return () => query.removeEventListener('change', listener);
+  }
+
+  query.addListener(listener);
+  return () => query.removeListener(listener);
 }
 
 export function InstallPwaPrompt() {
@@ -31,7 +42,7 @@ export function InstallPwaPrompt() {
   const [isStandalone, setIsStandalone] = useState(false);
 
   useEffect(() => {
-    if (typeof window === 'undefined') {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
       return;
     }
 
@@ -42,11 +53,11 @@ export function InstallPwaPrompt() {
     };
 
     apply();
-    media.addEventListener('change', apply);
+    const removeMediaListener = addMediaQueryListener(media, apply);
     window.addEventListener('appinstalled', apply);
 
     return () => {
-      media.removeEventListener('change', apply);
+      removeMediaListener();
       window.removeEventListener('appinstalled', apply);
     };
   }, []);
@@ -114,8 +125,12 @@ export function InstallPwaPrompt() {
         <button
           type="button"
           onClick={async () => {
-            await deferredPrompt.prompt();
-            await deferredPrompt.userChoice;
+            try {
+              await deferredPrompt.prompt();
+              await deferredPrompt.userChoice;
+            } catch {
+              // Browser install prompt support is inconsistent across mobile browsers.
+            }
             setDeferredPrompt(null);
             setDismissed(true);
           }}
