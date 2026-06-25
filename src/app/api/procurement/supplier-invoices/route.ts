@@ -10,7 +10,7 @@ export async function GET(_request: NextRequest) {
 
   const service = createServiceRoleClient();
   const [invoices, payments] = await Promise.all([
-    service.from('supplier_invoices').select('id, invoice_number, invoice_date, due_date, invoice_total, status, suppliers(name), purchase_orders(po_number)').eq('organization_id', ctx.organizationId).is('deleted_at', null).order('invoice_date', { ascending: false }),
+    service.from('supplier_invoices').select('id, supplier_id, invoice_number, invoice_date, due_date, invoice_total, status, suppliers(name), purchase_orders(po_number)').eq('organization_id', ctx.organizationId).is('deleted_at', null).order('invoice_date', { ascending: false }),
     service.from('supplier_payments').select('supplier_invoice_id, amount_paid').eq('organization_id', ctx.organizationId).is('deleted_at', null),
   ]);
 
@@ -49,6 +49,7 @@ export async function GET(_request: NextRequest) {
       paidAmount,
       purchaseOrderNumber: po?.po_number ?? null,
       status: row.status,
+      supplierId: row.supplier_id,
       supplierName: supplier?.name ?? 'Unknown supplier',
       total,
     };

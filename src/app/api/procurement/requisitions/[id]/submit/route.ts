@@ -19,7 +19,7 @@ export async function POST(
   try {
     const { data: existing, error: fetchErr } = await service
       .from('purchase_requisitions')
-      .select('id, status')
+      .select('id, requisition_number, status')
       .is('deleted_at', null)
       .eq('organization_id', ctx.organizationId)
       .eq('id', id)
@@ -30,20 +30,39 @@ export async function POST(
       return badRequest('Only draft requisitions can be submitted.');
     }
 
-    const workflowRequest = await submitWorkflowApproval({
-      body: {
-        documentId: id,
-        documentReference: String((existing as Record<string, unknown>).requisition_number ?? id),
-        documentType: 'purchase_requisition',
-        module: 'procurement',
-        reason: 'Purchase requisition submitted for approval.',
-      },
-      ctx,
-      requestMeta: {
-        ipAddress: _request.headers.get('x-forwarded-for'),
-        userAgent: _request.headers.get('user-agent'),
-      },
-    });
+    const { data: updated, error: updateErr } = await service
+      .from('purchase_requisitions')
+      .update({
+        approval_status: 'submitted',
+        status: 'submitted',
+      })
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (updateErr) return serverError(updateErr.message);
+
+    let workflowRequest: unknown = null;
+    let workflowWarning: string | null = null;
+
+    try {
+      workflowRequest = await submitWorkflowApproval({
+        body: {
+          documentId: id,
+          documentReference: String((existing as Record<string, unknown>).requisition_number ?? id),
+          documentType: 'purchase_requisition',
+          module: 'procurement',
+          reason: 'Purchase requisition submitted for approval.',
+        },
+        ctx,
+        requestMeta: {
+          ipAddress: _request.headers.get('x-forwarded-for'),
+          userAgent: _request.headers.get('user-agent'),
+        },
+      });
+    } catch (error) {
+      workflowWarning = error instanceof Error ? error.message : 'Workflow submission failed.';
+    }
 
     await emitOperationalNotifications({
       actorUserId: ctx.userId,
@@ -59,9 +78,9 @@ export async function POST(
       recipientRoleNames: ['Procurement Manager', 'Approver'],
       severity: 'MEDIUM',
       title: 'Purchase requisition submitted',
-    });
+    }).catch(() => null);
 
-    return NextResponse.json({ submitted: true, workflowRequest });
+    return NextResponse.json({ requisition: updated, submitted: true, workflowRequest, workflowWarning });
   } catch (err) {
     return serverError((err as Error).message);
   }

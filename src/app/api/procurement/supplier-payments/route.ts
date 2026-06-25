@@ -4,6 +4,8 @@ import { badRequest, can, forbidden, getAuthContext, serverError, unauthorized }
 import { canPayInvoice } from '@/lib/procurement';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
+const PAYMENT_SOURCES = new Set(['BANK', 'CASH', 'PETTY_CASH']);
+
 export async function GET(_request: NextRequest) {
   const ctx = await getAuthContext();
   if (!ctx) return unauthorized();
@@ -58,6 +60,9 @@ export async function POST(request: NextRequest) {
   if (!body.supplierId || !body.supplierInvoiceId || !body.paymentMethod || !body.amountPaid) {
     return badRequest('supplierId, supplierInvoiceId, paymentMethod, and amountPaid are required.');
   }
+  if (!PAYMENT_SOURCES.has(body.paymentMethod)) {
+    return badRequest('Payment source must be BANK, CASH, or PETTY_CASH.');
+  }
 
   const service = createServiceRoleClient();
   const tableCheck = await service.from('supplier_payments').select('id', { count: 'exact', head: true });
@@ -95,5 +100,10 @@ export async function POST(request: NextRequest) {
     .single();
 
   if (error) return serverError(error.message);
+  await service
+    .from('supplier_invoices')
+    .update({ status: Number(body.amountPaid) >= balance ? 'PAID' : 'PARTIAL_PAID' })
+    .eq('id', body.supplierInvoiceId);
+
   return NextResponse.json(data, { status: 201 });
 }

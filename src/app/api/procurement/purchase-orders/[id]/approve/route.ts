@@ -33,6 +33,7 @@ export async function POST(
       .update({
         approved_by: ctx.userId,
         approved_at: new Date().toISOString(),
+        status: 'approved',
       })
       .eq('id', id)
       .select()

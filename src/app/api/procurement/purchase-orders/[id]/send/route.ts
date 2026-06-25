@@ -26,8 +26,8 @@ export async function POST(
     if (fetchErr || !existing) return notFound('Purchase order not found.');
 
     const order = existing as Record<string, unknown>;
-    if (order.status !== 'draft') {
-      return badRequest('Only draft purchase orders can be sent.');
+    if (!['approved', 'draft'].includes(String(order.status))) {
+      return badRequest('Only approved purchase orders can be sent.');
     }
     if (!order.approved_by) {
       return badRequest('Purchase order must be approved before sending.');

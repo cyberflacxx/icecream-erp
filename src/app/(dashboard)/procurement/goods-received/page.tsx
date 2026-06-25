@@ -2,6 +2,7 @@
 
 import { Plus } from 'lucide-react';
 import { type FormEvent, useEffect, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { useQueryClient } from '@tanstack/react-query';
 
 import { DataTable, EmptyState, FilterBar, FormDrawer, StatusBadge } from '@/components/ui-library';
@@ -28,7 +29,9 @@ const initialFormState = {
 };
 
 export default function GoodsReceivedPage() {
-  const canCreate = usePermission(PERMISSIONS.goodsReceived.create);
+  const searchParams = useSearchParams();
+  const purchaseOrderIdParam = searchParams.get('purchaseOrderId');
+  const canCreate = usePermission([PERMISSIONS.goodsReceived.create, 'procurement.write']);
   const [filters, setFilters] = useState({
     page: 1,
     pageSize: 10,
@@ -62,6 +65,15 @@ export default function GoodsReceivedPage() {
     status: filters.status || undefined
   });
   const purchaseOrderQuery = usePurchaseOrder(formState.purchaseOrderId || undefined);
+
+  useEffect(() => {
+    if (!purchaseOrderIdParam) {
+      return;
+    }
+
+    setFormState((current) => ({ ...current, purchaseOrderId: purchaseOrderIdParam }));
+    setIsDrawerOpen(true);
+  }, [purchaseOrderIdParam]);
 
   useEffect(() => {
     const order = purchaseOrderQuery.data as
@@ -203,10 +215,10 @@ export default function GoodsReceivedPage() {
             key: 'status',
             label: 'Status',
             options: [
-              { label: 'DRAFT', value: 'DRAFT' },
-              { label: 'RECEIVED', value: 'RECEIVED' },
-              { label: 'QUALITY_PASSED', value: 'QUALITY_PASSED' },
-              { label: 'QUALITY_FAILED', value: 'QUALITY_FAILED' }
+              { label: 'Draft', value: 'draft' },
+              { label: 'Received', value: 'received' },
+              { label: 'Quality Passed', value: 'QUALITY_PASSED' },
+              { label: 'Quality Failed', value: 'QUALITY_FAILED' }
             ],
             type: 'select',
             value: filters.status
@@ -235,7 +247,7 @@ export default function GoodsReceivedPage() {
           {
             key: 'supplier',
             header: 'Supplier',
-            render: (row) => row.supplier.name
+            render: (row) => row.supplier?.name ?? 'Unknown supplier'
           },
           {
             key: 'receivedDate',
@@ -308,7 +320,7 @@ export default function GoodsReceivedPage() {
                 <option value="">Select PO</option>
                 {(metaQuery.data?.purchaseOrders ?? []).map((order) => (
                   <option key={order.id} value={order.id}>
-                    {order.poNumber} - {order.supplier.name}
+                    {order.poNumber} - {order.supplier?.name ?? 'Unknown supplier'}
                   </option>
                 ))}
               </select>

@@ -35,28 +35,34 @@ const initialFormState = {
 };
 
 function statusVariant(status: string) {
-  if (status === 'DRAFT') {
+  const normalized = status.toLowerCase();
+
+  if (normalized === 'draft') {
     return 'warning' as const;
   }
 
-  if (status === 'SUBMITTED') {
+  if (normalized === 'submitted') {
     return 'info' as const;
   }
 
-  if (status === 'APPROVED') {
+  if (['approved', 'level1_approved'].includes(normalized)) {
     return 'success' as const;
   }
 
-  if (status === 'REJECTED') {
+  if (normalized === 'rejected') {
     return 'error' as const;
   }
 
   return 'neutral' as const;
 }
 
+function isApprovedStatus(status: string) {
+  return ['approved', 'level1_approved'].includes(status.toLowerCase());
+}
+
 export default function RequisitionsPage() {
-  const canCreate = usePermission(PERMISSIONS.purchaseRequisition.create);
-  const canApprove = usePermission(PERMISSIONS.purchaseOrder.approve);
+  const canCreate = usePermission([PERMISSIONS.purchaseRequisition.create, 'procurement.write']);
+  const canApprove = usePermission([PERMISSIONS.purchaseRequisition.approve, 'procurement.approve']);
   const [filters, setFilters] = useState({
     department: '',
     endDate: '',
@@ -179,10 +185,11 @@ export default function RequisitionsPage() {
             key: 'status',
             label: 'Status',
             options: [
-              { label: 'DRAFT', value: 'DRAFT' },
-              { label: 'SUBMITTED', value: 'SUBMITTED' },
-              { label: 'APPROVED', value: 'APPROVED' },
-              { label: 'REJECTED', value: 'REJECTED' }
+              { label: 'Draft', value: 'draft' },
+              { label: 'Submitted', value: 'submitted' },
+              { label: 'Approved', value: 'level1_approved' },
+              { label: 'PO Created', value: 'po_created' },
+              { label: 'Rejected', value: 'rejected' }
             ],
             type: 'select',
             value: filters.status
@@ -248,10 +255,10 @@ export default function RequisitionsPage() {
             key: 'actions',
             header: 'Actions',
             render: (row) => {
-              const status = row.status;
+              const status = row.status.toLowerCase();
               const id = row.id;
 
-              if (status === 'DRAFT') {
+              if (status === 'draft') {
                 return (
                   <div className="flex flex-wrap gap-2">
                     <Button size="sm" variant="outline">
@@ -267,7 +274,7 @@ export default function RequisitionsPage() {
                 );
               }
 
-              if (status === 'SUBMITTED' && canApprove) {
+              if (status === 'submitted' && canApprove) {
                 return (
                   <div className="flex flex-wrap gap-2">
                     <Button size="sm" variant="outline" onClick={() => approveRequisition(id)}>
@@ -280,7 +287,7 @@ export default function RequisitionsPage() {
                 );
               }
 
-              if (status === 'APPROVED') {
+              if (isApprovedStatus(status)) {
                 return (
                   <Button asChild size="sm" variant="outline">
                     <Link href={`/procurement/purchase-orders?requisitionId=${id}`}>Create PO</Link>

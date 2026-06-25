@@ -6,7 +6,7 @@ import { createServiceRoleClient } from '@/lib/supabase/server';
 export async function GET(request: NextRequest) {
   const ctx = await getAuthContext();
   if (!ctx) return unauthorized();
-  if (!can(ctx, 'suppliers.read')) return forbidden();
+  if (!can(ctx, 'suppliers.read', 'procurement.supplier.view', 'procurement.read')) return forbidden();
 
   const service = createServiceRoleClient();
   const { searchParams } = new URL(request.url);
@@ -84,7 +84,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   const ctx = await getAuthContext();
   if (!ctx) return unauthorized();
-  if (!can(ctx, 'suppliers.write')) return forbidden();
+  if (!can(ctx, 'suppliers.write', 'procurement.supplier.write', 'procurement.write')) return forbidden();
 
   const service = createServiceRoleClient();
 

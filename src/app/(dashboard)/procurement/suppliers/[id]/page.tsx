@@ -103,7 +103,7 @@ export default function SupplierDetailPage({ params }: SupplierDetailPageProps) 
           </div>
           <div>
             <p className="text-xs uppercase tracking-[0.18em] text-muted">Category</p>
-            <p className="mt-2 text-sm font-semibold text-brown">{supplier.category.name}</p>
+            <p className="mt-2 text-sm font-semibold text-brown">{supplier.category?.name ?? 'General'}</p>
           </div>
           <div>
             <p className="text-xs uppercase tracking-[0.18em] text-muted">Contact</p>

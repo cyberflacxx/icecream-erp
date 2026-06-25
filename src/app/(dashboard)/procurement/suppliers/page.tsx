@@ -29,7 +29,7 @@ const currencyFormatter = new Intl.NumberFormat('en-US', {
 
 const supplierFormSchema = z.object({
   address: z.string().optional(),
-  categoryId: z.string().min(1),
+  categoryId: z.string().optional(),
   code: z.string().optional(),
   contactPerson: z.string().optional(),
   creditLimit: z.coerce.number().nonnegative(),
@@ -56,8 +56,8 @@ const initialFormState = {
 };
 
 export default function SuppliersPage() {
-  const canCreate = usePermission(PERMISSIONS.supplier.create);
-  const canUpdate = usePermission(PERMISSIONS.supplier.update);
+  const canCreate = usePermission([PERMISSIONS.supplier.create, 'procurement.supplier.write', 'procurement.write']);
+  const canUpdate = usePermission([PERMISSIONS.supplier.update, 'procurement.supplier.write', 'procurement.write']);
   const [filters, setFilters] = useState({
     categoryId: '',
     page: 1,
@@ -95,7 +95,7 @@ export default function SuppliersPage() {
     setEditingSupplier(row);
     setFormState({
       address: row.address ?? '',
-      categoryId: row.category.id,
+      categoryId: row.category?.id ?? '',
       code: row.code,
       contactPerson: row.contactPerson ?? '',
       creditLimit: String(row.creditLimit ?? 0),
@@ -121,7 +121,7 @@ export default function SuppliersPage() {
 
     const payload = {
       address: parsed.data.address || null,
-      categoryId: parsed.data.categoryId,
+      categoryId: parsed.data.categoryId || undefined,
       code: parsed.data.code || undefined,
       contactPerson: parsed.data.contactPerson || null,
       creditLimit: parsed.data.creditLimit,
@@ -216,7 +216,7 @@ export default function SuppliersPage() {
           {
             key: 'category',
             header: 'Category',
-            render: (row) => row.category.name
+            render: (row) => row.category?.name ?? 'General'
           },
           {
             key: 'contactPerson',
@@ -319,14 +319,13 @@ export default function SuppliersPage() {
             <label className="space-y-2 text-sm text-muted">
               <span>Category</span>
               <select
-                required
                 value={formState.categoryId}
                 onChange={(event) =>
                   setFormState((current) => ({ ...current, categoryId: event.target.value }))
                 }
                 className="surface-input-soft"
               >
-                <option value="">Select category</option>
+                <option value="">General / uncategorized</option>
                 {(categoriesQuery.data ?? []).map((category) => (
                   <option key={category.id} value={category.id}>
                     {category.name}

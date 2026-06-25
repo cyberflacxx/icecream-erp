@@ -46,19 +46,21 @@ const initialFormState = {
 };
 
 function statusVariant(status: string) {
-  if (status === 'RECEIVED') {
+  const normalized = status.toLowerCase();
+
+  if (normalized === 'received') {
     return 'success' as const;
   }
 
-  if (status === 'PARTIAL_RECEIVED') {
+  if (normalized === 'partial_received') {
     return 'warning' as const;
   }
 
-  if (status === 'SENT') {
+  if (['sent', 'sent_to_supplier', 'approved'].includes(normalized)) {
     return 'info' as const;
   }
 
-  if (status === 'CANCELLED') {
+  if (normalized === 'cancelled') {
     return 'error' as const;
   }
 
@@ -68,8 +70,9 @@ function statusVariant(status: string) {
 export default function PurchaseOrdersPage() {
   const searchParams = useSearchParams();
   const requisitionIdParam = searchParams.get('requisitionId');
-  const canCreate = usePermission(PERMISSIONS.purchaseOrder.create);
-  const canApprove = usePermission(PERMISSIONS.purchaseOrder.approve);
+  const canCreate = usePermission([PERMISSIONS.purchaseOrder.create, 'procurement.write']);
+  const canApprove = usePermission([PERMISSIONS.purchaseOrder.approve, 'procurement.approve']);
+  const canSend = usePermission([PERMISSIONS.purchaseOrder.create, 'procurement.write']);
   const [filters, setFilters] = useState({
     page: 1,
     pageSize: 10,
@@ -212,11 +215,12 @@ export default function PurchaseOrdersPage() {
             key: 'status',
             label: 'Status',
             options: [
-              { label: 'DRAFT', value: 'DRAFT' },
-              { label: 'SENT', value: 'SENT' },
-              { label: 'PARTIAL_RECEIVED', value: 'PARTIAL_RECEIVED' },
-              { label: 'RECEIVED', value: 'RECEIVED' },
-              { label: 'CANCELLED', value: 'CANCELLED' }
+              { label: 'Draft', value: 'draft' },
+              { label: 'Approved', value: 'approved' },
+              { label: 'Sent to Supplier', value: 'sent_to_supplier' },
+              { label: 'Partial Received', value: 'partial_received' },
+              { label: 'Received', value: 'received' },
+              { label: 'Cancelled', value: 'cancelled' }
             ],
             type: 'select',
             value: filters.status
@@ -274,10 +278,10 @@ export default function PurchaseOrdersPage() {
             key: 'actions',
             header: 'Actions',
             render: (row) => {
-              const status = row.status;
+              const status = row.status.toLowerCase();
               const id = row.id;
 
-              if (status === 'DRAFT') {
+              if (status === 'draft') {
                 return (
                   <div className="flex flex-wrap gap-2">
                     <Button asChild size="sm" variant="outline">
@@ -295,16 +299,29 @@ export default function PurchaseOrdersPage() {
                 );
               }
 
-              if (status === 'SENT') {
+              if (status === 'approved') {
                 return (
                   <div className="flex flex-wrap gap-2">
-                    {canApprove ? (
+                    {canSend ? (
                       <Button size="sm" variant="outline" onClick={() => sendOrder(id)}>
-                        Resend
+                        Send to Supplier
                       </Button>
                     ) : null}
                     <Button asChild size="sm" variant="outline">
-                      <Link href="/procurement/goods-received">Record GRN</Link>
+                      <Link href={`/procurement/purchase-orders/${id}`}>View</Link>
+                    </Button>
+                  </div>
+                );
+              }
+
+              if (['sent', 'sent_to_supplier', 'partial_received'].includes(status)) {
+                return (
+                  <div className="flex flex-wrap gap-2">
+                    <Button asChild size="sm" variant="outline">
+                      <Link href={`/procurement/goods-received?purchaseOrderId=${id}`}>Record GRN</Link>
+                    </Button>
+                    <Button asChild size="sm" variant="outline">
+                      <Link href={`/procurement/purchase-orders/${id}`}>View</Link>
                     </Button>
                   </div>
                 );

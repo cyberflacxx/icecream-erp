@@ -18,7 +18,7 @@ export interface SupplierRow {
   category: {
     id: string;
     name: string;
-  };
+  } | null;
   contactPerson: string | null;
   phone: string | null;
   email: string | null;
@@ -168,6 +168,7 @@ export interface SupplierInvoiceRow {
   paidAmount: number;
   purchaseOrderNumber: string | null;
   status: string;
+  supplierId: string;
   supplierName: string;
   total: number;
 }

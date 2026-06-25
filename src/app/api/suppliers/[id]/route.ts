@@ -9,7 +9,7 @@ export async function GET(
 ) {
   const ctx = await getAuthContext();
   if (!ctx) return unauthorized();
-  if (!can(ctx, 'suppliers.read')) return forbidden();
+  if (!can(ctx, 'suppliers.read', 'procurement.supplier.view', 'procurement.read')) return forbidden();
 
   const { id } = await params;
   const service = createServiceRoleClient();
@@ -63,7 +63,7 @@ export async function PATCH(
 ) {
   const ctx = await getAuthContext();
   if (!ctx) return unauthorized();
-  if (!can(ctx, 'suppliers.write')) return forbidden();
+  if (!can(ctx, 'suppliers.write', 'procurement.supplier.write', 'procurement.write')) return forbidden();
 
   const { id } = await params;
   const service = createServiceRoleClient();
@@ -159,7 +159,7 @@ export async function DELETE(
 ) {
   const ctx = await getAuthContext();
   if (!ctx) return unauthorized();
-  if (!can(ctx, 'suppliers.delete')) return forbidden();
+  if (!can(ctx, 'suppliers.delete', 'procurement.supplier.write')) return forbidden();
 
   const { id } = await params;
   const service = createServiceRoleClient();
