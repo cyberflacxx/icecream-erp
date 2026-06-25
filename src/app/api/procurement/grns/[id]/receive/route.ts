@@ -180,7 +180,7 @@ export async function POST(
         received_date: new Date().toISOString(),
       })
       .eq('id', id)
-      .select('*, goods_received_note_items(*), purchase_orders(id, po_number)')
+      .select('*, purchase_orders(id, po_number)')
       .single();
 
     if (updateErr) return serverError(updateErr.message);

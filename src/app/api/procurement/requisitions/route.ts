@@ -22,8 +22,7 @@ export async function GET(request: NextRequest) {
     let query = service
       .from('purchase_requisitions')
       .select(
-        `id, requisition_number, department, request_date, needed_by_date, status,
-         users!purchase_requisitions_requested_by_fkey(id, full_name)`,
+        'id, requisition_number, department, request_date, needed_by_date, status, requested_by',
         { count: 'exact' },
       )
       .is('deleted_at', null)
@@ -40,6 +39,14 @@ export async function GET(request: NextRequest) {
 
     if (error) return serverError(error.message);
 
+    const requesterIds = [...new Set((data ?? []).map((row) => String(row.requested_by ?? '')).filter(Boolean))];
+    const usersResult = requesterIds.length
+      ? await service.from('users').select('id, full_name').in('id', requesterIds)
+      : { data: [], error: null };
+    const usersById = new Map(
+      (usersResult.error ? [] : usersResult.data ?? []).map((row) => [String(row.id), String(row.full_name ?? 'Unknown')]),
+    );
+
     const mapped = (data ?? []).map((r: Record<string, unknown>) => ({
       id: r.id,
       requisitionNumber: r.requisition_number,
@@ -47,9 +54,7 @@ export async function GET(request: NextRequest) {
       requestDate: r.request_date,
       neededByDate: r.needed_by_date,
       status: r.status,
-      requestedBy: r.users
-        ? String((r.users as Record<string, unknown>).full_name ?? 'Unknown')
-        : 'Unknown',
+      requestedBy: usersById.get(String(r.requested_by ?? '')) ?? 'Unknown',
     }));
 
     return NextResponse.json({

@@ -27,8 +27,7 @@ export async function GET(request: NextRequest) {
       .from('goods_received_notes')
       .select(
         `id, grn_number, received_date, status, quality_status, warehouse_id,
-         purchase_orders(id, po_number, supplier_id, suppliers(id, name)),
-         goods_received_note_items(id)`,
+         purchase_orders(id, po_number, supplier_id, suppliers(id, name))`,
         { count: 'exact' },
       )
       .is('deleted_at', null)
@@ -114,6 +113,22 @@ export async function GET(request: NextRequest) {
       });
     }
 
+    const grnIds = (primary.data ?? []).map((row: Record<string, unknown>) => String(row.id));
+    const itemCounts = new Map<string, number>();
+    if (grnIds.length) {
+      const itemsResult = await service
+        .from('goods_received_note_items')
+        .select('grn_id')
+        .in('grn_id', grnIds);
+
+      if (!itemsResult.error) {
+        for (const item of itemsResult.data ?? []) {
+          const key = String(item.grn_id);
+          itemCounts.set(key, (itemCounts.get(key) ?? 0) + 1);
+        }
+      }
+    }
+
     const mapped = (primary.data ?? []).map((r: Record<string, unknown>) => {
       const po = r.purchase_orders as Record<string, unknown> | null;
       const supplier = po?.suppliers as Record<string, unknown> | null;
@@ -125,7 +140,7 @@ export async function GET(request: NextRequest) {
         qualityStatus: r.quality_status,
         purchaseOrder: po ? { id: po.id, poNumber: po.po_number } : null,
         supplier: supplier ? { id: supplier.id, name: supplier.name } : null,
-        itemsCount: Array.isArray(r.goods_received_note_items) ? (r.goods_received_note_items as unknown[]).length : 0,
+        itemsCount: itemCounts.get(String(r.id)) ?? 0,
       };
     });
 
@@ -319,7 +334,7 @@ export async function POST(request: NextRequest) {
 
     const primaryFull = await service
       .from('goods_received_notes')
-      .select('*, goods_received_note_items(*), purchase_orders(id, po_number)')
+      .select('*, purchase_orders(id, po_number)')
       .eq('id', grnId)
       .single();
     if (!primaryFull.error) return NextResponse.json(primaryFull.data, { status: 201 });
