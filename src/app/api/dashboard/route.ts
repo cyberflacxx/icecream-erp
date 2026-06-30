@@ -14,6 +14,16 @@ function isMissingColumnError(error: unknown, table: string, columnName: string)
   return message.includes(`column ${table}.${columnName} does not exist`);
 }
 
+function isInvalidBatchStatusEnum(error: unknown) {
+  const message =
+    error instanceof Error
+      ? error.message
+      : typeof error === 'object' && error !== null && 'message' in error
+        ? String((error as { message?: unknown }).message ?? '')
+        : '';
+  return message.toLowerCase().includes('invalid input value for enum batch_status');
+}
+
 type QueryResultRow = Record<string, unknown>;
 type QueryResult = { data: QueryResultRow[] | null; error: { message: string } | null };
 
@@ -150,7 +160,8 @@ export async function GET(_request: NextRequest) {
         isMissingColumnError(openBatchResult.error, 'production_batches', 'production_date') ||
         isMissingColumnError(openBatchResult.error, 'production_batches', 'planned_quantity') ||
         isMissingColumnError(openBatchResult.error, 'production_batches', 'actual_output') ||
-        isMissingColumnError(openBatchResult.error, 'production_batches', 'deleted_at')
+        isMissingColumnError(openBatchResult.error, 'production_batches', 'deleted_at') ||
+        isInvalidBatchStatusEnum(openBatchResult.error)
       )
     ) {
       let fallbackQuery = service
