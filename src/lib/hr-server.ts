@@ -412,9 +412,11 @@ export async function buildPayrollSummaryRows(periodId: string) {
       employeeName: [employee.first_name, employee.last_name].filter(Boolean).join(' '),
       employeeNumber: String(employee.employee_number ?? ''),
       grossPay: payroll.grossPay,
+      hoursWorked: attendance.hours,
       netPay: payroll.netPay,
       overtimeHours: attendance.overtime,
       overtimePay: payroll.overtimePay,
+      payRate: hourlyRate,
     };
   });
 }

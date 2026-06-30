@@ -26,8 +26,7 @@ export async function POST(
     const { data: batch, error: batchError } = await service
       .from('production_batches')
       .select(`
-        id, batch_number, status, warehouse_id, actual_output,
-        production_batch_outputs(id, item_id, actual_quantity)
+        id, batch_number, status, warehouse_id, actual_output
       `)
       .eq('id', id)
       .maybeSingle();
@@ -37,7 +36,11 @@ export async function POST(
       return badRequest('Only completed batches can be transferred to stores.');
     }
 
-    const outputs = Array.isArray(batch.production_batch_outputs) ? batch.production_batch_outputs : [];
+    const { data: outputs, error: outputsError } = await service
+      .from('production_batch_outputs')
+      .select('id, item_id, actual_quantity')
+      .eq('batch_id', id);
+    if (outputsError) throw outputsError;
     for (const output of outputs) {
       const quantity = Number(output.actual_quantity ?? 0);
       if (quantity <= 0) continue;
@@ -130,6 +133,11 @@ export async function POST(
       .select()
       .single();
     if (error) throw error;
+
+    await service
+      .from('production_batches')
+      .update({ status: 'TRANSFERRED_TO_STORES' })
+      .eq('id', id);
 
     await writeProductionAuditLog('PRODUCTION_FINISHED_GOODS_TRANSFERRED', id, ctx.userId, {
       destinationWarehouseId: body.destinationWarehouseId,

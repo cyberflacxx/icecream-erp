@@ -21,6 +21,7 @@ export function useCreateSalesOrder() {
     },
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['sales-orders'] });
+      await queryClient.invalidateQueries({ queryKey: ['sales'] });
     }
   });
 }

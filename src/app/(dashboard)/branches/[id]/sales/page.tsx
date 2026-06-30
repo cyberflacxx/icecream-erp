@@ -64,7 +64,7 @@ export default function BranchSalesPage() {
   const [expenseCategory, setExpenseCategory] = useState('');
   const [expenseDescription, setExpenseDescription] = useState('');
   const [expenseAmount, setExpenseAmount] = useState('0');
-  const [expensePaymentMethod, setExpensePaymentMethod] = useState<'CASH' | 'ECOCASH' | 'CARD'>('CASH');
+  const [expensePaymentMethod, setExpensePaymentMethod] = useState<'BANK' | 'CARD' | 'CASH' | 'ECOCASH' | 'PETTY_CASH'>('CASH');
 
   const salesQuery = useBranchSales(branchId, filters);
   const stockQuery = useBranchStock(branchId, {
@@ -75,7 +75,11 @@ export default function BranchSalesPage() {
   const createExpense = useCreateBranchExpense(branchId);
   const stockRows = stockQuery.data?.data ?? [];
   const stockOptions = stockRows.filter(
-    (row) => row.item.itemType === 'FINISHED_GOOD' && row.quantityAvailable > 0,
+    (row) => String(row.item.itemType ?? '').toUpperCase() === 'FINISHED_GOOD' && row.quantityAvailable > 0,
+  );
+  const stockOptionByItemId = useMemo(
+    () => new Map(stockOptions.map((option) => [option.item.id, option])),
+    [stockOptions],
   );
   const sales = salesQuery.data?.data ?? [];
   const pagination = salesQuery.data?.pagination;
@@ -285,6 +289,7 @@ export default function BranchSalesPage() {
           };
           quantityAvailable: number;
           quantityOnHand: number;
+          sellingPrice: number;
           totalValue: number;
         }>
           data={stockRows}
@@ -302,6 +307,11 @@ export default function BranchSalesPage() {
             {
               key: 'quantityAvailable',
               header: 'Available'
+            },
+            {
+              key: 'sellingPrice',
+              header: 'Price',
+              render: (row) => currencyFormatter.format(row.sellingPrice)
             },
             {
               key: 'totalValue',
@@ -379,19 +389,28 @@ export default function BranchSalesPage() {
               <div key={`${line.itemId}-${index}`} className="grid gap-3 rounded-2xl bg-white p-3 sm:grid-cols-4">
                 <select
                   value={line.itemId}
-                  onChange={(event) =>
+                  onChange={(event) => {
+                    const selectedItemId = event.target.value;
+                    const selectedStock = stockOptionByItemId.get(selectedItemId);
+                    const defaultPrice = Number(selectedStock?.sellingPrice ?? selectedStock?.unitCost ?? 0);
                     setSaleItems((current) =>
                       current.map((item, itemIndex) =>
-                        itemIndex === index ? { ...item, itemId: event.target.value } : item,
+                        itemIndex === index
+                          ? {
+                              ...item,
+                              itemId: selectedItemId,
+                              unitPrice: defaultPrice > 0 ? String(defaultPrice) : item.unitPrice,
+                            }
+                          : item,
                       ),
-                    )
-                  }
+                    );
+                  }}
                   className="surface-input-soft sm:col-span-2"
                 >
                   <option value="">Select item</option>
                   {stockOptions.map((option) => (
                     <option key={option.item.id} value={option.item.id}>
-                      {option.item.code} - {option.item.name}
+                      {option.item.code} - {option.item.name} ({currencyFormatter.format(option.sellingPrice)}, {option.quantityAvailable} available)
                     </option>
                   ))}
                 </select>
@@ -424,6 +443,11 @@ export default function BranchSalesPage() {
                   className="surface-input-soft"
                 />
                 <div className="text-sm text-muted sm:col-span-4">
+                  {stockOptionByItemId.get(line.itemId) ? (
+                    <span className="mr-3">
+                      Available: {stockOptionByItemId.get(line.itemId)?.quantityAvailable}
+                    </span>
+                  ) : null}
                   Line Total:{' '}
                   <span className="font-semibold text-brown">
                     {currencyFormatter.format((Number(line.quantity) || 0) * (Number(line.unitPrice) || 0))}
@@ -509,11 +533,13 @@ export default function BranchSalesPage() {
               <select
                 value={expensePaymentMethod}
                 onChange={(event) =>
-                  setExpensePaymentMethod(event.target.value as 'CASH' | 'ECOCASH' | 'CARD')
+                  setExpensePaymentMethod(event.target.value as 'BANK' | 'CARD' | 'CASH' | 'ECOCASH' | 'PETTY_CASH')
                 }
                 className="surface-input-soft"
               >
                 <option value="CASH">CASH</option>
+                <option value="BANK">BANK</option>
+                <option value="PETTY_CASH">PETTY CASH</option>
                 <option value="ECOCASH">ECOCASH</option>
                 <option value="CARD">CARD</option>
               </select>

@@ -49,7 +49,7 @@ export function ProductionDashboard() {
       <div className="grid gap-6 xl:grid-cols-2">
         <ChartCard title="Output Last 7 Days">
           <div className="h-72">
-            <ResponsiveContainer width="100%" height="100%">
+            <ResponsiveContainer width="100%" height="100%" initialDimension={{ width: 1, height: 1 }}>
               <BarChart data={charts.outputLast7Days}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#F3D7B6" />
                 <XAxis dataKey="day" stroke="#6B4A3A" fontSize={12} />
@@ -63,7 +63,7 @@ export function ProductionDashboard() {
 
         <ChartCard title="Batch Status Breakdown">
           <div className="h-72">
-            <ResponsiveContainer width="100%" height="100%">
+            <ResponsiveContainer width="100%" height="100%" initialDimension={{ width: 1, height: 1 }}>
               <PieChart>
                 <Tooltip />
                 <Pie data={charts.statusBreakdown} dataKey="count" nameKey="status" outerRadius={105} fill="#3B1F12" />

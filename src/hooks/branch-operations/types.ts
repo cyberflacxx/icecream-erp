@@ -109,6 +109,7 @@ export interface BranchStockRow {
   };
   quantityOnHand: number;
   quantityAvailable: number;
+  sellingPrice: number;
   unitCost: number;
   totalValue: number;
 }

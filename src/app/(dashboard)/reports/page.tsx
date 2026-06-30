@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
-import { AlertCircle, BookmarkPlus, History } from 'lucide-react';
+import { AlertCircle, ArrowUpRight, BookmarkPlus, History } from 'lucide-react';
 import {
   Bar,
   BarChart,
@@ -51,9 +51,13 @@ const reportLabels: Record<ReportType, string> = {
   daily_production: 'Daily Production Report',
   expiry_alert: 'Expiry Alert Report',
   inventory_valuation: 'Inventory Valuation Report',
+  financial_position: 'Financial Position',
+  financial_ratios: 'Financial Ratios',
+  income_statement: 'Income Statement',
   low_stock: 'Low Stock Report',
   raw_material_usage: 'Raw Material Usage Report',
   supplier_purchase: 'Supplier Purchase Report',
+  trial_balance: 'Trial Balance',
   wastage: 'Wastage Report',
   worker_productivity: 'Worker Productivity Report'
 };
@@ -423,6 +427,24 @@ export default function ReportsPage() {
         }
       />
 
+      <div className="grid gap-3 rounded-2xl border border-border bg-white p-4 shadow-sm md:grid-cols-2 xl:grid-cols-4">
+        {[
+          { href: '/finance/reports#trial-balance', label: 'Trial Balance' },
+          { href: '/finance/reports#income-statement', label: 'Income Statement' },
+          { href: '/finance/reports#financial-position', label: 'Financial Position' },
+          { href: '/finance/reports#ratios', label: 'Ratios' },
+        ].map((statement) => (
+          <Link
+            key={statement.href}
+            href={statement.href}
+            className="group rounded-2xl border border-border bg-cream px-4 py-4 text-sm font-semibold text-brown transition hover:border-brown/30 hover:bg-white"
+          >
+            <span>{statement.label}</span>
+            <ArrowUpRight className="ml-2 inline h-4 w-4 text-muted transition group-hover:text-brown" />
+          </Link>
+        ))}
+      </div>
+
       <div className="grid gap-4 rounded-2xl border border-border bg-white p-4 shadow-sm md:grid-cols-2 xl:grid-cols-5">
         {allowedReportTypes.map((type) => (
           <button
@@ -477,7 +499,7 @@ export default function ReportsPage() {
       {viewMode === 'chart' ? (
         <ChartCard title={reportLabels[activeReportType]} subtitle="Visualization generated from the selected report and filters.">
           <div className="h-80">
-            <ResponsiveContainer width="100%" height="100%">
+            <ResponsiveContainer width="100%" height="100%" initialDimension={{ width: 1, height: 1 }}>
               {showPie ? (
                 <PieChart>
                   <Tooltip />

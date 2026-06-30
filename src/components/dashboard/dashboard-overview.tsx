@@ -168,7 +168,7 @@ export function DashboardOverview() {
         <div className="grid gap-6 xl:grid-cols-2">
           <ChartCard title="Production Output (Last 7 Days)">
             <div className="h-72">
-              <ResponsiveContainer width="100%" height="100%">
+              <ResponsiveContainer width="100%" height="100%" initialDimension={{ width: 1, height: 1 }}>
                 <BarChart data={productionLast7Days}>
                   <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
                   <XAxis dataKey="day" stroke="rgba(255,255,255,0.3)" fontSize={12} />
@@ -182,7 +182,7 @@ export function DashboardOverview() {
 
           <ChartCard title="Sales Trend (Last 7 Days)">
             <div className="h-72">
-              <ResponsiveContainer width="100%" height="100%">
+              <ResponsiveContainer width="100%" height="100%" initialDimension={{ width: 1, height: 1 }}>
                 <LineChart data={salesLast7Days}>
                   <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
                   <XAxis dataKey="day" stroke="rgba(255,255,255,0.3)" fontSize={12} />
@@ -296,7 +296,7 @@ export function DashboardOverview() {
         <div className="grid gap-6 xl:grid-cols-2">
           <ChartCard title="Efficiency Gauge">
             <div className="h-72">
-              <ResponsiveContainer width="100%" height="100%">
+              <ResponsiveContainer width="100%" height="100%" initialDimension={{ width: 1, height: 1 }}>
                 <PieChart>
                   <Tooltip />
                   <Pie
@@ -316,7 +316,7 @@ export function DashboardOverview() {
 
           <ChartCard title="Wastage Trend (Last 7 Days)">
             <div className="h-72">
-              <ResponsiveContainer width="100%" height="100%">
+              <ResponsiveContainer width="100%" height="100%" initialDimension={{ width: 1, height: 1 }}>
                 <LineChart data={wastageTrend}>
                   <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
                   <XAxis dataKey="day" stroke="rgba(255,255,255,0.3)" fontSize={12} />
@@ -399,7 +399,7 @@ export function DashboardOverview() {
         <ChartCard title={`Scoped Report Snapshot: ${reportType}`}>
           {chartData.length ? (
             <div className="h-72">
-              <ResponsiveContainer width="100%" height="100%">
+              <ResponsiveContainer width="100%" height="100%" initialDimension={{ width: 1, height: 1 }}>
                 <BarChart data={chartData}>
                   <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
                   <XAxis dataKey={xAxisKey} stroke="rgba(255,255,255,0.3)" fontSize={12} />
@@ -481,7 +481,7 @@ export function DashboardOverview() {
 
         <ChartCard title="Sales Trend (Last 7 Days)">
           <div className="h-72">
-            <ResponsiveContainer width="100%" height="100%">
+            <ResponsiveContainer width="100%" height="100%" initialDimension={{ width: 1, height: 1 }}>
               <LineChart data={salesLast7Days}>
                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
                 <XAxis dataKey="day" stroke="rgba(255,255,255,0.3)" fontSize={12} />
@@ -573,7 +573,7 @@ export function DashboardOverview() {
       <div className="grid gap-6 xl:grid-cols-2">
         <ChartCard title="Payment Breakdown">
           <div className="h-72">
-            <ResponsiveContainer width="100%" height="100%">
+            <ResponsiveContainer width="100%" height="100%" initialDimension={{ width: 1, height: 1 }}>
               <PieChart>
                 <Tooltip />
                 <Pie data={paymentBreakdown} dataKey="total" nameKey="method" outerRadius={105} fill="#F97316" />

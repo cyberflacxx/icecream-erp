@@ -22,14 +22,7 @@ export async function GET(
         id, batch_number, production_date, production_line, shift, status, quality_status,
         planned_quantity, expected_output, actual_output, wastage_quantity, wastage_percentage,
         efficiency_percentage, warehouse_id, recipe_id, start_time, end_time, quality_notes,
-        worker_count, labour_cost, overhead_cost,
-        recipes(id, code, name, finished_item_id, output_unit_id,
-          recipe_items(id, item_id, quantity_required, unit_id, items(code, name), units_of_measure(abbreviation)),
-          recipe_packaging_items(item_id, quantity_required, unit_id)
-        ),
-        warehouses(id, name, branch_id),
-        production_batch_materials(id, item_id, quantity_required, quantity_issued, quantity_actual, variance, unit_id),
-        production_batch_outputs(id, item_id, unit_id, expected_quantity, actual_quantity)
+        worker_count, people_off_count, labour_cost, overhead_cost, material_cost
       `)
       .is('deleted_at', null)
       .eq('id', id)
@@ -37,10 +30,63 @@ export async function GET(
 
     if (error || !batch) return notFound('Production batch not found');
 
-    if (ctx.isBranchScoped && ctx.branchId) {
-      const warehouse = Array.isArray(batch.warehouses) ? batch.warehouses[0] : batch.warehouses as { branch_id: string } | undefined;
-      if (warehouse?.branch_id !== ctx.branchId) return forbidden();
-    }
+    const [warehouseResult, recipeResult, recipeItemsResult, packagingItemsResult, materialsResult, outputsResult, workersResult] = await Promise.all([
+      service
+        .schema('icecream_erp')
+        .from('warehouses')
+        .select('id, name, branch_id')
+        .eq('id', batch.warehouse_id)
+        .maybeSingle(),
+      service
+        .schema('icecream_erp')
+        .from('recipes')
+        .select('id, code, name, finished_item_id, output_unit_id')
+        .eq('id', batch.recipe_id)
+        .maybeSingle(),
+      service
+        .schema('icecream_erp')
+        .from('recipe_items')
+        .select('id, item_id, quantity_required, unit_id, wastage_allowance_percent')
+        .eq('recipe_id', batch.recipe_id),
+      service
+        .schema('icecream_erp')
+        .from('recipe_packaging_items')
+        .select('id, item_id, quantity_required, unit_id, wastage_allowance_percent')
+        .eq('recipe_id', batch.recipe_id),
+      service
+        .schema('icecream_erp')
+        .from('production_batch_materials')
+        .select('id, item_id, quantity_required, quantity_issued, quantity_actual, quantity_remaining, variance, unit_id, unit_cost, total_cost, notes')
+        .eq('batch_id', id),
+      service
+        .schema('icecream_erp')
+        .from('production_batch_outputs')
+        .select('id, item_id, unit_id, expected_quantity, actual_quantity, wastage_quantity, notes')
+        .eq('batch_id', id),
+      service
+        .schema('icecream_erp')
+        .from('production_worker_assignments')
+        .select('id, employee_id, worker_name, attendance_status, is_off_shift, hours_worked, output_quantity, remarks')
+        .eq('batch_id', id),
+    ]);
+
+    if (warehouseResult.error) throw warehouseResult.error;
+    if (recipeResult.error) throw recipeResult.error;
+    if (recipeItemsResult.error) throw recipeItemsResult.error;
+    if (packagingItemsResult.error) throw packagingItemsResult.error;
+    if (materialsResult.error) throw materialsResult.error;
+    if (outputsResult.error) throw outputsResult.error;
+    if (workersResult.error) throw workersResult.error;
+
+    if (ctx.isBranchScoped && ctx.branchId && warehouseResult.data?.branch_id !== ctx.branchId) return forbidden();
+
+    const recipe = recipeResult.data
+      ? {
+          ...recipeResult.data,
+          recipe_items: recipeItemsResult.data ?? [],
+          recipe_packaging_items: packagingItemsResult.data ?? [],
+        }
+      : null;
 
     return NextResponse.json({
       id: batch.id,
@@ -55,8 +101,10 @@ export async function GET(
       expectedOutput: Number(batch.expected_output ?? 0),
       actualOutput: Number(batch.actual_output ?? 0),
       workerCount: Number(batch.worker_count ?? 0),
+      peopleOffCount: Number(batch.people_off_count ?? 0),
       labourCost: Number(batch.labour_cost ?? 0),
       overheadCost: Number(batch.overhead_cost ?? 0),
+      materialCost: Number(batch.material_cost ?? 0),
       wastageQuantity: Number(batch.wastage_quantity ?? 0),
       wastagePercentage: Number(batch.wastage_percentage ?? 0),
       efficiencyPercentage: Number(batch.efficiency_percentage ?? 0),
@@ -64,10 +112,11 @@ export async function GET(
       recipeId: batch.recipe_id,
       startTime: batch.start_time,
       endTime: batch.end_time,
-      recipe: batch.recipes,
-      warehouse: batch.warehouses,
-      materials: batch.production_batch_materials,
-      outputs: batch.production_batch_outputs,
+      recipe,
+      warehouse: warehouseResult.data,
+      materials: materialsResult.data ?? [],
+      outputs: outputsResult.data ?? [],
+      workers: workersResult.data ?? [],
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Internal server error';
@@ -114,8 +163,10 @@ export async function PATCH(
     if (body.expectedOutput !== undefined) updates.expected_output = Number(body.expectedOutput);
     if (body.plannedQuantity !== undefined) updates.planned_quantity = Number(body.plannedQuantity);
     if (body.workerCount !== undefined) updates.worker_count = Number(body.workerCount);
+    if (body.peopleOffCount !== undefined) updates.people_off_count = Number(body.peopleOffCount);
     if (body.labourCost !== undefined) updates.labour_cost = Number(body.labourCost);
     if (body.overheadCost !== undefined) updates.overhead_cost = Number(body.overheadCost);
+    if (body.materialCost !== undefined) updates.material_cost = Number(body.materialCost);
     if (body.warehouseId !== undefined) updates.warehouse_id = body.warehouseId;
 
     const { data, error } = await service

@@ -39,8 +39,14 @@ const movementTypeOptions = [
   value
 }));
 
-function formatLabel(value: string) {
-  return value.replaceAll('_', ' ').toLowerCase().replace(/\b\w/g, (character) => character.toUpperCase());
+function formatLabel(value: string | null | undefined) {
+  const raw = String(value || 'UNKNOWN');
+  return raw.replaceAll('_', ' ').toLowerCase().replace(/\b\w/g, (character) => character.toUpperCase());
+}
+
+function formatMovementDate(value: string | null | undefined) {
+  const date = new Date(value || '');
+  return Number.isNaN(date.getTime()) ? 'Unknown date' : format(date, 'dd MMM yyyy HH:mm');
 }
 
 export default function StockMovementsPage() {
@@ -138,22 +144,22 @@ export default function StockMovementsPage() {
           {
             key: 'date',
             header: 'Date',
-            render: (row) => format(new Date(row.date), 'dd MMM yyyy HH:mm')
+            render: (row) => formatMovementDate(row.date)
           },
           {
             key: 'item',
             header: 'Item',
             render: (row) => (
               <div>
-                <p className="font-medium text-brown">{row.item.name}</p>
-                <p className="text-xs text-muted">{row.item.code}</p>
+                <p className="font-medium text-brown">{row.item?.name ?? 'Unknown item'}</p>
+                <p className="text-xs text-muted">{row.item?.code ?? '--'}</p>
               </div>
             )
           },
           {
             key: 'warehouse',
             header: 'Warehouse',
-            render: (row) => row.warehouse.name
+            render: (row) => row.warehouse?.name ?? 'Unknown warehouse'
           },
           {
             key: 'type',
@@ -173,15 +179,15 @@ export default function StockMovementsPage() {
           {
             key: 'unitCost',
             header: 'Unit Cost',
-            render: (row) => currencyFormatter.format(row.unitCost)
+            render: (row) => currencyFormatter.format(Number(row.unitCost ?? 0))
           },
           {
             key: 'reference',
             header: 'Reference',
             render: (row) => (
               <div>
-                <p className="font-medium text-brown">{formatLabel(row.reference.type)}</p>
-                <p className="text-xs text-muted">{row.reference.id}</p>
+                <p className="font-medium text-brown">{formatLabel(row.reference?.type)}</p>
+                <p className="text-xs text-muted">{row.reference?.id ?? '--'}</p>
               </div>
             )
           },

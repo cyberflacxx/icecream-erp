@@ -186,8 +186,12 @@ async function main() {
   const publicRoutes = expandedRoutes.filter((route) => route === '/' || route.startsWith('/auth'));
   const protectedRoutes = expandedRoutes.filter((route) => !publicRoutes.includes(route));
 
-  const adminCookie = await login(baseUrl, 'AQI-20260004', process.env.DEMO_PASSWORD || 'Demo@2026!');
-  const branchCookie = await login(baseUrl, 'AQI-20260005', process.env.DEMO_PASSWORD || 'Demo@2026!');
+  const demoPassword = process.env.DEMO_PASSWORD || 'Demo@2026!';
+  const adminWorkId = process.env.SMOKE_ADMIN_WORK_ID || 'AQI-20261001';
+  const branchWorkId = process.env.SMOKE_BRANCH_WORK_ID || 'AQI-20261007';
+
+  const adminCookie = await login(baseUrl, adminWorkId, demoPassword);
+  const branchCookie = await login(baseUrl, branchWorkId, demoPassword);
 
   const publicResults = await Promise.all(publicRoutes.map((route) => probe(baseUrl, route, null)));
   const adminResults = await Promise.all(protectedRoutes.map((route) => probe(baseUrl, route, adminCookie)));

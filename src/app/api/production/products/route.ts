@@ -79,6 +79,7 @@ export async function POST(request: NextRequest) {
         is_active: true,
         item_type: 'FINISHED_GOOD',
         name: body.name.trim(),
+        organization_id: ctx.organizationId,
         unit_cost: body.unitCost ?? 0,
         unit_of_measure_id: body.unitOfMeasureId,
       })

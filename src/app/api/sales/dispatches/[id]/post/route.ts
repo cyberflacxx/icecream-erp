@@ -19,7 +19,7 @@ export async function POST(
     const service = salesService();
     const { data: dispatch, error: dispatchError } = await service
       .from('sales_dispatch_notes')
-      .select('id, dispatch_number, invoice_id, warehouse_id, status, sales_dispatch_note_items(id, item_id, quantity_dispatched, quantity_invoiced, invoice_item_id), invoices(status, approved_at)')
+      .select('id, dispatch_note_number, invoice_id, warehouse_id, status, sales_dispatch_note_items(id, item_id, quantity_dispatched, quantity_invoiced, invoice_item_id), invoices(status, approved_at)')
       .eq('id', id)
       .single();
     if (dispatchError) throw dispatchError;
@@ -45,7 +45,7 @@ export async function POST(
 
     const { data: postingLog, error: postingLogError } = await workflow.from('posting_logs').insert({
       document_id: id,
-      document_reference: String(dispatch.dispatch_number ?? id),
+      document_reference: String(dispatch.dispatch_note_number ?? id),
       document_type: 'sales_dispatch',
       module_name: 'sales',
       organization_id: ctx.organizationId,
@@ -141,7 +141,7 @@ export async function POST(
         action_at: new Date().toISOString(),
         actor_id: ctx.userId,
         document_id: id,
-        document_reference: String(dispatch.dispatch_number ?? id),
+        document_reference: String(dispatch.dispatch_note_number ?? id),
         document_type: 'sales_dispatch',
         from_status: 'APPROVED',
         module_name: 'sales',
@@ -155,9 +155,9 @@ export async function POST(
         documentId: id,
         documentType: 'sales_dispatch',
         eventType: 'DISPATCH_POSTED',
-        message: `Dispatch ${String(dispatch.dispatch_number ?? id)} was posted successfully.`,
+        message: `Dispatch ${String(dispatch.dispatch_note_number ?? id)} was posted successfully.`,
         metadata: {
-          dispatchNumber: String(dispatch.dispatch_number ?? id),
+          dispatchNumber: String(dispatch.dispatch_note_number ?? id),
           invoiceId: String(dispatch.invoice_id ?? ''),
         },
         moduleName: 'dispatch',

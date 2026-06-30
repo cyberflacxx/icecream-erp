@@ -20,13 +20,8 @@ export async function POST(
       .schema('icecream_erp')
       .from('production_batches')
       .select(`
-        id, batch_number, status, planned_quantity, warehouse_id,
-        warehouses(id, branch_id),
-        recipes(
-          id, expected_output_quantity,
-          recipe_items(item_id, quantity_required, unit_id, items(code, name), units_of_measure(abbreviation)),
-          recipe_packaging_items(item_id, quantity_required, unit_id)
-        )
+        id, batch_number, status, planned_quantity, warehouse_id, recipe_id,
+        warehouses(id, branch_id)
       `)
       .is('deleted_at', null)
       .eq('id', id)
@@ -43,53 +38,59 @@ export async function POST(
       return badRequest(`Cannot reserve materials: batch must be in MATERIALS_APPROVED status (current: ${batch.status})`);
     }
 
-    const recipe = firstRelation(batch.recipes as {
-      expected_output_quantity: number;
-      recipe_items: Array<{ item_id: string; quantity_required: number; unit_id: string; items: { code: string; name: string } | Array<{ code: string; name: string }>; units_of_measure: { abbreviation: string } | Array<{ abbreviation: string }> }>;
-      recipe_packaging_items: Array<{ item_id: string; quantity_required: number; unit_id: string }>;
-    } | Array<{
-      expected_output_quantity: number;
-      recipe_items: Array<{ item_id: string; quantity_required: number; unit_id: string; items: { code: string; name: string } | Array<{ code: string; name: string }>; units_of_measure: { abbreviation: string } | Array<{ abbreviation: string }> }>;
-      recipe_packaging_items: Array<{ item_id: string; quantity_required: number; unit_id: string }>;
-    }> | null);
+    const { data: recipe, error: recipeError } = await service
+      .schema('icecream_erp')
+      .from('recipes')
+      .select('id, expected_output_quantity')
+      .eq('id', batch.recipe_id)
+      .maybeSingle();
+    if (recipeError) throw recipeError;
+    if (!recipe) return badRequest('Cannot reserve materials: batch has no recipe attached');
 
-    if (!recipe) {
-      return badRequest('Cannot reserve materials: batch has no recipe attached');
-    }
+    const [recipeItemsResult, packagingItemsResult] = await Promise.all([
+      service
+        .schema('icecream_erp')
+        .from('recipe_items')
+        .select('item_id, quantity_required, unit_id')
+        .eq('recipe_id', batch.recipe_id),
+      service
+        .schema('icecream_erp')
+        .from('recipe_packaging_items')
+        .select('item_id, quantity_required, unit_id')
+        .eq('recipe_id', batch.recipe_id),
+    ]);
+    if (recipeItemsResult.error) throw recipeItemsResult.error;
+    if (packagingItemsResult.error) throw packagingItemsResult.error;
 
     const baseOutput = Number(recipe.expected_output_quantity ?? 1);
     const scaleFactor = baseOutput > 0 ? Number(batch.planned_quantity) / baseOutput : 1;
 
-    // Fetch packaging item details
-    const packagingItemIds = [...new Set(recipe.recipe_packaging_items.map((pi) => pi.item_id))];
-    const { data: packagingItemsData } = await service
-      .schema('icecream_erp')
-      .from('items')
-      .select('id, code, name')
-      .in('id', packagingItemIds);
-    const packagingUnitIds = [...new Set(recipe.recipe_packaging_items.map((pi) => pi.unit_id))];
-    const { data: packagingUnitsData } = await service
-      .schema('icecream_erp')
-      .from('units_of_measure')
-      .select('id, abbreviation')
-      .in('id', packagingUnitIds);
+    const recipeItems = recipeItemsResult.data ?? [];
+    const packagingItems = packagingItemsResult.data ?? [];
+    const itemIds = [...new Set([...recipeItems, ...packagingItems].map((row) => row.item_id).filter(Boolean))];
+    const unitIds = [...new Set([...recipeItems, ...packagingItems].map((row) => row.unit_id).filter(Boolean))];
+
+    const [{ data: packagingItemsData }, { data: packagingUnitsData }] = await Promise.all([
+      itemIds.length
+        ? service.schema('icecream_erp').from('items').select('id, code, name').in('id', itemIds)
+        : Promise.resolve({ data: [] }),
+      unitIds.length
+        ? service.schema('icecream_erp').from('units_of_measure').select('id, abbreviation').in('id', unitIds)
+        : Promise.resolve({ data: [] }),
+    ]);
     const pkgItemMap = new Map((packagingItemsData ?? []).map((i: { id: string; code: string; name: string }) => [i.id, i]));
     const pkgUnitMap = new Map((packagingUnitsData ?? []).map((u: { id: string; abbreviation: string }) => [u.id, u]));
 
     const ingredients = [
-      ...recipe.recipe_items.map((ri) => {
-        const item = firstRelation(ri.items);
-        const unit = firstRelation(ri.units_of_measure);
-        return {
-          itemId: ri.item_id,
-          itemName: item?.name ?? 'Unknown',
-          itemCode: item?.code ?? 'N/A',
-          unitId: ri.unit_id,
-          unitAbbreviation: unit?.abbreviation ?? '-',
-          quantityRequired: Number(ri.quantity_required) * scaleFactor,
-        };
-      }),
-      ...recipe.recipe_packaging_items.map((pi) => ({
+      ...recipeItems.map((ri) => ({
+        itemId: ri.item_id,
+        itemName: pkgItemMap.get(ri.item_id)?.name ?? 'Unknown',
+        itemCode: pkgItemMap.get(ri.item_id)?.code ?? 'N/A',
+        unitId: ri.unit_id,
+        unitAbbreviation: pkgUnitMap.get(ri.unit_id)?.abbreviation ?? '-',
+        quantityRequired: Number(ri.quantity_required) * scaleFactor,
+      })),
+      ...packagingItems.map((pi) => ({
         itemId: pi.item_id,
         itemName: pkgItemMap.get(pi.item_id)?.name ?? 'Unknown',
         itemCode: pkgItemMap.get(pi.item_id)?.code ?? 'N/A',

@@ -11,6 +11,8 @@ export default function LabourCostingPage() {
         { key: 'department', label: 'Department' },
         { key: 'shift', label: 'Shift' },
         { key: 'hoursWorked', label: 'Hours' },
+        { key: 'rate', label: 'Pay Rate' },
+        { key: 'rateType', label: 'Rate Type' },
         { key: 'labourCost', label: 'Labour Cost' },
         { key: 'overheadAllocation', label: 'Overhead' },
         { key: 'costPerUnitImpact', label: 'Cost Per Unit' },

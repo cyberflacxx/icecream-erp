@@ -32,7 +32,7 @@ export async function fetchFinishedGoodsStockMap(warehouseId?: string | null, br
   const service = salesService();
   let query = service
     .from('stock_balances')
-    .select('item_id, quantity_available, warehouses(branch_id), items(item_type)')
+    .select('item_id, quantity_available, warehouse_id')
     .gt('quantity_available', 0);
 
   if (warehouseId) query = query.eq('warehouse_id', warehouseId);
@@ -40,13 +40,29 @@ export async function fetchFinishedGoodsStockMap(warehouseId?: string | null, br
   const { data, error } = await query;
   if (error) throw error;
 
+  const { data: itemRows } = await service.from('items').select('*');
+  const itemTypeById = new Map(
+    (itemRows ?? []).map((item) => [
+      String(item.id),
+      String((item as Record<string, unknown>).item_type ?? (item as Record<string, unknown>).type ?? ''),
+    ]),
+  );
+
+  const branchByWarehouseId = new Map<string, string | null>();
+  if (branchId) {
+    const { data: warehouseRows } = await service.from('warehouses').select('id, branch_id');
+    for (const warehouse of warehouseRows ?? []) {
+      branchByWarehouseId.set(String(warehouse.id), warehouse.branch_id ? String(warehouse.branch_id) : null);
+    }
+  }
+
   const map = new Map<string, number>();
   for (const row of data ?? []) {
-    const item = Array.isArray(row.items) ? row.items[0] : row.items;
-    const warehouse = Array.isArray(row.warehouses) ? row.warehouses[0] : row.warehouses;
-    if (String(item?.item_type ?? '') !== 'FINISHED_GOOD') continue;
-    if (branchId && warehouse?.branch_id && warehouse.branch_id !== branchId) continue;
-    map.set(String(row.item_id), Number(row.quantity_available ?? 0));
+    const itemId = String(row.item_id);
+    const itemType = itemTypeById.get(itemId);
+    if (itemType && itemType !== 'FINISHED_GOOD') continue;
+    if (branchId && branchByWarehouseId.get(String(row.warehouse_id)) && branchByWarehouseId.get(String(row.warehouse_id)) !== branchId) continue;
+    map.set(itemId, (map.get(itemId) ?? 0) + Number(row.quantity_available ?? 0));
   }
 
   return map;

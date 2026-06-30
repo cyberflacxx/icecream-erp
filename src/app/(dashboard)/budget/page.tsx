@@ -68,15 +68,19 @@ export default function BudgetPage() {
       <div className="rounded-2xl border border-white/8 bg-white/5 p-5">
         <h3 className="mb-4 font-display font-semibold text-white">Budget vs Actual — By Department</h3>
         <div className="h-72">
-          <ResponsiveContainer width="100%" height="100%">
+          <ResponsiveContainer width="100%" height="100%" initialDimension={{ width: 1, height: 1 }}>
             <BarChart data={chartData} barGap={4}>
               <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
               <XAxis dataKey="name" stroke="rgba(255,255,255,0.3)" fontSize={11} />
               <YAxis stroke="rgba(255,255,255,0.3)" fontSize={11} tickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`} />
               <Tooltip
                 contentStyle={{ background: '#1a0700', border: '1px solid rgba(249,115,22,0.2)', borderRadius: '12px', color: '#fff' }}
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                formatter={((v: number) => [`$${v.toLocaleString()}`, '']) as any}
+                formatter={(value: number | string | readonly (number | string)[] | undefined) => {
+                  const rawValue = Array.isArray(value) ? value[0] : value;
+                  const numericValue = Number(rawValue);
+                  const displayValue = Number.isFinite(numericValue) ? numericValue.toLocaleString() : String(rawValue ?? '');
+                  return [`$${displayValue}`, ''];
+                }}
               />
               <Bar dataKey="budget" fill="rgba(255,255,255,0.08)" radius={[4, 4, 0, 0]} name="Budget" />
               <Bar dataKey="actual" fill="#f97316" radius={[4, 4, 0, 0]} name="Actual" />

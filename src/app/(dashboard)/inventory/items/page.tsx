@@ -210,32 +210,32 @@ export default function InventoryItemsPage() {
           {
             key: 'itemType',
             header: 'Type',
-            render: (row) => formatItemType(row.itemType)
+            render: (row) => formatItemType(row.itemType ?? 'UNKNOWN')
           },
           {
             key: 'category',
             header: 'Category',
-            render: (row) => row.category.name
+            render: (row) => row.category?.name ?? 'Uncategorized'
           },
           {
             key: 'unitOfMeasure',
             header: 'UOM',
-            render: (row) => row.unitOfMeasure.abbreviation
+            render: (row) => row.unitOfMeasure?.abbreviation ?? '--'
           },
           {
             key: 'unitCost',
             header: 'Unit Cost',
-            render: (row) => currencyFormatter.format(row.unitCost)
+            render: (row) => currencyFormatter.format(Number(row.unitCost ?? 0))
           },
           {
             key: 'reorderLevel',
             header: 'Reorder Level',
-            render: (row) => numberFormatter.format(row.reorderLevel)
+            render: (row) => numberFormatter.format(Number(row.reorderLevel ?? 0))
           },
           {
             key: 'stock',
             header: 'Stock',
-            render: (row) => numberFormatter.format(row.stock)
+            render: (row) => numberFormatter.format(Number(row.stock ?? 0))
           },
           {
             key: 'status',
@@ -349,14 +349,13 @@ export default function InventoryItemsPage() {
             <label className="space-y-2 text-sm text-muted">
               <span>Category</span>
               <select
-                required
                 value={formState.categoryId}
                 onChange={(event) =>
                   setFormState((current) => ({ ...current, categoryId: event.target.value }))
                 }
                 className="surface-input-soft"
               >
-                <option value="">Select category</option>
+                <option value="">Uncategorized</option>
                 {metaQuery.data?.categories.map((category) => (
                   <option key={category.id} value={category.id}>
                     {category.name}

@@ -20,10 +20,7 @@ export async function GET() {
     const service = productionService();
     const { data, error } = await service
       .from('recipes')
-      .select(`
-        id, code, name, version, status, batch_size, expected_yield,
-        finished_item_id, batch_unit_id, notes
-      `)
+      .select('*')
       .order('updated_at', { ascending: false });
 
     if (error) throw error;
@@ -49,7 +46,9 @@ export async function POST(request: NextRequest) {
       instructions?: string;
       name: string;
       outputUnitId: string;
+      packagingItems?: RecipeIngredientInput[];
       packagingRequirement?: string;
+      productionCategory?: string;
       version?: number;
     };
 
@@ -81,8 +80,10 @@ export async function POST(request: NextRequest) {
         flavour_id: body.flavourId ?? null,
         instructions: body.instructions ?? null,
         name: body.name.trim(),
+        organization_id: ctx.organizationId,
         output_unit_id: body.outputUnitId,
         packaging_requirement: body.packagingRequirement ?? null,
+        production_category: body.productionCategory ?? 'ICE_CREAM_MAKING',
         status: 'DRAFT',
         version: body.version ?? 1,
       })
@@ -93,6 +94,7 @@ export async function POST(request: NextRequest) {
 
     const ingredientRows = body.ingredients.map((ingredient) => ({
       item_id: ingredient.itemId,
+      production_category: 'ICE_CREAM_MAKING',
       quantity_required: ingredient.quantityRequired,
       recipe_id: recipe.id,
       unit_id: ingredient.unitId,
@@ -102,9 +104,22 @@ export async function POST(request: NextRequest) {
     const { error: ingredientError } = await service.from('recipe_items').insert(ingredientRows);
     if (ingredientError) throw ingredientError;
 
+    const packagingRows = (body.packagingItems ?? []).map((item) => ({
+      item_id: item.itemId,
+      quantity_required: item.quantityRequired,
+      recipe_id: recipe.id,
+      unit_id: item.unitId,
+      wastage_allowance_percent: item.wastageAllowancePercent ?? 0,
+    }));
+    if (packagingRows.length > 0) {
+      const { error: packagingError } = await service.from('recipe_packaging_items').insert(packagingRows);
+      if (packagingError) throw packagingError;
+    }
+
     await writeProductionAuditLog('PRODUCTION_RECIPE_CREATED', String(recipe.id), ctx.userId, {
       code,
       ingredientCount: ingredientRows.length,
+      packagingCount: packagingRows.length,
       name: recipe.name,
     }, 'recipe');
 

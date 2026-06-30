@@ -47,7 +47,7 @@ export async function GET(request: NextRequest) {
       .from('production_batches')
       .select(`
         id, batch_number, production_date, shift, production_line, status, quality_status,
-        planned_quantity, expected_output, actual_output, warehouse_id, recipe_id, worker_count, labour_cost, overhead_cost,
+        planned_quantity, expected_output, actual_output, warehouse_id, recipe_id, worker_count, people_off_count, material_cost, labour_cost, overhead_cost,
         recipes!inner(id, code, name),
         warehouses!inner(id, name)
       `, { count: 'exact' })
@@ -111,6 +111,8 @@ export async function GET(request: NextRequest) {
           expectedOutput: Number(row.planned_qty ?? 0),
           actualOutput: Number(row.actual_qty ?? 0),
           workerCount: 0,
+          peopleOffCount: 0,
+          materialCost: Number(row.total_material_cost ?? 0),
           labourCost: Number(row.total_labour_cost ?? 0),
           overheadCost: Number(row.total_overhead_cost ?? 0),
           recipe: row.recipes,
@@ -133,6 +135,8 @@ export async function GET(request: NextRequest) {
         expectedOutput: Number(row.expected_output ?? 0),
         actualOutput: Number(row.actual_output ?? 0),
         workerCount: Number(row.worker_count ?? 0),
+        peopleOffCount: Number(row.people_off_count ?? 0),
+        materialCost: Number(row.material_cost ?? 0),
         labourCost: Number(row.labour_cost ?? 0),
         overheadCost: Number(row.overhead_cost ?? 0),
         recipe: row.recipes,
@@ -160,11 +164,14 @@ export async function POST(request: NextRequest) {
       plannedQuantity: number;
       expectedOutput: number;
       productionDate: string;
+      productionCategory?: string;
       productionLine?: string;
       shift?: string;
+      workerCount?: number;
+      peopleOffCount?: number;
     };
 
-    const { recipeId, warehouseId, plannedQuantity, expectedOutput, productionDate, productionLine, shift } = body;
+    const { recipeId, warehouseId, plannedQuantity, expectedOutput, productionDate, productionCategory, productionLine, shift } = body;
     if (!recipeId || !warehouseId || !plannedQuantity || !expectedOutput || !productionDate) {
       return badRequest('recipeId, warehouseId, plannedQuantity, expectedOutput, productionDate are required');
     }
@@ -211,12 +218,14 @@ export async function POST(request: NextRequest) {
         planned_quantity: plannedQuantity,
         expected_output: expectedOutput,
         production_date: `${productionDate}T00:00:00.000Z`,
+        production_category: productionCategory ?? 'ICE_CREAM_MAKING',
         production_line: productionLine ?? null,
         shift: shift ?? null,
         status: 'PLANNED',
         quality_status: 'PENDING',
         actual_output: 0,
-        worker_count: 0,
+        worker_count: Number(body.workerCount ?? 0),
+        people_off_count: Number(body.peopleOffCount ?? 0),
         labour_cost: 0,
         overhead_cost: 0,
         wastage_quantity: 0,
@@ -251,6 +260,7 @@ export async function POST(request: NextRequest) {
           planned_qty: plannedQuantity,
           status: 'PLANNED',
           notes: productionLine ?? null,
+          worker_count: Number(body.workerCount ?? 0),
         })
         .select()
         .single();

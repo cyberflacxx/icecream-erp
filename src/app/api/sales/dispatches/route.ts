@@ -44,7 +44,7 @@ export async function POST(request: NextRequest) {
       .eq('id', body.invoiceId)
       .single();
     if (invoiceError) throw invoiceError;
-    if (!['SENT', 'PARTIAL_PAID', 'PAID'].includes(String(invoice.status).toUpperCase())) {
+    if (!['APPROVED', 'SENT', 'PARTIAL_PAID', 'PAID'].includes(String(invoice.status).toUpperCase())) {
       return badRequest('Dispatch requires an approved invoice.');
     }
 

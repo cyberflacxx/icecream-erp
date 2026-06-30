@@ -7,8 +7,12 @@ export const scopedReportTypes = [
   'low_stock',
   'raw_material_usage',
   'supplier_purchase',
+  'trial_balance',
   'wastage',
-  'worker_productivity'
+  'worker_productivity',
+  'income_statement',
+  'financial_position',
+  'financial_ratios'
 ] as const;
 
 export type ScopedReportType = (typeof scopedReportTypes)[number];
@@ -77,7 +81,16 @@ const reportsByRole: Record<ScopedRoleKey, ScopedReportType[]> = {
     'low_stock',
     'expiry_alert'
   ],
-  accountant: ['branch_sales', 'branch_shift_close_summary', 'inventory_valuation', 'supplier_purchase'],
+  accountant: [
+    'branch_sales',
+    'branch_shift_close_summary',
+    'inventory_valuation',
+    'supplier_purchase',
+    'trial_balance',
+    'income_statement',
+    'financial_position',
+    'financial_ratios'
+  ],
   auditor: [
     'daily_production',
     'wastage',
@@ -86,8 +99,12 @@ const reportsByRole: Record<ScopedRoleKey, ScopedReportType[]> = {
     'low_stock',
     'expiry_alert',
     'supplier_purchase',
+    'trial_balance',
     'worker_productivity',
-    'branch_shift_close_summary'
+    'branch_shift_close_summary',
+    'income_statement',
+    'financial_position',
+    'financial_ratios'
   ],
   unknown: []
 };

@@ -135,7 +135,7 @@ export default function FinancePage() {
       <div className="grid gap-6 xl:grid-cols-2">
         <ChartCard title="Cashflow Last 7 Days">
           <div className="h-72">
-            <ResponsiveContainer width="100%" height="100%">
+            <ResponsiveContainer width="100%" height="100%" initialDimension={{ width: 1, height: 1 }}>
               <LineChart data={charts.cashflowLast7Days}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#F3D7B6" />
                 <XAxis dataKey="day" stroke="#6B4A3A" fontSize={12} />
@@ -150,7 +150,7 @@ export default function FinancePage() {
 
         <ChartCard title="Payment Method Breakdown">
           <div className="h-72">
-            <ResponsiveContainer width="100%" height="100%">
+            <ResponsiveContainer width="100%" height="100%" initialDimension={{ width: 1, height: 1 }}>
               <BarChart data={charts.paymentMethodBreakdown}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#F3D7B6" />
                 <XAxis dataKey="method" stroke="#6B4A3A" fontSize={12} />

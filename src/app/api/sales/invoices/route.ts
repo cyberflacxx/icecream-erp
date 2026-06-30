@@ -144,6 +144,7 @@ export async function POST(request: NextRequest) {
   const body = await request.json() as {
     customerId: string;
     salesOrderId?: string;
+    warehouseId?: string;
     invoiceDate?: string;
     dueDate?: string;
     notes?: string;
@@ -181,21 +182,36 @@ export async function POST(request: NextRequest) {
     discount_percent: number | null;
   }> = [];
   let branchId: string | null = null;
+  let warehouseId: string | null = body.warehouseId ?? null;
 
   // If linked to a sales order, pull its items
   if (body.salesOrderId) {
-    const { data: order } = await service
+    const primaryOrderResult = await service
       .schema('icecream_erp')
       .from('sales_orders')
-      .select(`id, branch_id, sales_order_items(item_id, quantity_ordered, unit_price, discount_percent)`)
+      .select(`id, branch_id, warehouse_id, sales_order_items(item_id, quantity_ordered, unit_price, discount_percent)`)
       .eq('id', body.salesOrderId)
       .is('deleted_at', null)
       .single();
+
+    let order = primaryOrderResult.data as Record<string, unknown> | null;
+    if (primaryOrderResult.error && isMissingColumnError(primaryOrderResult.error, 'sales_order_items', 'quantity_ordered')) {
+      const fallbackOrderResult = await service
+        .schema('icecream_erp')
+        .from('sales_orders')
+        .select(`id, branch_id, warehouse_id, sales_order_items(item_id, quantity, unit_price, discount_pct)`)
+        .eq('id', body.salesOrderId)
+        .is('deleted_at', null)
+        .single();
+
+      order = fallbackOrderResult.data as Record<string, unknown> | null;
+    }
 
     if (!order) return NextResponse.json({ error: 'Sales order not found.' }, { status: 404 });
 
     const ord = order as Record<string, unknown>;
     branchId = (ord.branch_id as string) ?? null;
+    warehouseId = (ord.warehouse_id as string) ?? warehouseId;
 
     if (ctx.isBranchScoped && ctx.branchId && branchId && ctx.branchId !== branchId) {
       return NextResponse.json({ error: 'This role is limited to its assigned branch.' }, { status: 403 });
@@ -203,9 +219,13 @@ export async function POST(request: NextRequest) {
 
     orderItems = ((ord.sales_order_items as Array<Record<string, unknown>>) ?? []).map((i) => ({
       item_id: String(i.item_id),
-      quantity_ordered: Number(i.quantity_ordered),
+      quantity_ordered: Number(i.quantity_ordered ?? i.quantity ?? 0),
       unit_price: Number(i.unit_price),
-      discount_percent: i.discount_percent !== null ? Number(i.discount_percent) : null,
+      discount_percent: i.discount_percent !== null && i.discount_percent !== undefined
+        ? Number(i.discount_percent)
+        : i.discount_pct !== null && i.discount_pct !== undefined
+          ? Number(i.discount_pct)
+          : null,
     }));
   }
 
@@ -256,10 +276,7 @@ export async function POST(request: NextRequest) {
 
   const invoiceNumber = `INV-${String((count ?? 0) + 1).padStart(5, '0')}`;
 
-    const primaryInsert = await service
-      .schema('icecream_erp')
-      .from('invoices')
-      .insert({
+    const invoicePayload: Record<string, unknown> = {
       invoice_number: invoiceNumber,
       customer_id: body.customerId,
       sales_order_id: body.salesOrderId ?? null,
@@ -272,9 +289,15 @@ export async function POST(request: NextRequest) {
       total,
       amount_paid: 0,
       balance_due: total,
-        notes: body.notes ?? null,
-        created_by: ctx.userId,
-      })
+      notes: body.notes ?? null,
+      created_by: ctx.userId,
+    };
+    if (warehouseId) invoicePayload.warehouse_id = warehouseId;
+
+    const primaryInsert = await service
+      .schema('icecream_erp')
+      .from('invoices')
+      .insert(invoicePayload)
       .select()
       .single();
     let invoice = primaryInsert.data;
@@ -284,6 +307,7 @@ export async function POST(request: NextRequest) {
       iErr &&
       (
         isMissingColumnError(iErr, 'invoices', 'sales_order_id') ||
+        isMissingColumnError(iErr, 'invoices', 'warehouse_id') ||
         isMissingColumnError(iErr, 'invoices', 'discount_amount') ||
         isMissingColumnError(iErr, 'invoices', 'total') ||
         isMissingColumnError(iErr, 'invoices', 'amount_paid')

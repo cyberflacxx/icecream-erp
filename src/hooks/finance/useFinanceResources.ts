@@ -1,6 +1,6 @@
 'use client';
 
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { useAppAuth } from '@/hooks/useAppAuth';
 import { apiFetch } from '@/lib/api';
@@ -16,6 +16,37 @@ function useFinanceQuery<T>(key: string, path: string) {
       return apiFetch<T>(path, { token });
     },
     enabled: isLoaded && Boolean(isSignedIn),
+  });
+}
+
+export function useFinanceMutation<TData = unknown, TVariables = Record<string, unknown>>(
+  path: string | ((variables: TVariables) => string),
+  options: {
+    invalidateKey?: string;
+    method?: 'POST' | 'PATCH' | 'DELETE';
+  } = {},
+) {
+  const { getToken } = useAppAuth();
+  const queryClient = useQueryClient();
+  const method = options.method ?? 'POST';
+
+  return useMutation<TData, Error, TVariables>({
+    mutationFn: async (variables) => {
+      const token = await getToken();
+      const resolvedPath = typeof path === 'function' ? path(variables) : path;
+
+      return apiFetch<TData>(resolvedPath, {
+        body: method === 'DELETE' ? undefined : JSON.stringify(variables),
+        method,
+        token,
+      });
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['finance'] });
+      if (options.invalidateKey) {
+        await queryClient.invalidateQueries({ queryKey: ['finance', options.invalidateKey] });
+      }
+    },
   });
 }
 
@@ -70,6 +101,27 @@ export function useAccountsPayable() {
   return useFinanceQuery<Array<Record<string, unknown>>>('accounts-payable', '/api/finance/accounts-payable');
 }
 
-export function useFinanceReport(path: string) {
-  return useFinanceQuery<Array<Record<string, unknown>>>(`report:${path}`, path);
+export function useBankTransactions() {
+  return useFinanceQuery<Array<Record<string, unknown>>>('bank-transactions', API_ROUTES.FINANCE.BANK_TRANSACTIONS);
+}
+
+export function useCashTransactions() {
+  return useFinanceQuery<Array<Record<string, unknown>>>('cash-transactions', API_ROUTES.FINANCE.CASH);
+}
+
+export function useFinanceMeta() {
+  return useFinanceQuery<{
+    accounts: Array<Record<string, unknown>>;
+    bankAccounts: Array<Record<string, unknown>>;
+    branches: Array<Record<string, unknown>>;
+    cashAccounts: Array<Record<string, unknown>>;
+  }>('meta', API_ROUTES.FINANCE.META);
+}
+
+export function useFinanceTransactions() {
+  return useFinanceQuery<Array<Record<string, unknown>>>('transactions', API_ROUTES.FINANCE.TRANSACTIONS);
+}
+
+export function useFinanceReport<T = Array<Record<string, unknown>>>(path: string) {
+  return useFinanceQuery<T>(`report:${path}`, path);
 }

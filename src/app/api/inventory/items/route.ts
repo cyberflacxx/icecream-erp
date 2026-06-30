@@ -15,16 +15,34 @@ function normalizeItem(row: Record<string, unknown>, categories = new Map<string
   const unitId = String(row.unit_of_measure_id ?? row.unit_id ?? '');
   const category = categoryId ? categories.get(categoryId) ?? null : null;
   const unit = unitId ? units.get(unitId) ?? null : null;
+  const itemType = String(row.item_type ?? row.type ?? 'RAW_MATERIAL');
+  const reorderLevel = Number(row.reorder_level ?? 0);
+  const reorderQuantity = Number(row.reorder_quantity ?? row.reorder_qty ?? 0);
+  const sellingPrice = Number(row.selling_price ?? 0);
+  const unitCost = Number(row.unit_cost ?? row.standard_cost ?? 0);
 
   return {
-    ...row,
-    item_type: row.item_type ?? row.type,
-    reorder_quantity: row.reorder_quantity ?? row.reorder_qty,
-    track_expiry: row.track_expiry ?? Boolean(row.shelf_life_days),
-    unit_cost: row.unit_cost ?? row.standard_cost,
-    unit_of_measure_id: unitId || null,
-    item_categories: category,
-    units_of_measure: unit,
+    code: String(row.code ?? ''),
+    category: {
+      id: categoryId,
+      name: String(category?.name ?? 'Uncategorized'),
+    },
+    description: row.description ? String(row.description) : null,
+    id: String(row.id ?? ''),
+    isActive: row.is_active !== false,
+    itemType,
+    name: String(row.name ?? row.code ?? 'Unnamed item'),
+    reorderLevel: Number.isFinite(reorderLevel) ? reorderLevel : 0,
+    reorderQuantity: Number.isFinite(reorderQuantity) ? reorderQuantity : 0,
+    sellingPrice: Number.isFinite(sellingPrice) ? sellingPrice : 0,
+    stock: Number(row.stock ?? row.quantity_on_hand ?? 0) || 0,
+    trackExpiry: Boolean(row.track_expiry ?? row.shelf_life_days),
+    unitCost: Number.isFinite(unitCost) ? unitCost : 0,
+    unitOfMeasure: {
+      abbreviation: String(unit?.abbreviation ?? '--'),
+      id: unitId,
+      name: String(unit?.name ?? 'Unit'),
+    },
   };
 }
 
@@ -124,10 +142,13 @@ export async function POST(request: NextRequest) {
     return badRequest('code, name, unitOfMeasureId, and itemType are required.');
   }
 
+  let categoryRecord: Record<string, unknown> | null = null;
+  let unitRecord: Record<string, unknown> | null = null;
+
   if (!categoryId) {
     const existing = await service
       .from('item_categories')
-      .select('id')
+      .select('id, name')
       .eq('organization_id', ctx.organizationId)
       .ilike('name', 'Uncategorized')
       .maybeSingle();
@@ -135,32 +156,38 @@ export async function POST(request: NextRequest) {
 
     if (existing.data?.id) {
       categoryId = existing.data.id;
+      categoryRecord = existing.data as Record<string, unknown>;
     } else {
       const created = await service
         .from('item_categories')
         .insert({ organization_id: ctx.organizationId, name: 'Uncategorized', description: 'Default category for uncategorized inventory items.' })
-        .select('id')
+        .select('id, name')
         .single();
       if (created.error || !created.data) return serverError(created.error?.message ?? 'Failed to create default item category.');
       categoryId = created.data.id;
+      categoryRecord = created.data as Record<string, unknown>;
     }
   } else {
-    const { data: category } = await service
+    const { data: category, error: categoryError } = await service
       .from('item_categories')
-      .select('id')
+      .select('id, name')
       .eq('id', categoryId)
       .eq('organization_id', ctx.organizationId)
       .single();
+    if (categoryError) return serverError(categoryError.message);
     if (!category) return badRequest('Item category not found.');
+    categoryRecord = category as Record<string, unknown>;
   }
 
   // Verify unit of measure exists
-  const { data: unit } = await service
+  const { data: unit, error: unitError } = await service
     .from('units_of_measure')
-    .select('id')
+    .select('id, name, abbreviation')
     .eq('id', unitOfMeasureId)
     .single();
+  if (unitError) return serverError(unitError.message);
   if (!unit) return badRequest('Unit of measure not found.');
+  unitRecord = unit as Record<string, unknown>;
 
   const { data, error } = await service
     .from('items')
@@ -184,5 +211,10 @@ export async function POST(request: NextRequest) {
 
   if (error) return serverError(error.message);
 
-  return NextResponse.json(normalizeItem(data as Record<string, unknown>), { status: 201 });
+  const categories = new Map<string, Record<string, unknown>>();
+  const units = new Map<string, Record<string, unknown>>();
+  if (categoryId && categoryRecord) categories.set(categoryId, categoryRecord);
+  if (unitOfMeasureId && unitRecord) units.set(unitOfMeasureId, unitRecord);
+
+  return NextResponse.json(normalizeItem(data as Record<string, unknown>, categories, units), { status: 201 });
 }

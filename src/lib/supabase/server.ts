@@ -2,6 +2,8 @@ import { createServerClient } from '@supabase/ssr';
 import { createClient as createSupabaseClient } from '@supabase/supabase-js';
 import { cookies } from 'next/headers';
 
+import { createSupabaseFetch } from '@/lib/supabase/fetch';
+
 export async function createClient() {
   const cookieStore = await cookies();
 
@@ -10,6 +12,7 @@ export async function createClient() {
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
       db: { schema: 'icecream_erp' },
+      global: { fetch: createSupabaseFetch() },
       cookies: {
         getAll() {
           return cookieStore.getAll();
@@ -35,6 +38,7 @@ export function createServiceRoleClient() {
     {
       db: { schema: 'icecream_erp' },
       auth: { persistSession: false, autoRefreshToken: false },
+      global: { fetch: createSupabaseFetch() },
     }
   );
 }

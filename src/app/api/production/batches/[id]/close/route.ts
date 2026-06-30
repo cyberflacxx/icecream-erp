@@ -26,10 +26,8 @@ export async function POST(
       .from('production_batches')
       .select(`
         id, batch_number, status, quality_status, expected_output, warehouse_id, quality_notes, wastage_reason,
-        warehouses(branch_id),
-        production_batch_materials(id, item_id, quantity_required, quantity_issued, quantity_actual),
-        production_batch_outputs(id, item_id, unit_id, expected_quantity, actual_quantity),
-        recipes(finished_item_id, output_unit_id)
+        recipe_id,
+        warehouses(branch_id)
       `)
       .is('deleted_at', null)
       .eq('id', id)
@@ -52,8 +50,30 @@ export async function POST(
       return badRequest(`Cannot close batch: quality check has not been completed yet.`);
     }
 
+    const [materialsResult, outputsResult, recipeResult] = await Promise.all([
+      service
+        .schema('icecream_erp')
+        .from('production_batch_materials')
+        .select('id, item_id, quantity_required, quantity_issued, quantity_actual')
+        .eq('batch_id', id),
+      service
+        .schema('icecream_erp')
+        .from('production_batch_outputs')
+        .select('id, item_id, unit_id, expected_quantity, actual_quantity')
+        .eq('batch_id', id),
+      service
+        .schema('icecream_erp')
+        .from('recipes')
+        .select('finished_item_id, output_unit_id')
+        .eq('id', batch.recipe_id)
+        .maybeSingle(),
+    ]);
+    if (materialsResult.error) throw materialsResult.error;
+    if (outputsResult.error) throw outputsResult.error;
+    if (recipeResult.error) throw recipeResult.error;
+
     const actualByItemId = new Map((body.actualMaterials ?? []).map((r) => [r.itemId, r.quantityActual]));
-    const materials = batch.production_batch_materials as Array<{
+    const materials = (materialsResult.data ?? []) as Array<{
       id: string; item_id: string; quantity_required: number; quantity_issued: number; quantity_actual: number;
     }>;
 
@@ -74,13 +94,14 @@ export async function POST(
         .maybeSingle();
 
       if (balance) {
-        const toRelease = Math.max(0, required - actualQty);
-        const releaseAmount = Math.min(toRelease, Number(balance.quantity_reserved));
+        const releaseAmount = Math.min(required, Number(balance.quantity_reserved));
+        const newOnHand = Math.max(0, Number(balance.quantity_on_hand) - actualQty);
+        const newReserved = Math.max(0, Number(balance.quantity_reserved) - releaseAmount);
 
         await service.schema('icecream_erp').from('stock_balances').update({
-          quantity_on_hand: Math.max(0, Number(balance.quantity_on_hand) - actualQty),
-          quantity_reserved: Math.max(0, Number(balance.quantity_reserved) - releaseAmount),
-          quantity_available: Number(balance.quantity_available) + releaseAmount,
+          quantity_on_hand: newOnHand,
+          quantity_reserved: newReserved,
+          quantity_available: Math.max(0, newOnHand - newReserved),
           last_updated: new Date().toISOString(),
         }).eq('id', balance.id);
 
@@ -100,15 +121,16 @@ export async function POST(
       await service.schema('icecream_erp').from('production_batch_materials').update({
         quantity_actual: actualQty,
         quantity_issued: actualQty,
-        variance: required - actualQty,
+        quantity_remaining: Math.max(0, required - actualQty),
+        variance: actualQty - required,
       }).eq('id', material.id);
     }
 
     // Add finished goods to inventory
-    const outputs = batch.production_batch_outputs as Array<{
+    const outputs = (outputsResult.data ?? []) as Array<{
       id: string; item_id: string; unit_id: string; expected_quantity: number; actual_quantity: number;
     }>;
-    const recipe = firstRelation(batch.recipes as { finished_item_id: string; output_unit_id: string } | Array<{ finished_item_id: string; output_unit_id: string }> | null);
+    const recipe = recipeResult.data as { finished_item_id: string; output_unit_id: string } | null;
 
     let totalActualOutput = 0;
     const outputList = outputs.length > 0

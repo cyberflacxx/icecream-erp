@@ -82,12 +82,12 @@ export async function POST(
       warehouse_id: warehouse.id,
       branch_id: warehouse.branch_id ?? null,
       order_date: new Date().toISOString().slice(0, 10),
-      required_date: q.valid_until ?? null,
+      delivery_date: q.valid_until ?? null,
       status: 'draft',
       subtotal: q.subtotal,
       tax_amount: q.tax_amount,
       discount_amount: q.discount_amount,
-      total: q.total,
+      total_amount: q.total,
       notes: q.notes ?? null,
       created_by: ctx.userId,
     })
@@ -105,13 +105,12 @@ export async function POST(
       .from('sales_order_items')
       .insert(
         quotationItems.map((item) => ({
-          sales_order_id: o.id,
+          order_id: o.id,
           item_id: item.item_id,
-          quantity_ordered: item.quantity,
-          quantity_delivered: 0,
+          quantity: item.quantity,
           unit_price: item.unit_price,
-          discount_percent: item.discount_percent ?? null,
-          total_price: item.total_price,
+          discount_pct: item.discount_percent ?? null,
+          line_total: item.total_price,
         })),
       );
 

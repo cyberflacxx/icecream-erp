@@ -68,12 +68,96 @@ export async function GET(request: NextRequest) {
 
   const employeeMap = new Map((employeesRes.data ?? []).map((row: Record<string, unknown>) => [String(row.id), row]));
   const periodMap = new Map((periodsRes.data ?? []).map((row: Record<string, unknown>) => [String(row.id), row]));
+  const periodDates = (periodsRes.data ?? [])
+    .map((row: Record<string, unknown>) => ({
+      endDate: String(row.end_date ?? ''),
+      startDate: String(row.start_date ?? ''),
+    }))
+    .filter((row) => row.startDate && row.endDate);
+  const minStartDate = periodDates.map((row) => row.startDate).sort()[0];
+  const maxEndDate = periodDates.map((row) => row.endDate).sort().at(-1);
 
-  const enriched = (data ?? []).map((row: Record<string, unknown>) => ({
-    ...row,
-    employee: employeeMap.get(String(row.employee_id ?? '')) ?? null,
-    period: periodMap.get(String(row.payroll_period_id ?? '')) ?? null,
-  }));
+  const [attendanceRes, contractsRes] = await Promise.all([
+    employeeIds.length > 0 && minStartDate && maxEndDate
+      ? service
+          .from('hr_attendance_records')
+          .select('employee_id, attendance_date, hours_worked, overtime_hours, approval_status')
+          .in('employee_id', employeeIds)
+          .gte('attendance_date', minStartDate)
+          .lte('attendance_date', maxEndDate)
+      : Promise.resolve({ data: [], error: null }),
+    employeeIds.length > 0
+      ? service
+          .from('hr_employee_contracts')
+          .select('employee_id, basic_rate, hourly_rate, shift_rate, is_active')
+          .in('employee_id', employeeIds)
+          .eq('is_active', true)
+      : Promise.resolve({ data: [], error: null }),
+  ]);
+
+  const attendanceRows =
+    attendanceRes.error && isMissingColumnOrRelation(attendanceRes.error, 'hr_attendance_records')
+      ? []
+      : attendanceRes.error
+        ? null
+        : (attendanceRes.data ?? []);
+  const contractRows =
+    contractsRes.error && isMissingColumnOrRelation(contractsRes.error, 'hr_employee_contracts')
+      ? []
+      : contractsRes.error
+        ? null
+        : (contractsRes.data ?? []);
+
+  if (attendanceRows === null) return serverError(attendanceRes.error?.message ?? 'Failed to load payroll attendance.');
+  if (contractRows === null) return serverError(contractsRes.error?.message ?? 'Failed to load payroll rates.');
+  const safeAttendanceRows = attendanceRows;
+
+  const contractByEmployee = new Map(
+    contractRows.map((row: Record<string, unknown>) => [
+      String(row.employee_id),
+      {
+        basicRate: Number(row.basic_rate ?? 0),
+        hourlyRate: Number(row.hourly_rate ?? row.basic_rate ?? 0),
+        shiftRate: Number(row.shift_rate ?? 0),
+      },
+    ]),
+  );
+
+  function summarizeAttendance(employeeId: string, periodId: string) {
+    const period = periodMap.get(periodId);
+    const startDate = String(period?.start_date ?? '');
+    const endDate = String(period?.end_date ?? '');
+    if (!startDate || !endDate) return { hoursWorked: 0, overtimeHours: 0 };
+
+    return safeAttendanceRows
+      .filter((row: Record<string, unknown>) => {
+        const date = String(row.attendance_date ?? '');
+        return String(row.employee_id) === employeeId && date >= startDate && date <= endDate;
+      })
+      .reduce(
+        (sum, row: Record<string, unknown>) => ({
+          hoursWorked: sum.hoursWorked + Number(row.hours_worked ?? 0),
+          overtimeHours: sum.overtimeHours + Number(row.overtime_hours ?? 0),
+        }),
+        { hoursWorked: 0, overtimeHours: 0 },
+      );
+  }
+
+  const enriched = (data ?? []).map((row: Record<string, unknown>) => {
+    const employeeIdValue = String(row.employee_id ?? '');
+    const periodIdValue = String(row.payroll_period_id ?? '');
+    const attendance = summarizeAttendance(employeeIdValue, periodIdValue);
+    const contract = contractByEmployee.get(employeeIdValue);
+    return {
+      ...row,
+      employee: employeeMap.get(employeeIdValue) ?? null,
+      hours_worked: attendance.hoursWorked,
+      overtime_hours: attendance.overtimeHours,
+      pay_rate: contract?.hourlyRate ?? contract?.basicRate ?? 0,
+      period: periodMap.get(periodIdValue) ?? null,
+      rate_type: contract?.hourlyRate ? 'HOURLY' : 'BASIC',
+    };
+  });
 
   const filtered = enriched.filter((row: Record<string, unknown>) => {
     const employee = row.employee as Record<string, unknown> | null;

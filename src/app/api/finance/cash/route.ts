@@ -3,6 +3,18 @@ import { NextRequest, NextResponse } from 'next/server';
 import { badRequest, can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
 import { financeService, writeFinanceAuditLog } from '@/lib/finance-server';
 
+const increaseTypes = new Set(['ADJUSTMENT_IN', 'CASH_IN', 'DEPOSIT', 'RECEIPT', 'SALE_RECEIPT', 'TRANSFER_IN']);
+const decreaseTypes = new Set(['ADJUSTMENT_OUT', 'CASH_OUT', 'DISBURSEMENT', 'EXPENSE', 'PAYMENT', 'TRANSFER_OUT', 'WITHDRAWAL']);
+
+function signedAmount(type: string, amount: number) {
+  const normalizedType = type.trim().toUpperCase();
+  if (decreaseTypes.has(normalizedType)) return -amount;
+  if (increaseTypes.has(normalizedType)) return amount;
+  return normalizedType.includes('OUT') || normalizedType.includes('PAYMENT') || normalizedType.includes('WITHDRAW')
+    ? -amount
+    : amount;
+}
+
 export async function GET(_request: NextRequest) {
   const ctx = await getAuthContext();
   if (!ctx) return unauthorized();
@@ -41,14 +53,24 @@ export async function POST(request: NextRequest) {
       return badRequest('cashAccountId, transactionDate, transactionType, and a positive amount are required');
     }
 
-    const { data, error } = await financeService()
+    const service = financeService();
+    const amount = Number(body.amount);
+    const { data: account, error: accountError } = await service
+      .from('cash_accounts')
+      .select('balance')
+      .eq('id', body.cashAccountId)
+      .maybeSingle();
+    if (accountError) throw accountError;
+    if (!account) return badRequest('Cash account was not found');
+
+    const { data, error } = await service
       .from('cash_transactions')
       .insert({
         organization_id: ctx.organizationId,
         cash_account_id: body.cashAccountId,
         transaction_date: body.transactionDate,
         transaction_type: body.transactionType,
-        amount: body.amount,
+        amount,
         source: body.source ?? null,
         reference: body.reference ?? null,
         counterparty: body.counterparty ?? null,
@@ -62,7 +84,14 @@ export async function POST(request: NextRequest) {
       .single();
     if (error) throw error;
 
-    await writeFinanceAuditLog('CASH_TRANSACTION_CREATED', data.id, ctx.userId, { amount: body.amount }, 'cash_transaction');
+    const nextBalance = Number(account.balance ?? 0) + signedAmount(body.transactionType, amount);
+    const { error: balanceError } = await service
+      .from('cash_accounts')
+      .update({ balance: nextBalance })
+      .eq('id', body.cashAccountId);
+    if (balanceError) throw balanceError;
+
+    await writeFinanceAuditLog('CASH_TRANSACTION_CREATED', data.id, ctx.userId, { amount, nextBalance }, 'cash_transaction');
     return NextResponse.json(data, { status: 201 });
   } catch (err) {
     return serverError(err instanceof Error ? err.message : 'Internal server error');

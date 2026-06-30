@@ -21,6 +21,7 @@ export function useCreateCustomer() {
     },
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['customers'] });
+      await queryClient.invalidateQueries({ queryKey: ['sales'] });
     }
   });
 }

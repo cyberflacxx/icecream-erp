@@ -27,7 +27,7 @@ export async function GET(
     let query = service
       .schema('icecream_erp')
       .from('branch_expenses')
-      .select('id, amount, category, description, expense_date, payment_method, created_by', { count: 'exact' })
+      .select('id, amount, category, description, expense_date, payment_method, created_by, status', { count: 'exact' })
       .is('deleted_at', null)
       .eq('branch_id', branchId)
       .order('expense_date', { ascending: false });

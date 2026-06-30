@@ -41,6 +41,7 @@ export async function POST(request: NextRequest) {
         recipeId: string;
       }>;
       planDate: string;
+      productionCategory?: string;
       productionLine?: string;
       shift: 'DAY' | 'NIGHT';
     };
@@ -57,8 +58,10 @@ export async function POST(request: NextRequest) {
     const { data: plan, error: planError } = await service
       .from('production_plans')
       .insert({
+        organization_id: ctx.organizationId,
         plan_date: body.planDate,
         plan_number: planNumber,
+        production_category: body.productionCategory ?? 'ICE_CREAM_MAKING',
         production_line: body.productionLine ?? 'Main Line',
         shift: body.shift,
         status: 'DRAFT',

@@ -50,6 +50,10 @@ export async function GET(request: NextRequest) {
   if (error) return serverError(error.message);
 
   type Obj = Record<string, unknown> | null;
+  const toNumber = (value: unknown) => {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : 0;
+  };
 
   const mapped = (data ?? []).map((row: Record<string, unknown>) => {
     const rawItems = row.items as Obj | Obj[];
@@ -60,18 +64,32 @@ export async function GET(request: NextRequest) {
     const users: Obj = Array.isArray(rawUsers) ? (rawUsers[0] ?? null) : rawUsers;
     return {
       id: row.id,
-      date: row.created_at,
-      type: row.movement_type,
-      quantity: Number(row.quantity),
-      runningBalance: Number(row.running_balance),
-      unitCost: row.unit_cost !== null && row.unit_cost !== undefined ? Number(row.unit_cost) : null,
-      totalCost: row.total_cost !== null && row.total_cost !== undefined ? Number(row.total_cost) : null,
-      reference: { id: row.reference_id ?? null, type: row.reference_type ?? null },
+      date: row.created_at ?? null,
+      type: String(row.movement_type ?? 'UNKNOWN'),
+      quantity: toNumber(row.quantity),
+      runningBalance: toNumber(row.running_balance),
+      unitCost: toNumber(row.unit_cost),
+      totalCost: toNumber(row.total_cost),
+      reference: {
+        id: row.reference_id ? String(row.reference_id) : null,
+        type: row.reference_type ? String(row.reference_type) : 'UNKNOWN',
+      },
       notes: row.notes ?? null,
-      item: items ? { id: items.id, code: items.code, name: items.name } : null,
-      warehouse: warehouses ? { id: warehouses.id, name: warehouses.name } : null,
+      item: items
+        ? {
+            id: String(items.id ?? ''),
+            code: String(items.code ?? '--'),
+            name: String(items.name ?? 'Unknown item'),
+          }
+        : { id: '', code: '--', name: 'Unknown item' },
+      warehouse: warehouses
+        ? {
+            id: String(warehouses.id ?? ''),
+            name: String(warehouses.name ?? 'Unknown warehouse'),
+          }
+        : { id: '', name: 'Unknown warehouse' },
       createdBy: users
-        ? { id: users.id, name: `${users.first_name ?? ''} ${users.last_name ?? ''}`.trim() }
+        ? { id: String(users.id ?? ''), name: `${users.first_name ?? ''} ${users.last_name ?? ''}`.trim() || 'Unknown user' }
         : null,
     };
   });

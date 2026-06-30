@@ -177,6 +177,7 @@ export const API_ROUTES = {
   FINANCE_REPORT_TRIAL_BALANCE: '/api/finance/reports/trial-balance',
   FINANCE_REPORT_PROFIT_AND_LOSS: '/api/finance/reports/profit-and-loss',
   FINANCE_REPORT_BALANCE_SHEET: '/api/finance/reports/balance-sheet',
+  FINANCE_REPORT_RATIOS: '/api/finance/reports/ratios',
   FINANCE_REPORT_CASH_FLOW: '/api/finance/reports/cash-flow',
   FINANCE_REPORT_GENERAL_LEDGER: '/api/finance/reports/general-ledger',
   FINANCE_REPORT_RECEIVABLES_AGEING: '/api/finance/reports/receivables-ageing',
@@ -438,6 +439,7 @@ export const API_ROUTES = {
     SHIFT: (id: string) => `/api/production/shifts/${id}`,
     SHIFT_CLOSE: (id: string) => `/api/production/shifts/${id}/close`,
     SHIFT_TARGETS: '/api/production/shift-targets',
+    TRANSFERS: '/api/production/transfers',
     WASTAGE: '/api/production/wastage',
     REPORT_PERFORMANCE: '/api/production/reports/performance',
     REPORT_BATCH_PERFORMANCE: '/api/production/reports/batch-performance',
@@ -474,6 +476,7 @@ export const API_ROUTES = {
     REPORT_PROFITABILITY: '/api/branches/reports/profitability'
   },
   SALES: {
+    META: '/api/sales/meta',
     CUSTOMERS: '/api/sales/customers',
     CUSTOMER: (id: string) => `/api/sales/customers/${id}`,
     CUSTOMER_GROUPS: '/api/sales/customer-groups',
@@ -525,6 +528,8 @@ export const API_ROUTES = {
   },
   FINANCE: {
     DASHBOARD: '/api/finance/dashboard',
+    META: '/api/finance/meta',
+    TRANSACTIONS: '/api/finance/transactions',
     JOURNAL_ENTRIES: '/api/finance/journal-entries',
     JOURNAL_ENTRY: (id: string) => `/api/finance/journal-entries/${id}`,
     JOURNAL_POST: (id: string) => `/api/finance/journal-entries/${id}/post`,
@@ -546,6 +551,7 @@ export const API_ROUTES = {
     REPORT_TRIAL_BALANCE: '/api/finance/reports/trial-balance',
     REPORT_PROFIT_AND_LOSS: '/api/finance/reports/profit-and-loss',
     REPORT_BALANCE_SHEET: '/api/finance/reports/balance-sheet',
+    REPORT_RATIOS: '/api/finance/reports/ratios',
     REPORT_CASH_FLOW: '/api/finance/reports/cash-flow',
     REPORT_GENERAL_LEDGER: '/api/finance/reports/general-ledger',
     REPORT_RECEIVABLES_AGEING: '/api/finance/reports/receivables-ageing',

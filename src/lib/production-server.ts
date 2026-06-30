@@ -49,7 +49,8 @@ export async function fetchStockBalanceMap(warehouseIds?: string[] | null) {
 
   const map = new Map<string, number>();
   for (const row of data ?? []) {
-    map.set(String(row.item_id), Number(row.quantity_available ?? 0));
+    const itemId = String(row.item_id);
+    map.set(itemId, (map.get(itemId) ?? 0) + Number(row.quantity_available ?? 0));
   }
 
   return map;

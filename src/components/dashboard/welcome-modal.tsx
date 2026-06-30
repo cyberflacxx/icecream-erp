@@ -36,7 +36,7 @@ export function WelcomeModal({ firstName }: { firstName?: string }) {
           <h2 className="text-xl font-bold">
             Welcome{firstName ? `, ${firstName}` : ''}! 👋
           </h2>
-          <p className="text-sm text-white/70 mt-1">Your account is ready. Here's what you can do.</p>
+          <p className="text-sm text-white/70 mt-1">Your account is ready. Here&apos;s what you can do.</p>
         </div>
 
         {/* Feature highlights */}

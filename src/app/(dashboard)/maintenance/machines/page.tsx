@@ -1,8 +1,7 @@
-/* eslint-disable @typescript-eslint/no-unused-vars */
 'use client';
 
 import Link from 'next/link';
-import { AlertTriangle, ArrowLeft, CheckCircle2, Eye, Plus, Wrench } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, Eye, Plus, Wrench } from 'lucide-react';
 import { PageHeader } from '@/components/dashboard/page-header';
 
 const machines = [

@@ -11,9 +11,35 @@ import {
   registerSession,
 } from '@/lib/security-server';
 import { createClient } from '@/lib/supabase/server';
+import { isSupabaseNetworkTimeout } from '@/lib/supabase/fetch';
 import { workIdToEmail } from '@/lib/auth-roles';
 
+const DEFAULT_LOGIN_TIMEOUT_MS = 12_000;
+
+function getLoginTimeoutMs() {
+  const parsed = Number(process.env.AUTH_LOGIN_TIMEOUT_MS);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.max(3_000, parsed) : DEFAULT_LOGIN_TIMEOUT_MS;
+}
+
+function loginTimeoutResponse(timeoutMs: number) {
+  return new Promise<NextResponse>((resolve) => {
+    setTimeout(() => {
+      resolve(
+        NextResponse.json(
+          { error: 'Supabase is not reachable right now. Check the configured database URL/network and try again.' },
+          { status: 503 },
+        ),
+      );
+    }, timeoutMs);
+  });
+}
+
 export async function POST(request: Request) {
+  const timeoutMs = getLoginTimeoutMs();
+  return Promise.race([handleLogin(request), loginTimeoutResponse(timeoutMs)]);
+}
+
+async function handleLogin(request: Request) {
   try {
     const body = (await request.json()) as { password?: string; workId?: string };
     const workId = String(body.workId ?? '').trim().toUpperCase();
@@ -112,6 +138,13 @@ export async function POST(request: Request) {
       sessionTimeoutMinutes: resolved.sessionTimeoutMinutes,
     });
   } catch (error) {
+    if (isSupabaseNetworkTimeout(error)) {
+      return NextResponse.json(
+        { error: 'Supabase is not reachable right now. Check the configured database URL/network and try again.' },
+        { status: 503 },
+      );
+    }
+
     const message = error instanceof Error ? error.message : 'Login failed unexpectedly.';
     return NextResponse.json({ error: message }, { status: 500 });
   }

@@ -36,7 +36,7 @@ export async function GET(
     let query = service
       .schema('icecream_erp')
       .from('stock_balances')
-      .select('id, quantity_on_hand, quantity_available, quantity_reserved, items!inner(id, code, name, item_type, unit_cost)', { count: 'exact' })
+      .select('id, quantity_on_hand, quantity_available, quantity_reserved, items!inner(*)', { count: 'exact' })
       .eq('warehouse_id', warehouse.id)
       .is('items.deleted_at', null)
       .order('items(name)', { ascending: true });
@@ -51,14 +51,26 @@ export async function GET(
 
     return NextResponse.json({
       data: (data ?? []).map((row: Record<string, unknown>) => {
-        const item = row.items as { id: string; code: string; name: string; item_type: string; unit_cost: number };
+        const item = row.items as {
+          id: string;
+          code: string;
+          name: string;
+          item_type?: string;
+          type?: string;
+          price?: number | null;
+          selling_price: number | null;
+          unit_price?: number | null;
+          unit_cost: number;
+        };
         const qtyOnHand = Number(row.quantity_on_hand ?? 0);
         const unitCost = Number(item?.unit_cost ?? 0);
+        const sellingPrice = Number(item?.selling_price ?? item?.unit_price ?? item?.price ?? unitCost);
         return {
           id: row.id,
-          item: { id: item?.id, code: item?.code, name: item?.name, itemType: item?.item_type },
+          item: { id: item?.id, code: item?.code, name: item?.name, itemType: item?.item_type ?? item?.type },
           quantityOnHand: qtyOnHand,
           quantityAvailable: Number(row.quantity_available ?? 0),
+          sellingPrice,
           unitCost,
           totalValue: qtyOnHand * unitCost,
         };

@@ -3,6 +3,24 @@ import { NextRequest, NextResponse } from 'next/server';
 import { can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
 import { buildFinanceReportCsv } from '@/lib/finance';
 
+function normalizeReportRows(payload: unknown): Array<Record<string, unknown>> {
+  if (Array.isArray(payload)) return payload as Array<Record<string, unknown>>;
+
+  if (payload && typeof payload === 'object') {
+    const record = payload as Record<string, unknown>;
+    if (Array.isArray(record.rows)) return record.rows as Array<Record<string, unknown>>;
+    if (Array.isArray(record.ratios)) return record.ratios as Array<Record<string, unknown>>;
+    if (Array.isArray(record.data)) return record.data as Array<Record<string, unknown>>;
+
+    return Object.entries(record).map(([metric, value]) => ({
+      metric,
+      value: typeof value === 'object' ? JSON.stringify(value) : value,
+    }));
+  }
+
+  return [];
+}
+
 const REPORT_ENDPOINTS: Record<string, string> = {
   'balance-sheet': '/api/finance/reports/balance-sheet',
   'branch-profitability': '/api/finance/reports/branch-profitability',
@@ -16,6 +34,7 @@ const REPORT_ENDPOINTS: Record<string, string> = {
   'payables-ageing': '/api/finance/reports/payables-ageing',
   'profit-and-loss': '/api/finance/reports/profit-and-loss',
   'production-costing': '/api/finance/reports/production-costing',
+  ratios: '/api/finance/reports/ratios',
   receivables: '/api/finance/reports/receivables',
   'receivables-ageing': '/api/finance/reports/receivables-ageing',
   tax: '/api/finance/reports/tax',
@@ -42,7 +61,7 @@ export async function GET(
     });
     if (!response.ok) throw new Error(await response.text());
 
-    const rows = await response.json() as Array<Record<string, unknown>>;
+    const rows = normalizeReportRows(await response.json());
     const csv = buildFinanceReportCsv(rows);
     return new NextResponse(csv, {
       headers: {

@@ -14,6 +14,12 @@ export function useCreateBranchExpense(branchId: string | undefined) {
   );
 }
 
+export function useCreateBranchReturn(branchId: string | undefined) {
+  return useBranchOperationsMutation<unknown, Record<string, unknown>>(
+    `/api/branches/${branchId}/returns`,
+  );
+}
+
 export function useInitShiftClose(branchId: string | undefined) {
   return useBranchOperationsMutation<unknown, Record<string, unknown>>(
     `/api/branch-operations/${branchId}/shift-closes`,

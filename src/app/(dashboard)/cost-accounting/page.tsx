@@ -1,195 +1,197 @@
 'use client';
 
-import {
-  AlertTriangle,
-  BarChart3,
-  DollarSign,
-  Package,
-  TrendingDown,
-  TrendingUp,
-  Zap
-} from 'lucide-react';
+import { AlertTriangle, DollarSign, Package, SlidersHorizontal, TrendingUp } from 'lucide-react';
+import { useEffect, useState } from 'react';
+
 import { PageHeader } from '@/components/dashboard/page-header';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { Button } from '@/components/ui/button';
+import { DataTable, EmptyState, FormDrawer, LoadingState, StatCard, StatusBadge } from '@/components/ui-library';
+import { useBatch, useBatches } from '@/hooks/production/useBatches';
+import { useBatchAction } from '@/hooks/production/useBatchAction';
+import { useProductionMeta } from '@/hooks/production/useProductionMeta';
 
-const costStats = [
-  { label: 'Cost Per Cone', value: '$0.47', change: '−3.2% vs budget', up: true, icon: Zap, color: 'text-orange border-orange/20 bg-orange/10' },
-  { label: 'Batch Cost Today', value: '$1,840', change: '6 batches', up: null, icon: Package, color: 'text-amber-300 border-amber-300/20 bg-amber-300/10' },
-  { label: 'Material Variance', value: '+$124', change: 'Over standard', up: false, icon: TrendingUp, color: 'text-red-400 border-red-400/20 bg-red-400/10' },
-  { label: 'Labour Cost', value: '$340', change: 'Today · both shifts', up: null, icon: DollarSign, color: 'text-orange-200 border-orange-200/20 bg-orange-200/10' },
-];
+function money(value: number) {
+  return new Intl.NumberFormat('en-US', { currency: 'USD', style: 'currency' }).format(value);
+}
 
-const batchCosts = [
-  { batch: 'BATCH-041', product: 'Vanilla Cone', output: 480, costPerUnit: 0.44, total: 211, variance: -12, status: 'UNDER' },
-  { batch: 'BATCH-040', product: 'Choc Cone', output: 320, costPerUnit: 0.52, total: 166, variance: +24, status: 'OVER' },
-  { batch: 'BATCH-039', product: 'Vanilla Cone', output: 440, costPerUnit: 0.45, total: 198, variance: -8, status: 'UNDER' },
-  { batch: 'BATCH-038', product: 'Mint Cone', output: 280, costPerUnit: 0.49, total: 137, variance: +6, status: 'OVER' },
-  { batch: 'BATCH-037', product: 'Vanilla Cone', output: 500, costPerUnit: 0.43, total: 215, variance: -18, status: 'UNDER' },
-];
+function numberValue(value: unknown) {
+  return Number(value ?? 0);
+}
 
-const costBreakdown = [
-  { category: 'Raw Materials', standard: 0.29, actual: 0.31, color: '#f97316' },
-  { category: 'Packaging', standard: 0.085, actual: 0.082, color: '#fbbf24' },
-  { category: 'Direct Labour', standard: 0.056, actual: 0.058, color: '#fdba74' },
-  { category: 'Overhead', standard: 0.038, actual: 0.038, color: '#a8a29e' },
-];
-
-const weeklyTrend = [
-  { day: 'Mon', cost: 0.45, budget: 0.48 },
-  { day: 'Tue', cost: 0.47, budget: 0.48 },
-  { day: 'Wed', cost: 0.43, budget: 0.48 },
-  { day: 'Thu', cost: 0.49, budget: 0.48 },
-  { day: 'Fri', cost: 0.46, budget: 0.48 },
-  { day: 'Sat', cost: 0.47, budget: 0.48 },
-  { day: 'Sun', cost: 0.44, budget: 0.48 },
-];
+type CostDraft = {
+  id: string;
+  itemId: string;
+  quantityActual: string;
+  quantityIssued: string;
+  unitCost: string;
+};
 
 export default function CostAccountingPage() {
+  const batchesQuery = useBatches({ limit: 50 });
+  const metaQuery = useProductionMeta();
+  const actions = useBatchAction();
+  const [selectedBatchId, setSelectedBatchId] = useState<string | null>(null);
+  const [costDrafts, setCostDrafts] = useState<CostDraft[]>([]);
+  const [formError, setFormError] = useState<string | null>(null);
+  const batchDetailQuery = useBatch(selectedBatchId ?? '');
+  const batchDetail = batchDetailQuery.data as Record<string, unknown> | undefined;
+  const rows =
+    batchesQuery.data && typeof batchesQuery.data === 'object' && Array.isArray((batchesQuery.data as { data?: unknown }).data)
+      ? (batchesQuery.data as { data: Array<Record<string, unknown>> }).data
+      : [];
+  const itemById = new Map((metaQuery.data?.items ?? []).map((item) => [item.id, item]));
+
+  useEffect(() => {
+    if (!batchDetail) return;
+    const materials = Array.isArray(batchDetail.materials) ? batchDetail.materials as Array<Record<string, unknown>> : [];
+    setCostDrafts(materials.map((material) => ({
+      id: String(material.id),
+      itemId: String(material.item_id ?? ''),
+      quantityActual: String(material.quantity_actual ?? material.quantity_issued ?? 0),
+      quantityIssued: String(material.quantity_issued ?? material.quantity_actual ?? 0),
+      unitCost: String(material.unit_cost ?? 0),
+    })));
+  }, [batchDetail]);
+
+  const totalMaterialCost = rows.reduce((sum, row) => sum + numberValue(row.materialCost), 0);
+  const totalLabourCost = rows.reduce((sum, row) => sum + numberValue(row.labourCost), 0);
+  const totalOverheadCost = rows.reduce((sum, row) => sum + numberValue(row.overheadCost), 0);
+  const totalOutput = rows.reduce((sum, row) => sum + numberValue(row.actualOutput), 0);
+  const totalCost = totalMaterialCost + totalLabourCost + totalOverheadCost;
+  const costPerUnit = totalOutput > 0 ? totalCost / totalOutput : 0;
+
+  async function saveCostAdjustments() {
+    if (!selectedBatchId) return;
+    try {
+      setFormError(null);
+      await actions.recordMaterialUsage.mutateAsync({
+        id: selectedBatchId,
+        materials: costDrafts.map((draft) => ({
+          id: draft.id,
+          quantityActual: Number(draft.quantityActual),
+          quantityIssued: Number(draft.quantityIssued),
+          unitCost: Number(draft.unitCost),
+        })),
+      });
+      await batchDetailQuery.refetch();
+      await batchesQuery.refetch();
+      setSelectedBatchId(null);
+    } catch (error) {
+      setFormError(error instanceof Error ? error.message : 'Failed to save cost adjustments.');
+    }
+  }
+
+  if (batchesQuery.isLoading || metaQuery.isLoading) return <LoadingState />;
+  if (batchesQuery.isError || !batchesQuery.data) {
+    return <EmptyState icon={<AlertTriangle className="h-6 w-6" />} title="Cost accounting unavailable" description={batchesQuery.error?.message ?? 'No production batch costing data returned.'} />;
+  }
+
   return (
     <div className="space-y-8">
       <PageHeader
         title="Cost Accounting"
-        description="Production cost analysis, cost-per-cone tracking, material variance, and overhead allocation per batch."
-        status="partial"
+        description="Review materials used per batch and adjust actual unit prices for production costing."
       />
 
-      {/* Stats */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        {costStats.map((stat) => {
-          const Icon = stat.icon;
-          return (
-            <div key={stat.label} className={`rounded-2xl border p-5 ${stat.color}`}>
-              <div className="flex items-start justify-between">
+        <StatCard title="Total Production Cost" value={money(totalCost)} icon={<DollarSign className="h-5 w-5" />} />
+        <StatCard title="Material Cost" value={money(totalMaterialCost)} icon={<Package className="h-5 w-5" />} />
+        <StatCard title="Labour + Overhead" value={money(totalLabourCost + totalOverheadCost)} icon={<TrendingUp className="h-5 w-5" />} />
+        <StatCard title="Cost Per Unit" value={money(costPerUnit)} icon={<SlidersHorizontal className="h-5 w-5" />} />
+      </div>
+
+      <DataTable
+        columns={[
+          { key: 'batchNumber', header: 'Batch #' },
+          {
+            key: 'recipe',
+            header: 'Recipe',
+            render: (row) => String(((row as Record<string, unknown>).recipe as Record<string, unknown> | null)?.name ?? ''),
+          },
+          {
+            key: 'status',
+            header: 'Status',
+            render: (row) => <StatusBadge status={String((row as Record<string, unknown>).status ?? '')} />,
+          },
+          {
+            key: 'actualOutput',
+            header: 'Output',
+            render: (row) => numberValue((row as Record<string, unknown>).actualOutput).toFixed(3),
+          },
+          {
+            key: 'materialCost',
+            header: 'Materials',
+            render: (row) => money(numberValue((row as Record<string, unknown>).materialCost)),
+          },
+          {
+            key: 'totalCost',
+            header: 'Total Cost',
+            render: (row) => money(numberValue((row as Record<string, unknown>).materialCost) + numberValue((row as Record<string, unknown>).labourCost) + numberValue((row as Record<string, unknown>).overheadCost)),
+          },
+          {
+            key: 'costPerUnit',
+            header: 'Cost/Unit',
+            render: (row) => {
+              const output = numberValue((row as Record<string, unknown>).actualOutput);
+              const rowCost = numberValue((row as Record<string, unknown>).materialCost) + numberValue((row as Record<string, unknown>).labourCost) + numberValue((row as Record<string, unknown>).overheadCost);
+              return money(output > 0 ? rowCost / output : 0);
+            },
+          },
+          {
+            key: 'actions',
+            header: 'Actions',
+            render: (row) => (
+              <Button type="button" size="sm" variant="outline" onClick={() => setSelectedBatchId(String((row as Record<string, unknown>).id))}>
+                Adjust Prices
+              </Button>
+            ),
+          },
+        ]}
+        data={rows}
+        emptyState={<EmptyState icon={<DollarSign className="h-6 w-6" />} title="No batch costs" description="Material costs appear after production material usage is recorded." />}
+      />
+
+      <FormDrawer title="Adjust Material Prices" open={Boolean(selectedBatchId)} onClose={() => setSelectedBatchId(null)}>
+        <div className="space-y-5">
+          {formError ? (
+            <div className="rounded-2xl border border-error/20 bg-error/5 px-4 py-3 text-sm text-error">
+              {formError}
+            </div>
+          ) : null}
+          {batchDetailQuery.isLoading ? <LoadingState /> : null}
+          {costDrafts.length === 0 && !batchDetailQuery.isLoading ? (
+            <EmptyState icon={<Package className="h-6 w-6" />} title="No material usage lines" description="Reserve and record production materials before adjusting costs." />
+          ) : null}
+          {costDrafts.map((draft, index) => {
+            const item = itemById.get(draft.itemId);
+            const lineCost = Number(draft.quantityActual || 0) * Number(draft.unitCost || 0);
+            return (
+              <div key={draft.id} className="grid gap-3 rounded-2xl border border-border bg-cream/60 p-4 dark:border-darkBorder dark:bg-darkBg/40 md:grid-cols-[1fr_120px_120px_120px]">
                 <div>
-                  <p className="text-xs font-medium text-white/50">{stat.label}</p>
-                  <p className="mt-1.5 font-display text-2xl font-bold text-white">{stat.value}</p>
-                  <p className={`mt-1 flex items-center gap-1 text-xs ${stat.up === true ? 'text-emerald-400' : stat.up === false ? 'text-red-400' : 'text-white/40'}`}>
-                    {stat.up === true && <TrendingDown className="h-3 w-3" />}
-                    {stat.up === false && <TrendingUp className="h-3 w-3" />}
-                    {stat.change}
-                  </p>
+                  <p className="font-medium text-brown dark:text-darkText">{String(item?.code ?? '')} {String(item?.name ?? draft.itemId)}</p>
+                  <p className="text-xs text-muted">Line total: {money(lineCost)}</p>
                 </div>
-                <div className="rounded-xl border border-current/20 bg-current/10 p-2">
-                  <Icon className="h-5 w-5" />
-                </div>
+                <label className="space-y-2 text-sm text-muted">
+                  <span>Issued Qty</span>
+                  <input className="surface-input-soft" min="0" step="0.001" type="number" value={draft.quantityIssued} onChange={(event) => setCostDrafts((current) => current.map((row, rowIndex) => rowIndex === index ? { ...row, quantityIssued: event.target.value } : row))} />
+                </label>
+                <label className="space-y-2 text-sm text-muted">
+                  <span>Actual Used</span>
+                  <input className="surface-input-soft" min="0" step="0.001" type="number" value={draft.quantityActual} onChange={(event) => setCostDrafts((current) => current.map((row, rowIndex) => rowIndex === index ? { ...row, quantityActual: event.target.value } : row))} />
+                </label>
+                <label className="space-y-2 text-sm text-muted">
+                  <span>Actual Unit Price</span>
+                  <input className="surface-input-soft" min="0" step="0.0001" type="number" value={draft.unitCost} onChange={(event) => setCostDrafts((current) => current.map((row, rowIndex) => rowIndex === index ? { ...row, unitCost: event.target.value } : row))} />
+                </label>
               </div>
-            </div>
-          );
-        })}
-      </div>
-
-      <div className="grid gap-6 lg:grid-cols-2">
-        {/* Cost per cone trend */}
-        <div className="rounded-2xl border border-white/8 bg-white/5 p-5">
-          <div className="mb-4 flex items-center gap-2">
-            <BarChart3 className="h-5 w-5 text-orange" />
-            <h3 className="font-display font-semibold text-white">Cost Per Cone — 7 Day Trend</h3>
-          </div>
-          <div className="h-56">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={weeklyTrend} barGap={4}>
-                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
-                <XAxis dataKey="day" stroke="rgba(255,255,255,0.3)" fontSize={11} />
-                <YAxis stroke="rgba(255,255,255,0.3)" fontSize={11} tickFormatter={(v) => `$${v}`} />
-                <Tooltip
-                  contentStyle={{ background: '#1a0700', border: '1px solid rgba(249,115,22,0.2)', borderRadius: '12px', color: '#fff' }}
-                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                  formatter={((v: number) => [`$${v}`, '']) as any}
-                />
-                <Bar dataKey="budget" fill="rgba(255,255,255,0.06)" radius={[4, 4, 0, 0]} name="Budget" />
-                <Bar dataKey="cost" fill="#f97316" radius={[4, 4, 0, 0]} name="Actual" />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-          <div className="mt-3 flex items-center gap-4 text-xs text-white/40">
-            <span className="flex items-center gap-1.5"><span className="h-2 w-4 rounded bg-orange" />Actual</span>
-            <span className="flex items-center gap-1.5"><span className="h-2 w-4 rounded bg-white/10" />Budget ($0.48)</span>
+            );
+          })}
+          <div className="flex justify-end gap-3">
+            <Button type="button" variant="outline" onClick={() => setSelectedBatchId(null)}>Cancel</Button>
+            <Button type="button" onClick={saveCostAdjustments} disabled={costDrafts.length === 0}>Save Adjusted Prices</Button>
           </div>
         </div>
-
-        {/* Cost breakdown */}
-        <div className="rounded-2xl border border-white/8 bg-white/5 p-5">
-          <h3 className="mb-4 font-display font-semibold text-white">Cost Breakdown Per Cone</h3>
-          <div className="space-y-4">
-            {costBreakdown.map((item) => (
-              <div key={item.category}>
-                <div className="mb-1.5 flex justify-between text-sm">
-                  <span className="text-white/70">{item.category}</span>
-                  <div className="flex items-center gap-3">
-                    <span className="text-white/40">std: ${item.standard.toFixed(3)}</span>
-                    <span className={`font-semibold ${item.actual > item.standard ? 'text-red-400' : 'text-emerald-400'}`}>
-                      act: ${item.actual.toFixed(3)}
-                    </span>
-                  </div>
-                </div>
-                <div className="relative h-2 overflow-hidden rounded-full bg-white/10">
-                  <div className="h-full rounded-full opacity-30" style={{ width: `${(item.standard / 0.48) * 100}%`, backgroundColor: item.color }} />
-                  <div className="absolute top-0 h-full rounded-full" style={{ width: `${(item.actual / 0.48) * 100}%`, backgroundColor: item.color }} />
-                </div>
-              </div>
-            ))}
-          </div>
-          <div className="mt-5 flex items-center justify-between border-t border-white/8 pt-4">
-            <span className="text-sm text-white/50">Total per cone</span>
-            <div className="flex items-center gap-3">
-              <span className="text-sm text-white/40">std: $0.469</span>
-              <span className="font-display font-bold text-orange">act: $0.470</span>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Batch cost table */}
-      <div className="rounded-2xl border border-white/8 bg-white/5">
-        <div className="flex items-center justify-between border-b border-white/8 px-5 py-4">
-          <h3 className="font-display font-semibold text-white">Batch Cost Analysis</h3>
-          <span className="text-xs text-white/40">Last 5 batches</span>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-white/5 text-left text-xs text-white/30">
-                <th className="px-5 py-3 font-medium">Batch</th>
-                <th className="px-5 py-3 font-medium">Product</th>
-                <th className="px-5 py-3 font-medium text-right">Output</th>
-                <th className="px-5 py-3 font-medium text-right">$/Unit</th>
-                <th className="px-5 py-3 font-medium text-right">Total Cost</th>
-                <th className="px-5 py-3 font-medium text-right">Variance</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-white/5">
-              {batchCosts.map((row) => (
-                <tr key={row.batch} className="transition hover:bg-white/5">
-                  <td className="px-5 py-4 font-semibold text-white">{row.batch}</td>
-                  <td className="px-5 py-4 text-white/60">{row.product}</td>
-                  <td className="px-5 py-4 text-right text-white">{row.output.toLocaleString()}</td>
-                  <td className="px-5 py-4 text-right text-white">${row.costPerUnit.toFixed(2)}</td>
-                  <td className="px-5 py-4 text-right text-white">${row.total}</td>
-                  <td className="px-5 py-4 text-right">
-                    <span className={`flex items-center justify-end gap-1 font-semibold ${row.variance < 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                      {row.variance < 0 ? <TrendingDown className="h-3.5 w-3.5" /> : <TrendingUp className="h-3.5 w-3.5" />}
-                      {row.variance > 0 ? '+' : ''}{row.variance}
-                    </span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {/* Variance alert */}
-      {batchCosts.some((b) => b.variance > 0) && (
-        <div className="flex items-start gap-4 rounded-2xl border border-amber-500/20 bg-amber-500/10 p-5">
-          <AlertTriangle className="mt-0.5 h-5 w-5 flex-shrink-0 text-amber-400" />
-          <div>
-            <p className="font-semibold text-amber-300">Material Variance Detected</p>
-            <p className="mt-1 text-sm text-amber-400/70">
-              2 batches exceeded standard material cost. Review raw material consumption records for BATCH-040 (Choc Cone) and BATCH-038 (Mint Cone). Consider investigating wastage or measurement issues.
-            </p>
-          </div>
-        </div>
-      )}
+      </FormDrawer>
     </div>
   );
 }

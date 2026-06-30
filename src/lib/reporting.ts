@@ -68,6 +68,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
   { category: 'finance', code: 'trial-balance', name: 'Trial Balance', description: 'Trial balance by account and period.', path: '/api/finance/reports/trial-balance', requiredPermission: 'finance.read' },
   { category: 'finance', code: 'profit-and-loss', name: 'Profit and Loss Statement', description: 'Profit and loss summary.', path: '/api/finance/reports/profit-and-loss', requiredPermission: 'finance.read' },
   { category: 'finance', code: 'balance-sheet', name: 'Balance Sheet', description: 'Balance sheet by reporting period.', path: '/api/finance/reports/balance-sheet', requiredPermission: 'finance.read' },
+  { category: 'finance', code: 'ratios', name: 'Financial Ratios', description: 'Liquidity, leverage, and profitability ratios.', path: '/api/finance/reports/ratios', requiredPermission: 'finance.read' },
   { category: 'finance', code: 'cash-flow', name: 'Cash Flow Statement', description: 'Cash flow by operating, investing, and financing activity.', path: '/api/finance/reports/cash-flow', requiredPermission: 'finance.read' },
   { category: 'finance', code: 'general-ledger', name: 'General Ledger Report', description: 'Detailed ledger lines by account.', path: '/api/finance/reports/general-ledger', requiredPermission: 'finance.read' },
   { category: 'finance', code: 'receivables-ageing', name: 'Accounts Receivable Ageing Report', description: 'Receivables balances by ageing bucket.', path: '/api/finance/reports/receivables-ageing', requiredPermission: 'finance.read' },
@@ -76,6 +77,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
   { category: 'finance', code: 'production-costing', name: 'Production Cost Accounting Report', description: 'Production cost accounting and unit cost analysis.', path: '/api/finance/reports/production-costing', requiredPermission: 'view_cost' },
   { category: 'finance', code: 'branch-costing', name: 'Branch Cost Accounting Report', description: 'Branch cost accounting and profitability.', path: '/api/finance/reports/branch-costing', requiredPermission: 'view_cost' },
   { category: 'finance', code: 'tax', name: 'Tax Report', description: 'Tax summary and tax transactions.', path: '/api/finance/reports/tax', requiredPermission: 'finance.read' },
+  { category: 'finance', code: 'ratios', name: 'Financial Ratios', description: 'Liquidity, profitability, and leverage ratios.', path: '/api/finance/reports/ratios', requiredPermission: 'finance.read' },
   { category: 'finance', code: 'fixed-assets', name: 'Fixed Assets Report', description: 'Fixed asset register and balances.', path: '/api/finance/fixed-assets', requiredPermission: 'finance.read' },
 
   { category: 'quality', code: 'raw-materials', name: 'Raw Material Quality Report', description: 'Raw material inspection outcomes.', path: '/api/quality/reports/raw-materials', requiredPermission: 'quality.read' },

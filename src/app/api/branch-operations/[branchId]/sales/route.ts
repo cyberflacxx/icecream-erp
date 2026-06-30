@@ -5,6 +5,14 @@ import { validateBranchSaleQuantity } from '@/lib/branches';
 import { ensureBranchScope, getActiveBranchWarehouse, requireOpenShift, writeBranchAuditLog } from '@/lib/branches-server';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
+function errorMessage(error: unknown) {
+  if (error instanceof Error) return error.message;
+  if (typeof error === 'object' && error !== null && 'message' in error) {
+    return String((error as { message?: unknown }).message ?? '');
+  }
+  return '';
+}
+
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ branchId: string }> },
@@ -29,7 +37,7 @@ export async function GET(
     let query = service
       .schema('icecream_erp')
       .from('branch_sales')
-      .select('id, sale_date, shift, item_id, quantity, unit_price, total_amount, payment_method, served_by', { count: 'exact' })
+      .select('id, sale_number, sale_date, shift, item_id, quantity, unit_price, total_amount, payment_method, served_by, status', { count: 'exact' })
       .eq('branch_id', branchId)
       .order('sale_date', { ascending: false });
 
@@ -45,12 +53,13 @@ export async function GET(
     return NextResponse.json({
       data: (data ?? []).map((row: Record<string, unknown>) => ({
         id: row.id,
-        saleNumber: row.id,
+        saleNumber: row.sale_number ?? row.id,
         saleDate: row.sale_date,
         shift: row.shift,
         itemsCount: 1,
         totalAmount: Number(row.total_amount ?? 0),
         paymentMethod: row.payment_method,
+        servedBy: row.served_by,
         status: row.status ?? 'POSTED',
       })),
       pagination: { page, pageSize, total: count ?? 0 },
@@ -98,7 +107,7 @@ export async function POST(
 
     // Validate items
     const itemIds = [...new Set(body.items.map((i) => i.itemId))];
-    const { data: items } = await service
+    let itemsResult = await service
       .schema('icecream_erp')
       .from('items')
       .select('id')
@@ -106,6 +115,18 @@ export async function POST(
       .eq('is_active', true)
       .eq('item_type', 'FINISHED_GOOD')
       .in('id', itemIds);
+    if (itemsResult.error && errorMessage(itemsResult.error).includes('items.item_type')) {
+      itemsResult = await service
+        .schema('icecream_erp')
+        .from('items')
+        .select('id')
+        .is('deleted_at', null)
+        .eq('is_active', true)
+        .eq('type', 'FINISHED_GOOD')
+        .in('id', itemIds);
+    }
+    if (itemsResult.error) throw itemsResult.error;
+    const items = itemsResult.data;
     if ((items ?? []).length !== itemIds.length) return badRequest('One or more sale items are invalid');
 
     const availableBalances = await service

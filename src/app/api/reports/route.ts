@@ -7,10 +7,19 @@ import { createServiceRoleClient } from '@/lib/supabase/server';
 const REPORT_TYPES = [
   'DAILY_PRODUCTION', 'WASTAGE', 'RAW_MATERIAL_USAGE', 'BRANCH_SALES',
   'INVENTORY_VALUATION', 'LOW_STOCK', 'EXPIRY_ALERT', 'SUPPLIER_PURCHASE',
-  'WORKER_PRODUCTIVITY', 'BRANCH_SHIFT_CLOSE_SUMMARY',
+  'WORKER_PRODUCTIVITY', 'BRANCH_SHIFT_CLOSE_SUMMARY', 'TRIAL_BALANCE',
+  'INCOME_STATEMENT', 'FINANCIAL_POSITION', 'FINANCIAL_RATIOS',
 ] as const;
 
 type ReportType = typeof REPORT_TYPES[number];
+
+function normalizeAccountType(value: unknown) {
+  return String(value ?? '').trim().toLowerCase().replace(/_/g, ' ');
+}
+
+function money(value: unknown) {
+  return Number(value ?? 0);
+}
 
 export async function GET(request: NextRequest) {
   const ctx = await getAuthContext();
@@ -19,7 +28,7 @@ export async function GET(request: NextRequest) {
 
   const service = createServiceRoleClient();
   const { searchParams } = new URL(request.url);
-  const reportType = searchParams.get('reportType') as ReportType | null;
+  const reportType = searchParams.get('reportType')?.toUpperCase() as ReportType | undefined;
   const startDate = searchParams.get('startDate') ?? undefined;
   const endDate = searchParams.get('endDate') ?? undefined;
   const branchId = searchParams.get('branchId') ?? undefined;
@@ -359,6 +368,247 @@ export async function GET(request: NextRequest) {
           chart: [],
           data: [],
           summary: { activeWorkers: 0, message: 'Worker productivity report requires production worker assignments data.' },
+        });
+      }
+
+      case 'TRIAL_BALANCE': {
+        let query = service
+          .schema('icecream_erp')
+          .from('journal_entry_lines')
+          .select('debit_amount, credit_amount, accounts(account_code, account_name), journal_entries!inner(organization_id, is_posted, entry_date)')
+          .eq('journal_entries.organization_id', ctx.organizationId)
+          .eq('journal_entries.is_posted', true);
+
+        if (startDate) query = query.gte('journal_entries.entry_date', `${startDate}T00:00:00.000Z`);
+        if (endDate) query = query.lte('journal_entries.entry_date', `${endDate}T23:59:59.999Z`);
+
+        const { data: lines, error } = await query;
+        if (error) throw error;
+
+        const grouped = new Map<string, { accountCode: string; accountName: string; credit: number; debit: number }>();
+        for (const line of lines ?? []) {
+          const account = firstRelation(line.accounts as { account_code?: string; account_name?: string } | Array<{ account_code?: string; account_name?: string }> | null);
+          const accountCode = String(account?.account_code ?? 'UNKNOWN');
+          const accountName = String(account?.account_name ?? 'Unknown account');
+          const key = `${accountCode}::${accountName}`;
+          const current = grouped.get(key) ?? { accountCode, accountName, credit: 0, debit: 0 };
+          current.debit += money(line.debit_amount);
+          current.credit += money(line.credit_amount);
+          grouped.set(key, current);
+        }
+
+        const data = Array.from(grouped.values()).map((row) => ({
+          ...row,
+          balance: row.debit - row.credit,
+        }));
+        const totalDebit = data.reduce((sum, row) => sum + row.debit, 0);
+        const totalCredit = data.reduce((sum, row) => sum + row.credit, 0);
+
+        return NextResponse.json({
+          chart: data.map((row) => ({ account: row.accountCode, balance: row.balance })),
+          data,
+          summary: {
+            totalCredit,
+            totalDebit,
+            variance: totalDebit - totalCredit,
+          },
+        });
+      }
+
+      case 'INCOME_STATEMENT': {
+        let invoiceQuery = service
+          .schema('icecream_erp')
+          .from('invoices')
+          .select('total, total_amount, invoice_date')
+          .eq('organization_id', ctx.organizationId)
+          .is('deleted_at', null);
+        let branchSalesQuery = service
+          .schema('icecream_erp')
+          .from('branch_sales')
+          .select('total_amount, sale_date, branch_id')
+          .eq('organization_id', ctx.organizationId)
+          .is('deleted_at', null);
+        let financeExpensesQuery = service
+          .schema('icecream_erp')
+          .from('finance_expenses')
+          .select('amount, expense_date, branch_id, status')
+          .eq('organization_id', ctx.organizationId)
+          .is('deleted_at', null)
+          .neq('status', 'REJECTED');
+        let branchExpensesQuery = service
+          .schema('icecream_erp')
+          .from('branch_expenses')
+          .select('amount, expense_date, branch_id')
+          .eq('organization_id', ctx.organizationId)
+          .is('deleted_at', null);
+
+        if (startDate) {
+          invoiceQuery = invoiceQuery.gte('invoice_date', `${startDate}T00:00:00.000Z`);
+          branchSalesQuery = branchSalesQuery.gte('sale_date', `${startDate}T00:00:00.000Z`);
+          financeExpensesQuery = financeExpensesQuery.gte('expense_date', startDate);
+          branchExpensesQuery = branchExpensesQuery.gte('expense_date', `${startDate}T00:00:00.000Z`);
+        }
+        if (endDate) {
+          invoiceQuery = invoiceQuery.lte('invoice_date', `${endDate}T23:59:59.999Z`);
+          branchSalesQuery = branchSalesQuery.lte('sale_date', `${endDate}T23:59:59.999Z`);
+          financeExpensesQuery = financeExpensesQuery.lte('expense_date', endDate);
+          branchExpensesQuery = branchExpensesQuery.lte('expense_date', `${endDate}T23:59:59.999Z`);
+        }
+        if (effectiveBranchId) {
+          branchSalesQuery = branchSalesQuery.eq('branch_id', effectiveBranchId);
+          financeExpensesQuery = financeExpensesQuery.eq('branch_id', effectiveBranchId);
+          branchExpensesQuery = branchExpensesQuery.eq('branch_id', effectiveBranchId);
+        }
+
+        const [invoices, branchSalesRows, financeExpensesRows, branchExpensesRows] = await Promise.all([
+          invoiceQuery,
+          branchSalesQuery,
+          financeExpensesQuery,
+          branchExpensesQuery,
+        ]);
+        if (invoices.error) throw invoices.error;
+        if (branchSalesRows.error) throw branchSalesRows.error;
+        if (financeExpensesRows.error) throw financeExpensesRows.error;
+        if (branchExpensesRows.error) throw branchExpensesRows.error;
+
+        const invoiceRevenue = (invoices.data ?? []).reduce((sum, row) => sum + money(row.total ?? row.total_amount), 0);
+        const branchRevenue = (branchSalesRows.data ?? []).reduce((sum, row) => sum + money(row.total_amount), 0);
+        const operatingExpenses =
+          (financeExpensesRows.data ?? []).reduce((sum, row) => sum + money(row.amount), 0) +
+          (branchExpensesRows.data ?? []).reduce((sum, row) => sum + money(row.amount), 0);
+        const revenue = invoiceRevenue + branchRevenue;
+        const grossProfit = revenue;
+        const netProfit = grossProfit - operatingExpenses;
+        const data = [
+          { amount: revenue, line: 'Revenue' },
+          { amount: grossProfit, line: 'Gross Profit' },
+          { amount: operatingExpenses, line: 'Operating Expenses' },
+          { amount: netProfit, line: 'Net Profit' },
+        ];
+
+        return NextResponse.json({
+          chart: data,
+          data,
+          summary: {
+            grossProfit,
+            netProfit,
+            operatingExpenses,
+            revenue,
+          },
+        });
+      }
+
+      case 'FINANCIAL_POSITION': {
+        let query = service
+          .schema('icecream_erp')
+          .from('journal_entry_lines')
+          .select('debit_amount, credit_amount, accounts(account_type), journal_entries!inner(organization_id, is_posted, entry_date)')
+          .eq('journal_entries.organization_id', ctx.organizationId)
+          .eq('journal_entries.is_posted', true);
+
+        if (startDate) query = query.gte('journal_entries.entry_date', `${startDate}T00:00:00.000Z`);
+        if (endDate) query = query.lte('journal_entries.entry_date', `${endDate}T23:59:59.999Z`);
+
+        const { data: lines, error } = await query;
+        if (error) throw error;
+
+        const totals = { assets: 0, equity: 0, liabilities: 0 };
+        for (const line of lines ?? []) {
+          const account = firstRelation(line.accounts as { account_type?: string } | Array<{ account_type?: string }> | null);
+          const accountType = normalizeAccountType(account?.account_type);
+          const net = money(line.debit_amount) - money(line.credit_amount);
+          if (accountType === 'asset') totals.assets += net;
+          if (accountType === 'liability') totals.liabilities += -net;
+          if (accountType === 'equity') totals.equity += -net;
+        }
+
+        const data = [
+          { amount: totals.assets, line: 'Assets' },
+          { amount: totals.liabilities, line: 'Liabilities' },
+          { amount: totals.equity, line: 'Equity' },
+        ];
+
+        return NextResponse.json({
+          chart: data,
+          data,
+          summary: totals,
+        });
+      }
+
+      case 'FINANCIAL_RATIOS': {
+        const [positionLines, invoiceRows, branchSalesRows, financeExpensesRows, branchExpensesRows] = await Promise.all([
+          service
+            .schema('icecream_erp')
+            .from('journal_entry_lines')
+            .select('debit_amount, credit_amount, accounts(account_type), journal_entries!inner(organization_id, is_posted)')
+            .eq('journal_entries.organization_id', ctx.organizationId)
+            .eq('journal_entries.is_posted', true),
+          service
+            .schema('icecream_erp')
+            .from('invoices')
+            .select('total, total_amount')
+            .eq('organization_id', ctx.organizationId)
+            .is('deleted_at', null),
+          service
+            .schema('icecream_erp')
+            .from('branch_sales')
+            .select('total_amount')
+            .eq('organization_id', ctx.organizationId)
+            .is('deleted_at', null),
+          service
+            .schema('icecream_erp')
+            .from('finance_expenses')
+            .select('amount, status')
+            .eq('organization_id', ctx.organizationId)
+            .is('deleted_at', null)
+            .neq('status', 'REJECTED'),
+          service
+            .schema('icecream_erp')
+            .from('branch_expenses')
+            .select('amount')
+            .eq('organization_id', ctx.organizationId)
+            .is('deleted_at', null),
+        ]);
+        if (positionLines.error) throw positionLines.error;
+        if (invoiceRows.error) throw invoiceRows.error;
+        if (branchSalesRows.error) throw branchSalesRows.error;
+        if (financeExpensesRows.error) throw financeExpensesRows.error;
+        if (branchExpensesRows.error) throw branchExpensesRows.error;
+
+        const totals = { assets: 0, equity: 0, liabilities: 0 };
+        for (const line of positionLines.data ?? []) {
+          const account = firstRelation(line.accounts as { account_type?: string } | Array<{ account_type?: string }> | null);
+          const accountType = normalizeAccountType(account?.account_type);
+          const net = money(line.debit_amount) - money(line.credit_amount);
+          if (accountType === 'asset') totals.assets += net;
+          if (accountType === 'liability') totals.liabilities += -net;
+          if (accountType === 'equity') totals.equity += -net;
+        }
+        const revenue =
+          (invoiceRows.data ?? []).reduce((sum, row) => sum + money(row.total ?? row.total_amount), 0) +
+          (branchSalesRows.data ?? []).reduce((sum, row) => sum + money(row.total_amount), 0);
+        const operatingExpenses =
+          (financeExpensesRows.data ?? []).reduce((sum, row) => sum + money(row.amount), 0) +
+          (branchExpensesRows.data ?? []).reduce((sum, row) => sum + money(row.amount), 0);
+        const netProfit = revenue - operatingExpenses;
+        const ratio = (numerator: number, denominator: number) => denominator === 0 ? 0 : Number((numerator / denominator).toFixed(4));
+        const data = [
+          { formula: 'Assets / Liabilities', ratio: 'Current Ratio', value: ratio(totals.assets, totals.liabilities) },
+          { formula: 'Liabilities / Equity', ratio: 'Debt to Equity', value: ratio(totals.liabilities, totals.equity) },
+          { formula: 'Net Profit / Revenue', ratio: 'Net Profit Margin', value: ratio(netProfit, revenue) },
+          { formula: 'Operating Expenses / Revenue', ratio: 'Expense Ratio', value: ratio(operatingExpenses, revenue) },
+          { formula: 'Net Profit / Assets', ratio: 'Return on Assets', value: ratio(netProfit, totals.assets) },
+        ];
+
+        return NextResponse.json({
+          chart: data.map((row) => ({ ratio: row.ratio, value: row.value })),
+          data,
+          summary: {
+            ...totals,
+            netProfit,
+            operatingExpenses,
+            revenue,
+          },
         });
       }
 

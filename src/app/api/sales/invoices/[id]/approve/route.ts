@@ -6,6 +6,55 @@ import { checkStockAvailability, evaluateCreditLimit } from '@/lib/sales';
 import { fetchFinishedGoodsStockMap, reserveInvoiceStock, salesService, writeSalesAuditLog } from '@/lib/sales-server';
 import { workflowService } from '@/lib/workflow-server';
 
+type SalesRow = Record<string, unknown>;
+
+function toNumber(value: unknown) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+async function loadInvoiceForApproval(service: ReturnType<typeof salesService>, id: string) {
+  const { data: invoice, error: invoiceError } = await service
+    .from('invoices')
+    .select('*')
+    .eq('id', id)
+    .single();
+  if (invoiceError) throw invoiceError;
+
+  const row = invoice as SalesRow;
+  const customerId = String(row.customer_id ?? '');
+  const salesOrderId = row.sales_order_id ? String(row.sales_order_id) : row.order_id ? String(row.order_id) : '';
+
+  const [customerResult, orderResult, itemResult] = await Promise.all([
+    customerId ? service.from('customers').select('*').eq('id', customerId).maybeSingle() : Promise.resolve({ data: null, error: null }),
+    salesOrderId ? service.from('sales_orders').select('*').eq('id', salesOrderId).maybeSingle() : Promise.resolve({ data: null, error: null }),
+    service.from('invoice_items').select('*').eq('invoice_id', id),
+  ]);
+
+  if (customerResult.error) throw customerResult.error;
+  if (orderResult.error) throw orderResult.error;
+  if (itemResult.error) throw itemResult.error;
+
+  const order = (orderResult.data ?? null) as SalesRow | null;
+
+  return {
+    amountPaid: toNumber(row.amount_paid ?? row.paid_amount),
+    balanceDue: toNumber(row.balance_due),
+    branchId: row.branch_id ? String(row.branch_id) : order?.branch_id ? String(order.branch_id) : '',
+    customer: (customerResult.data ?? null) as SalesRow | null,
+    id: String(row.id),
+    invoiceNumber: String(row.invoice_number ?? id),
+    items: ((itemResult.data ?? []) as SalesRow[]).map((item) => ({
+      itemId: String(item.item_id ?? ''),
+      quantity: toNumber(item.quantity ?? item.quantity_invoiced),
+    })),
+    salesOrderId,
+    status: String(row.status ?? ''),
+    total: toNumber(row.total ?? row.total_amount),
+    warehouseId: row.warehouse_id ? String(row.warehouse_id) : order?.warehouse_id ? String(order.warehouse_id) : '',
+  };
+}
+
 export async function POST(
   _request: Request,
   { params }: { params: Promise<{ id: string }> },
@@ -17,36 +66,27 @@ export async function POST(
   try {
     const { id } = await params;
     const service = salesService();
-    const { data: invoice, error: invoiceError } = await service
-      .from('invoices')
-      .select('id, customer_id, sales_order_id, total, amount_paid, balance_due, status, customers(credit_limit, current_balance, credit_allowed), invoice_items(item_id, quantity), sales_orders(warehouse_id)')
-      .eq('id', id)
-      .single();
-    if (invoiceError) throw invoiceError;
+    const invoice = await loadInvoiceForApproval(service, id);
+    if (!invoice.warehouseId) return badRequest('Invoice approval requires a linked warehouse or sales order warehouse.');
 
-    const customer = Array.isArray(invoice.customers) ? invoice.customers[0] : invoice.customers;
-    const salesOrder = Array.isArray(invoice.sales_orders) ? invoice.sales_orders[0] : invoice.sales_orders;
     const credit = evaluateCreditLimit(
-      Number(customer?.current_balance ?? 0),
-      Number(customer?.credit_limit ?? 0),
-      Number(invoice.total ?? 0),
-      Boolean(customer?.credit_allowed),
+      Number(invoice.customer?.current_balance ?? 0),
+      Number(invoice.customer?.credit_limit ?? 0),
+      invoice.total,
+      Boolean(invoice.customer?.credit_allowed),
     );
     if (credit.exceeded) return badRequest('Customer credit limit exceeded.');
 
-    const stockMap = await fetchFinishedGoodsStockMap(String(salesOrder?.warehouse_id ?? ''));
+    const stockMap = await fetchFinishedGoodsStockMap(invoice.warehouseId);
     const stockCheck = checkStockAvailability(
-      (Array.isArray(invoice.invoice_items) ? invoice.invoice_items : []).map((item) => ({
-        itemId: String(item.item_id),
-        quantity: Number(item.quantity ?? 0),
-      })),
+      invoice.items,
       stockMap,
     );
     if (stockCheck.some((row) => !row.stockAvailable)) {
       return badRequest('Invoice approval blocked by stock shortage.');
     }
 
-    await reserveInvoiceStock(id, String(salesOrder?.warehouse_id ?? ''));
+    await reserveInvoiceStock(id, invoice.warehouseId);
 
     const { data, error } = await service
       .from('invoices')
@@ -77,7 +117,7 @@ export async function POST(
 
     await emitOperationalNotifications({
       actorUserId: ctx.userId,
-      branchId: String((data as Record<string, unknown>).branch_id ?? ''),
+      branchId: invoice.branchId,
       documentId: id,
       documentType: 'sales_invoice',
       eventType: 'INVOICE_APPROVED',
@@ -94,7 +134,7 @@ export async function POST(
 
     await emitOperationalNotifications({
       actorUserId: ctx.userId,
-      branchId: String((data as Record<string, unknown>).branch_id ?? ''),
+      branchId: invoice.branchId,
       documentId: id,
       documentType: 'sales_invoice',
       eventType: 'DISPATCH_READY',

@@ -45,7 +45,7 @@ export async function POST(
       const creditLimit = Number(customer.credit_limit ?? 0);
       if (creditLimit > 0) {
         const currentBalance = Number(customer.current_balance ?? 0);
-        const orderTotal = Number(o.total ?? 0);
+        const orderTotal = Number(o.total_amount ?? o.total ?? 0);
         const projected = currentBalance + orderTotal;
         if (projected > creditLimit) {
           const available = Math.max(0, creditLimit - currentBalance);

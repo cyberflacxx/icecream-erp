@@ -9,6 +9,11 @@ function normalizeInvoiceStatus(amountPaid: number, total: number): string {
   return 'partial_paid';
 }
 
+function isMissingInvoiceColumnError(error: unknown, columnName: string) {
+  if (typeof error !== 'object' || error === null || !('message' in error)) return false;
+  return String((error as { message?: unknown }).message ?? '').includes(`column invoices.${columnName} does not exist`);
+}
+
 // ─── POST /api/sales/invoices/[id]/payment ────────────────────────────────────
 
 export async function POST(
@@ -25,7 +30,7 @@ export async function POST(
   const { data: invoice, error: fetchErr } = await service
     .schema('icecream_erp')
     .from('invoices')
-    .select(`id, invoice_number, status, total, amount_paid, balance_due, customer_id, sales_order_id`)
+    .select('*')
     .eq('id', params.id)
     .is('deleted_at', null)
     .single();
@@ -35,12 +40,13 @@ export async function POST(
   const inv = invoice as Record<string, unknown>;
 
   // Branch scoping check via linked sales order
-  if (ctx.isBranchScoped && ctx.branchId && inv.sales_order_id) {
+  const linkedOrderId = inv.sales_order_id ?? inv.order_id;
+  if (ctx.isBranchScoped && ctx.branchId && linkedOrderId) {
     const { data: order } = await service
       .schema('icecream_erp')
       .from('sales_orders')
       .select('branch_id')
-      .eq('id', inv.sales_order_id as string)
+      .eq('id', linkedOrderId as string)
       .single();
 
     const orderBranchId = (order as Record<string, unknown> | null)?.branch_id;
@@ -49,11 +55,12 @@ export async function POST(
     }
   }
 
-  if (inv.status === 'cancelled') {
+  const currentStatus = String(inv.status ?? '').toLowerCase();
+  if (currentStatus === 'cancelled') {
     return NextResponse.json({ error: 'Cannot record payment on cancelled invoice' }, { status: 400 });
   }
 
-  if (inv.status === 'paid') {
+  if (currentStatus === 'paid') {
     return NextResponse.json(
       { error: `Invoice ${inv.invoice_number} is already fully paid` },
       { status: 400 },
@@ -131,13 +138,13 @@ export async function POST(
   if (payErr || !payment) return serverError(payErr?.message ?? 'Failed to create payment');
 
   // Update invoice amounts and status
-  const prevAmountPaid = Number(inv.amount_paid ?? 0);
-  const total = Number(inv.total ?? 0);
+  const prevAmountPaid = Number(inv.amount_paid ?? inv.paid_amount ?? 0);
+  const total = Number(inv.total ?? inv.total_amount ?? 0);
   const nextAmountPaid = prevAmountPaid + body.amount;
   const nextBalanceDue = Math.max(0, total - nextAmountPaid);
   const nextStatus = normalizeInvoiceStatus(nextAmountPaid, total);
 
-  const { data: updatedInvoice, error: invErr } = await service
+  const primaryUpdate = await service
     .schema('icecream_erp')
     .from('invoices')
     .update({
@@ -150,7 +157,26 @@ export async function POST(
     .select()
     .single();
 
-  if (invErr) return serverError(invErr.message);
+  let updatedInvoice = primaryUpdate.data;
+  let invoiceUpdateError = primaryUpdate.error;
+  if (invoiceUpdateError && isMissingInvoiceColumnError(invoiceUpdateError, 'amount_paid')) {
+    const fallbackUpdate = await service
+      .schema('icecream_erp')
+      .from('invoices')
+      .update({
+        balance_due: nextBalanceDue,
+        paid_amount: nextAmountPaid,
+        status: nextStatus.toUpperCase(),
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', params.id)
+      .select()
+      .single();
+    updatedInvoice = fallbackUpdate.data;
+    invoiceUpdateError = fallbackUpdate.error;
+  }
+
+  if (invoiceUpdateError) return serverError(invoiceUpdateError.message);
 
   // Reduce customer balance
   const nextCustomerBalance = Math.max(0, Number(cust.current_balance ?? 0) - body.amount);
