@@ -10,54 +10,78 @@ export async function GET(request: NextRequest) {
   if (!can(ctx, 'inventory.read')) return forbidden();
 
   const service = createServiceRoleClient();
+  const warehousesQuery = service
+    .from('warehouses')
+    .select('id, code, name, branch_id')
+    .eq('organization_id', ctx.organizationId);
 
-  let query = service.from('stock_balances').select(
-    `id, quantity_on_hand, quantity_available, quantity_reserved,
-     items!item_id(
-       id, code, name, reorder_level,
-       units_of_measure!unit_of_measure_id(id, name, abbreviation)
-     ),
-     warehouses!warehouse_id(
-       id, code, name,
-       branches!branch_id(id, name)
-     )`,
-  );
+  const { data: accessibleWarehouses, error: warehousesError } = ctx.isBranchScoped && ctx.branchId
+    ? await warehousesQuery.eq('branch_id', ctx.branchId)
+    : await warehousesQuery;
+  if (warehousesError) return serverError(warehousesError.message);
 
-  if (ctx.isBranchScoped && ctx.branchId) {
-    query = query.eq('warehouses.branch_id', ctx.branchId);
-  }
+  const warehouseIds = (accessibleWarehouses ?? []).map((warehouse) => String(warehouse.id ?? '')).filter(Boolean);
+  if (!warehouseIds.length) return NextResponse.json([]);
 
-  const { data, error } = await query;
-  if (error) return serverError(error.message);
+  const { data: balances, error: balancesError } = await service
+    .from('stock_balances')
+    .select('id, item_id, warehouse_id, quantity, reserved_qty')
+    .in('warehouse_id', warehouseIds);
+  if (balancesError) return serverError(balancesError.message);
 
-  type ItemObj = { id?: string; code?: string; name?: string; reorder_level?: number | null; units_of_measure?: { id: string; name: string; abbreviation: string } | Array<{ id: string; name: string; abbreviation: string }> | null } | null;
-  type WHObj = { id?: string; code?: string; name?: string; branches?: { id: string; name: string } | Array<{ id: string; name: string }> | null } | null;
+  const itemIds = [...new Set((balances ?? []).map((row) => String(row.item_id ?? '')).filter(Boolean))];
+  const branchIds = [...new Set((accessibleWarehouses ?? []).map((warehouse) => String(warehouse.branch_id ?? '')).filter(Boolean))];
 
-  const lowStock = (data ?? [])
-    .map((row: Record<string, unknown>) => {
-      const rawItems = row.items as ItemObj | ItemObj[];
-      const items: ItemObj = Array.isArray(rawItems) ? (rawItems[0] ?? null) : rawItems;
-      const rawWH = row.warehouses as WHObj | WHObj[];
-      const warehouses: WHObj = Array.isArray(rawWH) ? (rawWH[0] ?? null) : rawWH;
-      const rawUoM = items?.units_of_measure;
-      const unitOfMeasure = Array.isArray(rawUoM) ? (rawUoM[0] ?? null) : (rawUoM ?? null);
-      const rawBranch = warehouses?.branches;
-      const branch = Array.isArray(rawBranch) ? (rawBranch[0] ?? null) : (rawBranch ?? null);
+  const [itemsResult, branchesResult] = await Promise.all([
+    itemIds.length
+      ? service.from('items').select('id, code, name, reorder_level').in('id', itemIds)
+      : Promise.resolve({ data: [], error: null }),
+    branchIds.length
+      ? service.from('branches').select('id, name').in('id', branchIds)
+      : Promise.resolve({ data: [], error: null }),
+  ]);
+  if (itemsResult.error) return serverError(itemsResult.error.message);
+  if (branchesResult.error) return serverError(branchesResult.error.message);
+
+  const items = new Map((itemsResult.data ?? []).map((item) => [String(item.id), item]));
+  const warehouses = new Map((accessibleWarehouses ?? []).map((warehouse) => [String(warehouse.id), warehouse]));
+  const branches = new Map((branchesResult.data ?? []).map((branch) => [String(branch.id), branch]));
+
+  const lowStock = (balances ?? [])
+    .map((row) => {
+      const item = items.get(String(row.item_id ?? '')) ?? null;
+      const warehouse = warehouses.get(String(row.warehouse_id ?? '')) ?? null;
+      const branch = warehouse ? branches.get(String(warehouse.branch_id ?? '')) ?? null : null;
+      const quantityOnHand = Number(row.quantity ?? 0);
+      const quantityReserved = Number(row.reserved_qty ?? 0);
+      const quantityAvailable = quantityOnHand - quantityReserved;
+      const reorderLevel = Number(item?.reorder_level ?? 0);
+
       return {
         id: row.id,
-        quantityOnHand: Number(row.quantity_on_hand),
-        quantityAvailable: Number(row.quantity_available),
-        quantityReserved: Number(row.quantity_reserved),
-        reorderLevel: Number(items?.reorder_level ?? 0),
-        item: items
-          ? { id: items.id, code: items.code, name: items.name, reorderLevel: Number(items.reorder_level ?? 0), unitOfMeasure }
+        quantityOnHand,
+        quantityAvailable,
+        quantityReserved,
+        reorderLevel,
+        item: item
+          ? {
+              id: item.id,
+              code: item.code,
+              name: item.name,
+              reorderLevel,
+            }
           : null,
-        warehouse: warehouses
-          ? { id: warehouses.id, code: warehouses.code, name: warehouses.name, branch }
+        warehouse: warehouse
+          ? {
+              id: warehouse.id,
+              code: warehouse.code,
+              name: warehouse.name,
+              branch: branch ? { id: branch.id, name: branch.name } : null,
+            }
           : null,
       };
     })
-    .filter((b) => b.reorderLevel > 0 && b.quantityAvailable <= b.reorderLevel);
+    .filter((row) => row.item && row.warehouse && row.reorderLevel > 0 && row.quantityAvailable <= row.reorderLevel);
 
   return NextResponse.json(lowStock);
 }

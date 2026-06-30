@@ -3,6 +3,19 @@ import { NextRequest, NextResponse } from 'next/server';
 import { can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
+function isMissingRelationError(error: unknown, relationName: string) {
+  const message =
+    error instanceof Error
+      ? error.message
+      : typeof error === 'object' && error !== null && 'message' in error
+        ? String((error as { message?: unknown }).message ?? '')
+        : '';
+  return (
+    message.includes(`relation "${relationName}" does not exist`) ||
+    message.includes(`Could not find the table 'icecream_erp.${relationName}'`)
+  );
+}
+
 export async function GET(request: NextRequest) {
   const ctx = await getAuthContext();
   if (!ctx) return unauthorized();
@@ -18,60 +31,75 @@ export async function GET(request: NextRequest) {
   const endDate = new Date(today);
   endDate.setDate(today.getDate() + days);
 
-  let query = service
+  const warehousesQuery = service
+    .from('warehouses')
+    .select('id, code, name, branch_id')
+    .eq('organization_id', ctx.organizationId);
+
+  const { data: accessibleWarehouses, error: warehousesError } = ctx.isBranchScoped && ctx.branchId
+    ? await warehousesQuery.eq('branch_id', ctx.branchId)
+    : await warehousesQuery;
+  if (warehousesError) return serverError(warehousesError.message);
+
+  const warehouseIds = (accessibleWarehouses ?? []).map((warehouse) => String(warehouse.id ?? '')).filter(Boolean);
+  if (!warehouseIds.length) return NextResponse.json([]);
+
+  const { data: batches, error: batchesError } = await service
     .from('inventory_batches')
-    .select(
-      `id, batch_number, expiry_date, manufactured_date, quantity_remaining,
-       quantity_received, status, created_at,
-       items!item_id(id, code, name),
-       warehouses!warehouse_id(id, code, name,
-         branches!branch_id(id, name))`,
-    )
+    .select('id, item_id, warehouse_id, batch_number, expiry_date, quantity_remaining, status, created_at')
+    .in('warehouse_id', warehouseIds)
     .gte('expiry_date', today.toISOString())
     .lte('expiry_date', endDate.toISOString())
     .gt('quantity_remaining', 0)
     .order('expiry_date', { ascending: true })
     .order('created_at', { ascending: true });
-
-  if (ctx.isBranchScoped && ctx.branchId) {
-    query = query.eq('warehouses.branch_id', ctx.branchId);
+  if (batchesError) {
+    if (isMissingRelationError(batchesError, 'inventory_batches')) {
+      return NextResponse.json([]);
+    }
+    return serverError(batchesError.message);
   }
 
-  const { data, error } = await query;
-  if (error) return serverError(error.message);
+  const itemIds = [...new Set((batches ?? []).map((row) => String(row.item_id ?? '')).filter(Boolean))];
+  const branchIds = [...new Set((accessibleWarehouses ?? []).map((warehouse) => String(warehouse.branch_id ?? '')).filter(Boolean))];
 
-  type ItemObj = { id?: string; code?: string; name?: string } | null;
-  type WarehouseObj = {
-    id?: string; code?: string; name?: string;
-    branches?: { id: string; name: string } | Array<{ id: string; name: string }> | null;
-  } | null;
+  const [itemsResult, branchesResult] = await Promise.all([
+    itemIds.length
+      ? service.from('items').select('id, code, name').in('id', itemIds)
+      : Promise.resolve({ data: [], error: null }),
+    branchIds.length
+      ? service.from('branches').select('id, name').in('id', branchIds)
+      : Promise.resolve({ data: [], error: null }),
+  ]);
+  if (itemsResult.error) return serverError(itemsResult.error.message);
+  if (branchesResult.error) return serverError(branchesResult.error.message);
 
-  const mapped = (data ?? []).map((row: Record<string, unknown>) => {
-    const rawItems = row.items as ItemObj | ItemObj[];
-    const batch_items: ItemObj = Array.isArray(rawItems) ? (rawItems[0] ?? null) : rawItems;
-    const rawWH = row.warehouses as WarehouseObj | WarehouseObj[];
-    const batch_warehouses: WarehouseObj = Array.isArray(rawWH) ? (rawWH[0] ?? null) : rawWH;
-    const rawBranch = batch_warehouses?.branches;
-    const branch = Array.isArray(rawBranch) ? (rawBranch[0] ?? null) : (rawBranch ?? null);
+  const items = new Map((itemsResult.data ?? []).map((item) => [String(item.id), item]));
+  const warehouses = new Map((accessibleWarehouses ?? []).map((warehouse) => [String(warehouse.id), warehouse]));
+  const branches = new Map((branchesResult.data ?? []).map((branch) => [String(branch.id), branch]));
+
+  const mapped = (batches ?? []).map((row) => {
+    const item = items.get(String(row.item_id ?? '')) ?? null;
+    const warehouse = warehouses.get(String(row.warehouse_id ?? '')) ?? null;
+    const branch = warehouse ? branches.get(String(warehouse.branch_id ?? '')) ?? null : null;
+
     return {
-    id: row.id,
-    batchNumber: row.batch_number,
-    expiryDate: row.expiry_date,
-    manufacturedDate: row.manufactured_date ?? null,
-    quantityRemaining: Number(row.quantity_remaining),
-    quantityReceived: Number(row.quantity_received),
-    status: row.status,
-    item: batch_items
-      ? { id: batch_items.id, code: batch_items.code, name: batch_items.name }
-      : null,
-    warehouse: batch_warehouses
-      ? {
-          id: batch_warehouses.id,
-          code: batch_warehouses.code,
-          name: batch_warehouses.name,
-          branch,
-        }
-      : null,
+      id: row.id,
+      batchNumber: row.batch_number,
+      expiryDate: row.expiry_date,
+      quantityRemaining: Number(row.quantity_remaining ?? 0),
+      status: row.status,
+      item: item
+        ? { id: item.id, code: item.code, name: item.name }
+        : null,
+      warehouse: warehouse
+        ? {
+            id: warehouse.id,
+            code: warehouse.code,
+            name: warehouse.name,
+            branch: branch ? { id: branch.id, name: branch.name } : null,
+          }
+        : null,
     };
   });
 
