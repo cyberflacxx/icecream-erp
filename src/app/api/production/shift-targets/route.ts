@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { badRequest, can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
-import { productionService } from '@/lib/production-server';
+import { loadShiftTargetRows, productionService } from '@/lib/production-server';
 
 export async function GET() {
   const ctx = await getAuthContext();
@@ -9,16 +9,7 @@ export async function GET() {
   if (!can(ctx, 'production.read')) return forbidden();
 
   try {
-    const service = productionService();
-    const { data, error } = await service
-      .from('production_shift_targets')
-      .select(`
-        id, target_date, shift, product_id, target_output_quantity, target_workers, target_production_time_hours, target_material_usage, approved_by, created_at,
-        items(id, code, name)
-      `)
-      .order('target_date', { ascending: false });
-    if (error) throw error;
-    return NextResponse.json(data ?? []);
+    return NextResponse.json(await loadShiftTargetRows(ctx.isBranchScoped ? ctx.branchId : null));
   } catch (err) {
     return serverError(err instanceof Error ? err.message : 'Internal server error');
   }
@@ -57,7 +48,12 @@ export async function POST(request: NextRequest) {
       })
       .select()
       .single();
-    if (error) throw error;
+    if (error) {
+      if (String(error.message ?? '').includes("Could not find the table 'icecream_erp.production_shift_targets'")) {
+        return badRequest('Shift targets setup is not available in this environment. Use production planning and shift reports until target tables are provisioned.');
+      }
+      throw error;
+    }
     return NextResponse.json(data, { status: 201 });
   } catch (err) {
     return serverError(err instanceof Error ? err.message : 'Internal server error');

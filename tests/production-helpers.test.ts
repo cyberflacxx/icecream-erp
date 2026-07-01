@@ -7,6 +7,8 @@ import {
   buildShiftPerformanceRows,
   buildVarianceRows,
   buildYieldRows,
+  calculateScaledMaterialRequirement,
+  calculateScalingFactor,
   calculateRequiredMaterials,
   calculateCostPerUnit,
   calculateProductivity,
@@ -33,6 +35,29 @@ test('calculateRequiredMaterials scales ingredient demand and shortages', () => 
 
   assert.equal(rows[0]?.requiredQuantity, 21);
   assert.equal(rows[0]?.shortageQuantity, 6);
+});
+
+test('BOM scaling helpers support lower and higher plan volumes', () => {
+  assert.equal(calculateScalingFactor(5000, 10000), 0.5);
+  assert.equal(calculateScalingFactor(20000, 10000), 2);
+
+  const halfBatch = calculateScaledMaterialRequirement({
+    plannedQuantity: 5000,
+    quantityRequired: 100,
+    standardOutputQuantity: 10000,
+    standardUnitCost: 2.5,
+  });
+  const doubleBatch = calculateScaledMaterialRequirement({
+    plannedQuantity: 20000,
+    quantityRequired: 100,
+    standardOutputQuantity: 10000,
+    standardUnitCost: 2.5,
+  });
+
+  assert.equal(halfBatch.requiredQuantity, 50);
+  assert.equal(halfBatch.estimatedMaterialCost, 125);
+  assert.equal(doubleBatch.requiredQuantity, 200);
+  assert.equal(doubleBatch.estimatedMaterialCost, 500);
 });
 
 test('variance, yield, productivity, and costing rows derive batch KPIs', () => {

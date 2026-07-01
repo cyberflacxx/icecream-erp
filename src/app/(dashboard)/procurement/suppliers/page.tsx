@@ -1,12 +1,13 @@
 ﻿'use client';
 
 import Link from 'next/link';
-import { Plus, Truck } from 'lucide-react';
-import { type FormEvent, useState } from 'react';
+import { Download, Plus, Power, PowerOff, Truck, Upload } from 'lucide-react';
+import { type ChangeEvent, type FormEvent, useRef, useState } from 'react';
 import { z } from 'zod';
 
 import { DataTable, EmptyState, FilterBar, FormDrawer, StatusBadge } from '@/components/ui-library';
-import { PERMISSIONS } from '@/lib/shared';
+import { importFromCsv } from '@/lib/export';
+import { API_ROUTES, PERMISSIONS } from '@/lib/shared';
 
 import { PageHeader } from '@/components/dashboard/page-header';
 import { PaginationControls } from '@/components/inventory/pagination-controls';
@@ -14,6 +15,7 @@ import { ProcurementNav } from '@/components/procurement/procurement-nav';
 import { Button } from '@/components/ui/button';
 import {
   useCreateSupplier,
+  useProcurementRequest,
   useSupplierCategories,
   useSuppliers,
   useUpdateSupplier,
@@ -58,6 +60,9 @@ const initialFormState = {
 export default function SuppliersPage() {
   const canCreate = usePermission([PERMISSIONS.supplier.create, 'procurement.supplier.write', 'procurement.write']);
   const canUpdate = usePermission([PERMISSIONS.supplier.update, 'procurement.supplier.write', 'procurement.write']);
+  const canImport = usePermission(['procurement.supplier.import', 'procurement.supplier.write', 'procurement.write']);
+  const request = useProcurementRequest();
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [filters, setFilters] = useState({
     categoryId: '',
     page: 1,
@@ -69,6 +74,9 @@ export default function SuppliersPage() {
   const [editingSupplier, setEditingSupplier] = useState<SupplierRow | null>(null);
   const [formState, setFormState] = useState(initialFormState);
   const [formError, setFormError] = useState<string | null>(null);
+  const [importError, setImportError] = useState<string | null>(null);
+  const [importMessage, setImportMessage] = useState<string | null>(null);
+  const [isImporting, setIsImporting] = useState(false);
 
   const suppliersQuery = useSuppliers({
     categoryId: filters.categoryId || undefined,
@@ -148,22 +156,102 @@ export default function SuppliersPage() {
     }
   }
 
+  async function handleToggleStatus(row: SupplierRow) {
+    setImportError(null);
+    setImportMessage(null);
+
+    try {
+      await request(
+        row.status === 'ACTIVE'
+          ? API_ROUTES.PROCUREMENT.SUPPLIER_DEACTIVATE(row.id)
+          : API_ROUTES.PROCUREMENT.SUPPLIER_ACTIVATE(row.id),
+        { method: 'POST' },
+      );
+      await suppliersQuery.refetch();
+    } catch (error) {
+      setImportError(error instanceof Error ? error.message : 'Failed to update supplier status.');
+    }
+  }
+
+  async function handleImportFile(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setIsImporting(true);
+    setImportError(null);
+    setImportMessage(null);
+
+    try {
+      const rows = await importFromCsv(file);
+      const response = await request<{ created: number }>(API_ROUTES.PROCUREMENT.IMPORT_SUPPLIERS, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fileName: file.name, rows }),
+      });
+
+      setImportMessage(`Supplier import completed. ${response.created} suppliers created.`);
+      await suppliersQuery.refetch();
+    } catch (error) {
+      setImportError(error instanceof Error ? error.message : 'Supplier import failed.');
+    } finally {
+      setIsImporting(false);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    }
+  }
+
   return (
     <div className="space-y-6">
       <PageHeader
         title="Suppliers"
         description="Manage supplier master data, contacts, payment terms, and exposure balances for procurement."
         actions={
-          canCreate ? (
-            <Button type="button" size="sm" onClick={openCreateDrawer}>
-              <Plus className="mr-2 h-4 w-4" />
-              Add Supplier
-            </Button>
-          ) : null
+          <div className="flex flex-wrap gap-2">
+            {canImport ? (
+              <>
+                <Button asChild type="button" size="sm" variant="outline">
+                  <a href={API_ROUTES.PROCUREMENT.IMPORT_SUPPLIERS_TEMPLATE}>
+                    <Download className="mr-2 h-4 w-4" />
+                    Download Template
+                  </a>
+                </Button>
+                <Button type="button" size="sm" variant="outline" onClick={() => fileInputRef.current?.click()} disabled={isImporting}>
+                  <Upload className="mr-2 h-4 w-4" />
+                  {isImporting ? 'Importing...' : 'Import CSV'}
+                </Button>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".csv,text/csv"
+                  className="hidden"
+                  onChange={handleImportFile}
+                />
+              </>
+            ) : null}
+            {canCreate ? (
+              <Button type="button" size="sm" onClick={openCreateDrawer}>
+                <Plus className="mr-2 h-4 w-4" />
+                Add Supplier
+              </Button>
+            ) : null}
+          </div>
         }
       />
 
       <ProcurementNav />
+
+      {importMessage ? (
+        <div className="rounded-2xl border border-success/20 bg-success/5 px-4 py-3 text-sm text-success">
+          {importMessage}
+        </div>
+      ) : null}
+
+      {importError ? (
+        <div className="rounded-2xl border border-error/20 bg-error/5 px-4 py-3 text-sm text-error">
+          {importError}
+        </div>
+      ) : null}
 
       <FilterBar
         filters={[
@@ -229,6 +317,11 @@ export default function SuppliersPage() {
             render: (row) => row.phone || '-'
           },
           {
+            key: 'creditLimit',
+            header: 'Credit Limit',
+            render: (row) => currencyFormatter.format(row.creditLimit)
+          },
+          {
             key: 'paymentTerms',
             header: 'Payment Terms',
             render: (row) => row.paymentTerms || '-'
@@ -254,6 +347,21 @@ export default function SuppliersPage() {
                 {canUpdate ? (
                   <Button size="sm" variant="outline" onClick={() => openEditDrawer(row)}>
                     Edit
+                  </Button>
+                ) : null}
+                {canUpdate ? (
+                  <Button size="sm" variant="outline" onClick={() => void handleToggleStatus(row)}>
+                    {row.status === 'ACTIVE' ? (
+                      <>
+                        <PowerOff className="mr-2 h-4 w-4" />
+                        Deactivate
+                      </>
+                    ) : (
+                      <>
+                        <Power className="mr-2 h-4 w-4" />
+                        Activate
+                      </>
+                    )}
                   </Button>
                 ) : null}
                 <Button asChild size="sm" variant="outline">

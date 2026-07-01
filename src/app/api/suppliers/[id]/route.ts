@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { badRequest, can, forbidden, getAuthContext, notFound, serverError, unauthorized } from '@/lib/api-auth';
+import { recordAuditLog } from '@/lib/security-server';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
 export async function GET(
@@ -126,16 +127,25 @@ export async function PATCH(
     }
 
     const updatePayload: Record<string, unknown> = {};
-    if (body.name !== undefined) updatePayload.name = body.name;
+    if (body.name !== undefined) {
+      if (!body.name.trim()) return badRequest('Supplier name is required.');
+      updatePayload.name = body.name.trim();
+    }
     if (body.categoryId !== undefined) updatePayload.category_id = body.categoryId;
-    if (body.code !== undefined) updatePayload.code = body.code;
+    if (body.code !== undefined) {
+      if (!body.code.trim()) return badRequest('Supplier code is required.');
+      updatePayload.code = body.code.trim();
+    }
     if (body.contactPerson !== undefined) updatePayload.contact_person = body.contactPerson;
     if (body.phone !== undefined) updatePayload.phone = body.phone;
     if (body.email !== undefined) updatePayload.email = body.email;
     if (body.address !== undefined) updatePayload.address = body.address;
     if (body.taxNumber !== undefined) updatePayload.tax_number = body.taxNumber;
     if (body.paymentTerms !== undefined) updatePayload.payment_terms = body.paymentTerms;
-    if (body.creditLimit !== undefined) updatePayload.credit_limit = body.creditLimit;
+    if (body.creditLimit !== undefined) {
+      if (Number(body.creditLimit) < 0) return badRequest('Credit limit cannot be negative.');
+      updatePayload.credit_limit = body.creditLimit;
+    }
     if (body.status !== undefined) updatePayload.status = body.status;
 
     const { data: updated, error: updateErr } = await service
@@ -146,6 +156,18 @@ export async function PATCH(
       .single();
 
     if (updateErr) return serverError(updateErr.message);
+
+    await recordAuditLog({
+      action: 'SUPPLIER_UPDATED',
+      entityId: id,
+      entityType: 'supplier',
+      ipAddress: request.headers.get('x-forwarded-for'),
+      newValues: updatePayload,
+      oldValues: existingS,
+      organizationId: ctx.organizationId,
+      userAgent: request.headers.get('user-agent'),
+      userProfileId: ctx.userId,
+    });
 
     return NextResponse.json(updated);
   } catch (err) {
@@ -161,31 +183,6 @@ export async function DELETE(
   if (!ctx) return unauthorized();
   if (!can(ctx, 'suppliers.delete', 'procurement.supplier.write')) return forbidden();
 
-  const { id } = await params;
-  const service = createServiceRoleClient();
-
-  try {
-    const { data: existing, error: fetchErr } = await service
-      .from('suppliers')
-      .select('id')
-      .is('deleted_at', null)
-      .eq('organization_id', ctx.organizationId)
-      .eq('id', id)
-      .single();
-
-    if (fetchErr || !existing) return notFound('Supplier not found.');
-
-    const { data: deleted, error: deleteErr } = await service
-      .from('suppliers')
-      .update({ deleted_at: new Date().toISOString(), status: 'inactive' })
-      .eq('id', id)
-      .select()
-      .single();
-
-    if (deleteErr) return serverError(deleteErr.message);
-
-    return NextResponse.json(deleted);
-  } catch (err) {
-    return serverError((err as Error).message);
-  }
+  await params;
+  return badRequest('Supplier deletion is disabled. Use the deactivate action instead.');
 }

@@ -28,8 +28,8 @@ export async function POST(
 
   const q = quotation as Record<string, unknown>;
 
-  const invalidStatuses = ['cancelled', 'rejected', 'expired'];
-  if (invalidStatuses.includes(String(q.status))) {
+  const invalidStatuses = ['CANCELLED', 'REJECTED', 'EXPIRED'];
+  if (invalidStatuses.includes(String(q.status ?? '').toUpperCase())) {
     return NextResponse.json(
       { error: 'Quotation cannot be converted in its current status.' },
       { status: 400 },
@@ -83,7 +83,7 @@ export async function POST(
       branch_id: warehouse.branch_id ?? null,
       order_date: new Date().toISOString().slice(0, 10),
       delivery_date: q.valid_until ?? null,
-      status: 'draft',
+      status: 'DRAFT',
       subtotal: q.subtotal,
       tax_amount: q.tax_amount,
       discount_amount: q.discount_amount,
@@ -121,7 +121,7 @@ export async function POST(
   await service
     .schema('icecream_erp')
     .from('quotations')
-    .update({ status: 'accepted', updated_at: new Date().toISOString() })
+    .update({ status: 'ACCEPTED', updated_at: new Date().toISOString() })
     .eq('id', params.id);
 
   // Return full order

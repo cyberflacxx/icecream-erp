@@ -57,13 +57,22 @@ export function useSupplierCategories() {
 
   return useQuery({
     queryKey: ['procurement', 'supplier-categories'],
-    queryFn: () =>
-      request<
-        Array<{
-          id: string;
-          name: string;
-        }>
-      >(API_ROUTES.SUPPLIERS_META),
+    queryFn: async () => {
+      const response = await request<
+        | Array<{
+            id: string;
+            name: string;
+          }>
+        | {
+            categories?: Array<{
+              id: string;
+              name: string;
+            }>;
+          }
+      >(API_ROUTES.PROCUREMENT.SUPPLIER_CATEGORIES);
+
+      return Array.isArray(response) ? response : response.categories ?? [];
+    },
     enabled: isLoaded && Boolean(isSignedIn)
   });
 }

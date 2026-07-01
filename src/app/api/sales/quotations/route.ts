@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
+import { isCustomerInactiveStatus } from '@/lib/sales-customers';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -109,13 +110,16 @@ export async function POST(request: NextRequest) {
   const { data: customer, error: custErr } = await service
     .schema('icecream_erp')
     .from('customers')
-    .select('id')
+    .select('id, status')
     .eq('id', body.customerId)
     .is('deleted_at', null)
     .single();
 
   if (custErr || !customer) {
     return NextResponse.json({ error: 'Customer not found.' }, { status: 404 });
+  }
+  if (isCustomerInactiveStatus(customer.status)) {
+    return NextResponse.json({ error: 'Inactive customers cannot be used on new quotations.' }, { status: 400 });
   }
 
   // Validate items
@@ -155,7 +159,7 @@ export async function POST(request: NextRequest) {
       quotation_date: body.quotationDate ?? new Date().toISOString().slice(0, 10),
       valid_until: body.validUntil ?? null,
       notes: body.notes ?? null,
-      status: 'draft',
+      status: 'DRAFT',
       subtotal,
       tax_amount: taxAmount,
       discount_amount: discountAmount,

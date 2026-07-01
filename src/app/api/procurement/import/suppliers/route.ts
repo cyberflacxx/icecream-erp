@@ -1,74 +1,107 @@
+import { randomUUID } from 'crypto';
 import { NextRequest, NextResponse } from 'next/server';
 
 import { badRequest, can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
-import { validateSupplierCodeUniqueness } from '@/lib/procurement';
+import { buildSupplierImportTemplateCsv, validateSupplierImportRows } from '@/lib/procurement';
+import { recordAuditLog } from '@/lib/security-server';
 import { createServiceRoleClient } from '@/lib/supabase/server';
+
+export async function GET() {
+  const ctx = await getAuthContext();
+  if (!ctx) return unauthorized();
+  if (!can(ctx, 'procurement.supplier.import', 'procurement.supplier.view', 'procurement.read')) return forbidden();
+
+  return new NextResponse(buildSupplierImportTemplateCsv(), {
+    status: 200,
+    headers: {
+      'Content-Disposition': 'attachment; filename="supplier-import-template.csv"',
+      'Content-Type': 'text/csv; charset=utf-8',
+    },
+  });
+}
 
 export async function POST(request: NextRequest) {
   const ctx = await getAuthContext();
   if (!ctx) return unauthorized();
-  if (!can(ctx, 'procurement.write')) return forbidden();
+  if (!can(ctx, 'procurement.supplier.import', 'procurement.supplier.write', 'procurement.write')) return forbidden();
 
-  const body = (await request.json().catch(() => ({}))) as { rows?: Array<Record<string, unknown>> };
+  const body = (await request.json().catch(() => ({}))) as {
+    fileName?: string;
+    rows?: Array<Record<string, unknown>>;
+  };
   if (!body.rows?.length) return badRequest('rows are required.');
 
   const service = createServiceRoleClient();
-  const { data: existingSuppliers, error } = await service.from('suppliers').select('code, name').eq('organization_id', ctx.organizationId).is('deleted_at', null);
+  const { data: existingSuppliers, error } = await service
+    .from('suppliers')
+    .select('code')
+    .eq('organization_id', ctx.organizationId)
+    .is('deleted_at', null);
   if (error) return serverError(error.message);
 
-  const existingCodes = (existingSuppliers ?? []).map((row) => String(row.code ?? ''));
-  const existingNames = new Set((existingSuppliers ?? []).map((row) => String(row.name ?? '').trim().toUpperCase()));
-  const errors: Array<{ message: string; row: number }> = [];
-  const accepted: Array<Record<string, unknown>> = [];
+  const batchId = randomUUID();
+  const validation = validateSupplierImportRows(
+    body.rows,
+    (existingSuppliers ?? []).map((row) => String(row.code ?? '')),
+  );
 
-  body.rows.forEach((row, index) => {
-    const code = String(row.code ?? '').trim();
-    const name = String(row.name ?? '').trim();
-    const paymentTerms = String(row.paymentTerms ?? '').trim();
-
-    if (!code || !name) {
-      errors.push({ message: 'code and name are required', row: index + 1 });
-      return;
-    }
-    if (!validateSupplierCodeUniqueness(existingCodes, code)) {
-      errors.push({ message: 'duplicate supplier code', row: index + 1 });
-      return;
-    }
-    if (existingNames.has(name.toUpperCase())) {
-      errors.push({ message: 'duplicate supplier name', row: index + 1 });
-      return;
-    }
-    if (Number(row.creditLimit ?? 0) < 0) {
-      errors.push({ message: 'negative credit limit not allowed', row: index + 1 });
-      return;
-    }
-    if (paymentTerms && !['7 DAYS', '14 DAYS', '30 DAYS', 'COD', 'IMMEDIATE'].includes(paymentTerms.toUpperCase())) {
-      errors.push({ message: 'invalid payment terms', row: index + 1 });
-      return;
-    }
-
-    accepted.push({
-      address: row.address ?? null,
-      code,
-      contact_person: row.contactPerson ?? null,
-      created_by: ctx.userId,
-      credit_limit: Number(row.creditLimit ?? 0),
-      email: row.email ?? null,
-      name,
-      organization_id: ctx.organizationId,
-      payment_terms: paymentTerms || null,
-      phone: row.phone ?? null,
-      status: row.status ?? 'ACTIVE',
-      tax_number: row.taxNumber ?? null,
+  if (validation.errors.length > 0) {
+    await recordAuditLog({
+      action: 'PROCUREMENT_SUPPLIER_IMPORT_REJECTED',
+      entityId: batchId,
+      entityType: 'procurement_supplier_import',
+      ipAddress: request.headers.get('x-forwarded-for'),
+      newValues: {
+        errors: validation.errors,
+        fileName: body.fileName ?? 'supplier-import-template.csv',
+        rejectedRows: validation.errors.length,
+        totalRows: body.rows.length,
+      },
+      organizationId: ctx.organizationId,
+      userAgent: request.headers.get('user-agent'),
+      userProfileId: ctx.userId,
     });
-    existingCodes.push(code);
-    existingNames.add(name.toUpperCase());
-  });
 
-  if (accepted.length) {
-    const insertResult = await service.from('suppliers').insert(accepted);
-    if (insertResult.error) return serverError(insertResult.error.message);
+    return NextResponse.json(
+      { batchId, created: 0, errors: validation.errors },
+      { status: 400 },
+    );
   }
 
-  return NextResponse.json({ created: accepted.length, errors });
+  const payload = validation.rows.map((row) => ({
+    address: row.address,
+    code: row.code,
+    contact_person: row.contactPerson,
+    created_by: ctx.userId,
+    credit_limit: row.creditLimit,
+    current_balance: 0,
+    email: row.email,
+    name: row.name,
+    organization_id: ctx.organizationId,
+    payment_terms: row.paymentTerms,
+    phone: row.phone,
+    status: row.status,
+    tax_number: row.taxNumber,
+  }));
+
+  const insertResult = await service.from('suppliers').insert(payload);
+  if (insertResult.error) return serverError(insertResult.error.message);
+
+  await recordAuditLog({
+    action: 'PROCUREMENT_SUPPLIER_IMPORT_COMPLETED',
+    entityId: batchId,
+    entityType: 'procurement_supplier_import',
+    ipAddress: request.headers.get('x-forwarded-for'),
+    newValues: {
+      created: payload.length,
+      errors: [],
+      fileName: body.fileName ?? 'supplier-import-template.csv',
+      totalRows: body.rows.length,
+    },
+    organizationId: ctx.organizationId,
+    userAgent: request.headers.get('user-agent'),
+    userProfileId: ctx.userId,
+  });
+
+  return NextResponse.json({ batchId, created: payload.length, errors: [] }, { status: 201 });
 }

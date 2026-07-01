@@ -7,7 +7,7 @@ import { loadProductionReportBatches } from '@/lib/production-server';
 export async function GET(request: Request) {
   const ctx = await getAuthContext();
   if (!ctx) return unauthorized();
-  if (!can(ctx, 'production.read', 'reports.read', 'finance.read')) return forbidden();
+  if (!can(ctx, 'finance.cost.view', 'production.cost.view', 'production.read', 'reports.read', 'finance.read')) return forbidden();
 
   try {
     const { searchParams } = new URL(request.url);

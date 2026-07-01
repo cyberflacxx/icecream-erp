@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
-import { financeService } from '@/lib/finance-server';
+import { summarizeCashFlowFromLedger } from '@/lib/finance';
+import { financeErrorMessage, financeService, isMissingFinanceTable, loadLedgerLines } from '@/lib/finance-server';
 
 export async function GET(_request: NextRequest) {
   const ctx = await getAuthContext();
   if (!ctx) return unauthorized();
-  if (!can(ctx, 'finance.read')) return forbidden();
+  if (!can(ctx, 'finance.report.view', 'finance.read', 'reports.read')) return forbidden();
 
   try {
     const [bankRows, cashRows] = await Promise.all([
@@ -37,6 +38,13 @@ export async function GET(_request: NextRequest) {
       netCashFlow: bank.cashIn + cash.cashIn - bank.cashOut - cash.cashOut,
     });
   } catch (err) {
-    return serverError(err instanceof Error ? err.message : 'Internal server error');
+    const tableMissing =
+      isMissingFinanceTable(err) ||
+      financeErrorMessage(err).includes("Could not find the table 'icecream_erp.bank_transactions'") ||
+      financeErrorMessage(err).includes("Could not find the table 'icecream_erp.cash_transactions'");
+    if (tableMissing) {
+      return NextResponse.json(summarizeCashFlowFromLedger(await loadLedgerLines(ctx.organizationId)));
+    }
+    return serverError(financeErrorMessage(err) || 'Internal server error');
   }
 }

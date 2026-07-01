@@ -1,14 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import { can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
+import { badRequest, can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
+import { toNumber } from '@/lib/inventory';
+import {
+  loadCustomerBalanceSnapshot,
+  mapCustomerRow,
+  normalizeCustomerStatus,
+} from '@/lib/sales-customers';
 import { validateCustomerCodeUniqueness } from '@/lib/sales';
-import { createServiceRoleClient } from '@/lib/supabase/server';
-
-// ─── Helpers ─────────────────────────────────────────────────────────────────
+import { salesService, writeSalesAuditLog } from '@/lib/sales-server';
 
 function parsePagination(searchParams: URLSearchParams) {
-  const page = Math.max(1, parseInt(searchParams.get('page') ?? '1'));
-  const pageSize = Math.min(100, Math.max(1, parseInt(searchParams.get('pageSize') ?? '20')));
+  const page = Math.max(1, parseInt(searchParams.get('page') ?? '1', 10));
+  const pageSize = Math.min(100, Math.max(1, parseInt(searchParams.get('pageSize') ?? '20', 10)));
   return { page, pageSize };
 }
 
@@ -21,134 +25,143 @@ function paginate<T>(data: T[], page: number, pageSize: number) {
   };
 }
 
-// ─── GET /api/sales/customers ─────────────────────────────────────────────────
-
 export async function GET(request: NextRequest) {
-  const ctx = await getAuthContext();
+  const ctx = await getAuthContext(request);
   if (!ctx) return unauthorized();
-  if (!can(ctx, 'sales.read')) return forbidden();
+  if (!can(ctx, 'sales.customer.view', 'sales.read')) return forbidden();
 
-  const service = createServiceRoleClient();
-  const { searchParams } = new URL(request.url);
-  const { page, pageSize } = parsePagination(searchParams);
-  const search = searchParams.get('search') ?? '';
-  const status = searchParams.get('status') ?? '';
+  try {
+    const service = salesService();
+    const { searchParams } = new URL(request.url);
+    const { page, pageSize } = parsePagination(searchParams);
+    const search = searchParams.get('search') ?? '';
+    const status = searchParams.get('status') ?? '';
 
-  let query = service
-    .schema('icecream_erp')
-    .from('customers')
-    .select('id, code, name, customer_type, email, phone, address, payment_terms, credit_limit, current_balance, status, credit_allowed, customer_group_id, price_list_code, tax_number')
-    .is('deleted_at', null)
-    .order('name', { ascending: true });
+    let query = service
+      .from('customers')
+      .select('id, organization_id, code, name, customer_type, email, phone, address, payment_terms, credit_limit, current_balance, status, created_at, updated_at')
+      .eq('organization_id', ctx.organizationId)
+      .is('deleted_at', null)
+      .order('name', { ascending: true });
 
-  if (status) {
-    query = query.eq('status', status);
+    if (status) {
+      query = query.eq('status', normalizeCustomerStatus(status));
+    }
+
+    if (search) {
+      query = query.or(`code.ilike.%${search}%,name.ilike.%${search}%,email.ilike.%${search}%,phone.ilike.%${search}%`);
+    }
+
+    const { data, error } = await query;
+    if (error) throw error;
+
+    const rows = await Promise.all((data ?? []).map(async (row) => {
+      const balance = await loadCustomerBalanceSnapshot(
+        service,
+        String(row.id),
+        row.current_balance,
+        row.credit_limit,
+        row.payment_terms,
+      );
+      return mapCustomerRow(row, balance);
+    }));
+
+    return NextResponse.json(paginate(rows, page, pageSize));
+  } catch (error) {
+    return serverError(error instanceof Error ? error.message : 'Failed to load customers.');
   }
-
-  if (search) {
-    query = query.or(
-      `code.ilike.%${search}%,name.ilike.%${search}%,email.ilike.%${search}%`,
-    );
-  }
-
-  const { data, error } = await query;
-  if (error) return serverError(error.message);
-
-  const mapped = (data ?? []).map((c) => ({
-    id: c.id,
-    code: c.code,
-    name: c.name,
-    customerType: c.customer_type,
-    email: c.email,
-    phone: c.phone,
-    address: c.address,
-    paymentTerms: c.payment_terms,
-    creditLimit: c.credit_limit ? Number(c.credit_limit) : 0,
-    creditAllowed: Boolean(c.credit_allowed),
-    currentBalance: c.current_balance ? Number(c.current_balance) : 0,
-    customerGroup: c.customer_group_id,
-    priceListCode: c.price_list_code,
-    status: c.status,
-    taxNumber: c.tax_number,
-  }));
-
-  return NextResponse.json(paginate(mapped, page, pageSize));
 }
 
-// ─── POST /api/sales/customers ────────────────────────────────────────────────
-
 export async function POST(request: NextRequest) {
-  const ctx = await getAuthContext();
+  const ctx = await getAuthContext(request);
   if (!ctx) return unauthorized();
-  if (!can(ctx, 'sales.write')) return forbidden();
+  if (!can(ctx, 'sales.customer.create', 'sales.write')) return forbidden();
 
-  const service = createServiceRoleClient();
+  try {
+    const service = salesService();
+    const body = (await request.json().catch(() => ({}))) as {
+      address?: string;
+      code?: string;
+      creditLimit?: number;
+      customerType?: string;
+      email?: string;
+      name?: string;
+      paymentTerms?: string;
+      phone?: string;
+      status?: string;
+    };
 
-  const body = await request.json() as {
-    address?: string;
-    code?: string;
-    creditAllowed?: boolean;
-    creditLimit?: number;
-    customerGroupId?: string | null;
-    customerType: string;
-    email?: string;
-    name: string;
-    paymentTerms?: string;
-    phone?: string;
-    priceListCode?: string | null;
-    status: string;
-    taxNumber?: string | null;
-  };
+    const name = String(body.name ?? '').trim();
+    if (!name) {
+      return badRequest('Customer name is required.');
+    }
 
-  if (!body.name || !body.customerType || !body.status) {
-    return NextResponse.json({ error: 'name, customerType, and status are required' }, { status: 400 });
-  }
+    const creditLimit = toNumber(body.creditLimit);
+    if (creditLimit < 0) {
+      return badRequest('Credit limit must not be negative.');
+    }
 
-  // Generate code if not provided
-  let code = body.code?.trim() ?? '';
-  if (!code) {
-    const { count } = await service
-      .schema('icecream_erp')
+    let code = String(body.code ?? '').trim().toUpperCase();
+    if (!code) {
+      const { count, error: countError } = await service
+        .from('customers')
+        .select('id', { count: 'exact', head: true })
+        .eq('organization_id', ctx.organizationId);
+      if (countError) throw countError;
+      code = `CUS-${String((count ?? 0) + 1).padStart(5, '0')}`;
+    }
+
+    const { data: existingCodes, error: codesError } = await service
       .from('customers')
-      .select('id', { count: 'exact', head: true });
-    code = `CUS-${String((count ?? 0) + 1).padStart(5, '0')}`;
+      .select('code')
+      .eq('organization_id', ctx.organizationId)
+      .is('deleted_at', null);
+    if (codesError) throw codesError;
+
+    if (!validateCustomerCodeUniqueness((existingCodes ?? []).map((row) => String(row.code ?? '')), code)) {
+      return NextResponse.json({ error: 'Customer code already exists.' }, { status: 409 });
+    }
+
+    const { data, error } = await service
+      .from('customers')
+      .insert({
+        address: body.address?.trim() || null,
+        code,
+        created_by: ctx.userId,
+        credit_limit: creditLimit,
+        current_balance: 0,
+        customer_type: String(body.customerType ?? 'DIRECT_CUSTOMER').trim().toUpperCase(),
+        email: body.email?.trim() || null,
+        name,
+        organization_id: ctx.organizationId,
+        payment_terms: body.paymentTerms?.trim() || null,
+        phone: body.phone?.trim() || null,
+        status: normalizeCustomerStatus(body.status),
+      })
+      .select('id, organization_id, code, name, customer_type, email, phone, address, payment_terms, credit_limit, current_balance, status, created_at, updated_at')
+      .single();
+    if (error || !data) {
+      throw error ?? new Error('Failed to create customer.');
+    }
+
+    const balance = await loadCustomerBalanceSnapshot(
+      service,
+      String(data.id),
+      data.current_balance,
+      data.credit_limit,
+      data.payment_terms,
+    );
+
+    await writeSalesAuditLog(
+      'SALES_CUSTOMER_CREATED',
+      String(data.id),
+      ctx.userId,
+      { code, status: data.status },
+      'customer',
+    );
+
+    return NextResponse.json(mapCustomerRow(data, balance), { status: 201 });
+  } catch (error) {
+    return serverError(error instanceof Error ? error.message : 'Failed to create customer.');
   }
-
-  const { data: existingCodes, error: codesError } = await service
-    .schema('icecream_erp')
-    .from('customers')
-    .select('code')
-    .is('deleted_at', null);
-
-  if (codesError) return serverError(codesError.message);
-  if (!validateCustomerCodeUniqueness((existingCodes ?? []).map((row) => String(row.code ?? '')), code)) {
-    return NextResponse.json({ error: 'Customer code already exists.' }, { status: 409 });
-  }
-
-  const { data, error } = await service
-    .schema('icecream_erp')
-    .from('customers')
-    .insert({
-      code,
-      name: body.name,
-      customer_type: body.customerType,
-      status: body.status,
-      email: body.email ?? null,
-      phone: body.phone ?? null,
-      address: body.address ?? null,
-      payment_terms: body.paymentTerms ?? null,
-      credit_allowed: body.creditAllowed ?? false,
-      credit_limit: body.creditLimit ?? null,
-      current_balance: 0,
-      customer_group_id: body.customerGroupId ?? null,
-      price_list_code: body.priceListCode ?? null,
-      tax_number: body.taxNumber ?? null,
-      created_by: ctx.userId,
-    })
-    .select()
-    .single();
-
-  if (error) return serverError(error.message);
-
-  return NextResponse.json(data, { status: 201 });
 }

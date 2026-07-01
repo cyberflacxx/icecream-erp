@@ -6,15 +6,51 @@
 
 @layer base {
   :root {
+    color-scheme: light;
     --app-bg: #fff7e8;
-    --app-surface: #fffaf1;
+    --app-bg-canvas: #fff7e8;
+    --app-bg-default: #fffaf1;
+    --app-bg-subtle: #fff1dd;
+    --app-bg-inset: #f6e3c8;
+    --app-surface: #fffdf8;
     --app-surface-strong: #fff1dd;
+    --app-sidebar: rgba(255, 250, 241, 0.86);
     --app-border: #f3d7b6;
+    --app-border-muted: #efdcc7;
+    --app-border-strong: #dbb488;
     --app-text: #1f130d;
     --app-muted: #6b4a3a;
+    --app-subtle: #8b6a58;
     --app-accent: #f97316;
     --app-accent-strong: #c2410c;
     --app-accent-soft: rgba(249, 115, 22, 0.12);
+    --app-shadow-sm: 0 1px 2px rgba(59, 31, 18, 0.06);
+    --app-shadow-md: 0 14px 34px rgba(59, 31, 18, 0.08);
+    --app-shadow-lg: 0 28px 70px rgba(59, 31, 18, 0.14);
+  }
+
+  .dark {
+    color-scheme: dark;
+    --app-bg: #120904;
+    --app-bg-canvas: #120904;
+    --app-bg-default: #1a0d07;
+    --app-bg-subtle: #24120b;
+    --app-bg-inset: #0d0501;
+    --app-surface: #1d1008;
+    --app-surface-strong: #25140b;
+    --app-sidebar: rgba(26, 13, 7, 0.88);
+    --app-border: #4a2010;
+    --app-border-muted: #3a1a0d;
+    --app-border-strong: #6f3820;
+    --app-text: #ffe8b8;
+    --app-muted: #c9956a;
+    --app-subtle: #9e7352;
+    --app-accent: #fb923c;
+    --app-accent-strong: #f97316;
+    --app-accent-soft: rgba(249, 115, 22, 0.16);
+    --app-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.28);
+    --app-shadow-md: 0 16px 36px rgba(0, 0, 0, 0.34);
+    --app-shadow-lg: 0 30px 80px rgba(0, 0, 0, 0.48);
   }
 
   * {
@@ -23,15 +59,18 @@
 
   html {
     scroll-behavior: smooth;
+    background: var(--app-bg-canvas);
   }
 
   body {
     @apply bg-cream text-textDark;
     background:
-      radial-gradient(circle at top left, rgba(249, 115, 22, 0.14), transparent 32%),
-      radial-gradient(circle at top right, rgba(255, 232, 184, 0.65), transparent 24%),
-      var(--app-bg);
+      radial-gradient(circle at top left, rgba(249, 115, 22, 0.08), transparent 24%),
+      linear-gradient(180deg, color-mix(in srgb, var(--app-bg-canvas) 94%, white) 0%, var(--app-bg-canvas) 100%);
     color: var(--app-text);
+    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
 
   ::selection {
@@ -39,17 +78,42 @@
   }
 
   .dark body {
-    @apply bg-darkBg text-darkText;
     background:
-      radial-gradient(circle at top left, rgba(249, 115, 22, 0.1), transparent 34%),
-      radial-gradient(circle at top right, rgba(60, 28, 14, 0.38), transparent 28%),
-      #1a0d07;
+      radial-gradient(circle at top left, rgba(249, 115, 22, 0.12), transparent 22%),
+      linear-gradient(180deg, #140904 0%, var(--app-bg-canvas) 100%);
   }
 }
 
 @layer utilities {
   .section-shell {
     @apply mx-auto max-w-7xl px-6;
+  }
+
+  .app-panel {
+    @apply rounded-2xl border backdrop-blur-sm;
+    border-color: color-mix(in srgb, var(--app-border) 80%, transparent);
+    background: color-mix(in srgb, var(--app-surface) 94%, transparent);
+    box-shadow: var(--app-shadow-sm);
+  }
+
+  .app-panel-strong {
+    @apply rounded-2xl border;
+    border-color: color-mix(in srgb, var(--app-border-strong) 74%, transparent);
+    background: color-mix(in srgb, var(--app-surface-strong) 96%, transparent);
+    box-shadow: var(--app-shadow-md);
+  }
+
+  .app-panel-subtle {
+    @apply rounded-xl border;
+    border-color: color-mix(in srgb, var(--app-border-muted) 70%, transparent);
+    background: color-mix(in srgb, var(--app-bg-subtle) 88%, transparent);
+  }
+
+  .app-icon-chip {
+    @apply inline-flex items-center justify-center rounded-xl border;
+    border-color: color-mix(in srgb, var(--app-border) 78%, transparent);
+    background: color-mix(in srgb, var(--app-bg-subtle) 92%, transparent);
+    color: var(--app-muted);
   }
 
   /* Dashboard card — theme-aware */
@@ -286,7 +350,11 @@
   }
 
   .auth-card {
-    @apply w-full max-w-xl rounded-2xl border border-border bg-white p-8 shadow-soft dark:border-darkBorder dark:bg-darkCard;
+    @apply w-full max-w-xl rounded-[28px] border p-7 shadow-soft sm:p-8;
+    border-color: color-mix(in srgb, var(--app-border) 76%, transparent);
+    background:
+      linear-gradient(180deg, color-mix(in srgb, var(--app-surface) 98%, white) 0%, var(--app-surface) 100%);
+    box-shadow: var(--app-shadow-lg);
   }
 
   .auth-field {
@@ -294,15 +362,22 @@
   }
 
   .auth-label {
-    @apply text-sm font-medium text-brown dark:text-darkText;
+    @apply text-sm font-medium;
+    color: var(--app-text);
   }
 
   .auth-input {
-    @apply h-11 w-full rounded-xl border border-border bg-white px-3 text-brown outline-none transition dark:border-darkBorder dark:bg-darkCard dark:text-darkText;
+    @apply h-11 w-full rounded-xl border px-3 outline-none transition;
+    border-color: color-mix(in srgb, var(--app-border) 86%, transparent);
+    background: color-mix(in srgb, var(--app-bg-canvas) 86%, white);
+    color: var(--app-text);
   }
 
   .auth-input-shell {
-    @apply flex h-11 items-center rounded-xl border border-border bg-white px-3 text-brown transition dark:border-darkBorder dark:bg-darkCard dark:text-darkText;
+    @apply flex h-11 items-center rounded-xl border px-3 transition;
+    border-color: color-mix(in srgb, var(--app-border) 86%, transparent);
+    background: color-mix(in srgb, var(--app-bg-canvas) 86%, white);
+    color: var(--app-text);
   }
 
   .auth-input-error {
@@ -310,7 +385,7 @@
   }
 
   .auth-input-valid {
-    @apply border-green-500;
+    border-color: color-mix(in srgb, #16a34a 72%, transparent);
   }
 
   .auth-input-disabled {
@@ -318,19 +393,46 @@
   }
 
   .auth-primary-button {
-    @apply h-11 w-full rounded-xl bg-orange font-semibold text-white transition hover:bg-deepOrange disabled:cursor-not-allowed disabled:opacity-60;
+    @apply h-11 w-full rounded-xl font-semibold text-white transition disabled:cursor-not-allowed disabled:opacity-60;
+    background: linear-gradient(180deg, color-mix(in srgb, var(--app-accent) 92%, white) 0%, var(--app-accent-strong) 100%);
+    box-shadow: 0 10px 24px rgba(194, 65, 12, 0.22);
+  }
+
+  .auth-primary-button:hover {
+    filter: brightness(1.04);
   }
 
   .auth-secondary-button {
-    @apply h-11 w-full rounded-xl border border-border font-semibold text-brown transition hover:bg-brown/5 disabled:cursor-not-allowed disabled:opacity-60 dark:border-darkBorder dark:text-darkText dark:hover:bg-white/5;
+    @apply h-11 w-full rounded-xl border font-semibold transition disabled:cursor-not-allowed disabled:opacity-60;
+    border-color: color-mix(in srgb, var(--app-border) 84%, transparent);
+    color: var(--app-text);
+    background: color-mix(in srgb, var(--app-bg-default) 72%, transparent);
+  }
+
+  .auth-secondary-button:hover {
+    background: color-mix(in srgb, var(--app-bg-subtle) 92%, transparent);
   }
 
   .auth-link {
-    @apply font-semibold text-orange transition hover:text-deepOrange;
+    @apply font-semibold transition;
+    color: var(--app-accent-strong);
+  }
+
+  .auth-link:hover {
+    color: var(--app-accent);
   }
 
   .auth-alert {
     @apply rounded-xl border px-4 py-3 text-sm;
+  }
+
+  .auth-input:focus,
+  .auth-input-shell:focus-within,
+  .surface-input:focus,
+  .surface-input-soft:focus,
+  .surface-textarea-soft:focus {
+    border-color: color-mix(in srgb, var(--app-accent) 76%, transparent);
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--app-accent) 58%, transparent);
   }
 }
 

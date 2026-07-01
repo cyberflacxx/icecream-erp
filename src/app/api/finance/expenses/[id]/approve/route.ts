@@ -6,7 +6,7 @@ import { financeService, writeFinanceAuditLog } from '@/lib/finance-server';
 export async function POST(_request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const ctx = await getAuthContext();
   if (!ctx) return unauthorized();
-  if (!can(ctx, 'finance.approve', 'finance.write')) return forbidden();
+  if (!can(ctx, 'finance.expense.approve', 'finance.approve', 'finance.write')) return forbidden();
 
   try {
     const { id } = await params;

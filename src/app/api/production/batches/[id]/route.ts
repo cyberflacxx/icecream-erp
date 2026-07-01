@@ -3,6 +3,15 @@ import { NextRequest, NextResponse } from 'next/server';
 import { badRequest, can, forbidden, getAuthContext, notFound, serverError, unauthorized } from '@/lib/api-auth';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
+function isMissingColumnError(error: unknown, table: string, columnName: string) {
+  const message = error instanceof Error
+    ? error.message
+    : typeof error === 'object' && error !== null && 'message' in error
+      ? String((error as { message?: unknown }).message ?? '')
+      : '';
+  return message.includes(`column ${table}.${columnName} does not exist`);
+}
+
 export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
@@ -15,7 +24,7 @@ export async function GET(
   const service = createServiceRoleClient();
 
   try {
-    const { data: batch, error } = await service
+    const primaryBatch = await service
       .schema('icecream_erp')
       .from('production_batches')
       .select(`
@@ -27,8 +36,57 @@ export async function GET(
       .is('deleted_at', null)
       .eq('id', id)
       .single();
+    let batch = primaryBatch.data;
+    let batchError = primaryBatch.error;
 
-    if (error || !batch) return notFound('Production batch not found');
+    if (
+      batchError &&
+      (
+        isMissingColumnError(batchError, 'production_batches', 'production_date') ||
+        isMissingColumnError(batchError, 'production_batches', 'production_line') ||
+        isMissingColumnError(batchError, 'production_batches', 'quality_status') ||
+        isMissingColumnError(batchError, 'production_batches', 'planned_quantity') ||
+        isMissingColumnError(batchError, 'production_batches', 'worker_count') ||
+        isMissingColumnError(batchError, 'production_batches', 'people_off_count') ||
+        isMissingColumnError(batchError, 'production_batches', 'material_cost') ||
+        isMissingColumnError(batchError, 'production_batches', 'labour_cost') ||
+        isMissingColumnError(batchError, 'production_batches', 'overhead_cost') ||
+        isMissingColumnError(batchError, 'production_batches', 'deleted_at')
+      )
+    ) {
+      const fallbackBatch = await service
+        .schema('icecream_erp')
+        .from('production_batches')
+        .select(`
+          id, batch_number, planned_date, shift, status, planned_qty, actual_qty, rejected_qty, wastage_qty,
+          warehouse_id, recipe_id, start_time, end_time, notes
+        `)
+        .eq('id', id)
+        .single();
+      batch = fallbackBatch.data
+        ? {
+            ...fallbackBatch.data,
+            actual_output: fallbackBatch.data.actual_qty,
+            efficiency_percentage: 0,
+            expected_output: fallbackBatch.data.planned_qty,
+            labour_cost: 0,
+            material_cost: 0,
+            overhead_cost: 0,
+            people_off_count: 0,
+            planned_quantity: fallbackBatch.data.planned_qty,
+            production_date: fallbackBatch.data.planned_date,
+            production_line: fallbackBatch.data.notes,
+            quality_notes: null,
+            quality_status: 'PENDING',
+            wastage_percentage: 0,
+            wastage_quantity: fallbackBatch.data.wastage_qty ?? fallbackBatch.data.rejected_qty ?? 0,
+            worker_count: 0,
+          }
+        : null;
+      batchError = fallbackBatch.error;
+    }
+
+    if (batchError || !batch) return notFound('Production batch not found');
 
     const [warehouseResult, recipeResult, recipeItemsResult, packagingItemsResult, materialsResult, outputsResult, workersResult] = await Promise.all([
       service
@@ -56,7 +114,7 @@ export async function GET(
       service
         .schema('icecream_erp')
         .from('production_batch_materials')
-        .select('id, item_id, quantity_required, quantity_issued, quantity_actual, quantity_remaining, variance, unit_id, unit_cost, total_cost, notes')
+        .select('id, item_id, quantity_required, quantity_issued, quantity_actual, variance, unit_id, notes, items(unit_cost)')
         .eq('batch_id', id),
       service
         .schema('icecream_erp')
@@ -87,6 +145,17 @@ export async function GET(
           recipe_packaging_items: packagingItemsResult.data ?? [],
         }
       : null;
+    const materials = (materialsResult.data ?? []).map((row: Record<string, unknown>) => {
+      const unitCost = Number((row.items as { unit_cost?: unknown } | null)?.unit_cost ?? 0);
+      const quantityIssued = Number(row.quantity_issued ?? row.quantity_required ?? 0);
+      const quantityActual = Number(row.quantity_actual ?? quantityIssued);
+      return {
+        ...row,
+        quantity_remaining: Math.max(0, quantityIssued - quantityActual),
+        total_cost: quantityActual * unitCost,
+        unit_cost: unitCost,
+      };
+    });
 
     return NextResponse.json({
       id: batch.id,
@@ -114,7 +183,7 @@ export async function GET(
       endTime: batch.end_time,
       recipe,
       warehouse: warehouseResult.data,
-      materials: materialsResult.data ?? [],
+      materials,
       outputs: outputsResult.data ?? [],
       workers: workersResult.data ?? [],
     });

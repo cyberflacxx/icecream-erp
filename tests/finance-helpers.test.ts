@@ -2,17 +2,23 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  buildFinanceSourceReference,
   buildPayablesRows,
   buildReceivablesRows,
   calculateBranchCostSummary,
   calculateBudgetVariance,
   calculateInventoryValuation,
   calculateJournalBalance,
+  isPostedJournalStatus,
+  parseFinanceSourceReference,
   calculatePayableBalance,
   calculatePettyCashBalance,
   calculateProductionCostSummary,
   calculateReceivableBalance,
   calculateStraightLineDepreciation,
+  summarizeBalanceSheetFromLedger,
+  summarizeCashFlowFromLedger,
+  summarizeProfitAndLossFromLedger,
   summarizeProfitAndLoss,
   summarizeTrialBalance,
   validateBankAccountImportRows,
@@ -58,6 +64,48 @@ test('journal helpers summarize balances and profit figures', () => {
   assert.equal(summary.totals.credit, 500);
   assert.equal(pnl.grossProfit, 3100);
   assert.equal(pnl.netProfit, 1900);
+});
+
+test('finance source references and posted statuses normalize safely', () => {
+  const reference = buildFinanceSourceReference('sales', 'invoice', 'abc-123');
+
+  assert.equal(reference, 'sales:invoice:abc-123');
+  assert.deepEqual(parseFinanceSourceReference(reference), {
+    sourceModule: 'sales',
+    sourceDocumentType: 'invoice',
+    sourceDocumentId: 'abc-123',
+  });
+  assert.equal(parseFinanceSourceReference('bad-reference'), null);
+  assert.equal(isPostedJournalStatus('approved'), true);
+  assert.equal(isPostedJournalStatus('posted'), true);
+  assert.equal(isPostedJournalStatus('draft'), false);
+});
+
+test('ledger summaries derive balance sheet, pnl, and cash flow totals', () => {
+  const ledgerLines = [
+    { accountCode: '1100', accountName: 'Accounts Receivable', accountType: 'ASSET', debitAmount: 115, creditAmount: 0 },
+    { accountCode: '4000', accountName: 'Sales Revenue', accountType: 'REVENUE', debitAmount: 0, creditAmount: 115 },
+    { accountCode: '5000', accountName: 'Cost of Goods Sold', accountType: 'EXPENSE', debitAmount: 40, creditAmount: 0 },
+    { accountCode: '1200', accountName: 'Inventory', accountType: 'ASSET', debitAmount: 0, creditAmount: 40 },
+    { accountCode: '1010', accountName: 'Cash on Hand', accountType: 'ASSET', debitAmount: 30, creditAmount: 5 },
+    { accountCode: '6100', accountName: 'Operating Expenses', accountType: 'EXPENSE', debitAmount: 5, creditAmount: 0 },
+  ];
+
+  const balanceSheet = summarizeBalanceSheetFromLedger(ledgerLines);
+  const pnl = summarizeProfitAndLossFromLedger(ledgerLines);
+  const cashFlow = summarizeCashFlowFromLedger(ledgerLines);
+
+  assert.equal(balanceSheet.assets, 100);
+  assert.equal(balanceSheet.liabilities, 0);
+  assert.equal(balanceSheet.equity, 0);
+  assert.equal(pnl.revenue, 115);
+  assert.equal(pnl.costOfGoodsSold, 40);
+  assert.equal(pnl.operatingExpenses, 5);
+  assert.equal(pnl.grossProfit, 75);
+  assert.equal(pnl.netProfit, 70);
+  assert.equal(cashFlow.cashIn, 30);
+  assert.equal(cashFlow.cashOut, 5);
+  assert.equal(cashFlow.netCashFlow, 25);
 });
 
 test('receivables and payables builders normalize report rows', () => {

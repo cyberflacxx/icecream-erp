@@ -33,7 +33,7 @@ export async function POST(
     return NextResponse.json({ error: 'This role is limited to its assigned branch.' }, { status: 403 });
   }
 
-  if (o.status !== 'draft') {
+  if (String(o.status ?? '').toUpperCase() !== 'DRAFT') {
     return NextResponse.json({ error: 'Only draft sales orders can be confirmed.' }, { status: 400 });
   }
 
@@ -64,7 +64,7 @@ export async function POST(
   const { data, error } = await service
     .schema('icecream_erp')
     .from('sales_orders')
-    .update({ status: 'confirmed', updated_at: new Date().toISOString() })
+    .update({ status: 'CONFIRMED', updated_at: new Date().toISOString() })
     .eq('id', params.id)
     .select()
     .single();

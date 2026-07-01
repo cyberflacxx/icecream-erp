@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { createClient } from '@/lib/supabase/server';
+import { hasPermissionAccess } from '@/lib/permission-access';
 import {
   buildSecurityContextProfile,
   canAccessBranch,
@@ -90,11 +91,11 @@ export async function getAuthContext(request?: Request | NextRequest): Promise<A
 }
 
 export function can(ctx: AuthContext, ...perms: string[]): boolean {
-  if (ctx.permissions.includes('manage_roles') || ctx.permissions.includes('settings.manage')) {
+  if (hasPermissionAccess(ctx.permissions, 'manage_roles', 'settings.manage')) {
     return true;
   }
 
-  return perms.some((permission) => ctx.permissions.includes(permission));
+  return hasPermissionAccess(ctx.permissions, ...perms);
 }
 
 export function canAccessBranchScope(ctx: AuthContext, branchId: string) {

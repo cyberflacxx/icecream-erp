@@ -9,6 +9,7 @@ import { DataTable, EmptyState, LoadingState } from '@/components/ui-library';
 
 export default function ProductionShiftsPage() {
   const query = useProductionShiftTargets();
+  const rows = Array.isArray(query.data) ? query.data : [];
 
   if (query.isLoading) return <LoadingState />;
   if (query.isError || !query.data) {
@@ -27,7 +28,14 @@ export default function ProductionShiftsPage() {
           { key: 'target_workers', header: 'Target Workers' },
           { key: 'target_material_usage', header: 'Target Material' },
         ]}
-        data={Array.isArray(query.data) ? query.data : []}
+        data={rows}
+        emptyState={
+          <EmptyState
+            icon={<AlertCircle className="h-6 w-6" />}
+            title="No shift targets yet"
+            description="Create shift targets from production planning or continue with shift reports until targets are set up."
+          />
+        }
       />
     </div>
   );

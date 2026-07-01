@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { badRequest, can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
+import { applyInventoryDelta, getBalance, recordStockMovement, requireWarehouseAccess } from '@/lib/inventory-server';
 import { productionService, writeProductionAuditLog } from '@/lib/production-server';
 
 export async function POST(
@@ -35,6 +36,9 @@ export async function POST(
       .single();
     if (batchError) throw batchError;
 
+    await requireWarehouseAccess(service, body.sourceWarehouseId, ctx.branchId, ctx.isBranchScoped);
+    await requireWarehouseAccess(service, String(batch.warehouse_id), ctx.branchId, ctx.isBranchScoped);
+
     const items = Array.isArray(requestRow.production_material_request_items)
       ? requestRow.production_material_request_items
       : [];
@@ -44,79 +48,46 @@ export async function POST(
         ?? Number(item.quantity_approved ?? item.quantity_requested ?? 0);
       if (issued <= 0) continue;
 
-      const { data: sourceBalance, error: sourceBalanceError } = await service
-        .from('stock_balances')
-        .select('id, quantity_on_hand, quantity_available')
-        .eq('item_id', item.item_id)
-        .eq('warehouse_id', body.sourceWarehouseId)
-        .single();
-      if (sourceBalanceError) throw sourceBalanceError;
-      if (Number(sourceBalance.quantity_available ?? 0) < issued) {
+      const sourceBalance = await getBalance(service, String(item.item_id), body.sourceWarehouseId);
+      if (Number(sourceBalance?.quantity_available ?? 0) < issued) {
         return badRequest(`Insufficient stock for item ${item.item_id}.`);
       }
 
-      await service
-        .from('stock_balances')
-        .update({
-          quantity_available: Number(sourceBalance.quantity_available) - issued,
-          quantity_on_hand: Number(sourceBalance.quantity_on_hand) - issued,
-          last_updated: body.issueDate ?? new Date().toISOString(),
-        })
-        .eq('id', sourceBalance.id);
+      await applyInventoryDelta(service, {
+        itemId: String(item.item_id),
+        organizationId: ctx.organizationId,
+        quantityDelta: -issued,
+        warehouseId: body.sourceWarehouseId,
+      });
+      await applyInventoryDelta(service, {
+        itemId: String(item.item_id),
+        organizationId: ctx.organizationId,
+        quantityDelta: issued,
+        warehouseId: String(batch.warehouse_id),
+      });
 
-      const { data: destinationBalance } = await service
-        .from('stock_balances')
-        .select('id, quantity_on_hand, quantity_available')
-        .eq('item_id', item.item_id)
-        .eq('warehouse_id', batch.warehouse_id)
-        .maybeSingle();
-
-      if (destinationBalance) {
-        await service
-          .from('stock_balances')
-          .update({
-            quantity_available: Number(destinationBalance.quantity_available ?? 0) + issued,
-            quantity_on_hand: Number(destinationBalance.quantity_on_hand ?? 0) + issued,
-            last_updated: body.issueDate ?? new Date().toISOString(),
-          })
-          .eq('id', destinationBalance.id);
-      } else {
-        await service.from('stock_balances').insert({
-          item_id: item.item_id,
-          quantity_available: issued,
-          quantity_on_hand: issued,
-          quantity_reserved: 0,
-          warehouse_id: batch.warehouse_id,
-        });
-      }
-
-      await service.from('stock_movements').insert([
-        {
-          created_by: ctx.userId,
-          destination_warehouse_id: batch.warehouse_id,
-          item_id: item.item_id,
-          movement_type: 'PRODUCTION_ISSUE',
-          quantity: issued,
-          reference_id: id,
-          reference_type: 'production_material_request',
-          source_warehouse_id: body.sourceWarehouseId,
-          total_cost: 0,
-          unit_cost: 0,
-          warehouse_id: body.sourceWarehouseId,
-        },
-        {
-          created_by: ctx.userId,
-          item_id: item.item_id,
-          movement_type: 'TRANSFER_IN',
-          quantity: issued,
-          reference_id: id,
-          reference_type: 'production_material_request',
-          source_warehouse_id: body.sourceWarehouseId,
-          total_cost: 0,
-          unit_cost: 0,
-          warehouse_id: batch.warehouse_id,
-        },
-      ]);
+      await recordStockMovement(service, {
+        createdBy: ctx.userId,
+        itemId: String(item.item_id),
+        movementType: 'PRODUCTION_ISSUE',
+        notes: requestRow.request_number ?? null,
+        organizationId: ctx.organizationId,
+        quantity: issued,
+        referenceId: id,
+        referenceType: 'production_material_request',
+        warehouseId: body.sourceWarehouseId,
+      });
+      await recordStockMovement(service, {
+        createdBy: ctx.userId,
+        itemId: String(item.item_id),
+        movementType: 'TRANSFER_IN',
+        notes: requestRow.request_number ?? null,
+        organizationId: ctx.organizationId,
+        quantity: issued,
+        referenceId: id,
+        referenceType: 'production_material_request',
+        warehouseId: String(batch.warehouse_id),
+      });
 
       await service
         .from('production_material_request_items')

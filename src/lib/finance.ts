@@ -168,6 +168,144 @@ export function summarizeProfitAndLoss(revenue: number, costOfGoodsSold: number,
   return { grossProfit, netProfit };
 }
 
+export function buildFinanceSourceReference(
+  sourceModule: string,
+  sourceDocumentType: string,
+  sourceDocumentId: string,
+) {
+  return [sourceModule, sourceDocumentType, sourceDocumentId]
+    .map((part) => String(part ?? '').trim())
+    .filter(Boolean)
+    .join(':');
+}
+
+export function parseFinanceSourceReference(reference: string | null | undefined) {
+  const normalized = String(reference ?? '').trim();
+  if (!normalized) return null;
+
+  const [sourceModule, sourceDocumentType, ...idParts] = normalized.split(':');
+  const sourceDocumentId = idParts.join(':').trim();
+  if (!sourceModule || !sourceDocumentType || !sourceDocumentId) return null;
+
+  return { sourceModule, sourceDocumentType, sourceDocumentId };
+}
+
+export function isPostedJournalStatus(status: string | null | undefined) {
+  const normalized = String(status ?? '').trim().toUpperCase();
+  return normalized === 'APPROVED' || normalized === 'POSTED';
+}
+
+export function normalizeFinanceAccountType(value: string | null | undefined) {
+  return String(value ?? '').trim().toUpperCase().replace(/\s+/g, '_');
+}
+
+export function isCostOfSalesAccount(input: {
+  accountCode?: string | null;
+  accountName?: string | null;
+  accountType?: string | null;
+}) {
+  const code = String(input.accountCode ?? '').trim().toUpperCase();
+  const name = String(input.accountName ?? '').trim().toUpperCase();
+  const type = normalizeFinanceAccountType(input.accountType);
+
+  return (
+    type === 'COST_OF_SALES' ||
+    name.includes('COST OF GOODS SOLD') ||
+    name.includes('COGS') ||
+    code.startsWith('5')
+  );
+}
+
+export function summarizeBalanceSheetFromLedger(
+  lines: Array<{ accountType?: string | null; creditAmount: number; debitAmount: number }>,
+) {
+  const totals = { assets: 0, equity: 0, liabilities: 0 };
+
+  for (const line of lines) {
+    const type = normalizeFinanceAccountType(line.accountType);
+    const debit = toNumber(line.debitAmount);
+    const credit = toNumber(line.creditAmount);
+    const net = debit - credit;
+
+    if (type === 'ASSET') totals.assets += net;
+    if (type === 'LIABILITY') totals.liabilities += -net;
+    if (type === 'EQUITY') totals.equity += -net;
+  }
+
+  return totals;
+}
+
+export function summarizeProfitAndLossFromLedger(
+  lines: Array<{
+    accountCode?: string | null;
+    accountName?: string | null;
+    accountType?: string | null;
+    creditAmount: number;
+    debitAmount: number;
+  }>,
+) {
+  let revenue = 0;
+  let costOfGoodsSold = 0;
+  let operatingExpenses = 0;
+
+  for (const line of lines) {
+    const type = normalizeFinanceAccountType(line.accountType);
+    const debit = toNumber(line.debitAmount);
+    const credit = toNumber(line.creditAmount);
+
+    if (type === 'REVENUE') {
+      revenue += credit - debit;
+      continue;
+    }
+
+    if (type === 'EXPENSE' || isCostOfSalesAccount(line)) {
+      const amount = debit - credit;
+      if (isCostOfSalesAccount(line)) costOfGoodsSold += amount;
+      else operatingExpenses += amount;
+    }
+  }
+
+  return {
+    ...summarizeProfitAndLoss(revenue, costOfGoodsSold, operatingExpenses),
+    costOfGoodsSold,
+    operatingExpenses,
+    revenue,
+  };
+}
+
+export function summarizeCashFlowFromLedger(
+  lines: Array<{
+    accountCode?: string | null;
+    accountName?: string | null;
+    creditAmount: number;
+    debitAmount: number;
+  }>,
+) {
+  let cashIn = 0;
+  let cashOut = 0;
+
+  for (const line of lines) {
+    const code = String(line.accountCode ?? '').trim().toUpperCase();
+    const name = String(line.accountName ?? '').trim().toUpperCase();
+    const isCashLike =
+      name.includes('CASH') ||
+      name.includes('BANK') ||
+      code === '1000' ||
+      code === '1010';
+
+    if (!isCashLike) continue;
+
+    cashIn += toNumber(line.debitAmount);
+    cashOut += toNumber(line.creditAmount);
+  }
+
+  return {
+    cashIn,
+    cashOut,
+    netCashFlow: cashIn - cashOut,
+  };
+}
+
 export function buildReceivablesRows(invoices: Array<Record<string, unknown>>) {
   return invoices.map((invoice) => ({
     balanceDue: toNumber(invoice.balance_due ?? invoice.balanceDue),

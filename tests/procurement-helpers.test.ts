@@ -2,10 +2,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  SUPPLIER_IMPORT_TEMPLATE_HEADERS,
   buildCostVarianceRows,
   buildInvoiceAgeingRows,
   buildSupplierShortageRows,
+  buildSupplierImportTemplateCsv,
   canPayInvoice,
+  validateSupplierImportRows,
   validateSupplierCodeUniqueness,
 } from '../src/lib/procurement';
 
@@ -80,4 +83,43 @@ test('canPayInvoice blocks overpayment', () => {
   assert.equal(canPayInvoice(100, 50), true);
   assert.equal(canPayInvoice(100, 150), false);
   assert.equal(canPayInvoice(100, 0), false);
+});
+
+test('supplier import template csv includes the required headers', () => {
+  const csv = buildSupplierImportTemplateCsv();
+  const [headerLine] = csv.split('\n');
+
+  assert.equal(headerLine, SUPPLIER_IMPORT_TEMPLATE_HEADERS.join(','));
+});
+
+test('supplier import validation accepts valid rows and rejects invalid ones', () => {
+  const result = validateSupplierImportRows([
+    {
+      'Supplier Code': 'SUP-010',
+      'Supplier Name': 'Cold Chain Supplies',
+      'Contact Person': 'Joy',
+      'Email Address': 'joy@example.com',
+      'Telephone Number': '+263700000001',
+      'Physical Address': 'Harare',
+      'VAT/Tax Number': 'VAT-01',
+      'Payment Terms': '30 DAYS',
+      'Credit Limit': '1200',
+      'Currency': 'USD',
+      'Status': 'ACTIVE',
+    },
+    {
+      'Supplier Code': 'SUP-010',
+      'Supplier Name': '',
+      'Email Address': 'bad-email',
+      'Credit Limit': '-1',
+      'Currency': '',
+      'Status': 'INACTIVE',
+    },
+  ], ['SUP-001']);
+
+  assert.equal(result.rows.length, 1);
+  assert.equal(result.rows[0]?.code, 'SUP-010');
+  assert.equal(result.errors.length, 5);
+  assert.equal(result.errors.some((error) => error.message.includes('Duplicate supplier code')), true);
+  assert.equal(result.errors.some((error) => error.message.includes('Email Address is invalid')), true);
 });

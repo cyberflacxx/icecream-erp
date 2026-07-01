@@ -13,13 +13,13 @@ export const PRODUCTION_BATCH_STATUSES = [
   'DRAFT',
   'PLANNED',
   'MATERIALS_REQUESTED',
-  'MATERIALS_ISSUED',
+  'MATERIALS_APPROVED',
+  'MATERIALS_RESERVED',
   'IN_PROGRESS',
-  'PENDING_QC',
+  'WIP',
+  'QUALITY_CHECK',
   'COMPLETED',
-  'TRANSFERRED_TO_STORES',
   'CANCELLED',
-  'VOIDED',
 ] as const;
 
 export const PRODUCTION_QUALITY_STATUSES = [
@@ -45,11 +45,14 @@ export type MaterialRequirementInput = {
 
 export type MaterialRequirementRow = {
   availableQuantity: number;
+  estimatedMaterialCost?: number;
   itemCode: string | null;
   itemId: string;
   itemName: string;
   requiredQuantity: number;
+  scalingFactor?: number;
   shortageQuantity: number;
+  standardUnitCost?: number;
   unit: string | null;
   unitId: string | null;
   wastageAllowancePercent: number;
@@ -120,6 +123,33 @@ export type ImportValidationResult<T extends Record<string, unknown>> = {
   rows: T[];
 };
 
+export function calculateScalingFactor(plannedQuantity: number, standardOutputQuantity: number) {
+  const normalizedPlanned = ensurePositiveQuantity(plannedQuantity, 'plannedQuantity');
+  const normalizedStandardOutput = ensurePositiveQuantity(standardOutputQuantity, 'standardOutputQuantity');
+  return normalizedPlanned / normalizedStandardOutput;
+}
+
+export function calculateScaledMaterialRequirement(input: {
+  plannedQuantity: number;
+  quantityRequired: number | string;
+  standardOutputQuantity: number;
+  standardUnitCost?: number | null;
+  wastageAllowancePercent?: number | null;
+}) {
+  const scalingFactor = calculateScalingFactor(input.plannedQuantity, input.standardOutputQuantity);
+  const baseRequiredQuantity = ensurePositiveQuantity(input.quantityRequired, 'quantityRequired') * scalingFactor;
+  const wastageAllowancePercent = ensureNonNegative(input.wastageAllowancePercent ?? 0, 'wastageAllowancePercent');
+  const requiredQuantity = baseRequiredQuantity + (baseRequiredQuantity * wastageAllowancePercent) / 100;
+  const standardUnitCost = ensureNonNegative(input.standardUnitCost ?? 0, 'standardUnitCost');
+
+  return {
+    estimatedMaterialCost: requiredQuantity * standardUnitCost,
+    requiredQuantity,
+    scalingFactor,
+    standardUnitCost,
+  };
+}
+
 export function normalizeShift(value: unknown): ProductionShift {
   const text = String(value ?? '').trim().toUpperCase();
   return text === 'NIGHT' ? 'NIGHT' : 'DAY';
@@ -141,24 +171,27 @@ export function calculateRequiredMaterials(
   return recipeItems.map((item) => {
     const ingredient = asObject(item.items);
     const unit = asObject(item.units_of_measure);
-    const baseQuantity = ensurePositiveQuantity(item.quantity_required ?? 0, 'recipe ingredient quantity');
-    const wastageAllowancePercent = ensureNonNegative(
-      item.wastage_allowance_percent ?? 0,
-      'wastageAllowancePercent',
-    );
-    const grossRequiredQuantity =
-      (baseQuantity * normalizedPlanned) / normalizedExpectedOutput;
-    const requiredQuantity =
-      grossRequiredQuantity + (grossRequiredQuantity * wastageAllowancePercent) / 100;
+    const wastageAllowancePercent = ensureNonNegative(item.wastage_allowance_percent ?? 0, 'wastageAllowancePercent');
+    const standardUnitCost = ensureNonNegative(ingredient?.unit_cost ?? 0, 'standardUnitCost');
+    const scaled = calculateScaledMaterialRequirement({
+      plannedQuantity: normalizedPlanned,
+      quantityRequired: item.quantity_required ?? 0,
+      standardOutputQuantity: normalizedExpectedOutput,
+      standardUnitCost,
+      wastageAllowancePercent,
+    });
     const availableQuantity = stockByItemId.get(String(item.item_id)) ?? 0;
 
     return {
       availableQuantity,
+      estimatedMaterialCost: scaled.estimatedMaterialCost,
       itemCode: ingredient?.code ? String(ingredient.code) : null,
       itemId: String(item.item_id),
       itemName: String(ingredient?.name ?? 'Unknown item'),
-      requiredQuantity,
-      shortageQuantity: Math.max(0, requiredQuantity - availableQuantity),
+      requiredQuantity: scaled.requiredQuantity,
+      scalingFactor: scaled.scalingFactor,
+      shortageQuantity: Math.max(0, scaled.requiredQuantity - availableQuantity),
+      standardUnitCost: scaled.standardUnitCost,
       unit: unit?.abbreviation ? String(unit.abbreviation) : null,
       unitId: item.unit_id ? String(item.unit_id) : null,
       wastageAllowancePercent,

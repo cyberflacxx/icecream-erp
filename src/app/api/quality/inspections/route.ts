@@ -2,7 +2,13 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { badRequest, can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
 import { calculateFailedQuantity, validateInspectionQuantities } from '@/lib/quality';
-import { generateQualityReferenceNumber, qualityService, writeQualityAuditLog } from '@/lib/quality-server';
+import {
+  generateQualityReferenceNumber,
+  isMissingQualityTable,
+  listQualityChecksAsInspections,
+  qualityService,
+  writeQualityAuditLog,
+} from '@/lib/quality-server';
 
 export async function GET() {
   const ctx = await getAuthContext();
@@ -10,13 +16,14 @@ export async function GET() {
   if (!can(ctx, 'quality.read')) return forbidden();
 
   try {
-    const { data, error } = await qualityService()
+    const primary = await qualityService()
       .from('quality_inspections')
       .select('*')
       .eq('organization_id', ctx.organizationId)
       .order('inspection_date', { ascending: false });
-    if (error) throw error;
-    return NextResponse.json(data ?? []);
+    if (!primary.error) return NextResponse.json(primary.data ?? []);
+    if (!isMissingQualityTable(primary.error, 'quality_inspections')) throw primary.error;
+    return NextResponse.json(await listQualityChecksAsInspections({ organizationId: ctx.organizationId }));
   } catch (err) {
     return serverError(err instanceof Error ? err.message : 'Internal server error');
   }

@@ -6,7 +6,7 @@ import { financeErrorMessage, financeService, isMissingFinanceTable, writeFinanc
 export async function GET(_request: NextRequest) {
   const ctx = await getAuthContext();
   if (!ctx) return unauthorized();
-  if (!can(ctx, 'finance.read')) return forbidden();
+  if (!can(ctx, 'finance.expense.view', 'finance.read')) return forbidden();
 
   try {
     const { data, error } = await financeService()
@@ -26,7 +26,7 @@ export async function GET(_request: NextRequest) {
 export async function POST(request: NextRequest) {
   const ctx = await getAuthContext();
   if (!ctx) return unauthorized();
-  if (!can(ctx, 'finance.write')) return forbidden();
+  if (!can(ctx, 'finance.expense.create', 'finance.write')) return forbidden();
 
   try {
     const body = await request.json() as {
@@ -71,6 +71,9 @@ export async function POST(request: NextRequest) {
     await writeFinanceAuditLog('FINANCE_EXPENSE_CREATED', data.id, ctx.userId, { amount: body.amount, category: body.category }, 'finance_expense');
     return NextResponse.json(data, { status: 201 });
   } catch (err) {
+    if (isMissingFinanceTable(err)) {
+      return serverError('Finance expenses table is not deployed in the live database yet.');
+    }
     return serverError(err instanceof Error ? err.message : 'Internal server error');
   }
 }

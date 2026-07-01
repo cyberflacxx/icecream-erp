@@ -82,47 +82,56 @@ export function Topbar({ onOpenSidebar }: TopbarProps) {
   const { avatarUrl, uploading, inputRef, openPicker, handleFileChange } = useAvatarUpload();
 
   return (
-    <header className="sticky top-0 z-20 border-b border-brown/10 bg-cream/95 backdrop-blur-xl dark:border-white/8 dark:bg-[#0D0500]/95 px-4 py-3 sm:px-6">
+    <header className="sticky top-0 z-20 border-b border-[color:var(--app-border-muted)] bg-[var(--app-bg-default)] px-4 py-3 backdrop-blur-xl sm:px-6">
       <div className="flex items-center justify-between gap-4">
         <div className="flex items-center gap-3">
           <button
             type="button"
             aria-label="Open sidebar"
             onClick={onOpenSidebar}
-            className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-brown/15 bg-brown/5 text-brown dark:border-white/10 dark:bg-white/5 dark:text-white lg:hidden"
+            className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-[color:var(--app-border)] bg-[color:var(--app-bg-canvas)] text-[color:var(--app-text)] lg:hidden"
           >
             <Menu className="h-5 w-5" />
           </button>
           <div>
-            <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-brown/40 dark:text-white/30">Manufacturing ERP</p>
-            <h2 className="text-base font-bold text-brown dark:text-white">{pageTitle}</h2>
+            <div className="flex flex-wrap items-center gap-2">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-[color:var(--app-subtle)]">
+                Manufacturing ERP
+              </p>
+              <span className="hidden rounded-full border border-[color:var(--app-border)] bg-[color:var(--app-bg-subtle)] px-2 py-0.5 text-[10px] font-semibold text-[color:var(--app-muted)] sm:inline-flex">
+                Live workspace
+              </span>
+            </div>
+            <h2 className="text-lg font-semibold tracking-tight text-[color:var(--app-text)]">
+              {pageTitle}
+            </h2>
           </div>
           <Link
             href="/dashboard"
-            className="hidden rounded-lg border border-brown/15 bg-brown/5 px-3 py-2 text-xs font-semibold text-brown transition hover:bg-brown/10 dark:border-white/10 dark:bg-white/5 dark:text-white dark:hover:bg-white/10 md:inline-flex"
+            className="hidden rounded-xl border border-[color:var(--app-border)] bg-[color:var(--app-bg-canvas)] px-3 py-2 text-xs font-semibold text-[color:var(--app-text)] transition hover:border-[color:var(--app-border-strong)] md:inline-flex"
           >
             Dashboard
           </Link>
         </div>
 
         <div className="flex items-center gap-2">
-          <label className="hidden h-9 min-w-[200px] items-center gap-2 rounded-lg border border-brown/15 bg-brown/5 px-3 text-sm text-brown/40 dark:border-white/10 dark:bg-white/5 dark:text-white/40 md:flex">
+          <label className="hidden h-10 min-w-[220px] items-center gap-2 rounded-xl border border-[color:var(--app-border)] bg-[color:var(--app-bg-canvas)] px-3 text-sm text-[color:var(--app-muted)] md:flex">
             <Search className="h-4 w-4 flex-shrink-0" />
             <input
               type="search"
-              placeholder="Search..."
-              className="w-full bg-transparent text-brown outline-none placeholder:text-brown/30 dark:text-white dark:placeholder:text-white/30"
+              placeholder="Search modules, records, people..."
+              className="w-full bg-transparent text-[color:var(--app-text)] outline-none placeholder:text-[color:var(--app-subtle)]"
             />
           </label>
 
-          {/* Theme toggle */}
           <button
             type="button"
             onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
-            className="flex h-9 w-9 items-center justify-center rounded-lg border border-brown/15 bg-brown/5 text-brown/60 transition hover:bg-brown/10 dark:border-white/10 dark:bg-white/5 dark:text-white/60 dark:hover:bg-white/10 dark:hover:text-white"
+            className="inline-flex h-10 items-center gap-2 rounded-xl border border-[color:var(--app-border)] bg-[color:var(--app-bg-canvas)] px-3 text-sm font-medium text-[color:var(--app-text)] transition hover:border-[color:var(--app-border-strong)]"
             aria-label="Toggle theme"
           >
-            {mounted && theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+            {mounted && theme === 'dark' ? <Sun className="h-4 w-4 text-orange" /> : <Moon className="h-4 w-4 text-orange" />}
+            <span className="hidden sm:inline">{mounted && theme === 'dark' ? 'Day mode' : 'Night mode'}</span>
           </button>
 
           <NotificationBell
@@ -157,13 +166,13 @@ export function Topbar({ onOpenSidebar }: TopbarProps) {
             <button
               type="button"
               onClick={() => setDropdownOpen((v) => !v)}
-              className="flex items-center gap-2 rounded-lg border border-brown/15 bg-brown/5 px-2.5 py-1.5 transition hover:bg-brown/10 dark:border-white/10 dark:bg-white/5 dark:hover:bg-white/10"
+              className="flex items-center gap-2 rounded-xl border border-[color:var(--app-border)] bg-[color:var(--app-bg-canvas)] px-2.5 py-1.5 transition hover:border-[color:var(--app-border-strong)]"
             >
               <div className="hidden text-right sm:block">
-                <p className="text-xs font-semibold text-brown dark:text-white">{currentUser?.profile?.fullName ?? 'ERP User'}</p>
-                <p className="text-[10px] text-brown/40 dark:text-white/40">{currentUser?.roles?.[0]?.name ?? 'Staff'}</p>
+                <p className="text-xs font-semibold text-[color:var(--app-text)]">{currentUser?.profile?.fullName ?? 'ERP User'}</p>
+                <p className="text-[10px] text-[color:var(--app-subtle)]">{currentUser?.roles?.[0]?.name ?? 'Staff'}</p>
               </div>
-              <div className="relative flex h-8 w-8 items-center justify-center rounded-lg bg-orange text-white text-xs font-bold shadow-glow-sm overflow-hidden">
+              <div className="relative flex h-9 w-9 items-center justify-center overflow-hidden rounded-xl border border-[color:var(--app-border)] bg-[color:var(--app-accent-strong)] text-xs font-bold text-white">
                 {avatarUrl ? (
                   <Image src={avatarUrl} alt="Avatar" fill className="object-cover" />
                 ) : (
@@ -179,16 +188,16 @@ export function Topbar({ onOpenSidebar }: TopbarProps) {
 
             {/* Dropdown menu */}
             {dropdownOpen && (
-              <div className="absolute right-0 top-full mt-2 w-52 overflow-hidden rounded-xl border border-brown/10 bg-white shadow-card-hover dark:border-white/10 dark:bg-[#1a0800]">
-                <div className="border-b border-brown/8 px-4 py-3 dark:border-white/8">
-                  <p className="text-xs font-semibold text-brown dark:text-white">{currentUser?.profile?.fullName ?? 'ERP User'}</p>
-                  <p className="text-[10px] text-brown/50 dark:text-white/40">{currentUser?.profile?.email ?? ''}</p>
+              <div className="absolute right-0 top-full mt-2 w-56 overflow-hidden rounded-2xl border border-[color:var(--app-border)] bg-[color:var(--app-surface)] shadow-[var(--app-shadow-lg)]">
+                <div className="border-b border-[color:var(--app-border-muted)] px-4 py-3">
+                  <p className="text-xs font-semibold text-[color:var(--app-text)]">{currentUser?.profile?.fullName ?? 'ERP User'}</p>
+                  <p className="text-[10px] text-[color:var(--app-subtle)]">{currentUser?.profile?.email ?? ''}</p>
                 </div>
                 <div className="py-1.5">
                   <button
                     type="button"
                     onClick={() => { setDropdownOpen(false); openPicker(); }}
-                    className="flex w-full items-center gap-3 px-4 py-2.5 text-sm text-brown/70 transition hover:bg-brown/5 hover:text-brown dark:text-white/60 dark:hover:bg-white/5 dark:hover:text-white"
+                    className="flex w-full items-center gap-3 px-4 py-2.5 text-sm text-[color:var(--app-muted)] transition hover:bg-[color:var(--app-bg-subtle)] hover:text-[color:var(--app-text)]"
                   >
                     <Camera className="h-4 w-4" />
                     Upload Photo
@@ -196,7 +205,7 @@ export function Topbar({ onOpenSidebar }: TopbarProps) {
                   <Link
                     href="/settings"
                     onClick={() => setDropdownOpen(false)}
-                    className="flex items-center gap-3 px-4 py-2.5 text-sm text-brown/70 transition hover:bg-brown/5 hover:text-brown dark:text-white/60 dark:hover:bg-white/5 dark:hover:text-white"
+                    className="flex items-center gap-3 px-4 py-2.5 text-sm text-[color:var(--app-muted)] transition hover:bg-[color:var(--app-bg-subtle)] hover:text-[color:var(--app-text)]"
                   >
                     <Settings className="h-4 w-4" />
                     Settings
@@ -204,13 +213,13 @@ export function Topbar({ onOpenSidebar }: TopbarProps) {
                   <Link
                     href="/settings/users"
                     onClick={() => setDropdownOpen(false)}
-                    className="flex items-center gap-3 px-4 py-2.5 text-sm text-brown/70 transition hover:bg-brown/5 hover:text-brown dark:text-white/60 dark:hover:bg-white/5 dark:hover:text-white"
+                    className="flex items-center gap-3 px-4 py-2.5 text-sm text-[color:var(--app-muted)] transition hover:bg-[color:var(--app-bg-subtle)] hover:text-[color:var(--app-text)]"
                   >
                     <User className="h-4 w-4" />
                     My Profile
                   </Link>
                 </div>
-                <div className="border-t border-brown/8 py-1.5 dark:border-white/8">
+                <div className="border-t border-[color:var(--app-border-muted)] py-1.5">
                   <button
                     type="button"
                     onClick={async () => { setDropdownOpen(false); await logoutAndRedirect(router); }}

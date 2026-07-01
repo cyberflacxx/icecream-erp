@@ -1,12 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { can, forbidden, getAuthContext, notFound, serverError, unauthorized } from '@/lib/api-auth';
+import { buildFinanceSourceReference } from '@/lib/finance';
+import { createLinkedFinanceTransaction, financeErrorMessage, isMissingFinanceTable, postFinanceDocument } from '@/lib/finance-server';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
 function normalizeInvoiceStatus(amountPaid: number, total: number): string {
-  if (amountPaid <= 0) return 'sent';
-  if (amountPaid >= total) return 'paid';
-  return 'partial_paid';
+  if (amountPaid <= 0) return 'SENT';
+  if (amountPaid >= total) return 'PAID';
+  return 'PARTIAL_PAID';
 }
 
 function isMissingInvoiceColumnError(error: unknown, columnName: string) {
@@ -110,10 +112,17 @@ export async function POST(
   const cust = customer as Record<string, unknown>;
 
   // Generate payment number
-  const { count } = await service
+  const countResult = await service
     .schema('icecream_erp')
     .from('payments')
     .select('id', { count: 'exact', head: true });
+  if (countResult.error) {
+    if (isMissingFinanceTable(countResult.error)) {
+      return serverError('Sales payments table is not deployed in the live database yet.');
+    }
+    return serverError(financeErrorMessage(countResult.error) || 'Failed to prepare invoice payment.');
+  }
+  const count = countResult.count;
 
   const paymentNumber = `PAY-${String((count ?? 0) + 1).padStart(5, '0')}`;
 
@@ -166,7 +175,7 @@ export async function POST(
       .update({
         balance_due: nextBalanceDue,
         paid_amount: nextAmountPaid,
-        status: nextStatus.toUpperCase(),
+        status: nextStatus,
         updated_at: new Date().toISOString(),
       })
       .eq('id', params.id)
@@ -186,8 +195,55 @@ export async function POST(
     .update({ current_balance: nextCustomerBalance, updated_at: new Date().toISOString() })
     .eq('id', cust.id as string);
 
+  let journal: { entryNumber: string; id: string } | null = null;
+  let linkedTransaction: { id: string; table: string } | null = null;
+  try {
+    const sourceReference = buildFinanceSourceReference('sales', 'invoice_payment', String(payment.id));
+    journal = await postFinanceDocument({
+      createdBy: ctx.userId,
+      description: `Customer payment for invoice ${String(inv.invoice_number ?? params.id)}`,
+      journalDate: body.paymentDate,
+      lines: [
+        {
+          accountCode: body.paymentMethod === 'BANK' ? '1000' : '1010',
+          creditAmount: 0,
+          debitAmount: Number(body.amount),
+          description: `Customer payment via ${body.paymentMethod}`,
+        },
+        {
+          accountCode: '1100',
+          creditAmount: Number(body.amount),
+          debitAmount: 0,
+          description: `Reduce accounts receivable for invoice ${String(inv.invoice_number ?? params.id)}`,
+        },
+      ],
+      organizationId: ctx.organizationId,
+      sourceDocumentId: String(payment.id),
+      sourceDocumentType: 'invoice_payment',
+      sourceModule: 'sales',
+    });
+
+    if (body.paymentMethod === 'BANK' || body.paymentMethod === 'CASH') {
+      linkedTransaction = await createLinkedFinanceTransaction({
+        amount: Number(body.amount),
+        createdBy: ctx.userId,
+        description: `Customer payment for invoice ${String(inv.invoice_number ?? params.id)}`,
+        direction: 'IN',
+        organizationId: ctx.organizationId,
+        paymentMethod: body.paymentMethod === 'BANK' ? 'BANK' : 'CASH',
+        referenceNumber: body.referenceNumber ?? null,
+        sourceDocument: sourceReference,
+        transactionDate: body.paymentDate,
+      });
+    }
+  } catch (postingError) {
+    return serverError(postingError instanceof Error ? postingError.message : 'Failed to post invoice payment to finance.');
+  }
+
   return NextResponse.json({
     invoice: updatedInvoice,
     payment,
+    journal,
+    linkedTransaction,
   });
 }

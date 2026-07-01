@@ -8,6 +8,7 @@ import { API_ROUTES } from '@/lib/shared';
 import { useSalesRequest } from './useSalesRequest';
 
 export interface SalesMetaCustomer {
+  availableCredit: number;
   code: string;
   creditAllowed: boolean;
   creditLimit: number;

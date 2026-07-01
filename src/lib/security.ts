@@ -1,3 +1,5 @@
+export { hasPermissionAccess } from './permission-access';
+
 export const USER_ACCOUNT_STATUSES = ['ACTIVE', 'INACTIVE', 'LOCKED', 'SUSPENDED', 'PASSWORD_RESET_REQUIRED'] as const;
 export const SESSION_STATUSES = ['ACTIVE', 'EXPIRED', 'LOGGED_OUT', 'REVOKED'] as const;
 export const LOGIN_ATTEMPT_STATUSES = ['SUCCESS', 'FAILED', 'LOCKED_OUT', 'PASSWORD_RESET_REQUIRED'] as const;

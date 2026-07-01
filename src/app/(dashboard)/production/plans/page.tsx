@@ -11,6 +11,7 @@ import { DataTable, EmptyState, FormDrawer, LoadingState, StatusBadge } from '@/
 import { useProductionMeta, type ProductionMetaRecipe } from '@/hooks/production/useProductionMeta';
 import { useProductionPlans } from '@/hooks/production/useProductionPlans';
 import { useProductionRequest } from '@/hooks/production/useProductionRequest';
+import { calculateScaledMaterialRequirement } from '@/lib/production';
 
 const today = new Date().toISOString().slice(0, 10);
 
@@ -26,8 +27,6 @@ const initialFormState = {
 
 function requirementRows(recipe: ProductionMetaRecipe | undefined, plannedQuantity: number, stockByItemId: Record<string, number>, itemById: Map<string, Record<string, unknown>>) {
   if (!recipe || plannedQuantity <= 0) return [];
-  const baseOutput = recipe.expectedOutputQuantity || 1;
-  const scale = plannedQuantity / baseOutput;
   const lines: Array<Record<string, unknown> & { productionSection: string }> = [
     ...recipe.ingredients.map((line) => ({ ...line, productionSection: 'Ice Cream Making' })),
     ...recipe.packagingItems.map((line) => ({ ...line, productionSection: 'Packaging' })),
@@ -36,17 +35,23 @@ function requirementRows(recipe: ProductionMetaRecipe | undefined, plannedQuanti
   return lines.map((line) => {
     const itemId = String(line.item_id ?? '');
     const item = itemById.get(itemId);
-    const baseQuantity = Number(line.quantity_required ?? 0);
-    const wastagePercent = Number(line.wastage_allowance_percent ?? 0);
-    const requiredQuantity = baseQuantity * scale * (1 + wastagePercent / 100);
+    const scaled = calculateScaledMaterialRequirement({
+      plannedQuantity,
+      quantityRequired: Number(line.quantity_required ?? 0),
+      standardOutputQuantity: recipe.expectedOutputQuantity || 1,
+      standardUnitCost: Number(item?.unit_cost ?? 0),
+      wastageAllowancePercent: Number(line.wastage_allowance_percent ?? 0),
+    });
     const availableQuantity = Number(stockByItemId[itemId] ?? 0);
     return {
       availableQuantity,
+      estimatedMaterialCost: scaled.estimatedMaterialCost,
       itemCode: String(item?.code ?? ''),
       itemName: String(item?.name ?? 'Unknown item'),
       productionSection: String(line.productionSection),
-      requiredQuantity,
-      shortageQuantity: Math.max(0, requiredQuantity - availableQuantity),
+      requiredQuantity: scaled.requiredQuantity,
+      scalingFactor: scaled.scalingFactor,
+      shortageQuantity: Math.max(0, scaled.requiredQuantity - availableQuantity),
     };
   });
 }

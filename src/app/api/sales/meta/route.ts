@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 
 import { can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
+import { calculateAvailableCredit, deriveCustomerCreditAllowed } from '@/lib/sales-customers';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
 type Row = Record<string, unknown>;
@@ -152,10 +153,11 @@ export async function GET() {
 
     const customers = sortByName(
       customerRows
-        .filter((row) => belongsToOrganization(row, ctx.organizationId) && isNotDeleted(row))
+        .filter((row) => belongsToOrganization(row, ctx.organizationId) && isNotDeleted(row) && isActive(row))
         .map((row) => ({
+          availableCredit: calculateAvailableCredit(row.credit_limit, row.current_balance ?? row.outstanding_balance),
           code: String(row.code ?? ''),
-          creditAllowed: Boolean(row.credit_allowed),
+          creditAllowed: deriveCustomerCreditAllowed(row.payment_terms, row.credit_limit),
           creditLimit: toNumber(row.credit_limit),
           currentBalance: toNumber(row.current_balance ?? row.outstanding_balance),
           email: row.email ? String(row.email) : null,

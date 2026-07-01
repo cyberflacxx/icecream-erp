@@ -2,7 +2,13 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
 import { createServiceRoleClient } from '@/lib/supabase/server';
-import { calculateBranchCostSummary, calculateInventoryValuation, calculateProductionCostSummary, summarizeProfitAndLoss } from '@/lib/finance';
+import {
+  calculateBranchCostSummary,
+  calculateInventoryValuation,
+  calculateProductionCostSummary,
+  summarizeProfitAndLossFromLedger,
+} from '@/lib/finance';
+import { financeErrorMessage, isMissingFinanceTable, loadLedgerLines } from '@/lib/finance-server';
 
 function isMissingColumnError(error: unknown, table: string, columnName: string) {
   const message =
@@ -22,10 +28,22 @@ async function queryWithoutDeletedAt<T>(primary: PromiseLike<{ data: T[] | null;
   return result;
 }
 
+async function optionalQuery<T>(query: PromiseLike<{ data: T[] | null; error: { message: string } | null }>) {
+  const result = await query;
+  if (result.error) {
+    const message = result.error.message ?? '';
+    if (isMissingFinanceTable(result.error) || message.includes('Could not find the table')) {
+      return [] as T[];
+    }
+    throw result.error;
+  }
+  return result.data ?? [];
+}
+
 export async function GET(request: NextRequest) {
   const ctx = await getAuthContext();
   if (!ctx) return unauthorized();
-  if (!can(ctx, 'finance.read')) return forbidden();
+  if (!can(ctx, 'finance.dashboard.view', 'finance.read', 'reports.read')) return forbidden();
 
   const service = createServiceRoleClient();
   const { searchParams } = new URL(request.url);
@@ -39,29 +57,31 @@ export async function GET(request: NextRequest) {
     const endDate = searchParams.get('endDate') ?? today.toISOString().slice(0, 10);
 
     const [
-      paymentsResult,
-      branchExpensesResult,
-      overdueInvoicesResult,
-      recentEntriesResult,
-      supplierInvoicesResult,
-      supplierPaymentsResult,
-      bankAccountsResult,
-      cashAccountsResult,
-      pettyCashRequestsResult,
-      financeExpensesResult,
-      stockBalancesResult,
-      branchSalesResult,
-      productionBatchesResult,
+      payments,
+      branchExpenses,
+      overdueInvoices,
+      supplierInvoices,
+      supplierPayments,
+      bankAccounts,
+      cashAccounts,
+      pettyCashRequests,
+      financeExpenses,
+      stockBalances,
+      branchSales,
+      productionBatches,
+      ledgerLines,
     ] = await Promise.all([
-        service
-          .schema('icecream_erp')
-          .from('payments')
-          .select('id, payment_date, amount, payment_method')
-          .gte('payment_date', `${startDate}T00:00:00.000Z`)
-          .lte('payment_date', `${endDate}T23:59:59.999Z`)
-          .order('payment_date', { ascending: true }),
+        optionalQuery(
+          service
+            .schema('icecream_erp')
+            .from('payments')
+            .select('id, payment_date, amount, payment_method')
+            .gte('payment_date', `${startDate}T00:00:00.000Z`)
+            .lte('payment_date', `${endDate}T23:59:59.999Z`)
+            .order('payment_date', { ascending: true }),
+        ),
 
-        queryWithoutDeletedAt(
+        optionalQuery(queryWithoutDeletedAt(
           service
           .schema('icecream_erp')
           .from('branch_expenses')
@@ -77,9 +97,9 @@ export async function GET(request: NextRequest) {
             .gte('expense_date', `${startDate}T00:00:00.000Z`)
             .lte('expense_date', `${endDate}T23:59:59.999Z`)
             .order('expense_date', { ascending: true }),
-        ),
+        )),
 
-        queryWithoutDeletedAt(
+        optionalQuery(queryWithoutDeletedAt(
           service
           .schema('icecream_erp')
           .from('invoices')
@@ -95,78 +115,71 @@ export async function GET(request: NextRequest) {
             .in('status', ['SENT', 'PARTIAL_PAID', 'OVERDUE'])
             .order('due_date', { ascending: true })
             .limit(8),
-        ),
-
-        service
-          .schema('icecream_erp')
-          .from('journal_entries')
-          .select('id, entry_number, entry_date, description')
-          .gte('entry_date', `${startDate}T00:00:00.000Z`)
-          .lte('entry_date', `${endDate}T23:59:59.999Z`)
-          .order('entry_date', { ascending: false })
-          .limit(10),
-        queryWithoutDeletedAt(
+        )),
+        optionalQuery(queryWithoutDeletedAt(
           service
           .schema('icecream_erp')
           .from('supplier_invoices')
           .select('id, invoice_total')
           .is('deleted_at', null),
           () => service.schema('icecream_erp').from('supplier_invoices').select('id, invoice_total'),
-        ),
-        queryWithoutDeletedAt(
+        )),
+        optionalQuery(queryWithoutDeletedAt(
           service
           .schema('icecream_erp')
           .from('supplier_payments')
           .select('supplier_invoice_id, amount_paid')
           .is('deleted_at', null),
           () => service.schema('icecream_erp').from('supplier_payments').select('supplier_invoice_id, amount_paid'),
-        ),
-        queryWithoutDeletedAt(
+        )),
+        optionalQuery(queryWithoutDeletedAt(
           service
           .schema('icecream_erp')
           .from('bank_accounts')
           .select('current_balance')
           .is('deleted_at', null),
           () => service.schema('icecream_erp').from('bank_accounts').select('current_balance'),
-        ),
-        queryWithoutDeletedAt(
+        )),
+        optionalQuery(queryWithoutDeletedAt(
           service
           .schema('icecream_erp')
           .from('cash_accounts')
           .select('balance')
           .is('deleted_at', null),
           () => service.schema('icecream_erp').from('cash_accounts').select('balance'),
-        ),
-        queryWithoutDeletedAt(
+        )),
+        optionalQuery(queryWithoutDeletedAt(
           service
           .schema('icecream_erp')
           .from('petty_cash_requests')
           .select('amount_requested, status')
           .is('deleted_at', null),
           () => service.schema('icecream_erp').from('petty_cash_requests').select('amount_requested, status'),
-        ),
-        queryWithoutDeletedAt(
+        )),
+        optionalQuery(queryWithoutDeletedAt(
           service
           .schema('icecream_erp')
           .from('finance_expenses')
           .select('amount, status')
           .is('deleted_at', null),
           () => service.schema('icecream_erp').from('finance_expenses').select('amount, status'),
+        )),
+        optionalQuery(
+          service
+            .schema('icecream_erp')
+            .from('stock_balances')
+            .select('quantity, quantity_on_hand, items(standard_cost, unit_cost)')
+            .eq('organization_id', ctx.organizationId),
         ),
-        service
-          .schema('icecream_erp')
-          .from('stock_balances')
-          .select('quantity, items(standard_cost)')
-          .eq('organization_id', ctx.organizationId),
-        queryWithoutDeletedAt(
+        optionalQuery(queryWithoutDeletedAt(
           service
           .schema('icecream_erp')
           .from('branch_sales')
           .select('sale_date, total_amount')
           .is('deleted_at', null),
           () => service.schema('icecream_erp').from('branch_sales').select('sale_date, total_amount'),
-        ),
-        queryWithoutDeletedAt(
+        )),
+        optionalQuery(queryWithoutDeletedAt(
           service
           .schema('icecream_erp')
           .from('production_batches')
@@ -176,22 +189,9 @@ export async function GET(request: NextRequest) {
             .schema('icecream_erp')
             .from('production_batches')
             .select('total_material_cost, total_labour_cost, total_overhead_cost, actual_qty'),
-        ),
+        )),
+        loadLedgerLines(ctx.organizationId),
       ]);
-
-    const payments = paymentsResult.data ?? [];
-    const branchExpenses = branchExpensesResult.data ?? [];
-    const overdueInvoices = overdueInvoicesResult.data ?? [];
-    const recentEntries = recentEntriesResult.data ?? [];
-    const supplierInvoices = supplierInvoicesResult.data ?? [];
-    const supplierPayments = supplierPaymentsResult.data ?? [];
-    const bankAccounts = bankAccountsResult.data ?? [];
-    const cashAccounts = cashAccountsResult.data ?? [];
-    const pettyCashRequests = pettyCashRequestsResult.data ?? [];
-    const financeExpenses = financeExpensesResult.data ?? [];
-    const stockBalances = stockBalancesResult.data ?? [];
-    const branchSales = branchSalesResult.data ?? [];
-    const productionBatches = productionBatchesResult.data ?? [];
 
     const revenueByDay = new Map<string, number>();
     const expenseByDay = new Map<string, number>();
@@ -229,7 +229,7 @@ export async function GET(request: NextRequest) {
     const totalBranchExpenses = branchExpenses.reduce((sum: number, e: { amount: number }) => sum + Number(e.amount ?? 0), 0);
     const totalFinanceExpenses = financeExpenses.reduce((sum: number, e: { amount: number }) => sum + Number(e.amount ?? 0), 0);
     const totalExpenses = totalBranchExpenses + totalFinanceExpenses;
-    const grossProfitSummary = summarizeProfitAndLoss(totalRevenue, 0, totalExpenses);
+    const grossProfitSummary = summarizeProfitAndLossFromLedger(ledgerLines);
     const outstandingPayables = Math.max(
       0,
       supplierInvoices.reduce((sum: number, inv: { invoice_total: number }) => sum + Number(inv.invoice_total ?? 0), 0) -
@@ -298,16 +298,15 @@ export async function GET(request: NextRequest) {
           customer: customer?.name ?? 'Walk-in',
         };
       }),
-      recentEntries: recentEntries.map((entry: { entry_number: string; entry_date: string; description: string }) => ({
-        entryNumber: entry.entry_number,
-        entryDate: entry.entry_date.slice(0, 10),
-        description: entry.description,
-        debit: 0,
-        credit: 0,
+      recentEntries: ledgerLines.slice(0, 10).map((entry) => ({
+        entryNumber: entry.entryNumber ?? '',
+        entryDate: entry.entryDate ? String(entry.entryDate).slice(0, 10) : '',
+        description: entry.description ?? '',
+        debit: entry.debitAmount,
+        credit: entry.creditAmount,
       })),
     });
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Internal server error';
-    return serverError(message);
+    return serverError(financeErrorMessage(err) || 'Internal server error');
   }
 }

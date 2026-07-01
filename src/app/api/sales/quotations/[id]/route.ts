@@ -78,7 +78,7 @@ export async function PATCH(
   };
 
   // Guard: line items can only change on draft
-  if (body.items && q.status !== 'draft') {
+  if (body.items && String(q.status ?? '').toUpperCase() !== 'DRAFT') {
     return NextResponse.json({ error: 'Only draft quotations can modify line items.' }, { status: 400 });
   }
 

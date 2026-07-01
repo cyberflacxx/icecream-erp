@@ -72,7 +72,12 @@ export async function GET(request: NextRequest) {
         isMissingColumnError(primary.error, 'production_batches', 'production_line') ||
         isMissingColumnError(primary.error, 'production_batches', 'quality_status') ||
         isMissingColumnError(primary.error, 'production_batches', 'planned_quantity') ||
-        isMissingColumnError(primary.error, 'production_batches', 'deleted_at');
+        isMissingColumnError(primary.error, 'production_batches', 'deleted_at') ||
+        isMissingColumnError(primary.error, 'production_batches', 'worker_count') ||
+        isMissingColumnError(primary.error, 'production_batches', 'people_off_count') ||
+        isMissingColumnError(primary.error, 'production_batches', 'material_cost') ||
+        isMissingColumnError(primary.error, 'production_batches', 'labour_cost') ||
+        isMissingColumnError(primary.error, 'production_batches', 'overhead_cost');
 
       if (!compatibleLegacy) throw primary.error;
 
@@ -180,7 +185,7 @@ export async function POST(request: NextRequest) {
     const { data: recipe } = await service
       .schema('icecream_erp')
       .from('recipes')
-      .select('id, code, name, finished_item_id, batch_unit_id')
+      .select('id, code, name, finished_item_id, output_unit_id')
       .eq('id', recipeId)
       .eq('status', 'ACTIVE')
       .single();
@@ -244,7 +249,11 @@ export async function POST(request: NextRequest) {
         isMissingColumnError(batchErr, 'production_batches', 'expected_output') ||
         isMissingColumnError(batchErr, 'production_batches', 'production_date') ||
         isMissingColumnError(batchErr, 'production_batches', 'quality_status') ||
-        isMissingColumnError(batchErr, 'production_batches', 'actual_output')
+        isMissingColumnError(batchErr, 'production_batches', 'actual_output') ||
+        isMissingColumnError(batchErr, 'production_batches', 'worker_count') ||
+        isMissingColumnError(batchErr, 'production_batches', 'people_off_count') ||
+        isMissingColumnError(batchErr, 'production_batches', 'labour_cost') ||
+        isMissingColumnError(batchErr, 'production_batches', 'overhead_cost')
       )
     ) {
       const fallback = await service
@@ -274,7 +283,7 @@ export async function POST(request: NextRequest) {
     const outputInsert = await service.schema('icecream_erp').from('production_batch_outputs').insert({
       batch_id: batch.id,
       item_id: recipe.finished_item_id,
-      unit_id: recipe.batch_unit_id,
+      unit_id: recipe.output_unit_id,
       expected_quantity: expectedOutput,
       actual_quantity: 0,
     });

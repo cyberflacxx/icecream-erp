@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { ArrowRight, IdCard, KeyRound } from 'lucide-react';
 import Swal from 'sweetalert2';
 
 import { AuthShell } from '@/components/auth/auth-shell';
@@ -122,36 +123,49 @@ export default function LoginPage() {
       description="Sign in with your Work ID and password to access your role-specific dashboard and operational tools."
     >
       <div className="auth-card">
-        <h2 className="text-3xl font-semibold text-brown dark:text-darkText">Welcome Back</h2>
-        <p className="mt-2 text-sm text-muted dark:text-darkMuted">Sign in with your Work ID and password.</p>
-        <Link href="/" className="auth-link mt-3 inline-flex text-sm">
+        <div className="mb-6">
+          <p className="text-xs font-semibold uppercase tracking-[0.24em] text-[color:var(--app-subtle)]">
+            Staff authentication
+          </p>
+          <h2 className="mt-2 text-3xl font-semibold tracking-tight text-[color:var(--app-text)]">
+            Welcome back
+          </h2>
+          <p className="mt-2 text-sm text-[color:var(--app-muted)]">
+            Sign in with your Work ID and password.
+          </p>
+        </div>
+        <Link href="/" className="auth-link inline-flex text-sm">
           Return to main page
         </Link>
 
         <form className="mt-8 space-y-5" onSubmit={handleSubmit}>
           <label className="auth-field">
             <span className="auth-label">Work ID</span>
-            <input
-              value={workId}
-              onChange={(e) => {
-                setWorkId(normalizeWorkId(e.target.value));
-                setWorkIdError(null);
-              }}
-              onBlur={() => {
-                const normalized = normalizeWorkId(workId);
-                setWorkId(normalized);
-                setWorkIdError(validateWorkId(normalized));
-              }}
-              placeholder="e.g. AQI-20260034"
-              autoComplete="username"
-              className={`auth-input ${workIdError ? 'auth-input-error' : workIdPattern.test(normalizeWorkId(workId)) ? 'auth-input-valid' : ''}`}
-            />
+            <div className={`auth-input-shell gap-3 ${workIdError ? 'auth-input-error' : workIdPattern.test(normalizeWorkId(workId)) ? 'auth-input-valid' : ''}`}>
+              <IdCard className="h-4 w-4 shrink-0 text-[color:var(--app-subtle)]" />
+              <input
+                value={workId}
+                onChange={(e) => {
+                  setWorkId(normalizeWorkId(e.target.value));
+                  setWorkIdError(null);
+                }}
+                onBlur={() => {
+                  const normalized = normalizeWorkId(workId);
+                  setWorkId(normalized);
+                  setWorkIdError(validateWorkId(normalized));
+                }}
+                placeholder="e.g. AQI-20260034"
+                autoComplete="username"
+                className="w-full bg-transparent outline-none"
+              />
+            </div>
             {workIdError ? <p className="text-xs text-red-600">{workIdError}</p> : null}
           </label>
 
           <label className="auth-field">
             <span className="auth-label">Password</span>
-            <div className={`auth-input-shell ${passwordError ? 'auth-input-error' : password ? 'auth-input-valid' : ''}`}>
+            <div className={`auth-input-shell gap-3 ${passwordError ? 'auth-input-error' : password ? 'auth-input-valid' : ''}`}>
+              <KeyRound className="h-4 w-4 shrink-0 text-[color:var(--app-subtle)]" />
               <input
                 value={password}
                 onChange={(e) => {
@@ -176,7 +190,10 @@ export default function LoginPage() {
           </label>
 
           <button type="submit" disabled={!canSubmit} className="auth-primary-button">
-            {isSubmitting ? 'Signing In...' : 'Sign In'}
+            <span className="inline-flex items-center gap-2">
+              <span>{isSubmitting ? 'Signing In...' : 'Sign In'}</span>
+              {!isSubmitting ? <ArrowRight className="h-4 w-4" /> : null}
+            </span>
           </button>
         </form>
 

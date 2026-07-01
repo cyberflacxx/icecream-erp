@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { badRequest, can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
+import { recordAuditLog } from '@/lib/security-server';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
 export async function GET(request: NextRequest) {
@@ -22,7 +23,7 @@ export async function GET(request: NextRequest) {
       .from('suppliers')
       .select(
         `id, code, name, contact_person, phone, email, address,
-         category_id, payment_terms, credit_limit, credit_days, status, rating, notes`,
+         category_id, tax_number, payment_terms, credit_limit, current_balance, credit_days, status, rating, notes`,
         { count: 'exact' },
       )
       .eq('organization_id', ctx.organizationId)
@@ -64,10 +65,10 @@ export async function GET(request: NextRequest) {
       phone: r.phone,
       email: r.email,
       address: r.address,
-      taxNumber: null,
+      taxNumber: r.tax_number ?? null,
       paymentTerms: r.payment_terms,
       creditLimit: Number(r.credit_limit ?? 0),
-      currentBalance: 0,
+      currentBalance: Number(r.current_balance ?? 0),
       status: r.status,
     };
     });
@@ -108,8 +109,16 @@ export async function POST(request: NextRequest) {
     return badRequest('Invalid JSON body');
   }
 
-  if (!body.name || !body.status) {
-    return badRequest('name and status are required');
+  const name = body.name?.trim();
+  const codeInput = body.code?.trim();
+  if (!name) {
+    return badRequest('Supplier name is required.');
+  }
+  if (body.creditLimit !== undefined && Number(body.creditLimit) < 0) {
+    return badRequest('Credit limit cannot be negative.');
+  }
+  if (!body.status) {
+    return badRequest('Supplier status is required.');
   }
 
   try {
@@ -152,7 +161,7 @@ export async function POST(request: NextRequest) {
       .select('id', { count: 'exact', head: true })
       .eq('organization_id', ctx.organizationId);
 
-    const code = body.code?.trim() || `SUP-${String((supplierCount ?? 0) + 1).padStart(5, '0')}`;
+    const code = codeInput || `SUP-${String((supplierCount ?? 0) + 1).padStart(5, '0')}`;
 
     // Check code uniqueness
     const { data: codeCheck } = await service
@@ -168,6 +177,7 @@ export async function POST(request: NextRequest) {
       .from('suppliers')
       .insert({
         name: body.name,
+        tax_number: body.taxNumber ?? null,
         category_id: categoryId,
         code,
         contact_person: body.contactPerson ?? null,
@@ -186,6 +196,23 @@ export async function POST(request: NextRequest) {
       if (supErr.code === '23505') return badRequest('Supplier code already exists.');
       return serverError(supErr.message);
     }
+
+    await recordAuditLog({
+      action: 'SUPPLIER_CREATED',
+      entityId: String((supplier as Record<string, unknown>).id),
+      entityType: 'supplier',
+      ipAddress: request.headers.get('x-forwarded-for'),
+      newValues: {
+        code,
+        creditLimit: body.creditLimit ?? null,
+        name,
+        paymentTerms: body.paymentTerms ?? null,
+        status: body.status,
+      },
+      organizationId: ctx.organizationId,
+      userAgent: request.headers.get('user-agent'),
+      userProfileId: ctx.userId,
+    });
 
     return NextResponse.json(supplier, { status: 201 });
   } catch (err) {

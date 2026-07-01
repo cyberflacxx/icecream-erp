@@ -56,7 +56,7 @@ export async function GET() {
     const [invoiceResult, dispatchResult, customerResult, finishedGoodsResult] = await Promise.all([
       invoiceQuery,
       dispatchQuery,
-      service.from('customers').select('credit_limit, outstanding_balance').eq('organization_id', ctx.organizationId),
+      service.from('customers').select('credit_limit, current_balance').eq('organization_id', ctx.organizationId),
       service.from('items').select('id').eq('organization_id', ctx.organizationId).eq('type', 'FINISHED_GOOD'),
     ]);
 
@@ -107,7 +107,7 @@ export async function GET() {
 
     const creditAlerts = customers.filter((row) => {
       const creditLimit = Number(row.credit_limit ?? 0);
-      const currentBalance = Number(row.outstanding_balance ?? 0);
+      const currentBalance = Number(row.current_balance ?? 0);
       return creditLimit > 0 && currentBalance > creditLimit;
     }).length;
 

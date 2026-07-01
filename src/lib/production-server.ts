@@ -138,3 +138,86 @@ export async function loadProductionReportBatches(filters: {
     workerCounts,
   };
 }
+
+export async function loadShiftTargetRows(branchId?: string | null) {
+  const service = productionService();
+
+  let directQuery = service
+    .from('production_shift_targets')
+    .select(`
+      id, target_date, shift, product_id, target_output_quantity, target_workers, target_production_time_hours, target_material_usage, approved_by, created_at,
+      items(id, code, name)
+    `)
+    .order('target_date', { ascending: false });
+
+  if (branchId) {
+    directQuery = directQuery.eq('branch_id', branchId);
+  }
+
+  const direct = await directQuery;
+  if (!direct.error) {
+    return (direct.data ?? []) as Array<Record<string, unknown>>;
+  }
+
+  if (!isMissingProductionTable(direct.error)) {
+    throw direct.error;
+  }
+
+  let fallbackQuery = service
+    .from('shift_reports')
+    .select(`
+      id, report_date, shift_type, status, notes, created_at, production_batch_id,
+      production_batches(expected_output, actual_output, worker_count, recipe_id, recipes(name, finished_item:items(id, code, name)))
+    `)
+    .is('deleted_at', null)
+    .order('report_date', { ascending: false });
+
+  if (branchId) {
+    fallbackQuery = fallbackQuery.eq('branch_id', branchId);
+  }
+
+  const fallback = await fallbackQuery;
+  if (fallback.error) throw fallback.error;
+
+  return (fallback.data ?? []).map((row: Record<string, unknown>) => {
+    const batch = Array.isArray(row.production_batches) ? row.production_batches[0] : row.production_batches;
+    const batchRecord = batch && typeof batch === 'object' ? batch as Record<string, unknown> : null;
+    const recipe = batchRecord
+      ? (Array.isArray(batchRecord.recipes)
+        ? batchRecord.recipes[0]
+        : batchRecord.recipes)
+      : null;
+    const recipeRecord = recipe && typeof recipe === 'object' ? recipe as Record<string, unknown> : null;
+    const finishedItem = recipeRecord
+      ? (Array.isArray(recipeRecord.finished_item)
+        ? recipeRecord.finished_item[0]
+        : recipeRecord.finished_item)
+      : null;
+    const finishedItemRecord = finishedItem && typeof finishedItem === 'object' ? finishedItem as Record<string, unknown> : null;
+
+    return {
+      id: row.id,
+      target_date: row.report_date,
+      shift: row.shift_type,
+      product_id: finishedItemRecord?.id ?? null,
+      target_output_quantity: Number(
+        batchRecord
+          ? batchRecord.expected_output ?? batchRecord.actual_output ?? 0
+          : 0,
+      ),
+      target_workers: Number(batchRecord?.worker_count ?? 0),
+      target_production_time_hours: 0,
+      target_material_usage: 0,
+      approved_by: null,
+      created_at: row.created_at,
+      items: finishedItemRecord
+        ? {
+            id: finishedItemRecord.id ?? null,
+            code: finishedItemRecord.code ?? null,
+            name: finishedItemRecord.name ?? recipeRecord?.name ?? 'Unknown product',
+          }
+        : null,
+      source_status: row.status ?? null,
+    };
+  });
+}

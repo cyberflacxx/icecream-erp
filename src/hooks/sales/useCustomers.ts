@@ -14,6 +14,8 @@ interface UseCustomersParams {
 }
 
 export interface CustomerListItem {
+  address: string | null;
+  availableCredit: number;
   code: string;
   creditAllowed: boolean;
   creditLimit: number;

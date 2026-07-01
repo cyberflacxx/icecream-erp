@@ -26,6 +26,7 @@ export async function POST(
       .from('production_batches')
       .select(`
         id, batch_number, status, quality_status, expected_output, warehouse_id, quality_notes, wastage_reason,
+        organization_id,
         recipe_id,
         warehouses(branch_id)
       `)
@@ -84,44 +85,53 @@ export async function POST(
       const actualQty = actualByItemId.get(material.item_id) ?? (defaultIssued || required);
       if (actualQty <= 0) continue;
 
-      // Deduct from stock balance
-      const { data: balance } = await service
+      const { data: balance, error: balanceError } = await service
         .schema('icecream_erp')
         .from('stock_balances')
         .select('id, quantity_on_hand, quantity_reserved, quantity_available')
         .eq('item_id', material.item_id)
         .eq('warehouse_id', batch.warehouse_id)
         .maybeSingle();
+      if (balanceError) throw balanceError;
 
-      if (balance) {
-        const releaseAmount = Math.min(required, Number(balance.quantity_reserved));
-        const newOnHand = Math.max(0, Number(balance.quantity_on_hand) - actualQty);
-        const newReserved = Math.max(0, Number(balance.quantity_reserved) - releaseAmount);
-
-        await service.schema('icecream_erp').from('stock_balances').update({
-          quantity_on_hand: newOnHand,
-          quantity_reserved: newReserved,
-          quantity_available: Math.max(0, newOnHand - newReserved),
-          last_updated: new Date().toISOString(),
-        }).eq('id', balance.id);
-
-        await service.schema('icecream_erp').from('stock_movements').insert({
-          item_id: material.item_id,
-          warehouse_id: batch.warehouse_id,
-          movement_type: 'PRODUCTION_ISSUE',
-          quantity: actualQty,
-          reference_id: id,
-          reference_type: 'production_batch',
-          unit_cost: 0,
-          total_cost: 0,
-          created_by: ctx.userId,
-        });
+      if (!balance) {
+        return badRequest(`No stock balance found for material ${material.item_id} in the production warehouse.`);
       }
+
+      const onHand = Number(balance.quantity_on_hand ?? 0);
+      const reserved = Number(balance.quantity_reserved ?? 0);
+      if (onHand < actualQty) {
+        return badRequest(`Insufficient stock to close batch for material ${material.item_id}.`);
+      }
+
+      const releaseAmount = Math.min(actualQty, reserved);
+      const newOnHand = onHand - actualQty;
+      const newReserved = Math.max(0, reserved - releaseAmount);
+
+      await service.schema('icecream_erp').from('stock_balances').update({
+        quantity_on_hand: newOnHand,
+        quantity_reserved: newReserved,
+        quantity_available: Math.max(0, newOnHand - newReserved),
+        last_updated: new Date().toISOString(),
+      }).eq('id', balance.id);
+
+      await service.schema('icecream_erp').from('stock_movements').insert({
+        organization_id: batch.organization_id,
+        item_id: material.item_id,
+        warehouse_id: batch.warehouse_id,
+        movement_type: 'PRODUCTION_ISSUE',
+        quantity: actualQty,
+        reference_id: id,
+        reference_type: 'production_batch',
+        unit_cost: 0,
+        total_cost: 0,
+        created_by: ctx.userId,
+        running_balance: newOnHand,
+      });
 
       await service.schema('icecream_erp').from('production_batch_materials').update({
         quantity_actual: actualQty,
         quantity_issued: actualQty,
-        quantity_remaining: Math.max(0, required - actualQty),
         variance: actualQty - required,
       }).eq('id', material.id);
     }
@@ -161,6 +171,7 @@ export async function POST(
         }).eq('id', fgBalance.id);
       } else {
         await service.schema('icecream_erp').from('stock_balances').insert({
+          organization_id: batch.organization_id,
           item_id: output.item_id,
           warehouse_id: batch.warehouse_id,
           quantity_on_hand: actualQty,
@@ -170,15 +181,17 @@ export async function POST(
       }
 
       await service.schema('icecream_erp').from('stock_movements').insert({
+        organization_id: batch.organization_id,
         item_id: output.item_id,
         warehouse_id: batch.warehouse_id,
-        movement_type: 'PRODUCTION_RECEIVE',
+        movement_type: 'PRODUCTION_OUTPUT',
         quantity: actualQty,
         reference_id: id,
         reference_type: 'production_batch',
         unit_cost: 0,
         total_cost: 0,
         created_by: ctx.userId,
+        running_balance: Number(fgBalance?.quantity_on_hand ?? 0) + actualQty,
       });
     }
 

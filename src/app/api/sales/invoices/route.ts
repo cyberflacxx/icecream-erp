@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
+import { isCustomerInactiveStatus } from '@/lib/sales-customers';
 import { isMissingSalesTable, salesErrorMessage } from '@/lib/sales-server';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
@@ -166,12 +167,15 @@ export async function POST(request: NextRequest) {
   const { data: customer } = await service
     .schema('icecream_erp')
     .from('customers')
-    .select('id, current_balance')
+    .select('id, current_balance, status')
     .eq('id', body.customerId)
     .is('deleted_at', null)
     .single();
 
   if (!customer) return NextResponse.json({ error: 'Customer not found.' }, { status: 404 });
+  if (isCustomerInactiveStatus(customer.status)) {
+    return NextResponse.json({ error: 'Inactive customers cannot be used on new invoices.' }, { status: 400 });
+  }
 
   const cust = customer as Record<string, unknown>;
 
@@ -282,7 +286,7 @@ export async function POST(request: NextRequest) {
       sales_order_id: body.salesOrderId ?? null,
       invoice_date: body.invoiceDate ?? new Date().toISOString().slice(0, 10),
       due_date: body.dueDate ?? null,
-      status: 'sent',
+      status: 'SENT',
       subtotal,
       tax_amount: taxAmount,
       discount_amount: discountAmount,

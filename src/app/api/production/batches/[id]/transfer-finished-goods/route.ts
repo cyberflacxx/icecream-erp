@@ -1,6 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { badRequest, can, forbidden, getAuthContext, notFound, serverError, unauthorized } from '@/lib/api-auth';
+import {
+  applyInventoryDelta,
+  generateDocumentNumber,
+  quantityOrThrow,
+  recordStockMovement,
+  requireWarehouseAccess,
+} from '@/lib/inventory-server';
 import { productionService, writeProductionAuditLog } from '@/lib/production-server';
 
 export async function POST(
@@ -36,112 +43,108 @@ export async function POST(
       return badRequest('Only completed batches can be transferred to stores.');
     }
 
+    await requireWarehouseAccess(service, String(batch.warehouse_id), ctx.branchId, ctx.isBranchScoped);
+    await requireWarehouseAccess(service, body.destinationWarehouseId, ctx.branchId, ctx.isBranchScoped);
+
     const { data: outputs, error: outputsError } = await service
       .from('production_batch_outputs')
       .select('id, item_id, actual_quantity')
       .eq('batch_id', id);
     if (outputsError) throw outputsError;
-    for (const output of outputs) {
-      const quantity = Number(output.actual_quantity ?? 0);
-      if (quantity <= 0) continue;
 
-      const { data: sourceBalance, error: sourceBalanceError } = await service
-        .from('stock_balances')
-        .select('id, quantity_on_hand, quantity_available')
-        .eq('item_id', output.item_id)
-        .eq('warehouse_id', batch.warehouse_id)
-        .single();
-      if (sourceBalanceError) throw sourceBalanceError;
-      if (Number(sourceBalance.quantity_available ?? 0) < quantity) {
-        return badRequest(`Insufficient finished stock to transfer item ${output.item_id}.`);
-      }
+    const transferItems = (outputs ?? [])
+      .map((output) => ({
+        itemId: String(output.item_id),
+        rawQuantity: Number(output.actual_quantity ?? 0),
+      }))
+      .filter((output) => output.rawQuantity > 0)
+      .map((output) => ({
+        itemId: output.itemId,
+        quantity: quantityOrThrow(output.rawQuantity, `actual quantity for ${output.itemId}`),
+      }));
 
-      await service
-        .from('stock_balances')
-        .update({
-          quantity_available: Number(sourceBalance.quantity_available) - quantity,
-          quantity_on_hand: Number(sourceBalance.quantity_on_hand) - quantity,
-          last_updated: body.transferDate ?? new Date().toISOString(),
-        })
-        .eq('id', sourceBalance.id);
-
-      const { data: destinationBalance } = await service
-        .from('stock_balances')
-        .select('id, quantity_on_hand, quantity_available')
-        .eq('item_id', output.item_id)
-        .eq('warehouse_id', body.destinationWarehouseId)
-        .maybeSingle();
-
-      if (destinationBalance) {
-        await service
-          .from('stock_balances')
-          .update({
-            quantity_available: Number(destinationBalance.quantity_available) + quantity,
-            quantity_on_hand: Number(destinationBalance.quantity_on_hand) + quantity,
-            last_updated: body.transferDate ?? new Date().toISOString(),
-          })
-          .eq('id', destinationBalance.id);
-      } else {
-        await service.from('stock_balances').insert({
-          item_id: output.item_id,
-          quantity_available: quantity,
-          quantity_on_hand: quantity,
-          quantity_reserved: 0,
-          warehouse_id: body.destinationWarehouseId,
-        });
-      }
-
-      await service.from('stock_movements').insert([
-        {
-          created_by: ctx.userId,
-          destination_warehouse_id: body.destinationWarehouseId,
-          item_id: output.item_id,
-          movement_type: 'TRANSFER_OUT',
-          quantity,
-          reference_id: id,
-          reference_type: 'finished_goods_transfer',
-          source_warehouse_id: batch.warehouse_id,
-          total_cost: 0,
-          unit_cost: 0,
-          warehouse_id: batch.warehouse_id,
-        },
-        {
-          created_by: ctx.userId,
-          item_id: output.item_id,
-          movement_type: 'TRANSFER_IN',
-          quantity,
-          reference_id: id,
-          reference_type: 'finished_goods_transfer',
-          source_warehouse_id: batch.warehouse_id,
-          total_cost: 0,
-          unit_cost: 0,
-          warehouse_id: body.destinationWarehouseId,
-        },
-      ]);
+    if (transferItems.length === 0) {
+      return badRequest('This batch has no finished goods quantities available to transfer.');
     }
 
+    const transferNumber = await generateDocumentNumber(service, 'stock_transfers', 'FGT');
+    const transferNotes = body.receivedBy
+      ? `Production batch ${batch.batch_number} [production_batch:${id}] received by ${body.receivedBy}`
+      : `Production batch ${batch.batch_number} [production_batch:${id}]`;
+
     const { data, error } = await service
-      .from('finished_goods_transfers')
+      .from('stock_transfers')
       .insert({
-        destination_warehouse_id: body.destinationWarehouseId,
-        production_batch_id: id,
-        quantity_transferred: Number(batch.actual_output ?? 0),
-        received_by: body.receivedBy ?? null,
-        source_warehouse_id: batch.warehouse_id,
+        approved_by: ctx.userId,
+        from_warehouse_id: batch.warehouse_id,
+        notes: transferNotes,
+        organization_id: ctx.organizationId,
+        requested_by: ctx.userId,
+        status: 'COMPLETED',
+        to_warehouse_id: body.destinationWarehouseId,
         transfer_date: body.transferDate ?? new Date().toISOString().slice(0, 10),
+        transfer_number: transferNumber,
       })
       .select()
       .single();
     if (error) throw error;
 
-    await service
-      .from('production_batches')
-      .update({ status: 'TRANSFERRED_TO_STORES' })
-      .eq('id', id);
+    for (const transferItem of transferItems) {
+      await applyInventoryDelta(service, {
+        itemId: transferItem.itemId,
+        organizationId: ctx.organizationId,
+        quantityDelta: -transferItem.quantity,
+        warehouseId: String(batch.warehouse_id),
+      });
+      await applyInventoryDelta(service, {
+        itemId: transferItem.itemId,
+        organizationId: ctx.organizationId,
+        quantityDelta: transferItem.quantity,
+        warehouseId: body.destinationWarehouseId,
+      });
+
+      await recordStockMovement(service, {
+        createdBy: ctx.userId,
+        itemId: transferItem.itemId,
+        movementType: 'TRANSFER_OUT',
+        notes: transferNotes,
+        organizationId: ctx.organizationId,
+        quantity: transferItem.quantity,
+        referenceId: String(data.id),
+        referenceType: 'stock_transfer',
+        warehouseId: String(batch.warehouse_id),
+      });
+      await recordStockMovement(service, {
+        createdBy: ctx.userId,
+        itemId: transferItem.itemId,
+        movementType: 'TRANSFER_IN',
+        notes: transferNotes,
+        organizationId: ctx.organizationId,
+        quantity: transferItem.quantity,
+        referenceId: String(data.id),
+        referenceType: 'stock_transfer',
+        warehouseId: body.destinationWarehouseId,
+      });
+
+      const { error: transferItemError } = await service
+        .from('stock_transfer_items')
+        .insert({
+          item_id: transferItem.itemId,
+          notes: transferNotes,
+          quantity_received: transferItem.quantity,
+          quantity_requested: transferItem.quantity,
+          quantity_sent: transferItem.quantity,
+          transfer_id: data.id,
+          unit_cost: 0,
+        });
+      if (transferItemError) throw transferItemError;
+    }
 
     await writeProductionAuditLog('PRODUCTION_FINISHED_GOODS_TRANSFERRED', id, ctx.userId, {
       destinationWarehouseId: body.destinationWarehouseId,
-    }, 'finished_goods_transfer');
+      stockTransferId: data.id,
+      transferNumber,
+    }, 'production_batch');
     return NextResponse.json(data, { status: 201 });
   } catch (err) {
     return serverError(err instanceof Error ? err.message : 'Internal server error');

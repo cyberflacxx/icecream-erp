@@ -37,6 +37,7 @@ export async function POST(request: NextRequest) {
       const acceptedQuantity = quantityOrThrow(line.quantityAccepted, 'quantityAccepted');
       await applyInventoryDelta(service, {
         itemId: line.itemId,
+        organizationId: ctx.organizationId,
         quantityDelta: acceptedQuantity,
         warehouseId: body.destinationWarehouseId,
       });
@@ -44,8 +45,9 @@ export async function POST(request: NextRequest) {
       await recordStockMovement(service, {
         createdBy: ctx.userId,
         itemId: line.itemId,
-        movementType: 'FINISHED_GOODS_RECEIPT',
+        movementType: 'PRODUCTION_OUTPUT',
         notes: body.notes ?? body.productionBatchReference ?? null,
+        organizationId: ctx.organizationId,
         quantity: acceptedQuantity,
         referenceId: body.productionBatchReference ?? null,
         referenceType: 'production_batch',

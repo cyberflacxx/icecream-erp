@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 
 import { badRequest, can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
 import { emitOperationalNotifications } from '@/lib/notifications-server';
+import { deriveCustomerCreditAllowed } from '@/lib/sales-customers';
 import { checkStockAvailability, evaluateCreditLimit } from '@/lib/sales';
 import { fetchFinishedGoodsStockMap, reserveInvoiceStock, salesService, writeSalesAuditLog } from '@/lib/sales-server';
 import { workflowService } from '@/lib/workflow-server';
@@ -73,7 +74,7 @@ export async function POST(
       Number(invoice.customer?.current_balance ?? 0),
       Number(invoice.customer?.credit_limit ?? 0),
       invoice.total,
-      Boolean(invoice.customer?.credit_allowed),
+      deriveCustomerCreditAllowed(invoice.customer?.payment_terms, invoice.customer?.credit_limit),
     );
     if (credit.exceeded) return badRequest('Customer credit limit exceeded.');
 

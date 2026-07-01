@@ -33,6 +33,42 @@ export type CostVarianceRow = {
   supplierName: string;
 };
 
+export const SUPPLIER_IMPORT_TEMPLATE_HEADERS = [
+  'Supplier Code',
+  'Supplier Name',
+  'Contact Person',
+  'Email Address',
+  'Telephone Number',
+  'Physical Address',
+  'VAT/Tax Number',
+  'Payment Terms',
+  'Credit Limit',
+  'Currency',
+  'Status',
+] as const;
+
+export type SupplierImportTemplateHeader = (typeof SUPPLIER_IMPORT_TEMPLATE_HEADERS)[number];
+
+export interface SupplierImportRowInput {
+  address: string | null;
+  code: string;
+  contactPerson: string | null;
+  creditLimit: number;
+  currency: string;
+  email: string | null;
+  name: string;
+  paymentTerms: string | null;
+  phone: string | null;
+  rowNumber: number;
+  status: 'ACTIVE' | 'INACTIVE';
+  taxNumber: string | null;
+}
+
+export interface SupplierImportValidationResult {
+  errors: Array<{ message: string; row: number }>;
+  rows: SupplierImportRowInput[];
+}
+
 export function buildSupplierShortageRows(
   purchaseOrders: Array<Record<string, unknown>>,
 ): SupplierShortageReportRow[] {
@@ -144,6 +180,115 @@ export function canPayInvoice(balance: number, attemptedPayment: number) {
   return attemptedPayment > 0 && attemptedPayment <= balance;
 }
 
+export function buildSupplierImportTemplateCsv() {
+  const sampleRow = [
+    'SUP-00001',
+    'Example Supplier',
+    'Patience Moyo',
+    'supplier@example.com',
+    '+263771234567',
+    '12 Cold Chain Avenue, Harare',
+    'VAT-001',
+    '30 DAYS',
+    '1500',
+    'USD',
+    'ACTIVE',
+  ];
+
+  return [SUPPLIER_IMPORT_TEMPLATE_HEADERS.join(','), sampleRow.join(',')].join('\n');
+}
+
+export function validateSupplierImportRows(
+  inputRows: Array<Record<string, unknown>>,
+  existingCodes: string[] = [],
+): SupplierImportValidationResult {
+  const seenCodes = new Set(existingCodes.map((code) => normalizeToken(code)));
+  const rows: SupplierImportRowInput[] = [];
+  const errors: Array<{ message: string; row: number }> = [];
+
+  inputRows.forEach((row, index) => {
+    const normalized = normalizeSupplierImportRow(row, index + 1);
+    const codeToken = normalizeToken(normalized.code);
+
+    if (!normalized.code) {
+      errors.push({ message: 'Supplier Code is required.', row: normalized.rowNumber });
+    }
+    if (!normalized.name) {
+      errors.push({ message: 'Supplier Name is required.', row: normalized.rowNumber });
+    }
+    if (!normalized.currency) {
+      errors.push({ message: 'Currency is required.', row: normalized.rowNumber });
+    }
+    if (codeToken && seenCodes.has(codeToken)) {
+      errors.push({ message: 'Duplicate supplier code detected.', row: normalized.rowNumber });
+    }
+    if (normalized.email && !isValidEmail(normalized.email)) {
+      errors.push({ message: 'Email Address is invalid.', row: normalized.rowNumber });
+    }
+    if (normalized.creditLimit < 0) {
+      errors.push({ message: 'Credit Limit cannot be negative.', row: normalized.rowNumber });
+    }
+    if (normalized.paymentTerms && !isValidSupplierPaymentTerms(normalized.paymentTerms)) {
+      errors.push({ message: 'Payment Terms is invalid.', row: normalized.rowNumber });
+    }
+
+    if (errors.some((error) => error.row === normalized.rowNumber)) {
+      return;
+    }
+
+    seenCodes.add(codeToken);
+    rows.push(normalized);
+  });
+
+  return { errors, rows };
+}
+
+export function normalizeSupplierImportRow(
+  row: Record<string, unknown>,
+  rowNumber: number,
+): SupplierImportRowInput {
+  const code = readValue(row, ['Supplier Code', 'supplierCode', 'code']);
+  const name = readValue(row, ['Supplier Name', 'supplierName', 'name']);
+  const contactPerson = readValue(row, ['Contact Person', 'contactPerson']);
+  const email = readValue(row, ['Email Address', 'emailAddress', 'email']);
+  const phone = readValue(row, ['Telephone Number', 'telephoneNumber', 'phone']);
+  const address = readValue(row, ['Physical Address', 'physicalAddress', 'address']);
+  const taxNumber = readValue(row, ['VAT/Tax Number', 'vatOrTaxNumber', 'taxNumber']);
+  const paymentTerms = normalizePaymentTerms(readValue(row, ['Payment Terms', 'paymentTerms']));
+  const creditLimit = toNumber(readValue(row, ['Credit Limit', 'creditLimit']), 0);
+  const currency = readValue(row, ['Currency', 'currency']).toUpperCase();
+  const status = normalizeSupplierStatus(readValue(row, ['Status', 'accountStatus', 'status']));
+
+  return {
+    address: address || null,
+    code,
+    contactPerson: contactPerson || null,
+    creditLimit,
+    currency,
+    email: email || null,
+    name,
+    paymentTerms,
+    phone: phone || null,
+    rowNumber,
+    status,
+    taxNumber: taxNumber || null,
+  };
+}
+
+export function normalizeSupplierStatus(value: string) {
+  return normalizeToken(value) === 'INACTIVE' ? 'INACTIVE' : 'ACTIVE';
+}
+
+export function normalizePaymentTerms(value: string) {
+  const normalized = normalizeToken(value).replace(/_/g, ' ');
+  return normalized || null;
+}
+
+export function isValidSupplierPaymentTerms(value: string) {
+  const normalized = normalizePaymentTerms(value);
+  return normalized !== null && ['7 DAYS', '14 DAYS', '30 DAYS', 'COD', 'IMMEDIATE'].includes(normalized);
+}
+
 function toNumber(value: unknown, fallback = 0): number {
   const numberValue = Number(value);
   return Number.isFinite(numberValue) ? numberValue : fallback;
@@ -165,4 +310,23 @@ function firstObject(value: unknown): Record<string, unknown> | null {
   }
 
   return null;
+}
+
+function readValue(row: Record<string, unknown>, keys: string[]) {
+  for (const key of keys) {
+    const raw = row[key];
+    if (raw === undefined || raw === null) continue;
+    const text = String(raw).trim();
+    if (text) return text;
+  }
+
+  return '';
+}
+
+function normalizeToken(value: string) {
+  return String(value ?? '').trim().toUpperCase();
+}
+
+function isValidEmail(value: string) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 }

@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { badRequest, can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
+import { buildFinanceSourceReference } from '@/lib/finance';
+import { createLinkedFinanceTransaction, postFinanceDocument } from '@/lib/finance-server';
 import { canPayInvoice } from '@/lib/procurement';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
@@ -45,7 +47,7 @@ export async function GET(_request: NextRequest) {
 export async function POST(request: NextRequest) {
   const ctx = await getAuthContext();
   if (!ctx) return unauthorized();
-  if (!can(ctx, 'finance.write', 'procurement.write')) return forbidden();
+  if (!can(ctx, 'procurement.payment.post', 'finance.write', 'procurement.write')) return forbidden();
 
   const body = (await request.json().catch(() => ({}))) as {
     amountPaid?: number;
@@ -100,10 +102,54 @@ export async function POST(request: NextRequest) {
     .single();
 
   if (error) return serverError(error.message);
+  const sourceReference = buildFinanceSourceReference('procurement', 'supplier_payment', String(data.id));
+
+  let journal: { entryNumber: string; id: string } | null = null;
+  let linkedTransaction: { id: string; table: string } | null = null;
+  try {
+    journal = await postFinanceDocument({
+      createdBy: ctx.userId,
+      description: `Supplier payment ${data.reference_number ?? data.id}`,
+      journalDate: String(data.payment_date ?? body.paymentDate ?? new Date().toISOString().slice(0, 10)),
+      lines: [
+        {
+          accountCode: '2000',
+          creditAmount: 0,
+          debitAmount: Number(body.amountPaid),
+          description: `Reduce accounts payable for supplier invoice ${body.supplierInvoiceId}`,
+        },
+        {
+          accountCode: body.paymentMethod === 'BANK' ? '1000' : '1010',
+          creditAmount: Number(body.amountPaid),
+          debitAmount: 0,
+          description: `Supplier payment via ${body.paymentMethod}`,
+        },
+      ],
+      organizationId: ctx.organizationId,
+      sourceDocumentId: String(data.id),
+      sourceDocumentType: 'supplier_payment',
+      sourceModule: 'procurement',
+    });
+
+    linkedTransaction = await createLinkedFinanceTransaction({
+      amount: Number(body.amountPaid),
+      createdBy: ctx.userId,
+      description: `Supplier payment ${data.reference_number ?? data.id}`,
+      direction: 'OUT',
+      organizationId: ctx.organizationId,
+      paymentMethod: body.paymentMethod as 'BANK' | 'CASH' | 'PETTY_CASH',
+      referenceNumber: body.referenceNumber ?? null,
+      sourceDocument: sourceReference,
+      transactionDate: String(data.payment_date ?? body.paymentDate ?? new Date().toISOString().slice(0, 10)),
+    });
+  } catch (postingError) {
+    return serverError(postingError instanceof Error ? postingError.message : 'Failed to post supplier payment to finance.');
+  }
+
   await service
     .from('supplier_invoices')
     .update({ status: Number(body.amountPaid) >= balance ? 'PAID' : 'PARTIAL_PAID' })
     .eq('id', body.supplierInvoiceId);
 
-  return NextResponse.json(data, { status: 201 });
+  return NextResponse.json({ ...data, journal, linkedTransaction }, { status: 201 });
 }

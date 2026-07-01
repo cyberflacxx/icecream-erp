@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import {
   getLockoutExpiry,
+  hasPermissionAccess,
   isLoginAllowed,
   isSessionExpired,
   mergePermissions,
@@ -48,4 +49,23 @@ test('isSessionExpired evaluates timeout based on last activity', () => {
   const now = new Date('2026-06-13T10:16:00.000Z');
   assert.equal(isSessionExpired('2026-06-13T10:00:00.000Z', 15, now), true);
   assert.equal(isSessionExpired('2026-06-13T10:02:00.000Z', 15, now), false);
+});
+
+test('hasPermissionAccess honors ERP permission aliases and dotted variants', () => {
+  const permissions = ['production_batch.create', 'reports.production', 'stock_transfer.create'];
+
+  assert.equal(hasPermissionAccess(permissions, 'production.write'), true);
+  assert.equal(hasPermissionAccess(permissions, 'production.batch.create'), true);
+  assert.equal(hasPermissionAccess(permissions, 'reports.read'), true);
+  assert.equal(hasPermissionAccess(permissions, 'inventory.write'), true);
+  assert.equal(hasPermissionAccess(permissions, 'quality.write'), false);
+});
+
+test('hasPermissionAccess resolves sales customer aliases to legacy sales permissions', () => {
+  const permissions = ['sales.write', 'sales.read'];
+
+  assert.equal(hasPermissionAccess(permissions, 'sales.customer.create'), true);
+  assert.equal(hasPermissionAccess(permissions, 'sales.customer.edit'), true);
+  assert.equal(hasPermissionAccess(permissions, 'sales.customer.view'), true);
+  assert.equal(hasPermissionAccess(permissions, 'sales.customer.deactivate'), true);
 });

@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import Image from 'next/image';
 import { Factory, ShieldCheck, Sparkles } from 'lucide-react';
 
 interface AuthShellProps {
@@ -10,48 +11,75 @@ interface AuthShellProps {
 
 const highlights = [
   'Role-based access for every department',
-  'Branch-aware visibility for operational users',
-  'Real-time stock, production, and sales oversight'
+  'Branch-aware visibility for operational teams',
+  'Real-time production, stock, and sales oversight'
 ];
 
 export function AuthShell({ eyebrow, title, description, children }: AuthShellProps) {
   return (
-    <main className="min-h-screen bg-cream">
-      <div className="mx-auto grid min-h-screen max-w-7xl gap-10 px-6 py-10 lg:grid-cols-[1.05fr_0.95fr] lg:items-center">
-        <section className="rounded-[32px] bg-brown p-8 text-white shadow-soft sm:p-10 lg:p-12">
-          <div className="inline-flex items-center gap-2 rounded-full bg-white/10 px-4 py-2 text-sm font-semibold text-vanilla">
-            <Sparkles className="h-4 w-4" />
+    <main className="min-h-screen bg-[var(--app-bg-canvas)] px-4 py-8 sm:px-6 lg:px-8">
+      <div className="mx-auto grid min-h-[calc(100vh-4rem)] max-w-6xl gap-8 lg:grid-cols-[0.92fr_1.08fr] lg:items-center">
+        <section className="order-2 rounded-[32px] border border-[color:var(--app-border)] bg-[color:var(--app-surface)] p-6 shadow-[var(--app-shadow-md)] sm:p-8 lg:order-1 lg:p-9">
+          <div className="inline-flex items-center gap-2 rounded-full border border-[color:var(--app-border)] bg-[color:var(--app-bg-subtle)] px-4 py-2 text-sm font-semibold text-[color:var(--app-text)]">
+            <Sparkles className="h-4 w-4 text-orange" />
             {eyebrow}
           </div>
-          <h1 className="mt-8 max-w-xl text-4xl font-semibold tracking-tight sm:text-5xl">
+
+          <div className="mt-6 flex items-start gap-4">
+            <div className="flex h-14 w-14 items-center justify-center overflow-hidden rounded-2xl border border-[color:var(--app-border)] bg-[color:var(--app-bg-canvas)]">
+              <Image
+                src="/branding/logo.png"
+                alt="Absolute Ice Cream ERP"
+                width={40}
+                height={40}
+                className="h-10 w-10 object-contain"
+              />
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-[color:var(--app-text)]">
+                Absolute Ice Cream ERP
+              </p>
+              <p className="mt-1 text-sm leading-6 text-[color:var(--app-muted)]">
+                Built for manufacturing, distribution, and branch operations.
+              </p>
+            </div>
+          </div>
+
+          <h1 className="mt-8 max-w-xl text-3xl font-semibold tracking-tight text-[color:var(--app-text)] sm:text-4xl">
             {title}
           </h1>
-          <p className="mt-5 max-w-2xl text-base leading-8 text-white/70">{description}</p>
+          <p className="mt-4 max-w-2xl text-sm leading-7 text-[color:var(--app-muted)] sm:text-base">
+            {description}
+          </p>
 
-          <div className="mt-10 space-y-4">
+          <div className="mt-8 space-y-3">
             {highlights.map((item) => (
               <div
                 key={item}
-                className="flex items-center gap-3 rounded-2xl border border-white/10 bg-white/5 px-4 py-4"
+                className="flex items-center gap-3 rounded-2xl border border-[color:var(--app-border-muted)] bg-[color:var(--app-bg-default)] px-4 py-3"
               >
-                <ShieldCheck className="h-5 w-5 text-vanilla" />
-                <span className="text-sm text-white/85">{item}</span>
+                <div className="flex h-9 w-9 items-center justify-center rounded-xl border border-[color:var(--app-border)] bg-[color:var(--app-bg-canvas)]">
+                  <ShieldCheck className="h-4 w-4 text-orange" />
+                </div>
+                <span className="text-sm text-[color:var(--app-text)]">{item}</span>
               </div>
             ))}
           </div>
 
-          <div className="mt-10 flex items-center gap-4 rounded-2xl border border-white/10 bg-white/5 px-5 py-5">
-            <div className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-orange text-white">
-              <Factory className="h-6 w-6" />
+          <div className="mt-8 flex items-center gap-4 rounded-2xl border border-[color:var(--app-border-muted)] bg-[color:var(--app-bg-default)] px-4 py-4">
+            <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[color:var(--app-accent-strong)] text-white">
+              <Factory className="h-5 w-5" />
             </div>
             <div>
-              <p className="font-semibold">Absolute Ice Cream ERP</p>
-              <p className="text-sm text-white/70">Built for Absolute Quality Icecream</p>
+              <p className="text-sm font-semibold text-[color:var(--app-text)]">Secure staff access</p>
+              <p className="text-xs text-[color:var(--app-muted)]">Theme-aware, role-aware, and branch-aware workspace entry.</p>
             </div>
           </div>
         </section>
 
-        <section className="mx-auto w-full max-w-xl">{children}</section>
+        <section className="order-1 mx-auto w-full max-w-xl lg:order-2">
+          {children}
+        </section>
       </div>
     </main>
   );

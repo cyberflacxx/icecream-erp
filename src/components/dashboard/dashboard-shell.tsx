@@ -42,11 +42,11 @@ export function DashboardShell({ children }: { children: ReactNode }) {
 
     if (!canAccessDashboardPath(persona, pathname)) {
       return (
-        <div className="min-h-screen bg-cream dark:bg-[#0D0500] lg:grid lg:grid-cols-[260px_1fr]">
+        <div className="min-h-screen bg-[var(--app-bg-canvas)] lg:grid lg:grid-cols-[288px_1fr]">
           <Sidebar />
-          <div className="min-w-0 bg-[#f5f0e8] dark:bg-[#0F0703]">
+          <div className="min-w-0 border-l border-[color:var(--app-border-muted)] bg-[color:var(--app-bg-default)]">
             <Topbar onOpenSidebar={() => setSidebarOpen(true)} />
-            <main className="px-5 py-6">
+            <main className="px-4 py-5 sm:px-6 sm:py-6">
               <div className="mx-auto max-w-7xl">
                 <EmptyState
                   icon={<AlertCircle className="h-6 w-6" />}
@@ -62,23 +62,23 @@ export function DashboardShell({ children }: { children: ReactNode }) {
   }
 
   return (
-    <div className="min-h-screen bg-cream dark:bg-[#0D0500] lg:grid lg:grid-cols-[260px_1fr]">
+    <div className="min-h-screen bg-[var(--app-bg-canvas)] lg:grid lg:grid-cols-[288px_1fr]">
       <div
-        className={`fixed inset-0 z-40 bg-black/60 backdrop-blur-sm transition-opacity lg:hidden ${
+        className={`fixed inset-0 z-40 bg-[rgba(16,8,4,0.58)] backdrop-blur-sm transition-opacity lg:hidden ${
           sidebarOpen ? 'opacity-100' : 'pointer-events-none opacity-0'
         }`}
         onClick={() => setSidebarOpen(false)}
       />
       <div
-        className={`fixed inset-y-0 left-0 z-50 w-[260px] transform transition-transform lg:static lg:translate-x-0 ${
+        className={`fixed inset-y-0 left-0 z-50 w-[288px] transform transition-transform lg:static lg:translate-x-0 ${
           sidebarOpen ? 'translate-x-0' : '-translate-x-full'
         }`}
       >
         <Sidebar />
       </div>
-      <div className="min-w-0 bg-[#f5f0e8] dark:bg-[#0F0703]">
+      <div className="min-w-0 border-l border-[color:var(--app-border-muted)] bg-[color:var(--app-bg-default)]">
         <Topbar onOpenSidebar={() => setSidebarOpen(true)} />
-        <main className="px-5 py-6">
+        <main className="px-4 py-5 sm:px-6 sm:py-6">
           <div className="mx-auto max-w-7xl">{children}</div>
         </main>
       </div>

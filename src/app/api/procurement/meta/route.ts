@@ -24,6 +24,7 @@ export async function GET(_request: NextRequest) {
         .select('id, code, name, email, phone, status, category_id')
         .is('deleted_at', null)
         .eq('organization_id', ctx.organizationId)
+        .eq('status', 'ACTIVE')
         .order('name'),
       service
         .from('items')

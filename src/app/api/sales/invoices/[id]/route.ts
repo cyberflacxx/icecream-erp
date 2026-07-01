@@ -12,9 +12,9 @@ function mapLineTotals(items: Array<{ discountPercent?: number | null; quantity:
 }
 
 function normalizeInvoiceStatus(amountPaid: number, total: number): string {
-  if (amountPaid <= 0) return 'sent';
-  if (amountPaid >= total) return 'paid';
-  return 'partial_paid';
+  if (amountPaid <= 0) return 'SENT';
+  if (amountPaid >= total) return 'PAID';
+  return 'PARTIAL_PAID';
 }
 
 // ─── GET /api/sales/invoices/[id] ─────────────────────────────────────────────
@@ -83,7 +83,8 @@ export async function PATCH(
 
   const inv = existing as Record<string, unknown>;
 
-  if (inv.status === 'paid' || inv.status === 'cancelled') {
+  const currentStatus = String(inv.status ?? '').toUpperCase();
+  if (currentStatus === 'PAID' || currentStatus === 'CANCELLED') {
     return NextResponse.json({ error: 'Paid or cancelled invoices cannot be edited.' }, { status: 400 });
   }
 
