@@ -17,6 +17,37 @@ export const INVENTORY_WAREHOUSE_TYPES = [
   'DISPATCH',
   'RETURNS',
   'DAMAGED',
+  'RAW_MATERIALS',
+  'PRODUCTION_MATERIALS',
+  'GENERAL',
+] as const;
+
+export const DEFAULT_INVENTORY_WAREHOUSES = [
+  {
+    code: 'RAW_STORE',
+    name: 'Raw Materials Store',
+    warehouseType: 'RAW_MATERIALS',
+  },
+  {
+    code: 'PROD_MATERIALS',
+    name: 'Production Materials Store',
+    warehouseType: 'PRODUCTION_MATERIALS',
+  },
+  {
+    code: 'FG_WAREHOUSE',
+    name: 'Finished Goods Warehouse',
+    warehouseType: 'FINISHED_GOODS',
+  },
+  {
+    code: 'DISPATCH_WAREHOUSE',
+    name: 'Dispatch Warehouse',
+    warehouseType: 'DISPATCH',
+  },
+  {
+    code: 'RETURNS_WAREHOUSE',
+    name: 'Returns Warehouse',
+    warehouseType: 'RETURNS',
+  },
 ] as const;
 
 export const STOCK_IN_MOVEMENT_TYPES = new Set([
@@ -52,6 +83,22 @@ export const STOCK_OUT_MOVEMENT_TYPES = new Set([
   'MACHINE_LOSS',
   'PACKAGING_LOSS',
 ]);
+
+const STOCK_MOVEMENT_TYPE_ALIASES: Record<string, string> = {
+  BRANCH_TRANSFER_IN: 'TRANSFER_IN',
+  BRANCH_TRANSFER_OUT: 'TRANSFER_OUT',
+  CUSTOMER_RETURN: 'RETURN_IN',
+  FINISHED_GOODS_RECEIPT: 'PRODUCTION_OUTPUT',
+  PRODUCTION_RECEIPT: 'PRODUCTION_OUTPUT',
+  PRODUCTION_RECEIVE: 'PRODUCTION_OUTPUT',
+  PRODUCTION_RETURN: 'PRODUCTION_OUTPUT',
+  PURCHASE_RECEIPT: 'PURCHASE_RECEIVE',
+  SALES_DISPATCH: 'SALES_ISSUE',
+  STOCK_ADJUSTMENT_IN: 'ADJUSTMENT_IN',
+  STOCK_ADJUSTMENT_OUT: 'ADJUSTMENT_OUT',
+  WAREHOUSE_TRANSFER_IN: 'TRANSFER_IN',
+  WAREHOUSE_TRANSFER_OUT: 'TRANSFER_OUT',
+};
 
 export type SupplierShortageRow = {
   expectedResolutionDate: string | null;
@@ -103,6 +150,113 @@ export function normalizeDate(value: string | null | undefined) {
   if (!value) return new Date().toISOString();
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? new Date().toISOString() : date.toISOString();
+}
+
+export function normalizeStockMovementType(value: string | null | undefined) {
+  const movementType = String(value ?? '').trim().toUpperCase();
+  return STOCK_MOVEMENT_TYPE_ALIASES[movementType] ?? movementType;
+}
+
+export function normalizeWarehouseCode(value: string | null | undefined) {
+  return String(value ?? '')
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+}
+
+export function normalizeWarehouseType(value: string | null | undefined) {
+  const warehouseType = normalizeWarehouseCode(value);
+
+  switch (warehouseType) {
+    case 'RAW_STORE':
+    case 'RAW_MATERIAL':
+    case 'RAW_MATERIALS_STORE':
+      return 'RAW_MATERIALS';
+    case 'PROD_MATERIALS':
+    case 'PRODUCTION_STORE':
+    case 'PRODUCTION_MATERIAL':
+    case 'PRODUCTION_MATERIALS_STORE':
+      return 'PRODUCTION_MATERIALS';
+    case 'FG':
+    case 'FG_STORE':
+    case 'FG_WAREHOUSE':
+      return 'FINISHED_GOODS';
+    case 'DISPATCH_WAREHOUSE':
+      return 'DISPATCH';
+    case 'RETURNS_WAREHOUSE':
+      return 'RETURNS';
+    default:
+      return warehouseType;
+  }
+}
+
+export function resolveWarehouseStorageType(value: string | null | undefined) {
+  const warehouseType = normalizeWarehouseType(value);
+
+  switch (warehouseType) {
+    case 'BRANCH':
+    case 'COLD_ROOM':
+    case 'MAIN':
+      return warehouseType;
+    default:
+      return 'MAIN';
+  }
+}
+
+export function resolveWarehouseDisplayType(input: {
+  code?: string | null;
+  type?: string | null;
+  warehouseType?: string | null;
+}) {
+  const code = normalizeWarehouseCode(input.code);
+
+  if (code === 'RAW_STORE') return 'RAW_MATERIALS';
+  if (code === 'PROD_MATERIALS') return 'PRODUCTION_MATERIALS';
+  if (code === 'FG_WAREHOUSE') return 'FINISHED_GOODS';
+  if (code === 'DISPATCH_WAREHOUSE') return 'DISPATCH';
+  if (code === 'RETURNS_WAREHOUSE') return 'RETURNS';
+
+  return normalizeWarehouseType(input.warehouseType ?? input.type);
+}
+
+export function normalizeTransferStatus(value: string | null | undefined) {
+  const status = normalizeWarehouseCode(value);
+  return status === 'POSTED' ? 'COMPLETED' : status;
+}
+
+export function calculateAcceptedQuantity(input: {
+  damagedQuantity?: unknown;
+  receivedQuantity: unknown;
+  rejectedQuantity?: unknown;
+}) {
+  const receivedQuantity = ensureNonNegative(input.receivedQuantity, 'receivedQuantity');
+  const damagedQuantity = ensureNonNegative(input.damagedQuantity ?? 0, 'damagedQuantity');
+  const rejectedQuantity = ensureNonNegative(input.rejectedQuantity ?? 0, 'rejectedQuantity');
+  const acceptedQuantity = receivedQuantity - damagedQuantity - rejectedQuantity;
+
+  if (acceptedQuantity < 0) {
+    throw new Error('acceptedQuantity must not be negative.');
+  }
+
+  return acceptedQuantity;
+}
+
+export function calculateShortageQuantity(input: {
+  orderedQuantity: unknown;
+  receivedQuantity: unknown;
+}) {
+  const orderedQuantity = ensureNonNegative(input.orderedQuantity, 'orderedQuantity');
+  const receivedQuantity = ensureNonNegative(input.receivedQuantity, 'receivedQuantity');
+  return Math.max(0, orderedQuantity - receivedQuantity);
+}
+
+export function findMissingDefaultWarehouses(existingCodes: string[]) {
+  const existing = new Set(existingCodes.map((code) => normalizeWarehouseCode(code)));
+
+  return DEFAULT_INVENTORY_WAREHOUSES.filter(
+    (warehouse) => !existing.has(normalizeWarehouseCode(warehouse.code)),
+  );
 }
 
 export function deriveSupplierShortages(
@@ -218,7 +372,7 @@ export function buildOpeningClosingRows(
     const item = asObject(movement.items);
     const warehouse = asObject(movement.warehouses);
     const movementDate = new Date(String(movement.created_at));
-    const movementType = String(movement.movement_type ?? '');
+    const movementType = normalizeStockMovementType(String(movement.movement_type ?? ''));
     const quantity = toNumber(movement.quantity);
     const unitCost = toNumber(movement.unit_cost ?? item?.unit_cost);
     const direction =

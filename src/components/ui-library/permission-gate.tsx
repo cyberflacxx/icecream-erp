@@ -2,6 +2,8 @@
 
 import type { ReactNode } from 'react';
 
+import { hasPermissionAccess } from '@/lib/permission-access';
+
 import { usePermissions } from './permissions/permission-context';
 
 export interface PermissionGateProps {
@@ -20,8 +22,8 @@ export function PermissionGate({
   const { permissions } = usePermissions();
   const requiredPermissions = Array.isArray(permission) ? permission : [permission];
   const isAllowed = requireAll
-    ? requiredPermissions.every((item) => permissions.includes(item))
-    : requiredPermissions.some((item) => permissions.includes(item));
+    ? requiredPermissions.every((item) => hasPermissionAccess(permissions, item))
+    : hasPermissionAccess(permissions, ...requiredPermissions);
 
   return isAllowed ? <>{children}</> : <>{fallback}</>;
 }

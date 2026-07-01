@@ -35,6 +35,8 @@ const initialTransferForm = {
     }
   ],
   notes: '',
+  referenceNumber: '',
+  transferDate: new Date().toISOString().slice(0, 10),
   toWarehouseId: ''
 };
 
@@ -100,6 +102,8 @@ export default function TransfersPage() {
         fromWarehouseId: formState.fromWarehouseId,
         items: validItems,
         notes: formState.notes || null,
+        referenceNumber: formState.referenceNumber || undefined,
+        transferDate: formState.transferDate,
         toWarehouseId: formState.toWarehouseId
       });
       setFormState(initialTransferForm);
@@ -122,7 +126,7 @@ export default function TransfersPage() {
           <PermissionGate permission={PERMISSIONS.stockTransfer.create}>
             <Button type="button" size="sm" onClick={() => setIsDrawerOpen(true)}>
               <Plus className="mr-2 h-4 w-4" />
-              New Transfer
+              Transfer Inventory
             </Button>
           </PermissionGate>
         }
@@ -223,7 +227,7 @@ export default function TransfersPage() {
             action={
               canCreateTransfer ? (
                 <Button type="button" size="sm" onClick={() => setIsDrawerOpen(true)}>
-                  Create transfer
+                  Transfer Inventory
                 </Button>
               ) : null
             }
@@ -245,13 +249,39 @@ export default function TransfersPage() {
         />
       ) : null}
 
-      <FormDrawer title="New Stock Transfer" open={isDrawerOpen} onClose={() => setIsDrawerOpen(false)}>
+      <FormDrawer title="Transfer Inventory" open={isDrawerOpen} onClose={() => setIsDrawerOpen(false)}>
         <form className="space-y-5" onSubmit={handleSubmit}>
           {formError ? (
             <div className="rounded-2xl border border-error/20 bg-error/5 px-4 py-3 text-sm text-error">
               {formError}
             </div>
           ) : null}
+
+          <div className="grid gap-5 sm:grid-cols-2">
+            <label className="space-y-2 text-sm text-muted">
+              <span>Reference number</span>
+              <input
+                value={formState.referenceNumber}
+                onChange={(event) =>
+                  setFormState((current) => ({ ...current, referenceNumber: event.target.value }))
+                }
+                className="surface-input-soft"
+                placeholder="Auto-generate if blank"
+              />
+            </label>
+            <label className="space-y-2 text-sm text-muted">
+              <span>Transfer date</span>
+              <input
+                required
+                type="date"
+                value={formState.transferDate}
+                onChange={(event) =>
+                  setFormState((current) => ({ ...current, transferDate: event.target.value }))
+                }
+                className="surface-input-soft"
+              />
+            </label>
+          </div>
 
           <div className="grid gap-5 sm:grid-cols-2">
             <label className="space-y-2 text-sm text-muted">
@@ -363,7 +393,7 @@ export default function TransfersPage() {
                       }))
                     }
                   >
-                    Remove
+                    Remove Line
                   </Button>
                 </div>
               ))}
@@ -385,7 +415,7 @@ export default function TransfersPage() {
               Cancel
             </Button>
             <Button type="submit" disabled={createTransferMutation.isPending}>
-              {createTransferMutation.isPending ? 'Processing...' : 'Submit Transfer'}
+              {createTransferMutation.isPending ? 'Processing...' : 'Transfer Inventory'}
             </Button>
           </div>
         </form>

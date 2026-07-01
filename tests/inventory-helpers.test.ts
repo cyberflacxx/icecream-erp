@@ -3,8 +3,17 @@ import assert from 'node:assert/strict';
 
 import {
   buildOpeningClosingRows,
+  calculateAcceptedQuantity,
+  calculateShortageQuantity,
   deriveSupplierShortages,
+  findMissingDefaultWarehouses,
   isInvoiceApprovedForDispatch,
+  resolveWarehouseDisplayType,
+  normalizeTransferStatus,
+  normalizeWarehouseCode,
+  resolveWarehouseStorageType,
+  normalizeWarehouseType,
+  normalizeStockMovementType,
 } from '../src/lib/inventory';
 
 test('deriveSupplierShortages returns open shortages from ordered versus received quantities', () => {
@@ -62,4 +71,56 @@ test('isInvoiceApprovedForDispatch only allows non-draft invoice statuses', () =
   assert.equal(isInvoiceApprovedForDispatch('draft'), false);
   assert.equal(isInvoiceApprovedForDispatch('sent'), true);
   assert.equal(isInvoiceApprovedForDispatch('paid'), true);
+});
+
+test('normalizeStockMovementType maps legacy aliases onto schema enums', () => {
+  assert.equal(normalizeStockMovementType('purchase_receipt'), 'PURCHASE_RECEIVE');
+  assert.equal(normalizeStockMovementType('finished_goods_receipt'), 'PRODUCTION_OUTPUT');
+  assert.equal(normalizeStockMovementType('sales_dispatch'), 'SALES_ISSUE');
+  assert.equal(normalizeStockMovementType('transfer_out'), 'TRANSFER_OUT');
+});
+
+test('warehouse helpers normalize codes and types expected by inventory stores', () => {
+  assert.equal(normalizeWarehouseCode(' Raw Store '), 'RAW_STORE');
+  assert.equal(normalizeWarehouseType('raw_store'), 'RAW_MATERIALS');
+  assert.equal(resolveWarehouseStorageType('raw_store'), 'MAIN');
+  assert.equal(resolveWarehouseDisplayType({ code: 'RAW_STORE', type: 'MAIN' }), 'RAW_MATERIALS');
+  assert.equal(normalizeWarehouseType('fg warehouse'), 'FINISHED_GOODS');
+  assert.equal(normalizeTransferStatus('posted'), 'COMPLETED');
+});
+
+test('GRN quantity helpers derive accepted and shortage quantities safely', () => {
+  assert.equal(
+    calculateAcceptedQuantity({
+      damagedQuantity: 3,
+      receivedQuantity: 20,
+      rejectedQuantity: 2,
+    }),
+    15,
+  );
+  assert.equal(
+    calculateShortageQuantity({
+      orderedQuantity: 30,
+      receivedQuantity: 24,
+    }),
+    6,
+  );
+  assert.throws(
+    () =>
+      calculateAcceptedQuantity({
+        damagedQuantity: 12,
+        receivedQuantity: 10,
+        rejectedQuantity: 0,
+      }),
+    /acceptedQuantity must not be negative/,
+  );
+});
+
+test('findMissingDefaultWarehouses returns only missing warehouse seeds', () => {
+  const missing = findMissingDefaultWarehouses(['RAW_STORE', 'FG_WAREHOUSE']);
+
+  assert.deepEqual(
+    missing.map((warehouse) => warehouse.code),
+    ['PROD_MATERIALS', 'DISPATCH_WAREHOUSE', 'RETURNS_WAREHOUSE'],
+  );
 });

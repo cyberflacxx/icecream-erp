@@ -8,22 +8,24 @@ import {
   serverError,
   unauthorized,
 } from '@/lib/api-auth';
+import { normalizeWarehouseCode, normalizeWarehouseType, resolveWarehouseDisplayType, resolveWarehouseStorageType } from '@/lib/inventory';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
 export async function GET(request: NextRequest) {
   void request;
   const ctx = await getAuthContext();
   if (!ctx) return unauthorized();
-  if (!can(ctx, 'inventory.read')) return forbidden();
+  if (!can(ctx, 'inventory.warehouse.view', 'inventory.read')) return forbidden();
 
   const service = createServiceRoleClient();
 
   let query = service
     .from('warehouses')
     .select(
-      `id, code, name, type, is_active, address, branch_id, created_at,
+      `id, code, name, type, warehouse_type, is_active, address, branch_id, created_at,
        branches!branch_id(id, name)`,
     )
+    .eq('organization_id', ctx.organizationId)
     .order('name', { ascending: true });
 
   if (ctx.isBranchScoped && ctx.branchId) {
@@ -76,7 +78,11 @@ export async function GET(request: NextRequest) {
       id: warehouse.id,
       code: warehouse.code,
       name: warehouse.name,
-      type: warehouse.type,
+      type: resolveWarehouseDisplayType({
+        code: String(warehouse.code ?? ''),
+        type: warehouse.type ? String(warehouse.type) : null,
+        warehouseType: warehouse.warehouse_type ? String(warehouse.warehouse_type) : null,
+      }),
       isActive: warehouse.is_active,
       address: warehouse.address ?? null,
       branch: (() => {
@@ -95,7 +101,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   const ctx = await getAuthContext();
   if (!ctx) return unauthorized();
-  if (!can(ctx, 'inventory.write')) return forbidden();
+  if (!can(ctx, 'inventory.warehouse.create', 'inventory.write')) return forbidden();
 
   const service = createServiceRoleClient();
 
@@ -103,15 +109,29 @@ export async function POST(request: NextRequest) {
     code?: string;
     name?: string;
     type?: string;
+    warehouseType?: string;
     isActive?: boolean;
     address?: string | null;
     branchId?: string | null;
   };
 
-  const { code, name, type } = body;
+  const code = normalizeWarehouseCode(body.code);
+  const name = String(body.name ?? '').trim();
+  const type = normalizeWarehouseType(body.warehouseType ?? body.type);
+
   if (!code || !name || !type) {
     return badRequest('code, name, and type are required.');
   }
+
+  const { data: duplicateWarehouse, error: duplicateError } = await service
+    .from('warehouses')
+    .select('id')
+    .eq('organization_id', ctx.organizationId)
+    .eq('code', code)
+    .maybeSingle();
+
+  if (duplicateError) return serverError(duplicateError.message);
+  if (duplicateWarehouse) return badRequest('Warehouse code already exists.');
 
   // If branchId provided, verify it exists
   if (body.branchId) {
@@ -129,18 +149,25 @@ export async function POST(request: NextRequest) {
       organization_id: ctx.organizationId,
       code,
       name,
-      type,
+      type: resolveWarehouseStorageType(type),
+      warehouse_type: resolveWarehouseStorageType(type),
       is_active: body.isActive ?? true,
       address: body.address ?? null,
       branch_id: body.branchId ?? null,
     })
     .select(
-      `id, code, name, type, is_active, address, branch_id, created_at,
+      `id, code, name, type, warehouse_type, is_active, address, branch_id, created_at,
        branches!branch_id(id, name)`,
     )
     .single();
 
   if (error) return serverError(error.message);
-
-  return NextResponse.json(data, { status: 201 });
+  return NextResponse.json({
+    ...data,
+    type: resolveWarehouseDisplayType({
+      code: String(data.code ?? ''),
+      type: data.type ? String(data.type) : null,
+      warehouseType: data.warehouse_type ? String(data.warehouse_type) : null,
+    }),
+  }, { status: 201 });
 }

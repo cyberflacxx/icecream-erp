@@ -25,7 +25,7 @@ export async function GET(request: NextRequest) {
 
   const { data: balances, error: balancesError } = await service
     .from('stock_balances')
-    .select('id, item_id, warehouse_id, quantity, reserved_qty')
+    .select('id, item_id, warehouse_id, quantity_on_hand, quantity_available, quantity_reserved')
     .in('warehouse_id', warehouseIds);
   if (balancesError) return serverError(balancesError.message);
 
@@ -52,9 +52,9 @@ export async function GET(request: NextRequest) {
       const item = items.get(String(row.item_id ?? '')) ?? null;
       const warehouse = warehouses.get(String(row.warehouse_id ?? '')) ?? null;
       const branch = warehouse ? branches.get(String(warehouse.branch_id ?? '')) ?? null : null;
-      const quantityOnHand = Number(row.quantity ?? 0);
-      const quantityReserved = Number(row.reserved_qty ?? 0);
-      const quantityAvailable = quantityOnHand - quantityReserved;
+      const quantityOnHand = Number(row.quantity_on_hand ?? 0);
+      const quantityReserved = Number(row.quantity_reserved ?? 0);
+      const quantityAvailable = Number(row.quantity_available ?? (quantityOnHand - quantityReserved));
       const reorderLevel = Number(item?.reorder_level ?? 0);
 
       return {

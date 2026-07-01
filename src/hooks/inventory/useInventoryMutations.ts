@@ -18,12 +18,19 @@ export interface CreateItemPayload {
 }
 
 export interface CreateTransferPayload {
+  destinationWarehouseId?: string;
   fromWarehouseId: string;
   items: Array<{
+    batchNumber?: string | null;
     itemId: string;
     quantity: number;
   }>;
   notes?: string | null;
+  referenceNumber?: string;
+  remarks?: string | null;
+  sourceWarehouseId?: string;
+  status?: string;
+  transferDate?: string;
   toWarehouseId: string;
 }
 

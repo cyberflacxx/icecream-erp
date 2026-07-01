@@ -18,16 +18,27 @@ export async function GET(request: NextRequest) {
   const itemType = searchParams.get('itemType') ?? '';
   const lowStock = searchParams.get('lowStock') === 'true';
 
+  let scopedWarehouseIds: string[] | null = null;
+  if (ctx.isBranchScoped && ctx.branchId) {
+    const { data: warehouses, error: warehouseError } = await service
+      .from('warehouses')
+      .select('id')
+      .eq('branch_id', ctx.branchId);
+    if (warehouseError) return serverError(warehouseError.message);
+    scopedWarehouseIds = (warehouses ?? []).map((row) => String(row.id));
+  }
+
   let query = service
     .from('stock_balances')
-    .select('id, item_id, warehouse_id, quantity, reserved_qty, avg_cost, updated_at', { count: 'exact' })
+    .select('id, item_id, warehouse_id, quantity_on_hand, quantity_reserved, quantity_available, last_updated', { count: 'exact' })
     .eq('organization_id', ctx.organizationId);
 
   if (itemId) query = query.eq('item_id', itemId);
   if (warehouseId) query = query.eq('warehouse_id', warehouseId);
-  if (ctx.isBranchScoped && ctx.branchId) {
-    // Filter by warehouses that belong to the branch
-    query = query.eq('warehouses.branch_id', ctx.branchId);
+  if (scopedWarehouseIds) {
+    query = scopedWarehouseIds.length
+      ? query.in('warehouse_id', scopedWarehouseIds)
+      : query.in('warehouse_id', ['00000000-0000-0000-0000-000000000000']);
   }
 
   // Fetch without range first if lowStock filter is needed (post-filter)
@@ -37,9 +48,10 @@ export async function GET(request: NextRequest) {
 
     if (error) return serverError(error.message);
 
-    const filtered = (data ?? []).filter((row: Record<string, unknown>) => {
-      const reorderLevel = 0;
-      const available = Number(row.quantity ?? 0) - Number(row.reserved_qty ?? 0);
+    const mapped = await mapBalances(service, (data ?? []) as Array<Record<string, unknown>>);
+    const filtered = mapped.filter((row) => {
+      const reorderLevel = Number(row.item?.reorderLevel ?? 0);
+      const available = Number(row.quantityAvailable ?? 0);
       return reorderLevel > 0 && available <= reorderLevel;
     });
 
@@ -48,7 +60,7 @@ export async function GET(request: NextRequest) {
     const paginated = filtered.slice(start, start + pageSize);
 
     return NextResponse.json({
-        data: await mapBalances(service, paginated),
+      data: paginated,
       pagination: { page, pageSize, total },
     });
   }
@@ -59,7 +71,7 @@ export async function GET(request: NextRequest) {
       .from('items')
       .select('id')
       .eq('organization_id', ctx.organizationId)
-      .eq('type', itemType);
+      .eq('item_type', itemType);
     if (typeItemsError) return serverError(typeItemsError.message);
     const ids = (typeItems ?? []).map((row) => row.id);
     query = ids.length ? query.in('item_id', ids) : query.in('item_id', ['00000000-0000-0000-0000-000000000000']);
@@ -82,13 +94,13 @@ async function mapBalances(service: ReturnType<typeof createServiceRoleClient>, 
   const itemIds = [...new Set(rows.map((row) => String(row.item_id ?? '')).filter(Boolean))];
   const warehouseIds = [...new Set(rows.map((row) => String(row.warehouse_id ?? '')).filter(Boolean))];
   const [itemsResult, warehousesResult] = await Promise.all([
-    itemIds.length ? service.from('items').select('id, code, name, type, reorder_level, unit_id').in('id', itemIds) : Promise.resolve({ data: [], error: null }),
+    itemIds.length ? service.from('items').select('id, code, name, item_type, reorder_level, unit_of_measure_id').in('id', itemIds) : Promise.resolve({ data: [], error: null }),
     warehouseIds.length ? service.from('warehouses').select('id, code, name, branch_id').in('id', warehouseIds) : Promise.resolve({ data: [], error: null }),
   ]);
   if (itemsResult.error) throw new Error(itemsResult.error.message);
   if (warehousesResult.error) throw new Error(warehousesResult.error.message);
 
-  const unitIds = [...new Set((itemsResult.data ?? []).map((item) => String(item.unit_id ?? '')).filter(Boolean))];
+  const unitIds = [...new Set((itemsResult.data ?? []).map((item) => String(item.unit_of_measure_id ?? '')).filter(Boolean))];
   const branchIds = [...new Set((warehousesResult.data ?? []).map((warehouse) => String(warehouse.branch_id ?? '')).filter(Boolean))];
   const [unitsResult, branchesResult] = await Promise.all([
     unitIds.length ? service.from('units_of_measure').select('id, name, abbreviation').in('id', unitIds) : Promise.resolve({ data: [], error: null }),
@@ -105,36 +117,37 @@ async function mapBalances(service: ReturnType<typeof createServiceRoleClient>, 
   return rows.map((row) => {
     const item = items.get(String(row.item_id ?? '')) ?? null;
     const warehouse = warehouses.get(String(row.warehouse_id ?? '')) ?? null;
-    const unitOfMeasure = item ? units.get(String(item.unit_id ?? '')) ?? null : null;
+    const unitOfMeasure = item ? units.get(String(item.unit_of_measure_id ?? '')) ?? null : null;
     const branch = warehouse ? branches.get(String(warehouse.branch_id ?? '')) ?? null : null;
-    const quantityOnHand = Number(row.quantity ?? 0);
-    const quantityReserved = Number(row.reserved_qty ?? 0);
+    const quantityOnHand = Number(row.quantity_on_hand ?? 0);
+    const quantityReserved = Number(row.quantity_reserved ?? 0);
+    const quantityAvailable = Number(row.quantity_available ?? (quantityOnHand - quantityReserved));
     return {
-    id: row.id,
-    lastUpdated: row.updated_at,
-    quantityOnHand,
-    quantityAvailable: quantityOnHand - quantityReserved,
-    quantityReserved,
-    item: item
-      ? {
-          id: item.id,
-          code: item.code,
-          name: item.name,
-          itemType: item.type,
-          reorderLevel: Number(item.reorder_level ?? 0),
-          unitOfMeasure: unitOfMeasure
-            ? { id: unitOfMeasure.id, name: unitOfMeasure.name, abbreviation: unitOfMeasure.abbreviation }
-            : null,
-        }
-      : null,
-    warehouse: warehouse
-      ? {
-          id: warehouse.id,
-          code: warehouse.code,
-          name: warehouse.name,
-          branch: branch ? { id: branch.id, name: branch.name } : null,
-        }
-      : null,
+      id: row.id,
+      lastUpdated: row.last_updated,
+      quantityOnHand,
+      quantityAvailable,
+      quantityReserved,
+      item: item
+        ? {
+            id: item.id,
+            code: item.code,
+            name: item.name,
+            itemType: item.item_type,
+            reorderLevel: Number(item.reorder_level ?? 0),
+            unitOfMeasure: unitOfMeasure
+              ? { id: unitOfMeasure.id, name: unitOfMeasure.name, abbreviation: unitOfMeasure.abbreviation }
+              : null,
+          }
+        : null,
+      warehouse: warehouse
+        ? {
+            id: warehouse.id,
+            code: warehouse.code,
+            name: warehouse.name,
+            branch: branch ? { id: branch.id, name: branch.name } : null,
+          }
+        : null,
     };
   });
 }

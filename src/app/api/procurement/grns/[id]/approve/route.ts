@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { badRequest, can, forbidden, getAuthContext, notFound, serverError, unauthorized } from '@/lib/api-auth';
+import { recordAuditLog } from '@/lib/security-server';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
 export async function POST(
@@ -9,7 +10,7 @@ export async function POST(
 ) {
   const ctx = await getAuthContext();
   if (!ctx) return unauthorized();
-  if (!can(ctx, 'procurement.approve')) return forbidden();
+  if (!can(ctx, 'stores.grn.approve', 'procurement.approve')) return forbidden();
 
   const { id } = await params;
   const service = createServiceRoleClient();
@@ -39,18 +40,29 @@ export async function POST(
       }
     }
 
-    if (grn.status !== 'received') {
-      return badRequest('Only received GRNs can be approved.');
+    if (grn.status !== 'PENDING_APPROVAL') {
+      return badRequest('Only submitted GRNs can be approved.');
     }
 
     const { data: updated, error: updateErr } = await service
       .from('goods_received_notes')
-      .update({ status: 'quality_passed', quality_status: 'passed' })
+      .update({ status: 'APPROVED', quality_status: 'APPROVED' })
       .eq('id', id)
       .select()
       .single();
 
     if (updateErr) return serverError(updateErr.message);
+
+    await recordAuditLog({
+      action: 'GRN_APPROVED',
+      entityId: id,
+      entityType: 'goods_received_note',
+      newValues: { status: 'APPROVED' },
+      organizationId: ctx.organizationId,
+      userProfileId: ctx.userId,
+      ipAddress: _request.headers.get('x-forwarded-for'),
+      userAgent: _request.headers.get('user-agent'),
+    });
 
     return NextResponse.json(updated);
   } catch (err) {

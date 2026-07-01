@@ -24,9 +24,14 @@ const currencyFormatter = new Intl.NumberFormat('en-US', {
 });
 
 const warehouseTypes = [
-  { label: 'Main', value: 'MAIN' },
-  { label: 'Branch', value: 'BRANCH' },
-  { label: 'Cold Room', value: 'COLD_ROOM' }
+  { label: 'Raw Materials', value: 'RAW_MATERIALS' },
+  { label: 'Production Materials', value: 'PRODUCTION_MATERIALS' },
+  { label: 'Work in Progress', value: 'WIP' },
+  { label: 'Finished Goods', value: 'FINISHED_GOODS' },
+  { label: 'Dispatch', value: 'DISPATCH' },
+  { label: 'Returns', value: 'RETURNS' },
+  { label: 'Damaged', value: 'DAMAGED' },
+  { label: 'General', value: 'GENERAL' },
 ] as const;
 
 const initialFormState = {
@@ -43,7 +48,7 @@ function formatWarehouseType(value: string) {
 }
 
 export default function WarehousesPage() {
-  const canManageWarehouses = usePermission(PERMISSIONS.settings.manage);
+  const canManageWarehouses = usePermission(['inventory.warehouse.create', PERMISSIONS.settings.manage]);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [formState, setFormState] = useState(initialFormState);
   const [formError, setFormError] = useState<string | null>(null);
@@ -84,9 +89,9 @@ export default function WarehousesPage() {
     <div className="space-y-6">
       <PageHeader
         title="Warehouses"
-        description="Maintain every physical stock location, from the main factory store to branch warehouses and cold rooms, with visibility into stock spread and value."
+        description="Maintain raw materials, production materials, finished goods, dispatch, returns, and other stock locations with independent balances and valuation visibility."
         actions={
-          <PermissionGate permission={PERMISSIONS.settings.manage}>
+          <PermissionGate permission={['inventory.warehouse.create', PERMISSIONS.settings.manage]}>
             <Button type="button" size="sm" onClick={() => setIsDrawerOpen(true)}>
               <Plus className="mr-2 h-4 w-4" />
               Add Warehouse

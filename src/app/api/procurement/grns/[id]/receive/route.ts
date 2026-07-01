@@ -1,7 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { badRequest, can, forbidden, getAuthContext, notFound, serverError, unauthorized } from '@/lib/api-auth';
+import { calculateAcceptedQuantity, calculateShortageQuantity } from '@/lib/inventory';
+import { recordAuditLog } from '@/lib/security-server';
 import { createServiceRoleClient } from '@/lib/supabase/server';
+
+const OPTIONAL_GRN_ITEM_COLUMNS = new Set([
+  'accepted_quantity',
+  'damaged_quantity',
+  'remarks',
+  'shortage_quantity',
+]);
 
 export async function POST(
   request: NextRequest,
@@ -9,7 +18,7 @@ export async function POST(
 ) {
   const ctx = await getAuthContext();
   if (!ctx) return unauthorized();
-  if (!can(ctx, 'procurement.write')) return forbidden();
+  if (!can(ctx, 'stores.grn.submit', 'stores.grn.edit', 'procurement.write')) return forbidden();
 
   const { id } = await params;
   const service = createServiceRoleClient();
@@ -17,6 +26,7 @@ export async function POST(
   let body: {
     notes?: string | null;
     items: Array<{
+      damagedQuantity?: number;
       itemId: string;
       poItemId: string;
       quantityReceived: number;
@@ -67,8 +77,8 @@ export async function POST(
       }
     }
 
-    if (g.status !== 'draft') {
-      return badRequest('Only draft GRNs can be received.');
+    if (g.status !== 'DRAFT') {
+      return badRequest('Only draft GRNs can be submitted.');
     }
 
     const po = g.purchase_orders as Record<string, unknown>;
@@ -84,18 +94,18 @@ export async function POST(
         return badRequest('GRN line references an invalid purchase order item.');
       }
 
-      if (line.quantityRejected > line.quantityReceived) {
-        return badRequest('Rejected quantity cannot exceed received quantity.');
-      }
-
       const quantityOrdered = Number(poItem.quantity_ordered ?? 0);
       const quantityAlreadyReceived = Number(poItem.quantity_received ?? 0);
       const remaining = quantityOrdered - quantityAlreadyReceived;
-      const accepted = line.quantityReceived - line.quantityRejected;
-
-      if (accepted < 0) {
-        return badRequest('Accepted quantity cannot be negative.');
-      }
+      const accepted = calculateAcceptedQuantity({
+        damagedQuantity: line.damagedQuantity ?? 0,
+        receivedQuantity: line.quantityReceived,
+        rejectedQuantity: line.quantityRejected,
+      });
+      const shortageQuantity = calculateShortageQuantity({
+        orderedQuantity: quantityOrdered,
+        receivedQuantity: line.quantityReceived,
+      });
 
       if (line.quantityReceived > remaining && !line.overReceiveReason) {
         return badRequest(
@@ -124,57 +134,41 @@ export async function POST(
         quantity_expected: quantityOrdered,
         quantity_received: line.quantityReceived,
         quantity_rejected: line.quantityRejected,
+        accepted_quantity: accepted,
+        damaged_quantity: Number(line.damagedQuantity ?? 0),
+        shortage_quantity: shortageQuantity,
         unit_cost: Number(poItem.unit_cost ?? 0),
         batch_number: line.batchNumber ?? null,
         expiry_date: line.expiryDate ?? null,
-        quality_notes: line.qualityNotes ?? null,
+        remarks: line.overReceiveReason ?? null,
+        quality_notes:
+          line.qualityNotes ??
+          `accepted=${accepted}; damaged=${Number(line.damagedQuantity ?? 0)}; shortage=${shortageQuantity}`,
       };
 
       if (existingGrnItem) {
-        await service
-          .from('goods_received_note_items')
-          .update(grnItemData)
-          .eq('id', (existingGrnItem as Record<string, unknown>).id);
+        const updateError = await writeGrnItem(
+          service,
+          'update',
+          grnItemData,
+          (query) => query.eq('id', (existingGrnItem as Record<string, unknown>).id),
+        );
+        if (updateError) {
+          return serverError(updateError);
+        }
       } else {
-        await service.from('goods_received_note_items').insert(grnItemData);
+        const insertError = await writeGrnItem(service, 'insert', grnItemData);
+        if (insertError) {
+          return serverError(insertError);
+        }
       }
-
-      // Update PO item received quantity
-      await service
-        .from('purchase_order_items')
-        .update({ quantity_received: quantityAlreadyReceived + accepted })
-        .eq('id', line.poItemId);
     }
 
-    // Recalculate PO status
-    const { data: refreshedPoItems } = await service
-      .from('purchase_order_items')
-      .select('quantity_ordered, quantity_received')
-      .eq('purchase_order_id', po.id as string);
-
-    const allReceived = (refreshedPoItems ?? []).every(
-      (i: Record<string, unknown>) => Number(i.quantity_received) >= Number(i.quantity_ordered),
-    );
-    const anyReceived = (refreshedPoItems ?? []).some(
-      (i: Record<string, unknown>) => Number(i.quantity_received) > 0,
-    );
-
-    const nextPoStatus = allReceived
-      ? 'fully_received'
-      : anyReceived
-        ? 'partial_received'
-        : 'sent_to_supplier';
-
-    await service
-      .from('purchase_orders')
-      .update({ status: nextPoStatus })
-      .eq('id', po.id as string);
-
-    // Update GRN status to received
+    // Move to approval queue. Stock is still not posted at this point.
     const { data: updated, error: updateErr } = await service
       .from('goods_received_notes')
       .update({
-        status: 'received',
+        status: 'PENDING_APPROVAL',
         notes: body.notes ?? (g.notes as string | null),
         received_by: ctx.userId,
         received_date: new Date().toISOString(),
@@ -185,8 +179,66 @@ export async function POST(
 
     if (updateErr) return serverError(updateErr.message);
 
+    await recordAuditLog({
+      action: 'GRN_SUBMITTED',
+      entityId: id,
+      entityType: 'goods_received_note',
+      newValues: {
+        itemCount: body.items.length,
+        status: 'PENDING_APPROVAL',
+        warnings,
+      },
+      organizationId: ctx.organizationId,
+      userProfileId: ctx.userId,
+      ipAddress: request.headers.get('x-forwarded-for'),
+      userAgent: request.headers.get('user-agent'),
+    });
+
     return NextResponse.json({ ...updated, warnings });
   } catch (err) {
     return serverError((err as Error).message);
   }
+}
+
+async function writeGrnItem(
+  service: ReturnType<typeof createServiceRoleClient>,
+  operation: 'insert' | 'update',
+  values: Record<string, unknown>,
+  applyFilter?: (query: any) => any,
+) {
+  const payload: Record<string, unknown> = { ...values };
+
+  for (let attempt = 0; attempt < OPTIONAL_GRN_ITEM_COLUMNS.size + 1; attempt += 1) {
+    let query =
+      operation === 'insert'
+        ? service.from('goods_received_note_items').insert(payload)
+        : service.from('goods_received_note_items').update(payload);
+
+    if (applyFilter) {
+      query = applyFilter(query);
+    }
+
+    const { error } = await query;
+    if (!error) {
+      return null;
+    }
+
+    const missingColumn = extractMissingColumnName(error, 'goods_received_note_items');
+    if (!missingColumn || !OPTIONAL_GRN_ITEM_COLUMNS.has(missingColumn)) {
+      return error.message;
+    }
+
+    delete payload[missingColumn];
+  }
+
+  return 'Failed to write GRN item.';
+}
+
+function extractMissingColumnName(
+  error: { message?: string } | null | undefined,
+  table: string,
+) {
+  const message = error?.message ?? '';
+  const match = message.match(new RegExp(`column\\s+${table}\\.([a-z_]+)\\s+does not exist`, 'i'));
+  return match?.[1] ?? null;
 }

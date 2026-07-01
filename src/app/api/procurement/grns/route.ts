@@ -10,7 +10,7 @@ function isMissingColumnError(error: unknown, table: string, columnName: string)
 export async function GET(request: NextRequest) {
   const ctx = await getAuthContext();
   if (!ctx) return unauthorized();
-  if (!can(ctx, 'procurement.read')) return forbidden();
+  if (!can(ctx, 'stores.grn.view', 'procurement.read')) return forbidden();
 
   const service = createServiceRoleClient();
   const { searchParams } = new URL(request.url);
@@ -99,7 +99,7 @@ export async function GET(request: NextRequest) {
           id: r.id,
           grnNumber: r.grn_number,
           receivedDate: r.received_date,
-          status: r.status,
+          status: String(r.status ?? '').toUpperCase(),
           qualityStatus: null,
           purchaseOrder: po ? { id: po.id, poNumber: po.po_number } : null,
           supplier: supplier ? { id: supplier.id, name: supplier.name } : null,
@@ -136,8 +136,8 @@ export async function GET(request: NextRequest) {
         id: r.id,
         grnNumber: r.grn_number,
         receivedDate: r.received_date,
-        status: r.status,
-        qualityStatus: r.quality_status,
+        status: String(r.status ?? '').toUpperCase(),
+        qualityStatus: r.quality_status ? String(r.quality_status).toUpperCase() : null,
         purchaseOrder: po ? { id: po.id, poNumber: po.po_number } : null,
         supplier: supplier ? { id: supplier.id, name: supplier.name } : null,
         itemsCount: itemCounts.get(String(r.id)) ?? 0,
@@ -156,7 +156,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   const ctx = await getAuthContext();
   if (!ctx) return unauthorized();
-  if (!can(ctx, 'procurement.write')) return forbidden();
+  if (!can(ctx, 'stores.grn.create', 'procurement.write')) return forbidden();
 
   const service = createServiceRoleClient();
 
@@ -240,8 +240,8 @@ export async function POST(request: NextRequest) {
         received_date: body.receivedDate ?? new Date().toISOString(),
         notes: body.notes ?? null,
         quality_notes: body.qualityNotes ?? null,
-        quality_status: 'pending',
-        status: 'draft',
+        quality_status: 'PENDING',
+        status: 'DRAFT',
       })
       .select()
       .single();

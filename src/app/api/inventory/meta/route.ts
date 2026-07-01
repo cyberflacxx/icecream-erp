@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
+import { resolveWarehouseDisplayType } from '@/lib/inventory';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
 export async function GET(request: NextRequest) {
@@ -39,7 +40,8 @@ export async function GET(request: NextRequest) {
     (() => {
       let q = service
         .from('warehouses')
-        .select('id, name, code, type, is_active, branch_id')
+        .select('id, name, code, type, warehouse_type, is_active, branch_id')
+        .eq('organization_id', ctx.organizationId)
         .order('name', { ascending: true });
       if (ctx.isBranchScoped && ctx.branchId) {
         q = q.eq('branch_id', ctx.branchId);
@@ -70,7 +72,14 @@ export async function GET(request: NextRequest) {
     categories: categoriesResult.data ?? [],
     unitsOfMeasure: unitsOfMeasureResult.data ?? [],
     branches: branchesResult.data ?? [],
-    warehouses: warehousesResult.data ?? [],
+    warehouses: (warehousesResult.data ?? []).map((warehouse) => ({
+      ...warehouse,
+      type: resolveWarehouseDisplayType({
+        code: String(warehouse.code ?? ''),
+        type: warehouse.type ? String(warehouse.type) : null,
+        warehouseType: warehouse.warehouse_type ? String(warehouse.warehouse_type) : null,
+      }),
+    })),
     items: (itemsResult.data ?? []).map((item) => ({
       ...item,
       item_type: item.type,

@@ -3,12 +3,19 @@ import {
   ensurePositiveQuantity,
   isInvoiceApprovedForDispatch,
   normalizeDate,
+  normalizeStockMovementType,
   toNumber,
 } from '@/lib/inventory';
 
 type ServiceClient = {
   from: (table: string) => any;
 };
+
+const OPTIONAL_STOCK_MOVEMENT_COLUMNS = new Set([
+  'batch_number',
+  'destination_warehouse_id',
+  'source_warehouse_id',
+]);
 
 export async function generateDocumentNumber(
   service: ServiceClient,
@@ -34,7 +41,7 @@ export async function requireWarehouseAccess(
 ) {
   const { data, error } = await service
     .from('warehouses')
-    .select('id, name, branch_id, is_active')
+    .select('id, name, branch_id, is_active, organization_id')
     .eq('id', warehouseId)
     .single();
 
@@ -55,7 +62,7 @@ export async function requireItem(
 ) {
   const { data, error } = await service
     .from('items')
-    .select('id, code, name, item_type, unit_cost, reorder_level, deleted_at')
+    .select('id, code, name, item_type, unit_cost, reorder_level, deleted_at, organization_id')
     .eq('id', itemId)
     .is('deleted_at', null)
     .single();
@@ -74,7 +81,7 @@ export async function getBalance(
 ) {
   const { data, error } = await service
     .from('stock_balances')
-    .select('id, item_id, warehouse_id, quantity_on_hand, quantity_available, quantity_reserved, last_updated')
+    .select('id, organization_id, item_id, warehouse_id, quantity_on_hand, quantity_available, quantity_reserved, last_updated')
     .eq('item_id', itemId)
     .eq('warehouse_id', warehouseId)
     .maybeSingle();
@@ -90,12 +97,19 @@ export async function applyInventoryDelta(
   service: ServiceClient,
   params: {
     itemId: string;
+    organizationId?: string;
     quantityDelta: number;
     warehouseId: string;
   },
 ) {
   const quantityDelta = toNumber(params.quantityDelta);
   const current = await getBalance(service, params.itemId, params.warehouseId);
+  const organizationId = await resolveInventoryOrganizationId(service, {
+    explicitOrganizationId: params.organizationId,
+    fallbackOrganizationId: current?.organization_id ? String(current.organization_id) : null,
+    itemId: params.itemId,
+    warehouseId: params.warehouseId,
+  });
   const quantityReserved = toNumber(current?.quantity_reserved);
   const nextOnHand = toNumber(current?.quantity_on_hand) + quantityDelta;
   const nextAvailable = nextOnHand - quantityReserved;
@@ -126,6 +140,7 @@ export async function applyInventoryDelta(
   const { data, error } = await service
     .from('stock_balances')
     .insert({
+      organization_id: organizationId,
       item_id: params.itemId,
       warehouse_id: params.warehouseId,
       quantity_on_hand: nextOnHand,
@@ -146,13 +161,17 @@ export async function applyInventoryDelta(
 export async function recordStockMovement(
   service: ServiceClient,
   params: {
+    batchNumber?: string | null;
     createdBy: string;
+    destinationWarehouseId?: string | null;
     itemId: string;
     movementType: string;
     notes?: string | null;
+    organizationId?: string;
     quantity: number;
     referenceId?: string | null;
     referenceType?: string | null;
+    sourceWarehouseId?: string | null;
     warehouseId: string;
   },
 ) {
@@ -161,30 +180,55 @@ export async function recordStockMovement(
   const quantity = ensurePositiveQuantity(params.quantity);
   const unitCost = toNumber(item.unit_cost);
   const totalCost = unitCost * quantity;
+  const organizationId = await resolveInventoryOrganizationId(service, {
+    explicitOrganizationId: params.organizationId,
+    fallbackOrganizationId: balance?.organization_id
+      ? String(balance.organization_id)
+      : item.organization_id
+        ? String(item.organization_id)
+        : null,
+    itemId: params.itemId,
+    warehouseId: params.warehouseId,
+  });
+  const movementType = normalizeStockMovementType(params.movementType);
+  const payload: Record<string, unknown> = {
+    organization_id: organizationId,
+    item_id: params.itemId,
+    warehouse_id: params.warehouseId,
+    movement_type: movementType,
+    quantity,
+    running_balance: toNumber(balance?.quantity_on_hand),
+    unit_cost: unitCost || null,
+    total_cost: totalCost || null,
+    reference_id: params.referenceId ?? null,
+    reference_type: params.referenceType ?? null,
+    batch_number: params.batchNumber ?? null,
+    source_warehouse_id: params.sourceWarehouseId ?? null,
+    destination_warehouse_id: params.destinationWarehouseId ?? null,
+    notes: params.notes ?? null,
+    created_by: params.createdBy,
+  };
 
-  const { data, error } = await service
-    .from('stock_movements')
-    .insert({
-      item_id: params.itemId,
-      warehouse_id: params.warehouseId,
-      movement_type: params.movementType,
-      quantity,
-      running_balance: toNumber(balance?.quantity_on_hand),
-      unit_cost: unitCost || null,
-      total_cost: totalCost || null,
-      reference_id: params.referenceId ?? null,
-      reference_type: params.referenceType ?? null,
-      notes: params.notes ?? null,
-      created_by: params.createdBy,
-    })
-    .select()
-    .single();
+  for (let attempt = 0; attempt < OPTIONAL_STOCK_MOVEMENT_COLUMNS.size + 1; attempt += 1) {
+    const { data, error } = await service
+      .from('stock_movements')
+      .insert(payload)
+      .select()
+      .single();
 
-  if (error || !data) {
-    throw new Error(error?.message ?? 'Failed to record stock movement.');
+    if (!error && data) {
+      return data;
+    }
+
+    const missingColumn = extractMissingColumnName(error, 'stock_movements');
+    if (!missingColumn || !OPTIONAL_STOCK_MOVEMENT_COLUMNS.has(missingColumn)) {
+      throw new Error(error?.message ?? 'Failed to record stock movement.');
+    }
+
+    delete payload[missingColumn];
   }
 
-  return data;
+  throw new Error('Failed to record stock movement.');
 }
 
 export async function verifyApprovedInvoice(
@@ -215,6 +259,7 @@ export async function createInventoryAdjustmentRecord(
     createdBy: string;
     itemId: string;
     movementType: string;
+    organizationId?: string;
     quantity: number;
     reason: string;
     warehouseId: string;
@@ -222,6 +267,16 @@ export async function createInventoryAdjustmentRecord(
 ) {
   const item = await requireItem(service, params.itemId);
   const balance = await getBalance(service, params.itemId, params.warehouseId);
+  const organizationId = await resolveInventoryOrganizationId(service, {
+    explicitOrganizationId: params.organizationId,
+    fallbackOrganizationId: balance?.organization_id
+      ? String(balance.organization_id)
+      : item.organization_id
+        ? String(item.organization_id)
+        : null,
+    itemId: params.itemId,
+    warehouseId: params.warehouseId,
+  });
   const quantityBefore = toNumber(balance?.quantity_on_hand);
   const quantityAdjusted = ensurePositiveQuantity(params.quantity);
   const quantityAfter =
@@ -242,7 +297,7 @@ export async function createInventoryAdjustmentRecord(
       status: 'POSTED',
       created_by: params.createdBy,
       approved_by: params.createdBy,
-      organization_id: 'absolute-ice-cream',
+      organization_id: organizationId,
     })
     .select()
     .single();
@@ -277,4 +332,63 @@ export function normalizeMovementDate(value: string | null | undefined) {
 
 export function quantityOrThrow(value: unknown, field = 'quantity') {
   return ensurePositiveQuantity(value, field);
+}
+
+async function resolveInventoryOrganizationId(
+  service: ServiceClient,
+  params: {
+    explicitOrganizationId?: string;
+    fallbackOrganizationId?: string | null;
+    itemId: string;
+    warehouseId: string;
+  },
+) {
+  if (params.explicitOrganizationId) {
+    return params.explicitOrganizationId;
+  }
+
+  if (params.fallbackOrganizationId) {
+    return params.fallbackOrganizationId;
+  }
+
+  const { data: warehouse, error: warehouseError } = await service
+    .from('warehouses')
+    .select('organization_id')
+    .eq('id', params.warehouseId)
+    .maybeSingle();
+
+  if (warehouseError) {
+    throw new Error(warehouseError.message);
+  }
+
+  const warehouseOrganizationId = warehouse?.organization_id ? String(warehouse.organization_id) : '';
+  if (warehouseOrganizationId) {
+    return warehouseOrganizationId;
+  }
+
+  const { data: item, error: itemError } = await service
+    .from('items')
+    .select('organization_id')
+    .eq('id', params.itemId)
+    .maybeSingle();
+
+  if (itemError) {
+    throw new Error(itemError.message);
+  }
+
+  const itemOrganizationId = item?.organization_id ? String(item.organization_id) : '';
+  if (itemOrganizationId) {
+    return itemOrganizationId;
+  }
+
+  throw new Error('Unable to resolve organization for inventory transaction.');
+}
+
+function extractMissingColumnName(
+  error: { message?: string } | null | undefined,
+  table: string,
+) {
+  const message = error?.message ?? '';
+  const match = message.match(new RegExp(`column\\s+${table}\\.([a-z_]+)\\s+does not exist`, 'i'));
+  return match?.[1] ?? null;
 }

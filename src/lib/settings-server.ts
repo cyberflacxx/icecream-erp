@@ -1,4 +1,5 @@
 import { buildDocumentNumber, DEFAULT_CHOCOLATE_TYPES, DEFAULT_FLAVOURS, DEFAULT_PAYMENT_METHODS, DEFAULT_STOCK_CATEGORIES, getSettingsTemplateColumns, normalizeCode, normalizeName, SETTINGS_EXPORT_TYPES, SETTINGS_IMPORT_TEMPLATES, toPositiveNumber, validateImportRows } from '@/lib/settings';
+import { findMissingDefaultWarehouses, normalizeWarehouseCode, resolveWarehouseStorageType } from '@/lib/inventory';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
 export function settingsService() {
@@ -168,15 +169,17 @@ export async function fetchSettingsDashboardMetrics(organizationId: string) {
 export async function seedSettingsDefaults(input: { organizationId: string; userId: string }) {
   const service = settingsService();
 
-  const [{ data: categories }, { data: units }, { data: sequences }] = await Promise.all([
+  const [{ data: categories }, { data: units }, { data: sequences }, { data: warehouses }] = await Promise.all([
     service.from('item_categories').select('id, name').eq('organization_id', input.organizationId),
     service.from('units_of_measure').select('id, name, abbreviation').eq('organization_id', input.organizationId),
     service.from('number_series').select('series_type').eq('organization_id', input.organizationId),
+    service.from('warehouses').select('id, code, name').eq('organization_id', input.organizationId),
   ]);
 
   const categoryNames = new Set((categories ?? []).map((row: Record<string, unknown>) => normalizeName(row.name as string | null | undefined)));
   const unitByAbbr = new Map((units ?? []).map((row: Record<string, unknown>) => [normalizeCode(row.abbreviation as string | null | undefined), row]));
   const sequenceTypes = new Set((sequences ?? []).map((row: Record<string, unknown>) => normalizeCode(row.series_type as string | null | undefined)));
+  const warehouseCodes = (warehouses ?? []).map((row: Record<string, unknown>) => String(row.code ?? ''));
 
   if (DEFAULT_STOCK_CATEGORIES.some((name) => !categoryNames.has(name))) {
     const missing = DEFAULT_STOCK_CATEGORIES.filter((name) => !categoryNames.has(name)).map((name) => ({
@@ -229,6 +232,22 @@ export async function seedSettingsDefaults(input: { organizationId: string; user
     }));
   if (itemPayload.length > 0) {
     const { error } = await service.from('items').insert(itemPayload);
+    if (error) throw error;
+  }
+
+  const missingWarehouses = findMissingDefaultWarehouses(warehouseCodes);
+  if (missingWarehouses.length > 0) {
+    const warehousePayload = missingWarehouses.map((warehouse) => ({
+      code: normalizeWarehouseCode(warehouse.code),
+      created_by: input.userId,
+      is_active: true,
+      name: warehouse.name,
+      organization_id: input.organizationId,
+      type: resolveWarehouseStorageType(warehouse.warehouseType),
+      updated_by: input.userId,
+      warehouse_type: resolveWarehouseStorageType(warehouse.warehouseType),
+    }));
+    const { error } = await service.from('warehouses').insert(warehousePayload);
     if (error) throw error;
   }
 
@@ -311,6 +330,7 @@ export async function seedSettingsDefaults(input: { organizationId: string; user
   return {
     createdItems: itemPayload.length,
     createdSequences: sequencePayload.length,
+    createdWarehouses: missingWarehouses.length,
     seededChocolateTypes: DEFAULT_CHOCOLATE_TYPES.length,
     seededFlavours: DEFAULT_FLAVOURS.length,
     seededPaymentMethods: DEFAULT_PAYMENT_METHODS.length,

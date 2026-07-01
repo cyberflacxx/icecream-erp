@@ -215,10 +215,10 @@ export default function GoodsReceivedPage() {
             key: 'status',
             label: 'Status',
             options: [
-              { label: 'Draft', value: 'draft' },
-              { label: 'Received', value: 'received' },
-              { label: 'Quality Passed', value: 'QUALITY_PASSED' },
-              { label: 'Quality Failed', value: 'QUALITY_FAILED' }
+              { label: 'Draft', value: 'DRAFT' },
+              { label: 'Pending Approval', value: 'PENDING_APPROVAL' },
+              { label: 'Approved', value: 'APPROVED' },
+              { label: 'Posted', value: 'POSTED' }
             ],
             type: 'select',
             value: filters.status
@@ -279,7 +279,7 @@ export default function GoodsReceivedPage() {
           <EmptyState
             icon={<Plus className="h-6 w-6" />}
             title="No GRNs found"
-            description="Create and receive a GRN from a sent purchase order."
+            description="Create and submit a GRN from a sent purchase order."
           />
         }
       />
@@ -446,7 +446,7 @@ export default function GoodsReceivedPage() {
             <Button type="button" variant="outline" onClick={() => setIsDrawerOpen(false)}>
               Cancel
             </Button>
-            <Button type="submit">Submit & Receive</Button>
+            <Button type="submit">Submit GRN</Button>
           </div>
         </form>
       </FormDrawer>
