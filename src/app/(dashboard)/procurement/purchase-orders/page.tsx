@@ -28,6 +28,7 @@ const currencyFormatter = new Intl.NumberFormat('en-US', {
 });
 
 const initialFormState = {
+  approverUserId: '',
   discountAmount: '0',
   expectedDeliveryDate: '',
   items: [
@@ -151,6 +152,7 @@ export default function PurchaseOrdersPage() {
           items,
           notes: formState.notes || null,
           orderDate: formState.orderDate || undefined,
+          approverUserId: formState.approverUserId || null,
           requisitionId: formState.requisitionId || null,
           supplierId: formState.supplierId,
           taxAmount: Number(formState.taxAmount)
@@ -176,6 +178,14 @@ export default function PurchaseOrdersPage() {
 
   async function sendOrder(id: string) {
     await request(`/api/procurement/purchase-orders/${id}/send`, {
+      body: JSON.stringify({}),
+      method: 'POST'
+    });
+    await refresh();
+  }
+
+  async function rejectOrder(id: string) {
+    await request(`/api/procurement/purchase-orders/${id}/reject`, {
       body: JSON.stringify({}),
       method: 'POST'
     });
@@ -220,6 +230,7 @@ export default function PurchaseOrdersPage() {
               { label: 'Sent to Supplier', value: 'sent_to_supplier' },
               { label: 'Partial Received', value: 'partial_received' },
               { label: 'Received', value: 'received' },
+              { label: 'Rejected', value: 'rejected' },
               { label: 'Cancelled', value: 'cancelled' }
             ],
             type: 'select',
@@ -245,6 +256,11 @@ export default function PurchaseOrdersPage() {
             key: 'supplier',
             header: 'Supplier',
             render: (row) => row.supplier.name
+          },
+          {
+            key: 'approverName',
+            header: 'Approver',
+            render: (row) => row.approverName ?? 'Auto route'
           },
           {
             key: 'orderDate',
@@ -292,9 +308,11 @@ export default function PurchaseOrdersPage() {
                         Approve
                       </Button>
                     ) : null}
-                    <Button size="sm" variant="outline">
-                      Cancel
-                    </Button>
+                    {canApprove ? (
+                      <Button size="sm" variant="outline" onClick={() => rejectOrder(id)}>
+                        Reject
+                      </Button>
+                    ) : null}
                   </div>
                 );
               }
@@ -310,6 +328,11 @@ export default function PurchaseOrdersPage() {
                     <Button asChild size="sm" variant="outline">
                       <Link href={`/procurement/purchase-orders/${id}`}>View</Link>
                     </Button>
+                    {canApprove ? (
+                      <Button size="sm" variant="outline" onClick={() => rejectOrder(id)}>
+                        Reject
+                      </Button>
+                    ) : null}
                   </div>
                 );
               }
@@ -392,6 +415,23 @@ export default function PurchaseOrdersPage() {
                 }
                 className="surface-input-soft"
               />
+            </label>
+            <label className="space-y-2 text-sm text-muted">
+              <span>Approver</span>
+              <select
+                value={formState.approverUserId}
+                onChange={(event) =>
+                  setFormState((current) => ({ ...current, approverUserId: event.target.value }))
+                }
+                className="surface-input-soft"
+              >
+                <option value="">Auto route to supervisor</option>
+                {(metaQuery.data?.approvers ?? []).map((approver) => (
+                  <option key={approver.id} value={approver.id}>
+                    {approver.fullName} {approver.role ? `(${approver.role.replace(/_/g, ' ')})` : ''}
+                  </option>
+                ))}
+              </select>
             </label>
             <label className="space-y-2 text-sm text-muted">
               <span>Order Date</span>

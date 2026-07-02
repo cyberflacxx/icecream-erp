@@ -21,6 +21,7 @@ import {
 import { usePermission } from '@/hooks/usePermission';
 
 const initialFormState = {
+  approverUserId: '',
   department: '',
   items: [
     {
@@ -124,7 +125,8 @@ export default function RequisitionsPage() {
           department: formState.department,
           items,
           neededByDate: formState.neededByDate || null,
-          remarks: formState.remarks || null
+          remarks: formState.remarks || null,
+          approverUserId: formState.approverUserId || null
         }),
         method: 'POST'
       });
@@ -234,6 +236,11 @@ export default function RequisitionsPage() {
         columns={[
           { key: 'requisitionNumber', header: 'Req #' },
           { key: 'requestedBy', header: 'Requested By' },
+          {
+            key: 'approverName',
+            header: 'Approver',
+            render: (row) => row.approverName ?? 'Auto route'
+          },
           { key: 'department', header: 'Department' },
           {
             key: 'requestDate',
@@ -249,7 +256,7 @@ export default function RequisitionsPage() {
           {
             key: 'status',
             header: 'Status Badge',
-            render: (row) => <StatusBadge status={row.status} variant={statusVariant(row.status)} />
+            render: (row) => <StatusBadge status={row.approvalStatus || row.status} variant={statusVariant(row.approvalStatus || row.status)} />
           },
           {
             key: 'actions',
@@ -350,6 +357,23 @@ export default function RequisitionsPage() {
                 }
                 className="surface-input-soft"
               />
+            </label>
+            <label className="space-y-2 text-sm text-muted">
+              <span>Approver</span>
+              <select
+                value={formState.approverUserId}
+                onChange={(event) =>
+                  setFormState((current) => ({ ...current, approverUserId: event.target.value }))
+                }
+                className="surface-input-soft"
+              >
+                <option value="">Auto route to supervisor</option>
+                {(metaQuery.data?.approvers ?? []).map((approver) => (
+                  <option key={approver.id} value={approver.id}>
+                    {approver.fullName} {approver.role ? `(${approver.role.replace(/_/g, ' ')})` : ''}
+                  </option>
+                ))}
+              </select>
             </label>
           </div>
 

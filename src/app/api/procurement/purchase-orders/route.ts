@@ -22,7 +22,7 @@ export async function GET(request: NextRequest) {
     let query = service
       .from('purchase_orders')
       .select(
-        `id, po_number, order_date, expected_delivery_date, status, total,
+        `id, po_number, order_date, expected_delivery_date, status, total, approver_user_id, approved_by, approved_at,
          suppliers(id, name),
          purchase_order_items(id)`,
         { count: 'exact' },
@@ -41,12 +41,29 @@ export async function GET(request: NextRequest) {
 
     if (error) return serverError(error.message);
 
+    const userIds = [
+      ...new Set(
+        (data ?? [])
+          .flatMap((row) => [row.approver_user_id, row.approved_by])
+          .map((value) => String(value ?? ''))
+          .filter(Boolean),
+      ),
+    ];
+    const usersResult = userIds.length
+      ? await service.from('users').select('id, full_name').in('id', userIds)
+      : { data: [], error: null };
+    if (usersResult.error) return serverError(usersResult.error.message);
+    const usersById = new Map((usersResult.data ?? []).map((row) => [String(row.id), String(row.full_name ?? 'Unknown')]));
+
     const mapped = (data ?? []).map((r: Record<string, unknown>) => ({
       id: r.id,
       poNumber: r.po_number,
       orderDate: r.order_date,
       expectedDeliveryDate: r.expected_delivery_date,
       status: r.status,
+      approverName: usersById.get(String(r.approver_user_id ?? '')) ?? null,
+      approvedBy: usersById.get(String(r.approved_by ?? '')) ?? null,
+      approvedAt: r.approved_at ? String(r.approved_at) : null,
       total: Number(r.total ?? 0),
       supplier: r.suppliers
         ? { id: (r.suppliers as Record<string, unknown>).id, name: (r.suppliers as Record<string, unknown>).name }
@@ -78,6 +95,7 @@ export async function POST(request: NextRequest) {
     notes?: string | null;
     taxAmount?: number;
     discountAmount?: number;
+    approverUserId?: string | null;
     items: Array<{
       itemId: string;
       unitOfMeasureId: string;
@@ -157,6 +175,7 @@ export async function POST(request: NextRequest) {
         order_date: body.orderDate ?? new Date().toISOString(),
         expected_delivery_date: body.expectedDeliveryDate ?? null,
         notes: body.notes ?? null,
+        approver_user_id: body.approverUserId ?? null,
         organization_id: ctx.organizationId,
         created_by: ctx.userId,
         status: 'draft',

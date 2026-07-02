@@ -26,7 +26,7 @@ export async function GET(request: NextRequest) {
     let query = service
       .from('goods_received_notes')
       .select(
-        `id, grn_number, received_date, status, quality_status, warehouse_id,
+        `id, grn_number, received_date, status, quality_status, warehouse_id, supplier_id, entry_mode,
          purchase_orders(id, po_number, supplier_id, suppliers(id, name))`,
         { count: 'exact' },
       )
@@ -129,17 +129,38 @@ export async function GET(request: NextRequest) {
       }
     }
 
+    const supplierIds = [
+      ...new Set(
+        (primary.data ?? [])
+          .flatMap((row) => [row.supplier_id, ((row.purchase_orders as unknown) as Record<string, unknown> | null)?.supplier_id])
+          .map((value) => String(value ?? ''))
+          .filter(Boolean),
+      ),
+    ];
+    const supplierLookup = supplierIds.length
+      ? await service.from('suppliers').select('id, name').in('id', supplierIds)
+      : { data: [], error: null };
+    if (supplierLookup.error) return serverError(supplierLookup.error.message);
+    const suppliersById = new Map((supplierLookup.data ?? []).map((row) => [String(row.id), String(row.name ?? 'Unknown supplier')]));
+
     const mapped = (primary.data ?? []).map((r: Record<string, unknown>) => {
       const po = r.purchase_orders as Record<string, unknown> | null;
-      const supplier = po?.suppliers as Record<string, unknown> | null;
+      const supplierId = String(r.supplier_id ?? po?.supplier_id ?? '');
+      const supplier = supplierId
+        ? {
+            id: supplierId,
+            name: suppliersById.get(supplierId) ?? 'Unknown supplier',
+          }
+        : null;
       return {
+        entryMode: String(r.entry_mode ?? (po ? 'po_linked' : 'manual')).toUpperCase(),
         id: r.id,
         grnNumber: r.grn_number,
         receivedDate: r.received_date,
         status: String(r.status ?? '').toUpperCase(),
         qualityStatus: r.quality_status ? String(r.quality_status).toUpperCase() : null,
         purchaseOrder: po ? { id: po.id, poNumber: po.po_number } : null,
-        supplier: supplier ? { id: supplier.id, name: supplier.name } : null,
+        supplier,
         itemsCount: itemCounts.get(String(r.id)) ?? 0,
       };
     });
@@ -161,14 +182,16 @@ export async function POST(request: NextRequest) {
   const service = createServiceRoleClient();
 
   let body: {
-    purchaseOrderId: string;
+    purchaseOrderId?: string | null;
+    supplierId?: string | null;
     warehouseId: string;
     receivedDate?: string | null;
     notes?: string | null;
     qualityNotes?: string | null;
+    entryMode?: string | null;
     items?: Array<{
       itemId: string;
-      poItemId: string;
+      poItemId?: string | null;
       quantityExpected: number;
       quantityReceived: number;
       quantityRejected: number;
@@ -185,34 +208,56 @@ export async function POST(request: NextRequest) {
     return badRequest('Invalid JSON body');
   }
 
-  if (!body.purchaseOrderId || !body.warehouseId) {
-    return badRequest('purchaseOrderId and warehouseId are required');
+  const isManualEntry = String(body.entryMode ?? '').toLowerCase() === 'manual' || !body.purchaseOrderId;
+
+  if (!body.warehouseId) {
+    return badRequest('warehouseId is required');
+  }
+  if (!isManualEntry && !body.purchaseOrderId) {
+    return badRequest('purchaseOrderId is required for PO-linked receipts.');
+  }
+  if (isManualEntry && !body.supplierId) {
+    return badRequest('supplierId is required for manual GRNs.');
   }
 
   try {
-    // Validate purchase order
-    const { data: order, error: orderErr } = await service
-      .from('purchase_orders')
-      .select('id, supplier_id, status, purchase_order_items(*)')
-      .is('deleted_at', null)
-      .eq('organization_id', ctx.organizationId)
-      .eq('id', body.purchaseOrderId)
-      .single();
+    let order: Record<string, unknown> | null = null;
+    if (!isManualEntry && body.purchaseOrderId) {
+      const { data: purchaseOrder, error: orderErr } = await service
+        .from('purchase_orders')
+        .select('id, supplier_id, status, purchase_order_items(*)')
+        .is('deleted_at', null)
+        .eq('organization_id', ctx.organizationId)
+        .eq('id', body.purchaseOrderId)
+        .single();
 
-    if (orderErr || !order) return badRequest('Purchase order not found.');
+      if (orderErr || !purchaseOrder) return badRequest('Purchase order not found.');
 
-    const o = order as Record<string, unknown>;
-    if (o.status !== 'sent_to_supplier' && o.status !== 'partial_received') {
-      return badRequest('GRN can only be created for sent or partially received purchase orders.');
+      order = purchaseOrder as Record<string, unknown>;
+      if (order.status !== 'sent_to_supplier' && order.status !== 'partial_received') {
+        return badRequest('GRN can only be created for sent or partially received purchase orders.');
+      }
+    }
+
+    if (body.supplierId) {
+      const { data: supplier, error: supplierError } = await service
+        .from('suppliers')
+        .select('id')
+        .is('deleted_at', null)
+        .eq('organization_id', ctx.organizationId)
+        .eq('id', body.supplierId)
+        .single();
+      if (supplierError || !supplier) return badRequest('Supplier not found.');
     }
 
     // Validate warehouse
     let warehouseQuery = service
       .from('warehouses')
-      .select('id, branch_id')
+      .select('id, branch_id, type, warehouse_type')
       .eq('id', body.warehouseId)
       .eq('is_active', true)
-      .eq('organization_id', ctx.organizationId);
+      .eq('organization_id', ctx.organizationId)
+      .is('branch_id', null);
 
     if (ctx.isBranchScoped && ctx.branchId) {
       warehouseQuery = warehouseQuery.eq('branch_id', ctx.branchId);
@@ -233,7 +278,9 @@ export async function POST(request: NextRequest) {
       .from('goods_received_notes')
       .insert({
         grn_number: grnNumber,
-        purchase_order_id: body.purchaseOrderId,
+        purchase_order_id: body.purchaseOrderId ?? null,
+        supplier_id: body.supplierId ?? (order?.supplier_id as string | null) ?? null,
+        entry_mode: isManualEntry ? 'manual' : 'po_linked',
         warehouse_id: body.warehouseId,
         organization_id: ctx.organizationId,
         received_by: ctx.userId,
@@ -261,10 +308,10 @@ export async function POST(request: NextRequest) {
         .from('goods_received_notes')
         .insert({
           grn_number: grnNumber,
-          po_id: body.purchaseOrderId,
+          po_id: body.purchaseOrderId ?? null,
           warehouse_id: body.warehouseId,
           organization_id: ctx.organizationId,
-          supplier_id: (order as Record<string, unknown>).supplier_id ?? null,
+          supplier_id: body.supplierId ?? (order?.supplier_id as string | null) ?? null,
           received_date: (body.receivedDate ?? new Date().toISOString()).slice(0, 10),
           notes: body.notes ?? null,
           invoice_ref: body.qualityNotes ?? null,
@@ -281,7 +328,7 @@ export async function POST(request: NextRequest) {
     const grnId = (grnRow as Record<string, unknown>).id as string;
 
     // Build items: use provided or derive from PO items
-    const poItems = (o.purchase_order_items as Record<string, unknown>[]) ?? [];
+    const poItems = ((order?.purchase_order_items as Record<string, unknown>[]) ?? []);
     const itemsToInsert = body.items?.length
       ? body.items
       : poItems.map((pi) => ({
@@ -301,7 +348,7 @@ export async function POST(request: NextRequest) {
         itemsToInsert.map((item) => ({
           grn_id: grnId,
           item_id: item.itemId,
-          po_item_id: item.poItemId,
+          po_item_id: item.poItemId ?? null,
           quantity_expected: item.quantityExpected,
           quantity_received: item.quantityReceived,
           quantity_rejected: item.quantityRejected,

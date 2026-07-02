@@ -9,33 +9,33 @@ export async function POST(
 ) {
   const ctx = await getAuthContext();
   if (!ctx) return unauthorized();
-  if (!can(ctx, 'procurement.write')) return forbidden();
+  if (!can(ctx, 'stores.grn.approve', 'procurement.approve')) return forbidden();
 
   const { id } = await params;
   const service = createServiceRoleClient();
 
   try {
     const { data: existing, error: fetchErr } = await service
-      .from('purchase_orders')
-      .select('id, status, approved_by')
+      .from('goods_received_notes')
+      .select('id, status, warehouse_id')
       .is('deleted_at', null)
       .eq('organization_id', ctx.organizationId)
       .eq('id', id)
       .single();
 
-    if (fetchErr || !existing) return notFound('Purchase order not found.');
+    if (fetchErr || !existing) return notFound('Goods received note not found.');
 
-    const order = existing as Record<string, unknown>;
-    if (!['approved', 'draft'].includes(String(order.status))) {
-      return badRequest('Only approved purchase orders can be sent.');
-    }
-    if (!order.approved_by) {
-      return badRequest('Purchase order must be approved before sending.');
+    const grn = existing as Record<string, unknown>;
+    if (grn.status !== 'PENDING_APPROVAL') {
+      return badRequest('Only submitted GRNs can be rejected.');
     }
 
     const { data: updated, error: updateErr } = await service
-      .from('purchase_orders')
-      .update({ sent_at: new Date().toISOString(), status: 'sent_to_supplier' })
+      .from('goods_received_notes')
+      .update({
+        quality_status: 'REJECTED',
+        status: 'REJECTED',
+      })
       .eq('id', id)
       .select()
       .single();
@@ -43,7 +43,7 @@ export async function POST(
     if (updateErr) return serverError(updateErr.message);
 
     return NextResponse.json(updated);
-  } catch (err) {
-    return serverError((err as Error).message);
+  } catch (error) {
+    return serverError(error instanceof Error ? error.message : 'Failed to reject GRN.');
   }
 }

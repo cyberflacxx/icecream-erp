@@ -27,6 +27,8 @@ export interface SupplierRow {
   paymentTerms: string | null;
   creditLimit: number;
   currentBalance: number;
+  documentName: string | null;
+  documentUrl: string | null;
   status: string;
 }
 
@@ -50,7 +52,11 @@ export interface RequisitionRow {
   requestDate: string;
   neededByDate: string | null;
   status: string;
+  approvalStatus: string;
   requestedBy: string;
+  approverName: string | null;
+  approvedBy: string | null;
+  approvedAt: string | null;
 }
 
 export interface RequisitionFilters {
@@ -68,6 +74,9 @@ export interface PurchaseOrderRow {
   orderDate: string;
   expectedDeliveryDate: string | null;
   status: string;
+  approverName: string | null;
+  approvedBy: string | null;
+  approvedAt: string | null;
   supplier: {
     id: string;
     name: string;
@@ -88,14 +97,15 @@ export interface PurchaseOrderFilters {
 export interface GRNRow {
   id: string;
   grnNumber: string;
+  entryMode: string;
   purchaseOrder: {
     id: string;
     poNumber: string;
-  };
+  } | null;
   supplier: {
     id: string;
     name: string;
-  };
+  } | null;
   receivedDate: string;
   qualityStatus: string;
   status: string;

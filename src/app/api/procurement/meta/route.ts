@@ -14,11 +14,12 @@ export async function GET(_request: NextRequest) {
     const poStatusFilter = ['sent_to_supplier', 'partial_received'];
     const warehouseQuery = service
       .from('warehouses')
-      .select('*')
+      .select('id, code, name, type, warehouse_type, branch_id')
       .eq('is_active', true)
-      .eq('organization_id', ctx.organizationId);
+      .eq('organization_id', ctx.organizationId)
+      .is('branch_id', null);
 
-    const [suppliersRes, itemsRes, unitsRes, warehousesRes, purchaseOrdersRes] = await Promise.all([
+    const [suppliersRes, itemsRes, unitsRes, warehousesRes, purchaseOrdersRes, approversRes] = await Promise.all([
       service
         .from('suppliers')
         .select('id, code, name, email, phone, status, category_id')
@@ -48,6 +49,12 @@ export async function GET(_request: NextRequest) {
         .eq('organization_id', ctx.organizationId)
         .in('status', poStatusFilter)
         .order('created_at', { ascending: false }),
+      service
+        .from('users')
+        .select('id, full_name, role')
+        .eq('organization_id', ctx.organizationId)
+        .eq('status', 'active')
+        .order('full_name'),
     ]);
 
     const departmentsRes = await service
@@ -62,10 +69,28 @@ export async function GET(_request: NextRequest) {
     ];
 
     return NextResponse.json({
+      approvers: (approversRes.data ?? [])
+        .filter((user) =>
+          ['super_admin', 'branch_manager', 'manager', 'procurement_lead', 'procurement_manager'].includes(
+            String(user.role ?? ''),
+          ),
+        )
+        .map((user) => ({
+          id: String(user.id),
+          fullName: String(user.full_name ?? 'Unknown'),
+          role: user.role ? String(user.role) : null,
+        })),
       suppliers: suppliersRes.data ?? [],
       items: itemsRes.data ?? [],
       units: unitsRes.data ?? [],
-      warehouses: warehousesRes.data ?? [],
+      warehouses: (warehousesRes.data ?? []).map((warehouse) => ({
+        branchId: warehouse.branch_id ? String(warehouse.branch_id) : null,
+        code: String(warehouse.code ?? ''),
+        id: String(warehouse.id),
+        name: String(warehouse.name ?? ''),
+        type: warehouse.type ? String(warehouse.type) : null,
+        warehouseType: warehouse.warehouse_type ? String(warehouse.warehouse_type) : null,
+      })),
       purchaseOrders: (purchaseOrdersRes.data ?? []).map((o: Record<string, unknown>) => ({
         id: o.id,
         poNumber: o.po_number,

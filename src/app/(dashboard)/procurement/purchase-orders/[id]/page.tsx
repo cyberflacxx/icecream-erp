@@ -106,7 +106,7 @@ export default function PurchaseOrderDetailPage({ params }: PurchaseOrderDetailP
             <Button asChild size="sm" variant="outline">
               <a href={`/api/procurement/purchase-orders/${params.id}/pdf`} target="_blank" rel="noreferrer">
                 <Download className="mr-2 h-4 w-4" />
-                Download PDF
+                Print / Save PDF
               </a>
             </Button>
           </div>

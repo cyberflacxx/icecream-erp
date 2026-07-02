@@ -7,6 +7,11 @@ import { API_ROUTES } from '@/lib/shared';
 import { useProcurementRequest } from './useProcurementRequest';
 
 export interface ProcurementMetaResponse {
+  approvers: Array<{
+    id: string;
+    fullName: string;
+    role: string | null;
+  }>;
   departments: string[];
   items: Array<{
     id: string;
@@ -37,6 +42,9 @@ export interface ProcurementMetaResponse {
     id: string;
     code: string;
     name: string;
+    branchId: string | null;
+    type: string | null;
+    warehouseType: string | null;
   }>;
 }
 

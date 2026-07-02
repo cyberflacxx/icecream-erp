@@ -25,7 +25,7 @@ export async function POST(
   try {
     const { data: existing, error: fetchErr } = await service
       .from('purchase_requisitions')
-      .select('id, status, remarks')
+      .select('id, status, remarks, approver_user_id')
       .is('deleted_at', null)
       .eq('organization_id', ctx.organizationId)
       .eq('id', id)
@@ -36,6 +36,9 @@ export async function POST(
     const req = existing as Record<string, unknown>;
     if (req.status !== 'submitted') {
       return badRequest('Only submitted requisitions can be approved.');
+    }
+    if (req.approver_user_id && String(req.approver_user_id) !== ctx.userId) {
+      return forbidden();
     }
 
     // Auto-approve quantities: set quantity_approved = quantity_requested where null

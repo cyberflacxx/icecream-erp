@@ -1,7 +1,7 @@
 ﻿'use client';
 
 import Link from 'next/link';
-import { Download, Plus, Power, PowerOff, Truck, Upload } from 'lucide-react';
+import { Download, Paperclip, Plus, Power, PowerOff, Truck, Upload } from 'lucide-react';
 import { type ChangeEvent, type FormEvent, useRef, useState } from 'react';
 import { z } from 'zod';
 
@@ -12,6 +12,7 @@ import { API_ROUTES, PERMISSIONS } from '@/lib/shared';
 import { PageHeader } from '@/components/dashboard/page-header';
 import { PaginationControls } from '@/components/inventory/pagination-controls';
 import { ProcurementNav } from '@/components/procurement/procurement-nav';
+import { createClient, hasSupabaseClientEnv } from '@/lib/supabase/client';
 import { Button } from '@/components/ui/button';
 import {
   useCreateSupplier,
@@ -35,6 +36,8 @@ const supplierFormSchema = z.object({
   code: z.string().optional(),
   contactPerson: z.string().optional(),
   creditLimit: z.coerce.number().nonnegative(),
+  documentName: z.string().optional(),
+  documentUrl: z.string().url().optional().or(z.literal('')),
   email: z.string().email().optional().or(z.literal('')),
   name: z.string().min(1),
   paymentTerms: z.string().optional(),
@@ -49,6 +52,8 @@ const initialFormState = {
   code: '',
   contactPerson: '',
   creditLimit: '0',
+  documentName: '',
+  documentUrl: '',
   email: '',
   name: '',
   paymentTerms: '',
@@ -63,6 +68,7 @@ export default function SuppliersPage() {
   const canImport = usePermission(['procurement.supplier.import', 'procurement.supplier.write', 'procurement.write']);
   const request = useProcurementRequest();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const documentInputRef = useRef<HTMLInputElement>(null);
   const [filters, setFilters] = useState({
     categoryId: '',
     page: 1,
@@ -77,6 +83,7 @@ export default function SuppliersPage() {
   const [importError, setImportError] = useState<string | null>(null);
   const [importMessage, setImportMessage] = useState<string | null>(null);
   const [isImporting, setIsImporting] = useState(false);
+  const [isUploadingDocument, setIsUploadingDocument] = useState(false);
 
   const suppliersQuery = useSuppliers({
     categoryId: filters.categoryId || undefined,
@@ -107,6 +114,8 @@ export default function SuppliersPage() {
       code: row.code,
       contactPerson: row.contactPerson ?? '',
       creditLimit: String(row.creditLimit ?? 0),
+      documentName: row.documentName ?? '',
+      documentUrl: row.documentUrl ?? '',
       email: row.email ?? '',
       name: row.name,
       paymentTerms: row.paymentTerms ?? '',
@@ -133,6 +142,8 @@ export default function SuppliersPage() {
       code: parsed.data.code || undefined,
       contactPerson: parsed.data.contactPerson || null,
       creditLimit: parsed.data.creditLimit,
+      documentName: parsed.data.documentName || null,
+      documentUrl: parsed.data.documentUrl || null,
       email: parsed.data.email || null,
       name: parsed.data.name,
       paymentTerms: parsed.data.paymentTerms || null,
@@ -153,6 +164,53 @@ export default function SuppliersPage() {
       setFormState(initialFormState);
     } catch (error) {
       setFormError(error instanceof Error ? error.message : 'Failed to save supplier.');
+    }
+  }
+
+  async function handleDocumentUpload(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    if (!hasSupabaseClientEnv()) {
+      setFormError('Supabase storage is not configured here. Paste the supplier document URL manually.');
+      return;
+    }
+
+    setIsUploadingDocument(true);
+    setFormError(null);
+
+    try {
+      const supabase = createClient();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (!user) throw new Error('You must be signed in to upload supplier documents.');
+
+      const safeFileName = file.name.replace(/[^a-zA-Z0-9._-]/g, '-');
+      const filePath = `icecream_erp/suppliers/${user.id}/${Date.now()}-${safeFileName}`;
+      const { error: uploadError } = await supabase.storage
+        .from('procurement-documents')
+        .upload(filePath, file, { cacheControl: '3600', upsert: false });
+
+      if (uploadError) throw new Error(uploadError.message);
+
+      const {
+        data: { publicUrl },
+      } = supabase.storage.from('procurement-documents').getPublicUrl(filePath);
+
+      setFormState((current) => ({
+        ...current,
+        documentName: file.name,
+        documentUrl: publicUrl,
+      }));
+    } catch (error) {
+      setFormError(error instanceof Error ? error.message : 'Failed to upload supplier document.');
+    } finally {
+      setIsUploadingDocument(false);
+      if (documentInputRef.current) {
+        documentInputRef.current.value = '';
+      }
     }
   }
 
@@ -325,6 +383,23 @@ export default function SuppliersPage() {
             key: 'paymentTerms',
             header: 'Payment Terms',
             render: (row) => row.paymentTerms || '-'
+          },
+          {
+            key: 'document',
+            header: 'Document',
+            render: (row) =>
+              row.documentUrl ? (
+                <a
+                  href={row.documentUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-sm text-orange underline-offset-4 hover:underline"
+                >
+                  {row.documentName || 'Open document'}
+                </a>
+              ) : (
+                '-'
+              )
           },
           {
             key: 'balance',
@@ -513,6 +588,63 @@ export default function SuppliersPage() {
                 <option value="BLACKLISTED">BLACKLISTED</option>
               </select>
             </label>
+          </div>
+
+          <div className="space-y-3 rounded-2xl border border-border bg-cream/60 p-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <p className="text-sm font-semibold uppercase tracking-[0.18em] text-orange">Supplier Document</p>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => documentInputRef.current?.click()}
+                disabled={isUploadingDocument}
+              >
+                <Upload className="mr-2 h-4 w-4" />
+                {isUploadingDocument ? 'Uploading...' : 'Upload Document'}
+              </Button>
+              <input
+                ref={documentInputRef}
+                type="file"
+                accept=".pdf,.doc,.docx,.png,.jpg,.jpeg"
+                className="hidden"
+                onChange={handleDocumentUpload}
+              />
+            </div>
+            <div className="grid gap-5 sm:grid-cols-2">
+              <label className="space-y-2 text-sm text-muted">
+                <span>Document Name</span>
+                <input
+                  value={formState.documentName}
+                  onChange={(event) =>
+                    setFormState((current) => ({ ...current, documentName: event.target.value }))
+                  }
+                  className="surface-input-soft"
+                />
+              </label>
+              <label className="space-y-2 text-sm text-muted">
+                <span>Document URL</span>
+                <input
+                  value={formState.documentUrl}
+                  onChange={(event) =>
+                    setFormState((current) => ({ ...current, documentUrl: event.target.value }))
+                  }
+                  placeholder="https://..."
+                  className="surface-input-soft"
+                />
+              </label>
+            </div>
+            {formState.documentUrl ? (
+              <a
+                href={formState.documentUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-2 text-sm text-orange underline-offset-4 hover:underline"
+              >
+                <Paperclip className="h-4 w-4" />
+                {formState.documentName || 'Open current document'}
+              </a>
+            ) : null}
           </div>
 
           <label className="space-y-2 text-sm text-muted">

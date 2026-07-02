@@ -20,7 +20,7 @@ export async function GET(
       .from('suppliers')
       .select(
         `id, code, name, contact_person, phone, email, address,
-         tax_number, payment_terms, credit_limit, current_balance, status, created_at,
+         tax_number, payment_terms, credit_limit, current_balance, status, created_at, document_name, document_url,
          supplier_categories(id, name)`,
       )
       .is('deleted_at', null)
@@ -50,6 +50,8 @@ export async function GET(
       paymentTerms: s.payment_terms,
       creditLimit: Number(s.credit_limit ?? 0),
       currentBalance: Number(s.current_balance ?? 0),
+      documentName: s.document_name ?? null,
+      documentUrl: s.document_url ?? null,
       status: s.status,
       createdAt: s.created_at,
     });
@@ -80,6 +82,8 @@ export async function PATCH(
     taxNumber?: string | null;
     paymentTerms?: string | null;
     creditLimit?: number | null;
+    documentName?: string | null;
+    documentUrl?: string | null;
     status?: string;
   };
 
@@ -142,6 +146,8 @@ export async function PATCH(
     if (body.address !== undefined) updatePayload.address = body.address;
     if (body.taxNumber !== undefined) updatePayload.tax_number = body.taxNumber;
     if (body.paymentTerms !== undefined) updatePayload.payment_terms = body.paymentTerms;
+    if (body.documentName !== undefined) updatePayload.document_name = body.documentName;
+    if (body.documentUrl !== undefined) updatePayload.document_url = body.documentUrl;
     if (body.creditLimit !== undefined) {
       if (Number(body.creditLimit) < 0) return badRequest('Credit limit cannot be negative.');
       updatePayload.credit_limit = body.creditLimit;

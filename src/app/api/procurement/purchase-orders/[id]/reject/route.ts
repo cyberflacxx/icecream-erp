@@ -4,7 +4,7 @@ import { badRequest, can, forbidden, getAuthContext, notFound, serverError, unau
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
 export async function POST(
-  request: NextRequest,
+  _request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
   const ctx = await getAuthContext();
@@ -14,41 +14,31 @@ export async function POST(
   const { id } = await params;
   const service = createServiceRoleClient();
 
-  let remarks: string | null = null;
-  try {
-    const body = await request.json();
-    remarks = body.remarks ?? null;
-  } catch {
-    // remarks is optional
-  }
-
   try {
     const { data: existing, error: fetchErr } = await service
-      .from('purchase_requisitions')
-      .select('id, status, remarks, approver_user_id')
+      .from('purchase_orders')
+      .select('id, status, approver_user_id')
       .is('deleted_at', null)
       .eq('organization_id', ctx.organizationId)
       .eq('id', id)
       .single();
 
-    if (fetchErr || !existing) return notFound('Purchase requisition not found.');
+    if (fetchErr || !existing) return notFound('Purchase order not found.');
 
-    const req = existing as Record<string, unknown>;
-    if (req.status !== 'submitted') {
-      return badRequest('Only submitted requisitions can be rejected.');
+    const order = existing as Record<string, unknown>;
+    if (!['draft', 'approved'].includes(String(order.status))) {
+      return badRequest('Only draft or approved purchase orders can be rejected.');
     }
-    if (req.approver_user_id && String(req.approver_user_id) !== ctx.userId) {
+    if (order.approver_user_id && String(order.approver_user_id) !== ctx.userId) {
       return forbidden();
     }
 
     const { data: updated, error: updateErr } = await service
-      .from('purchase_requisitions')
+      .from('purchase_orders')
       .update({
-        status: 'rejected',
-        approval_status: 'rejected',
-        rejected_by: ctx.userId,
         rejected_at: new Date().toISOString(),
-        remarks: remarks ?? (req.remarks as string | null),
+        rejected_by: ctx.userId,
+        status: 'rejected',
       })
       .eq('id', id)
       .select()
@@ -57,7 +47,7 @@ export async function POST(
     if (updateErr) return serverError(updateErr.message);
 
     return NextResponse.json(updated);
-  } catch (err) {
-    return serverError((err as Error).message);
+  } catch (error) {
+    return serverError(error instanceof Error ? error.message : 'Failed to reject purchase order.');
   }
 }

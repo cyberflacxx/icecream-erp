@@ -22,7 +22,7 @@ export async function GET(request: NextRequest) {
     let query = service
       .from('purchase_requisitions')
       .select(
-        'id, requisition_number, department, request_date, needed_by_date, status, requested_by',
+        'id, requisition_number, department, request_date, needed_by_date, status, approval_status, requested_by, approver_user_id, approved_by, approved_at',
         { count: 'exact' },
       )
       .is('deleted_at', null)
@@ -39,9 +39,16 @@ export async function GET(request: NextRequest) {
 
     if (error) return serverError(error.message);
 
-    const requesterIds = [...new Set((data ?? []).map((row) => String(row.requested_by ?? '')).filter(Boolean))];
-    const usersResult = requesterIds.length
-      ? await service.from('users').select('id, full_name').in('id', requesterIds)
+    const userIds = [
+      ...new Set(
+        (data ?? [])
+          .flatMap((row) => [row.requested_by, row.approver_user_id, row.approved_by])
+          .map((value) => String(value ?? ''))
+          .filter(Boolean),
+      ),
+    ];
+    const usersResult = userIds.length
+      ? await service.from('users').select('id, full_name').in('id', userIds)
       : { data: [], error: null };
     const usersById = new Map(
       (usersResult.error ? [] : usersResult.data ?? []).map((row) => [String(row.id), String(row.full_name ?? 'Unknown')]),
@@ -54,7 +61,11 @@ export async function GET(request: NextRequest) {
       requestDate: r.request_date,
       neededByDate: r.needed_by_date,
       status: r.status,
+      approvalStatus: r.approval_status ?? r.status,
       requestedBy: usersById.get(String(r.requested_by ?? '')) ?? 'Unknown',
+      approverName: usersById.get(String(r.approver_user_id ?? '')) ?? null,
+      approvedBy: usersById.get(String(r.approved_by ?? '')) ?? null,
+      approvedAt: r.approved_at ? String(r.approved_at) : null,
     }));
 
     return NextResponse.json({
@@ -77,6 +88,7 @@ export async function POST(request: NextRequest) {
     department: string;
     neededByDate?: string | null;
     remarks?: string | null;
+    approverUserId?: string | null;
     items: Array<{
       itemId: string;
       unitOfMeasureId: string;
@@ -134,6 +146,7 @@ export async function POST(request: NextRequest) {
         department: body.department,
         needed_by_date: body.neededByDate ?? null,
         remarks: body.remarks ?? null,
+        approver_user_id: body.approverUserId ?? null,
         request_date: new Date().toISOString(),
         requested_by: ctx.userId,
         organization_id: ctx.organizationId,

@@ -17,15 +17,19 @@ export async function POST(
   try {
     const { data: existing, error: fetchErr } = await service
       .from('purchase_orders')
-      .select('id, status')
+      .select('id, status, approver_user_id')
       .is('deleted_at', null)
       .eq('organization_id', ctx.organizationId)
       .eq('id', id)
       .single();
 
     if (fetchErr || !existing) return notFound('Purchase order not found.');
-    if ((existing as Record<string, unknown>).status !== 'draft') {
+    const order = existing as Record<string, unknown>;
+    if (order.status !== 'draft') {
       return badRequest('Only draft purchase orders can be approved.');
+    }
+    if (order.approver_user_id && String(order.approver_user_id) !== ctx.userId) {
+      return forbidden();
     }
 
     const { data: updated, error: updateErr } = await service

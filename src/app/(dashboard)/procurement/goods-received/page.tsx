@@ -22,9 +22,11 @@ import {
 import { usePermission } from '@/hooks/usePermission';
 
 const initialFormState = {
+  entryMode: 'PO_LINKED',
   notes: '',
   purchaseOrderId: '',
   qualityNotes: '',
+  supplierId: '',
   warehouseId: ''
 };
 
@@ -45,7 +47,7 @@ export default function GoodsReceivedPage() {
       batchNumber: string;
       expiryDate: string;
       itemId: string;
-      poItemId: string;
+      poItemId?: string;
       qualityNotes: string;
       quantityExpected: number;
       quantityReceived: string;
@@ -71,7 +73,7 @@ export default function GoodsReceivedPage() {
       return;
     }
 
-    setFormState((current) => ({ ...current, purchaseOrderId: purchaseOrderIdParam }));
+    setFormState((current) => ({ ...current, entryMode: 'PO_LINKED', purchaseOrderId: purchaseOrderIdParam }));
     setIsDrawerOpen(true);
   }, [purchaseOrderIdParam]);
 
@@ -87,7 +89,7 @@ export default function GoodsReceivedPage() {
         }
       | undefined;
 
-    if (!order) {
+    if (!order || formState.entryMode !== 'PO_LINKED') {
       setLineItems([]);
       return;
     }
@@ -107,6 +109,23 @@ export default function GoodsReceivedPage() {
     );
   }, [purchaseOrderQuery.data]);
 
+  useEffect(() => {
+    if (formState.entryMode === 'MANUAL' && lineItems.length === 0) {
+      setLineItems([
+        {
+          batchNumber: '',
+          expiryDate: '',
+          itemId: '',
+          qualityNotes: '',
+          quantityExpected: 0,
+          quantityReceived: '0',
+          quantityRejected: '0',
+          reason: ''
+        }
+      ]);
+    }
+  }, [formState.entryMode, lineItems.length]);
+
   const grns = grnsQuery.data?.data ?? [];
   const pagination = grnsQuery.data?.pagination;
 
@@ -119,8 +138,18 @@ export default function GoodsReceivedPage() {
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    if (!formState.purchaseOrderId || !formState.warehouseId) {
-      setFormError('Purchase order and warehouse are required.');
+    if (!formState.warehouseId) {
+      setFormError('HQ warehouse is required.');
+      return;
+    }
+
+    if (formState.entryMode === 'PO_LINKED' && !formState.purchaseOrderId) {
+      setFormError('Purchase order is required for PO-linked GRNs.');
+      return;
+    }
+
+    if (formState.entryMode === 'MANUAL' && !formState.supplierId) {
+      setFormError('Supplier is required for manual GRNs.');
       return;
     }
 
@@ -157,8 +186,10 @@ export default function GoodsReceivedPage() {
       const grn = await request<{ id: string }>('/api/procurement/grns', {
         body: JSON.stringify({
           notes: formState.notes || null,
-          purchaseOrderId: formState.purchaseOrderId,
+          entryMode: formState.entryMode.toLowerCase(),
+          purchaseOrderId: formState.entryMode === 'PO_LINKED' ? formState.purchaseOrderId : null,
           qualityNotes: formState.qualityNotes || null,
+          supplierId: formState.entryMode === 'MANUAL' ? formState.supplierId : null,
           warehouseId: formState.warehouseId
         }),
         method: 'POST'
@@ -239,10 +270,11 @@ export default function GoodsReceivedPage() {
         pagination={pagination}
         columns={[
           { key: 'grnNumber', header: 'GRN #' },
+          { key: 'entryMode', header: 'Mode' },
           {
             key: 'poNumber',
             header: 'PO #',
-            render: (row) => row.purchaseOrder.poNumber
+            render: (row) => row.purchaseOrder?.poNumber ?? 'Manual'
           },
           {
             key: 'supplier',
@@ -272,7 +304,48 @@ export default function GoodsReceivedPage() {
           {
             key: 'actions',
             header: 'Actions',
-            render: () => <Button size="sm" variant="outline">View</Button>
+            render: (row) => {
+              if (row.status === 'PENDING_APPROVAL') {
+                return (
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() =>
+                        request(`/api/procurement/grns/${row.id}/approve`, { body: JSON.stringify({}), method: 'POST' }).then(refresh)
+                      }
+                    >
+                      Approve
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() =>
+                        request(`/api/procurement/grns/${row.id}/reject`, { body: JSON.stringify({}), method: 'POST' }).then(refresh)
+                      }
+                    >
+                      Reject
+                    </Button>
+                  </div>
+                );
+              }
+
+              if (row.status === 'APPROVED') {
+                return (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() =>
+                      request(`/api/procurement/grns/${row.id}/post`, { body: JSON.stringify({}), method: 'POST' }).then(refresh)
+                    }
+                  >
+                    Post to Inventory
+                  </Button>
+                );
+              }
+
+              return <span className="text-sm text-muted">No actions</span>;
+            }
           }
         ]}
         emptyState={
@@ -308,9 +381,28 @@ export default function GoodsReceivedPage() {
 
           <div className="grid gap-5 sm:grid-cols-2">
             <label className="space-y-2 text-sm text-muted">
+              <span>Entry Mode</span>
+              <select
+                value={formState.entryMode}
+                onChange={(event) =>
+                  setFormState((current) => ({
+                    ...current,
+                    entryMode: event.target.value,
+                    purchaseOrderId: event.target.value === 'PO_LINKED' ? current.purchaseOrderId : '',
+                    supplierId: event.target.value === 'MANUAL' ? current.supplierId : ''
+                  }))
+                }
+                className="surface-input-soft"
+              >
+                <option value="PO_LINKED">Linked to Purchase Order</option>
+                <option value="MANUAL">Manual Receipt</option>
+              </select>
+            </label>
+            <label className="space-y-2 text-sm text-muted">
               <span>Purchase Order</span>
               <select
-                required
+                required={formState.entryMode === 'PO_LINKED'}
+                disabled={formState.entryMode !== 'PO_LINKED'}
                 value={formState.purchaseOrderId}
                 onChange={(event) =>
                   setFormState((current) => ({ ...current, purchaseOrderId: event.target.value }))
@@ -326,7 +418,24 @@ export default function GoodsReceivedPage() {
               </select>
             </label>
             <label className="space-y-2 text-sm text-muted">
-              <span>Warehouse</span>
+              <span>Supplier</span>
+              <select
+                required={formState.entryMode === 'MANUAL'}
+                disabled={formState.entryMode !== 'MANUAL'}
+                value={formState.supplierId}
+                onChange={(event) => setFormState((current) => ({ ...current, supplierId: event.target.value }))}
+                className="surface-input-soft"
+              >
+                <option value="">Select supplier</option>
+                {(metaQuery.data?.suppliers ?? []).map((supplier) => (
+                  <option key={supplier.id} value={supplier.id}>
+                    {supplier.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="space-y-2 text-sm text-muted">
+              <span>HQ Warehouse</span>
               <select
                 required
                 value={formState.warehouseId}
@@ -358,10 +467,38 @@ export default function GoodsReceivedPage() {
           <div className="space-y-3 rounded-2xl border border-border bg-cream/60 p-4">
             <p className="text-sm font-semibold uppercase tracking-[0.18em] text-orange">Expected and Received</p>
             {lineItems.map((item, index) => (
-              <div key={item.poItemId} className="grid gap-3 md:grid-cols-[120px_120px_120px_1fr_1fr]">
+              <div key={item.poItemId ?? `${item.itemId}-${index}`} className="grid gap-3 md:grid-cols-[1fr_120px_120px_120px_1fr_1fr]">
+                <select
+                  value={item.itemId}
+                  disabled={formState.entryMode === 'PO_LINKED'}
+                  onChange={(event) =>
+                    setLineItems((current) =>
+                      current.map((row, rowIndex) =>
+                        rowIndex === index ? { ...row, itemId: event.target.value } : row,
+                      ),
+                    )
+                  }
+                  className="surface-input-soft"
+                >
+                  <option value="">Select item</option>
+                  {(metaQuery.data?.items ?? []).map((row) => (
+                    <option key={row.id} value={row.id}>
+                      {row.code} - {row.name}
+                    </option>
+                  ))}
+                </select>
                 <input
-                  readOnly
                   value={item.quantityExpected}
+                  readOnly={formState.entryMode === 'PO_LINKED'}
+                  onChange={(event) =>
+                    setLineItems((current) =>
+                      current.map((row, rowIndex) =>
+                        rowIndex === index
+                          ? { ...row, quantityExpected: Number(event.target.value) || 0 }
+                          : row,
+                      ),
+                    )
+                  }
                   className="surface-input-soft"
                 />
                 <input
@@ -430,6 +567,30 @@ export default function GoodsReceivedPage() {
                 />
               </div>
             ))}
+            {formState.entryMode === 'MANUAL' ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() =>
+                  setLineItems((current) => [
+                    ...current,
+                    {
+                      batchNumber: '',
+                      expiryDate: '',
+                      itemId: '',
+                      qualityNotes: '',
+                      quantityExpected: 0,
+                      quantityReceived: '0',
+                      quantityRejected: '0',
+                      reason: ''
+                    }
+                  ])
+                }
+              >
+                Add Manual Item
+              </Button>
+            ) : null}
           </div>
 
           <label className="space-y-2 text-sm text-muted">

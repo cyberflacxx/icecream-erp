@@ -28,7 +28,7 @@ export async function POST(
     items: Array<{
       damagedQuantity?: number;
       itemId: string;
-      poItemId: string;
+      poItemId?: string | null;
       quantityReceived: number;
       quantityRejected: number;
       batchNumber?: string | null;
@@ -81,22 +81,36 @@ export async function POST(
       return badRequest('Only draft GRNs can be submitted.');
     }
 
-    const po = g.purchase_orders as Record<string, unknown>;
-    const poItemsArr = (po.purchase_order_items as Record<string, unknown>[]) ?? [];
+    const po = g.purchase_orders as Record<string, unknown> | null;
+    const poItemsArr = ((po?.purchase_order_items as Record<string, unknown>[]) ?? []);
     const poItemsById = new Map(poItemsArr.map((i) => [i.id as string, i]));
+    const existingGrnItemsResult = await service
+      .from('goods_received_note_items')
+      .select('id, item_id, po_item_id, quantity_expected, unit_cost')
+      .eq('grn_id', id);
+    if (existingGrnItemsResult.error) return serverError(existingGrnItemsResult.error.message);
+    const grnItemsByItemId = new Map(
+      (existingGrnItemsResult.data ?? []).map((item) => [String(item.item_id), item as Record<string, unknown>]),
+    );
 
     const warnings: string[] = [];
 
     for (const line of body.items) {
-      const poItem = poItemsById.get(line.poItemId);
+      const poItem = line.poItemId ? poItemsById.get(line.poItemId) : null;
+      const manualGrnItem = grnItemsByItemId.get(line.itemId) ?? null;
 
-      if (!poItem || poItem.item_id !== line.itemId) {
+      if (g.purchase_order_id && (!poItem || poItem.item_id !== line.itemId)) {
         return badRequest('GRN line references an invalid purchase order item.');
       }
+      if (!g.purchase_order_id && !manualGrnItem) {
+        return badRequest('GRN line references an invalid manual receipt item.');
+      }
 
-      const quantityOrdered = Number(poItem.quantity_ordered ?? 0);
-      const quantityAlreadyReceived = Number(poItem.quantity_received ?? 0);
-      const remaining = quantityOrdered - quantityAlreadyReceived;
+      const quantityOrdered = g.purchase_order_id
+        ? Number(poItem?.quantity_ordered ?? 0)
+        : Number(manualGrnItem?.quantity_expected ?? 0);
+      const quantityAlreadyReceived = g.purchase_order_id ? Number(poItem?.quantity_received ?? 0) : 0;
+      const remaining = g.purchase_order_id ? quantityOrdered - quantityAlreadyReceived : quantityOrdered;
       const accepted = calculateAcceptedQuantity({
         damagedQuantity: line.damagedQuantity ?? 0,
         receivedQuantity: line.quantityReceived,
@@ -107,37 +121,41 @@ export async function POST(
         receivedQuantity: line.quantityReceived,
       });
 
-      if (line.quantityReceived > remaining && !line.overReceiveReason) {
+      if (g.purchase_order_id && line.quantityReceived > remaining && !line.overReceiveReason) {
         return badRequest(
-          `Received quantity exceeds ordered quantity for PO item ${poItem.id}. Provide overReceiveReason to continue.`,
+          `Received quantity exceeds ordered quantity for PO item ${poItem?.id}. Provide overReceiveReason to continue.`,
         );
       }
 
-      if (line.quantityReceived > remaining && line.overReceiveReason) {
+      if (g.purchase_order_id && line.quantityReceived > remaining && line.overReceiveReason) {
         warnings.push(
-          `Over-received ${line.quantityReceived} on PO item ${poItem.id}. Reason: ${line.overReceiveReason}`,
+          `Over-received ${line.quantityReceived} on PO item ${poItem?.id}. Reason: ${line.overReceiveReason}`,
         );
       }
 
       // Upsert GRN item
-      const { data: existingGrnItem } = await service
-        .from('goods_received_note_items')
-        .select('id')
-        .eq('grn_id', id)
-        .eq('po_item_id', line.poItemId)
-        .maybeSingle();
+      const existingGrnItem = g.purchase_order_id
+        ? await service
+            .from('goods_received_note_items')
+            .select('id')
+            .eq('grn_id', id)
+            .eq('po_item_id', line.poItemId ?? '')
+            .maybeSingle()
+        : { data: manualGrnItem ? { id: manualGrnItem.id } : null, error: null };
+
+      if (existingGrnItem.error) return serverError(existingGrnItem.error.message);
 
       const grnItemData = {
         grn_id: id,
         item_id: line.itemId,
-        po_item_id: line.poItemId,
+        po_item_id: line.poItemId ?? null,
         quantity_expected: quantityOrdered,
         quantity_received: line.quantityReceived,
         quantity_rejected: line.quantityRejected,
         accepted_quantity: accepted,
         damaged_quantity: Number(line.damagedQuantity ?? 0),
         shortage_quantity: shortageQuantity,
-        unit_cost: Number(poItem.unit_cost ?? 0),
+        unit_cost: Number(poItem?.unit_cost ?? manualGrnItem?.unit_cost ?? 0),
         batch_number: line.batchNumber ?? null,
         expiry_date: line.expiryDate ?? null,
         remarks: line.overReceiveReason ?? null,
@@ -146,12 +164,12 @@ export async function POST(
           `accepted=${accepted}; damaged=${Number(line.damagedQuantity ?? 0)}; shortage=${shortageQuantity}`,
       };
 
-      if (existingGrnItem) {
+      if (existingGrnItem.data) {
         const updateError = await writeGrnItem(
           service,
           'update',
           grnItemData,
-          (query) => query.eq('id', (existingGrnItem as Record<string, unknown>).id),
+          (query) => query.eq('id', String((existingGrnItem.data as Record<string, unknown>).id)),
         );
         if (updateError) {
           return serverError(updateError);

@@ -23,7 +23,8 @@ export async function GET(request: NextRequest) {
       .from('suppliers')
       .select(
         `id, code, name, contact_person, phone, email, address,
-         category_id, tax_number, payment_terms, credit_limit, current_balance, credit_days, status, rating, notes`,
+         category_id, tax_number, payment_terms, credit_limit, current_balance, credit_days, status, rating, notes,
+         document_name, document_url`,
         { count: 'exact' },
       )
       .eq('organization_id', ctx.organizationId)
@@ -69,6 +70,8 @@ export async function GET(request: NextRequest) {
       paymentTerms: r.payment_terms,
       creditLimit: Number(r.credit_limit ?? 0),
       currentBalance: Number(r.current_balance ?? 0),
+      documentName: r.document_name ?? null,
+      documentUrl: r.document_url ?? null,
       status: r.status,
     };
     });
@@ -100,6 +103,8 @@ export async function POST(request: NextRequest) {
     taxNumber?: string | null;
     paymentTerms?: string | null;
     creditLimit?: number | null;
+    documentName?: string | null;
+    documentUrl?: string | null;
     status: string;
   };
 
@@ -186,6 +191,8 @@ export async function POST(request: NextRequest) {
         address: body.address ?? null,
         payment_terms: body.paymentTerms ?? null,
         credit_limit: body.creditLimit ?? null,
+        document_name: body.documentName ?? null,
+        document_url: body.documentUrl ?? null,
         status: body.status,
         organization_id: ctx.organizationId,
       })
@@ -205,6 +212,8 @@ export async function POST(request: NextRequest) {
       newValues: {
         code,
         creditLimit: body.creditLimit ?? null,
+        documentName: body.documentName ?? null,
+        documentUrl: body.documentUrl ?? null,
         name,
         paymentTerms: body.paymentTerms ?? null,
         status: body.status,
