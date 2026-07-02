@@ -7,18 +7,23 @@ import { PageHeader } from '@/components/dashboard/page-header';
 import { NotificationNav } from '@/components/notifications/notification-nav';
 import { Button } from '@/components/ui/button';
 import { DataTable, EmptyState, LoadingState, StatusBadge } from '@/components/ui-library';
+import { useAppAuth } from '@/hooks/useAppAuth';
 import { useDismissNotification, useMarkAllNotificationsRead, useMarkNotificationRead, useNotificationsList } from '@/hooks/useNotifications';
 
 export default function NotificationCenterPage() {
   const [severity, setSeverity] = useState('');
   const [moduleName, setModuleName] = useState('');
+  const { isLoaded, isSignedIn } = useAppAuth();
   const query = useNotificationsList({ page: 1, pageSize: 50, severity: severity || undefined, module: moduleName || undefined });
   const markRead = useMarkNotificationRead();
   const dismiss = useDismissNotification();
   const markAll = useMarkAllNotificationsRead();
 
-  if (query.isLoading) return <LoadingState />;
-  if (query.isError || !query.data) {
+  if (!isLoaded || (isSignedIn && query.isPending && !query.data)) return <LoadingState />;
+  if (!isSignedIn) {
+    return <EmptyState icon={<BellRing className="h-6 w-6" />} title="Sign in required" description="Sign in to view your notifications." />;
+  }
+  if (query.isError) {
     return <EmptyState icon={<BellRing className="h-6 w-6" />} title="Notifications unavailable" description={query.error?.message ?? 'Failed to load notifications.'} />;
   }
 

@@ -5,12 +5,17 @@ import { AlertTriangle } from 'lucide-react';
 import { PageHeader } from '@/components/dashboard/page-header';
 import { NotificationNav } from '@/components/notifications/notification-nav';
 import { DataTable, EmptyState, LoadingState, StatCard, StatusBadge } from '@/components/ui-library';
+import { useAppAuth } from '@/hooks/useAppAuth';
 import { useNotificationAlertDashboard } from '@/hooks/useNotifications';
 
 export default function NotificationAlertDashboardPage() {
+  const { isLoaded, isSignedIn } = useAppAuth();
   const query = useNotificationAlertDashboard();
-  if (query.isLoading) return <LoadingState />;
-  if (query.isError || !query.data) {
+  if (!isLoaded || (isSignedIn && query.isPending && !query.data)) return <LoadingState />;
+  if (!isSignedIn) {
+    return <EmptyState icon={<AlertTriangle className="h-6 w-6" />} title="Sign in required" description="Sign in to view the alert dashboard." />;
+  }
+  if (query.isError) {
     return <EmptyState icon={<AlertTriangle className="h-6 w-6" />} title="Alert dashboard unavailable" description={query.error?.message ?? 'Failed to load the alert dashboard.'} />;
   }
 

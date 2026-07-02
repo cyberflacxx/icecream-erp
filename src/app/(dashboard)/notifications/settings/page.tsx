@@ -8,6 +8,7 @@ import { PageHeader } from '@/components/dashboard/page-header';
 import { NotificationNav } from '@/components/notifications/notification-nav';
 import { Button } from '@/components/ui/button';
 import { EmptyState, LoadingState, StatusBadge } from '@/components/ui-library';
+import { useAppAuth } from '@/hooks/useAppAuth';
 import {
   useCreateEscalationRule,
   useCreateNotificationRule,
@@ -28,6 +29,7 @@ function Card({ title, children }: { children: ReactNode; title: string }) {
 }
 
 export default function NotificationSettingsPage() {
+  const { isLoaded, isSignedIn } = useAppAuth();
   const query = useNotificationSettings();
   const createRule = useCreateNotificationRule();
   const createTemplate = useCreateNotificationTemplate();
@@ -37,8 +39,11 @@ export default function NotificationSettingsPage() {
   const sendTest = useSendNotificationTest();
   const [message, setMessage] = useState<string | null>(null);
 
-  if (query.isLoading) return <LoadingState />;
-  if (query.isError || !query.data) {
+  if (!isLoaded || (isSignedIn && query.isPending && !query.data)) return <LoadingState />;
+  if (!isSignedIn) {
+    return <EmptyState icon={<Settings2 className="h-6 w-6" />} title="Sign in required" description="Sign in to manage notification settings." />;
+  }
+  if (query.isError) {
     return <EmptyState icon={<Settings2 className="h-6 w-6" />} title="Notification settings unavailable" description={query.error?.message ?? 'Failed to load notification settings.'} />;
   }
 

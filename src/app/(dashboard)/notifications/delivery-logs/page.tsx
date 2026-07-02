@@ -5,12 +5,17 @@ import { Send } from 'lucide-react';
 import { PageHeader } from '@/components/dashboard/page-header';
 import { NotificationNav } from '@/components/notifications/notification-nav';
 import { DataTable, EmptyState, LoadingState, StatusBadge } from '@/components/ui-library';
+import { useAppAuth } from '@/hooks/useAppAuth';
 import { useNotificationDeliveryLogs } from '@/hooks/useNotifications';
 
 export default function NotificationDeliveryLogsPage() {
+  const { isLoaded, isSignedIn } = useAppAuth();
   const query = useNotificationDeliveryLogs();
-  if (query.isLoading) return <LoadingState />;
-  if (query.isError || !query.data) {
+  if (!isLoaded || (isSignedIn && query.isPending && !query.data)) return <LoadingState />;
+  if (!isSignedIn) {
+    return <EmptyState icon={<Send className="h-6 w-6" />} title="Sign in required" description="Sign in to view notification delivery logs." />;
+  }
+  if (query.isError) {
     return <EmptyState icon={<Send className="h-6 w-6" />} title="Delivery logs unavailable" description={query.error?.message ?? 'Failed to load delivery logs.'} />;
   }
 
