@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { badRequest, can, forbidden, getAuthContext, notFound, serverError, unauthorized } from '@/lib/api-auth';
+import { isMissingColumnError } from '@/lib/postgrest-compat';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
 export async function GET(
@@ -20,25 +21,68 @@ export async function GET(
       .select(
         `id, po_number, order_date, expected_delivery_date, status,
          subtotal, tax_amount, discount_amount, total,
-         suppliers(id, name),
-         purchase_order_items(
-           id, quantity_ordered, quantity_received, unit_cost, total_cost,
-           items(id, code, name),
-           units_of_measure(id, name, abbreviation)
-         ),
-         goods_received_notes(
-           id, grn_number, received_date, status, quality_status,
-           goods_received_note_items(id)
-         )`,
+         suppliers(id, name)`,
       )
       .is('deleted_at', null)
       .eq('organization_id', ctx.organizationId)
       .eq('id', id)
-      .single();
+      .maybeSingle();
 
-    if (error || !order) return notFound('Purchase order not found.');
+    if (error) return serverError(error.message);
+    if (!order) return notFound('Purchase order not found.');
+
+    const [itemsRes, grnsPrimary] = await Promise.all([
+      service
+        .from('purchase_order_items')
+        .select('id, quantity_ordered, quantity_received, unit_cost, total_cost, unit_of_measure_id, items(id, code, name)')
+        .eq('purchase_order_id', id)
+        .order('created_at', { ascending: true }),
+      service
+        .from('goods_received_notes')
+        .select('id, grn_number, received_date, status, quality_status')
+        .eq('purchase_order_id', id)
+        .order('received_date', { ascending: false }),
+    ]);
+
+    const grnsRes =
+      grnsPrimary.error && isMissingColumnError(grnsPrimary.error, 'goods_received_notes', 'purchase_order_id')
+        ? await service
+            .from('goods_received_notes')
+            .select('id, grn_number, received_date, status, quality_status')
+            .eq('po_id', id)
+            .order('received_date', { ascending: false })
+        : grnsPrimary;
+
+    if (itemsRes.error) return serverError(itemsRes.error.message);
+    if (grnsRes.error) return serverError(grnsRes.error.message);
+
+    const unitIds = [
+      ...new Set(
+        (itemsRes.data ?? [])
+          .map((item) => String(item.unit_of_measure_id ?? ''))
+          .filter(Boolean),
+      ),
+    ];
+    const unitsRes = unitIds.length
+      ? await service.from('units_of_measure').select('id, name, abbreviation').in('id', unitIds)
+      : { data: [], error: null };
+    if (unitsRes.error) return serverError(unitsRes.error.message);
+
+    const grnIds = (grnsRes.data ?? []).map((row) => String(row.id));
+    const grnItemCounts = new Map<string, number>();
+    if (grnIds.length) {
+      const grnItemsRes = await service.from('goods_received_note_items').select('grn_id').in('grn_id', grnIds);
+      if (!grnItemsRes.error) {
+        for (const row of grnItemsRes.data ?? []) {
+          const grnId = String(row.grn_id ?? '');
+          if (!grnId) continue;
+          grnItemCounts.set(grnId, (grnItemCounts.get(grnId) ?? 0) + 1);
+        }
+      }
+    }
 
     const o = order as Record<string, unknown>;
+    const unitsById = new Map((unitsRes.data ?? []).map((unit) => [String(unit.id), unit]));
 
     return NextResponse.json({
       id: o.id,
@@ -53,36 +97,38 @@ export async function GET(
       supplier: o.suppliers
         ? { id: (o.suppliers as Record<string, unknown>).id, name: (o.suppliers as Record<string, unknown>).name }
         : null,
-      items: ((o.purchase_order_items as Record<string, unknown>[]) ?? []).map((item) => ({
-        id: item.id,
-        quantityOrdered: Number(item.quantity_ordered ?? 0),
-        quantityReceived: Number(item.quantity_received ?? 0),
-        unitCost: Number(item.unit_cost ?? 0),
-        totalCost: Number(item.total_cost ?? 0),
-        item: item.items
-          ? {
-              id: (item.items as Record<string, unknown>).id,
-              code: (item.items as Record<string, unknown>).code,
-              name: (item.items as Record<string, unknown>).name,
-            }
-          : null,
-        unitOfMeasure: item.units_of_measure
-          ? {
-              id: (item.units_of_measure as Record<string, unknown>).id,
-              name: (item.units_of_measure as Record<string, unknown>).name,
-              abbreviation: (item.units_of_measure as Record<string, unknown>).abbreviation,
-            }
-          : null,
-      })),
-      grns: ((o.goods_received_notes as Record<string, unknown>[]) ?? []).map((grn) => ({
+      items: (itemsRes.data ?? []).map((item) => {
+        const unit = unitsById.get(String(item.unit_of_measure_id ?? ''));
+        const product = Array.isArray(item.items) ? item.items[0] : item.items;
+        return {
+          id: item.id,
+          quantityOrdered: Number(item.quantity_ordered ?? 0),
+          quantityReceived: Number(item.quantity_received ?? 0),
+          unitCost: Number(item.unit_cost ?? 0),
+          totalCost: Number(item.total_cost ?? 0),
+          item: product
+            ? {
+                id: (product as Record<string, unknown>).id,
+                code: (product as Record<string, unknown>).code,
+                name: (product as Record<string, unknown>).name,
+              }
+            : null,
+          unitOfMeasure: unit
+            ? {
+                id: String(unit.id),
+                name: String(unit.name ?? ''),
+                abbreviation: String(unit.abbreviation ?? ''),
+              }
+            : null,
+        };
+      }),
+      grns: (grnsRes.data ?? []).map((grn) => ({
         id: grn.id,
         grnNumber: grn.grn_number,
         receivedDate: grn.received_date,
         status: grn.status,
         qualityStatus: grn.quality_status,
-        itemsCount: Array.isArray(grn.goods_received_note_items)
-          ? (grn.goods_received_note_items as unknown[]).length
-          : 0,
+        itemsCount: grnItemCounts.get(String(grn.id)) ?? 0,
       })),
     });
   } catch (err) {
@@ -142,10 +188,15 @@ export async function PATCH(
     if (body.items?.length) {
       const itemIds = [...new Set(body.items.map((i) => i.itemId))];
       const unitIds = [...new Set(body.items.map((i) => i.unitOfMeasureId))];
-      const [itemsCheck, unitsCheck] = await Promise.all([
+      const [itemsPrimary, unitsCheck] = await Promise.all([
         service.from('items').select('id').is('deleted_at', null).eq('organization_id', ctx.organizationId).in('id', itemIds),
         service.from('units_of_measure').select('id').eq('organization_id', ctx.organizationId).in('id', unitIds),
       ]);
+
+      const itemsCheck =
+        itemsPrimary.error && isMissingColumnError(itemsPrimary.error, 'items', 'deleted_at')
+          ? await service.from('items').select('id').eq('organization_id', ctx.organizationId).in('id', itemIds)
+          : itemsPrimary;
 
       if (
         (itemsCheck.data?.length ?? 0) !== itemIds.length ||

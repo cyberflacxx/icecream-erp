@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { badRequest, can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
+import { isMissingColumnError } from '@/lib/postgrest-compat';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
 export async function GET(request: NextRequest) {
@@ -116,13 +117,24 @@ export async function POST(request: NextRequest) {
 
   try {
     // Validate supplier
-    const { data: supplier, error: supErr } = await service
+    let { data: supplier, error: supErr } = await service
       .from('suppliers')
       .select('id')
       .is('deleted_at', null)
       .eq('organization_id', ctx.organizationId)
       .eq('id', body.supplierId)
       .single();
+
+    if (supErr && isMissingColumnError(supErr, 'suppliers', 'deleted_at')) {
+      const fallback = await service
+        .from('suppliers')
+        .select('id')
+        .eq('organization_id', ctx.organizationId)
+        .eq('id', body.supplierId)
+        .single();
+      supplier = fallback.data;
+      supErr = fallback.error;
+    }
 
     if (supErr || !supplier) return badRequest('Supplier not found.');
 
@@ -145,10 +157,15 @@ export async function POST(request: NextRequest) {
     // Validate items
     const itemIds = [...new Set(body.items.map((i) => i.itemId))];
     const unitIds = [...new Set(body.items.map((i) => i.unitOfMeasureId))];
-    const [itemsCheck, unitsCheck] = await Promise.all([
+    const [itemsPrimary, unitsCheck] = await Promise.all([
       service.from('items').select('id').is('deleted_at', null).eq('organization_id', ctx.organizationId).in('id', itemIds),
       service.from('units_of_measure').select('id').eq('organization_id', ctx.organizationId).in('id', unitIds),
     ]);
+
+    const itemsCheck =
+      itemsPrimary.error && isMissingColumnError(itemsPrimary.error, 'items', 'deleted_at')
+        ? await service.from('items').select('id').eq('organization_id', ctx.organizationId).in('id', itemIds)
+        : itemsPrimary;
 
     if ((itemsCheck.data?.length ?? 0) !== itemIds.length || (unitsCheck.data?.length ?? 0) !== unitIds.length) {
       return badRequest('One or more purchase order items are invalid.');

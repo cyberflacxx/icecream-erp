@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { badRequest, can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
+import { isMissingColumnError } from '@/lib/postgrest-compat';
 import { recordAuditLog } from '@/lib/security-server';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
@@ -19,66 +20,107 @@ export async function GET(request: NextRequest) {
   const categoryId = searchParams.get('categoryId');
 
   try {
-    let query = service
-      .from('suppliers')
-      .select(
-        `id, code, name, contact_person, phone, email, address,
-         category_id, tax_number, payment_terms, credit_limit, current_balance, credit_days, status, rating, notes,
-         document_name, document_url`,
-        { count: 'exact' },
-      )
-      .eq('organization_id', ctx.organizationId)
-      .order('name');
+    const buildPrimaryQuery = () =>
+      service
+        .from('suppliers')
+        .select(
+          `id, code, name, contact_person, phone, email, address,
+           category_id, tax_number, payment_terms, credit_limit, current_balance, credit_days, status, rating, notes,
+           document_name, document_url`,
+          { count: 'exact' },
+        )
+        .eq('organization_id', ctx.organizationId)
+        .order('name');
 
-    if (status) query = query.eq('status', status);
-    if (categoryId) query = query.eq('category_id', categoryId);
-    if (search) {
-      query = query.or(
-        `code.ilike.%${search}%,name.ilike.%${search}%,contact_person.ilike.%${search}%`,
-      );
-    }
+    const buildFallbackQuery = () =>
+      service
+        .from('suppliers')
+        .select(
+          `id, code, name, contact_person, phone, email, address,
+           category_id, payment_terms, credit_limit, credit_days, status, rating, notes,
+           document_name, document_url`,
+          { count: 'exact' },
+        )
+        .eq('organization_id', ctx.organizationId)
+        .order('name');
+
+    let query = buildPrimaryQuery();
+
+    const applyFilters = <
+      T extends {
+        eq(column: string, value: unknown): T;
+        or(filters: string): T;
+      },
+    >(input: T) => {
+      let next = input;
+      if (status) next = next.eq('status', status);
+      if (categoryId) next = next.eq('category_id', categoryId);
+      if (search) {
+        next = next.or(
+          `code.ilike.%${search}%,name.ilike.%${search}%,contact_person.ilike.%${search}%`,
+        );
+      }
+      return next;
+    };
+
+    query = applyFilters(query);
 
     const from = (page - 1) * pageSize;
-    const { data, count, error } = await query.range(from, from + pageSize - 1);
+    const primary = await query.range(from, from + pageSize - 1);
+    let rows = ((primary.data ?? []) as unknown) as Record<string, unknown>[];
+    let total = primary.count ?? 0;
+    let errorMessage = primary.error?.message ?? null;
 
-    if (error) return serverError(error.message);
+    if (
+      primary.error &&
+      (
+        isMissingColumnError(primary.error, 'suppliers', 'tax_number') ||
+        isMissingColumnError(primary.error, 'suppliers', 'current_balance')
+      )
+    ) {
+      const fallback = await applyFilters(buildFallbackQuery()).range(from, from + pageSize - 1);
+      rows = ((fallback.data ?? []) as unknown) as Record<string, unknown>[];
+      total = fallback.count ?? 0;
+      errorMessage = fallback.error?.message ?? null;
+    }
 
-    const categoryIds = [...new Set((data ?? []).map((row) => String(row.category_id ?? '')).filter(Boolean))];
+    if (errorMessage) return serverError(errorMessage);
+    const categoryIds = [...new Set(rows.map((row) => String(row.category_id ?? '')).filter(Boolean))];
     const categoriesResult = categoryIds.length
       ? await service.from('supplier_categories').select('id, name').in('id', categoryIds)
       : { data: [], error: null };
     if (categoriesResult.error) return serverError(categoriesResult.error.message);
     const categories = new Map((categoriesResult.data ?? []).map((row) => [String(row.id), row as Record<string, unknown>]));
 
-    const mapped = (data ?? []).map((r: Record<string, unknown>) => {
+    const mapped = rows.map((r) => {
       const category = categories.get(String(r.category_id ?? '')) ?? null;
       return {
-      id: r.id,
-      code: r.code,
-      name: r.name,
-      category: category
-        ? {
-            id: category.id,
-            name: category.name,
-          }
-        : null,
-      contactPerson: r.contact_person,
-      phone: r.phone,
-      email: r.email,
-      address: r.address,
-      taxNumber: r.tax_number ?? null,
-      paymentTerms: r.payment_terms,
-      creditLimit: Number(r.credit_limit ?? 0),
-      currentBalance: Number(r.current_balance ?? 0),
-      documentName: r.document_name ?? null,
-      documentUrl: r.document_url ?? null,
-      status: r.status,
-    };
+        id: r.id,
+        code: r.code,
+        name: r.name,
+        category: category
+          ? {
+              id: category.id,
+              name: category.name,
+            }
+          : null,
+        contactPerson: r.contact_person,
+        phone: r.phone,
+        email: r.email,
+        address: r.address,
+        taxNumber: r.tax_number ?? null,
+        paymentTerms: r.payment_terms,
+        creditLimit: Number(r.credit_limit ?? 0),
+        currentBalance: Number(r.current_balance ?? 0),
+        documentName: r.document_name ?? null,
+        documentUrl: r.document_url ?? null,
+        status: r.status,
+      };
     });
 
     return NextResponse.json({
       data: mapped,
-      pagination: { page, pageSize, total: count ?? 0 },
+      pagination: { page, pageSize, total },
     });
   } catch (err) {
     return serverError((err as Error).message);
@@ -178,26 +220,35 @@ export async function POST(request: NextRequest) {
 
     if (codeCheck) return badRequest('Supplier code already exists.');
 
-    const { data: supplier, error: supErr } = await service
+    const insertPayload = {
+      name: body.name,
+      tax_number: body.taxNumber ?? null,
+      category_id: categoryId,
+      code,
+      contact_person: body.contactPerson ?? null,
+      phone: body.phone ?? null,
+      email: body.email ?? null,
+      address: body.address ?? null,
+      payment_terms: body.paymentTerms ?? null,
+      credit_limit: body.creditLimit ?? null,
+      document_name: body.documentName ?? null,
+      document_url: body.documentUrl ?? null,
+      status: body.status,
+      organization_id: ctx.organizationId,
+    };
+
+    let { data: supplier, error: supErr } = await service
       .from('suppliers')
-      .insert({
-        name: body.name,
-        tax_number: body.taxNumber ?? null,
-        category_id: categoryId,
-        code,
-        contact_person: body.contactPerson ?? null,
-        phone: body.phone ?? null,
-        email: body.email ?? null,
-        address: body.address ?? null,
-        payment_terms: body.paymentTerms ?? null,
-        credit_limit: body.creditLimit ?? null,
-        document_name: body.documentName ?? null,
-        document_url: body.documentUrl ?? null,
-        status: body.status,
-        organization_id: ctx.organizationId,
-      })
+      .insert(insertPayload)
       .select()
       .single();
+
+    if (supErr && isMissingColumnError(supErr, 'suppliers', 'tax_number')) {
+      const { tax_number, ...fallbackPayload } = insertPayload;
+      const fallback = await service.from('suppliers').insert(fallbackPayload).select().single();
+      supplier = fallback.data;
+      supErr = fallback.error;
+    }
 
     if (supErr) {
       if (supErr.code === '23505') return badRequest('Supplier code already exists.');

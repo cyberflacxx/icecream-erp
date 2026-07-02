@@ -21,23 +21,43 @@ export async function GET(
       .from('purchase_orders')
       .select(
         `id, po_number, order_date, expected_delivery_date, notes, subtotal, tax_amount, discount_amount, total,
-         suppliers(name, email, phone, address),
-         purchase_order_items(quantity_ordered, unit_cost, total_cost, items(code, name), units_of_measure(abbreviation))`,
+         suppliers(name, email, phone, address)`,
       )
       .is('deleted_at', null)
       .eq('organization_id', ctx.organizationId)
       .eq('id', id)
-      .single();
+      .maybeSingle();
 
-    if (error || !order) return notFound('Purchase order not found.');
+    if (error) return serverError(error.message);
+    if (!order) return notFound('Purchase order not found.');
+
+    const itemsRes = await service
+      .from('purchase_order_items')
+      .select('quantity_ordered, unit_cost, total_cost, unit_of_measure_id, items(code, name)')
+      .eq('purchase_order_id', id)
+      .order('created_at', { ascending: true });
+    if (itemsRes.error) return serverError(itemsRes.error.message);
+
+    const unitIds = [
+      ...new Set(
+        (itemsRes.data ?? [])
+          .map((item) => String(item.unit_of_measure_id ?? ''))
+          .filter(Boolean),
+      ),
+    ];
+    const unitsRes = unitIds.length
+      ? await service.from('units_of_measure').select('id, abbreviation').in('id', unitIds)
+      : { data: [], error: null };
+    if (unitsRes.error) return serverError(unitsRes.error.message);
 
     const supplier = Array.isArray(order.suppliers) ? order.suppliers[0] : order.suppliers;
-    const items = Array.isArray(order.purchase_order_items) ? order.purchase_order_items : [];
+    const items = itemsRes.data ?? [];
+    const unitsById = new Map((unitsRes.data ?? []).map((unit) => [String(unit.id), unit]));
     const origin = request.nextUrl.origin;
     const rows = items
       .map((item, index) => {
         const product = Array.isArray(item.items) ? item.items[0] : item.items;
-        const unit = Array.isArray(item.units_of_measure) ? item.units_of_measure[0] : item.units_of_measure;
+        const unit = unitsById.get(String(item.unit_of_measure_id ?? ''));
         return `
           <tr>
             <td>${index + 1}</td>

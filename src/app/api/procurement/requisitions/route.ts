@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { badRequest, can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
+import { isMissingColumnError } from '@/lib/postgrest-compat';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
 export async function GET(request: NextRequest) {
@@ -113,7 +114,7 @@ export async function POST(request: NextRequest) {
     const itemIds = [...new Set(body.items.map((i) => i.itemId))];
     const unitIds = [...new Set(body.items.map((i) => i.unitOfMeasureId))];
 
-    const [itemsCheck, unitsCheck] = await Promise.all([
+    const [itemsPrimary, unitsCheck] = await Promise.all([
       service
         .from('items')
         .select('id')
@@ -126,6 +127,11 @@ export async function POST(request: NextRequest) {
         .eq('organization_id', ctx.organizationId)
         .in('id', unitIds),
     ]);
+
+    const itemsCheck =
+      itemsPrimary.error && isMissingColumnError(itemsPrimary.error, 'items', 'deleted_at')
+        ? await service.from('items').select('id').eq('organization_id', ctx.organizationId).in('id', itemIds)
+        : itemsPrimary;
 
     if ((itemsCheck.data?.length ?? 0) !== itemIds.length || (unitsCheck.data?.length ?? 0) !== unitIds.length) {
       return badRequest('One or more requisition items are invalid.');

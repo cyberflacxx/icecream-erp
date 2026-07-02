@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { badRequest, can, forbidden, getAuthContext, notFound, serverError, unauthorized } from '@/lib/api-auth';
+import { isMissingColumnError } from '@/lib/postgrest-compat';
 import { recordAuditLog } from '@/lib/security-server';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
@@ -16,7 +17,7 @@ export async function GET(
   const service = createServiceRoleClient();
 
   try {
-    const { data: supplier, error } = await service
+    const primary = await service
       .from('suppliers')
       .select(
         `id, code, name, contact_person, phone, email, address,
@@ -28,32 +29,56 @@ export async function GET(
       .eq('id', id)
       .single();
 
-    if (error || !supplier) return notFound('Supplier not found.');
+    let supplier = (primary.data as Record<string, unknown> | null) ?? null;
+    let errorMessage = primary.error?.message ?? null;
 
-    const s = supplier as Record<string, unknown>;
+    if (
+      primary.error &&
+      (
+        isMissingColumnError(primary.error, 'suppliers', 'tax_number') ||
+        isMissingColumnError(primary.error, 'suppliers', 'current_balance') ||
+        isMissingColumnError(primary.error, 'suppliers', 'deleted_at')
+      )
+    ) {
+      const fallback = await service
+        .from('suppliers')
+        .select(
+          `id, code, name, contact_person, phone, email, address,
+           payment_terms, credit_limit, status, created_at, document_name, document_url,
+           supplier_categories(id, name)`,
+        )
+        .eq('organization_id', ctx.organizationId)
+        .eq('id', id)
+        .single();
+      supplier = (fallback.data as Record<string, unknown> | null) ?? null;
+      errorMessage = fallback.error?.message ?? null;
+    }
+
+    if (errorMessage) return serverError(errorMessage);
+    if (!supplier) return notFound('Supplier not found.');
 
     return NextResponse.json({
-      id: s.id,
-      code: s.code,
-      name: s.name,
-      category: s.supplier_categories
+      id: supplier.id,
+      code: supplier.code,
+      name: supplier.name,
+      category: supplier.supplier_categories
         ? {
-            id: (s.supplier_categories as Record<string, unknown>).id,
-            name: (s.supplier_categories as Record<string, unknown>).name,
+            id: (supplier.supplier_categories as Record<string, unknown>).id,
+            name: (supplier.supplier_categories as Record<string, unknown>).name,
           }
         : null,
-      contactPerson: s.contact_person,
-      phone: s.phone,
-      email: s.email,
-      address: s.address,
-      taxNumber: s.tax_number,
-      paymentTerms: s.payment_terms,
-      creditLimit: Number(s.credit_limit ?? 0),
-      currentBalance: Number(s.current_balance ?? 0),
-      documentName: s.document_name ?? null,
-      documentUrl: s.document_url ?? null,
-      status: s.status,
-      createdAt: s.created_at,
+      contactPerson: supplier.contact_person,
+      phone: supplier.phone,
+      email: supplier.email,
+      address: supplier.address,
+      taxNumber: supplier.tax_number ?? null,
+      paymentTerms: supplier.payment_terms,
+      creditLimit: Number(supplier.credit_limit ?? 0),
+      currentBalance: Number(supplier.current_balance ?? 0),
+      documentName: supplier.document_name ?? null,
+      documentUrl: supplier.document_url ?? null,
+      status: supplier.status,
+      createdAt: supplier.created_at,
     });
   } catch (err) {
     return serverError((err as Error).message);
@@ -95,13 +120,24 @@ export async function PATCH(
 
   try {
     // Ensure supplier exists
-    const { data: existing, error: fetchErr } = await service
+    let { data: existing, error: fetchErr } = await service
       .from('suppliers')
       .select('id, code, name, status')
       .is('deleted_at', null)
       .eq('organization_id', ctx.organizationId)
       .eq('id', id)
       .single();
+
+    if (fetchErr && isMissingColumnError(fetchErr, 'suppliers', 'deleted_at')) {
+      const fallback = await service
+        .from('suppliers')
+        .select('id, code, name, status')
+        .eq('organization_id', ctx.organizationId)
+        .eq('id', id)
+        .single();
+      existing = fallback.data;
+      fetchErr = fallback.error;
+    }
 
     if (fetchErr || !existing) return notFound('Supplier not found.');
 
@@ -154,12 +190,24 @@ export async function PATCH(
     }
     if (body.status !== undefined) updatePayload.status = body.status;
 
-    const { data: updated, error: updateErr } = await service
+    let { data: updated, error: updateErr } = await service
       .from('suppliers')
       .update(updatePayload)
       .eq('id', id)
       .select('*, supplier_categories(id, name)')
       .single();
+
+    if (updateErr && isMissingColumnError(updateErr, 'suppliers', 'tax_number')) {
+      const { tax_number, ...fallbackPayload } = updatePayload;
+      const fallback = await service
+        .from('suppliers')
+        .update(fallbackPayload)
+        .eq('id', id)
+        .select('*, supplier_categories(id, name)')
+        .single();
+      updated = fallback.data;
+      updateErr = fallback.error;
+    }
 
     if (updateErr) return serverError(updateErr.message);
 
