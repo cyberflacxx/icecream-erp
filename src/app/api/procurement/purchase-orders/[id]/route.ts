@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { badRequest, can, forbidden, getAuthContext, notFound, serverError, unauthorized } from '@/lib/api-auth';
+import {
+  derivePurchaseOrderStatus,
+  isPurchaseOrderApprovable,
+} from '@/lib/procurement-purchase-orders';
 import { isMissingColumnError } from '@/lib/postgrest-compat';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
@@ -20,7 +24,7 @@ export async function GET(
       .from('purchase_orders')
       .select(
         `id, po_number, order_date, expected_delivery_date, status,
-         subtotal, tax_amount, discount_amount, total,
+         subtotal, tax_amount, discount_amount, total, approved_at, sent_at, rejected_at,
          suppliers(id, name)`,
       )
       .is('deleted_at', null)
@@ -92,7 +96,14 @@ export async function GET(
       poNumber: o.po_number,
       orderDate: o.order_date,
       expectedDeliveryDate: o.expected_delivery_date,
-      status: o.status,
+      status: derivePurchaseOrderStatus({
+        rejectedAt: o.rejected_at,
+        sentAt: o.sent_at,
+        status: o.status,
+      }),
+      approvedAt: o.approved_at ? String(o.approved_at) : null,
+      sentAt: o.sent_at ? String(o.sent_at) : null,
+      rejectedAt: o.rejected_at ? String(o.rejected_at) : null,
       subtotal: Number(o.subtotal ?? 0),
       taxAmount: Number(o.tax_amount ?? 0),
       discountAmount: Number(o.discount_amount ?? 0),
@@ -186,7 +197,7 @@ export async function PATCH(
     if (fetchErr || !existing) return notFound('Purchase order not found.');
 
     const order = existing as Record<string, unknown>;
-    if (order.status !== 'draft') {
+    if (!isPurchaseOrderApprovable(order.status)) {
       return badRequest('Only draft purchase orders can be edited.');
     }
 

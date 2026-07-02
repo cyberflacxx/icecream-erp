@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { badRequest, can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
+import {
+  derivePurchaseOrderStatus,
+  normalizePurchaseOrderStatus,
+} from '@/lib/procurement-purchase-orders';
 import { isMissingColumnError } from '@/lib/postgrest-compat';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
@@ -23,7 +27,7 @@ export async function GET(request: NextRequest) {
     let query = service
       .from('purchase_orders')
       .select(
-        `id, po_number, order_date, expected_delivery_date, status, total, approver_user_id, approved_by, approved_at,
+        `id, po_number, order_date, expected_delivery_date, status, total, approver_user_id, approved_by, approved_at, sent_at, rejected_at,
          suppliers(id, name),
          purchase_order_items(id)`,
         { count: 'exact' },
@@ -32,7 +36,15 @@ export async function GET(request: NextRequest) {
       .eq('organization_id', ctx.organizationId)
       .order('created_at', { ascending: false });
 
-    if (status) query = query.eq('status', status);
+    if (status) {
+      const normalizedStatus = normalizePurchaseOrderStatus(status);
+      if (normalizedStatus === 'REJECTED') {
+        query = query.not('rejected_at', 'is', null);
+      } else {
+        const variants = [...new Set([status, status.toLowerCase(), status.toUpperCase()])];
+        query = query.in('status', variants);
+      }
+    }
     if (supplierId) query = query.eq('supplier_id', supplierId);
     if (startDate) query = query.gte('order_date', startDate);
     if (endDate) query = query.lte('order_date', endDate);
@@ -61,7 +73,11 @@ export async function GET(request: NextRequest) {
       poNumber: r.po_number,
       orderDate: r.order_date,
       expectedDeliveryDate: r.expected_delivery_date,
-      status: r.status,
+      status: derivePurchaseOrderStatus({
+        rejectedAt: r.rejected_at,
+        sentAt: r.sent_at,
+        status: r.status,
+      }),
       approverName: usersById.get(String(r.approver_user_id ?? '')) ?? null,
       approvedBy: usersById.get(String(r.approved_by ?? '')) ?? null,
       approvedAt: r.approved_at ? String(r.approved_at) : null,
@@ -195,7 +211,7 @@ export async function POST(request: NextRequest) {
         approver_user_id: body.approverUserId ?? null,
         organization_id: ctx.organizationId,
         created_by: ctx.userId,
-        status: 'draft',
+        status: 'DRAFT',
         subtotal,
         tax_amount: taxAmount,
         discount_amount: discountAmount,

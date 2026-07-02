@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { badRequest, can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
+import { isPurchaseOrderSentLike } from '@/lib/procurement-purchase-orders';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
 function isMissingColumnError(error: unknown, table: string, columnName: string) {
@@ -234,7 +235,7 @@ export async function POST(request: NextRequest) {
       if (orderErr || !purchaseOrder) return badRequest('Purchase order not found.');
 
       order = purchaseOrder as Record<string, unknown>;
-      if (order.status !== 'sent_to_supplier' && order.status !== 'partial_received') {
+      if (!isPurchaseOrderSentLike(order.status)) {
         return badRequest('GRN can only be created for sent or partially received purchase orders.');
       }
     }

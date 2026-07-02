@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { badRequest, can, forbidden, getAuthContext, notFound, serverError, unauthorized } from '@/lib/api-auth';
+import {
+  derivePurchaseOrderStatus,
+  formatPurchaseOrderDbStatus,
+} from '@/lib/procurement-purchase-orders';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
 export async function POST(
@@ -17,7 +21,7 @@ export async function POST(
   try {
     const { data: existing, error: fetchErr } = await service
       .from('purchase_orders')
-      .select('id, status, approved_by')
+      .select('id, status, approved_by, approved_at, sent_at, rejected_at')
       .is('deleted_at', null)
       .eq('organization_id', ctx.organizationId)
       .eq('id', id)
@@ -26,16 +30,24 @@ export async function POST(
     if (fetchErr || !existing) return notFound('Purchase order not found.');
 
     const order = existing as Record<string, unknown>;
-    if (!['approved', 'draft'].includes(String(order.status))) {
+    const workflowStatus = derivePurchaseOrderStatus({
+      rejectedAt: order.rejected_at,
+      sentAt: order.sent_at,
+      status: order.status,
+    });
+    if (workflowStatus !== 'APPROVED') {
       return badRequest('Only approved purchase orders can be sent.');
     }
-    if (!order.approved_by) {
+    if (!order.approved_by && !order.approved_at) {
       return badRequest('Purchase order must be approved before sending.');
     }
 
     const { data: updated, error: updateErr } = await service
       .from('purchase_orders')
-      .update({ sent_at: new Date().toISOString(), status: 'sent_to_supplier' })
+      .update({
+        sent_at: new Date().toISOString(),
+        status: formatPurchaseOrderDbStatus('sent_to_supplier', order.status),
+      })
       .eq('id', id)
       .select()
       .single();

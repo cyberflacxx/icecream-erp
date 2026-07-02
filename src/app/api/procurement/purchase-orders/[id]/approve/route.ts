@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { badRequest, can, forbidden, getAuthContext, notFound, serverError, unauthorized } from '@/lib/api-auth';
+import {
+  formatPurchaseOrderDbStatus,
+  isPurchaseOrderApprovable,
+} from '@/lib/procurement-purchase-orders';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
 export async function POST(
@@ -25,7 +29,7 @@ export async function POST(
 
     if (fetchErr || !existing) return notFound('Purchase order not found.');
     const order = existing as Record<string, unknown>;
-    if (order.status !== 'draft') {
+    if (!isPurchaseOrderApprovable(order.status)) {
       return badRequest('Only draft purchase orders can be approved.');
     }
     if (order.approver_user_id && String(order.approver_user_id) !== ctx.userId) {
@@ -37,7 +41,7 @@ export async function POST(
       .update({
         approved_by: ctx.userId,
         approved_at: new Date().toISOString(),
-        status: 'approved',
+        status: formatPurchaseOrderDbStatus('approved', order.status),
       })
       .eq('id', id)
       .select()
