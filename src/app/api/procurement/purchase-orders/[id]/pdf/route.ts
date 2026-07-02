@@ -33,7 +33,7 @@ export async function GET(
 
     const itemsRes = await service
       .from('purchase_order_items')
-      .select('quantity_ordered, unit_cost, total_cost, unit_of_measure_id, items(code, name)')
+      .select('quantity_ordered, unit_cost, total_cost, unit_of_measure_id, items(code, name, unit_of_measure_id)')
       .eq('purchase_order_id', id)
       .order('created_at', { ascending: true });
     if (itemsRes.error) return serverError(itemsRes.error.message);
@@ -41,7 +41,10 @@ export async function GET(
     const unitIds = [
       ...new Set(
         (itemsRes.data ?? [])
-          .map((item) => String(item.unit_of_measure_id ?? ''))
+          .map((item) => {
+            const product = Array.isArray(item.items) ? item.items[0] : item.items;
+            return String(item.unit_of_measure_id ?? (product as Record<string, unknown> | null)?.unit_of_measure_id ?? '');
+          })
           .filter(Boolean),
       ),
     ];
@@ -57,7 +60,10 @@ export async function GET(
     const rows = items
       .map((item, index) => {
         const product = Array.isArray(item.items) ? item.items[0] : item.items;
-        const unit = unitsById.get(String(item.unit_of_measure_id ?? ''));
+        const resolvedUnitId = String(
+          item.unit_of_measure_id ?? (product as Record<string, unknown> | null)?.unit_of_measure_id ?? '',
+        );
+        const unit = unitsById.get(resolvedUnitId);
         return `
           <tr>
             <td>${index + 1}</td>

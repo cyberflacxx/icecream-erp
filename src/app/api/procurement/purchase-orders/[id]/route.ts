@@ -34,7 +34,7 @@ export async function GET(
     const [itemsRes, grnsPrimary] = await Promise.all([
       service
         .from('purchase_order_items')
-        .select('id, quantity_ordered, quantity_received, unit_cost, total_cost, unit_of_measure_id, items(id, code, name)')
+        .select('id, quantity_ordered, quantity_received, unit_cost, total_cost, unit_of_measure_id, items(id, code, name, unit_of_measure_id)')
         .eq('purchase_order_id', id)
         .order('created_at', { ascending: true }),
       service
@@ -59,7 +59,10 @@ export async function GET(
     const unitIds = [
       ...new Set(
         (itemsRes.data ?? [])
-          .map((item) => String(item.unit_of_measure_id ?? ''))
+          .map((item) => {
+            const product = Array.isArray(item.items) ? item.items[0] : item.items;
+            return String(item.unit_of_measure_id ?? (product as Record<string, unknown> | null)?.unit_of_measure_id ?? '');
+          })
           .filter(Boolean),
       ),
     ];
@@ -98,8 +101,11 @@ export async function GET(
         ? { id: (o.suppliers as Record<string, unknown>).id, name: (o.suppliers as Record<string, unknown>).name }
         : null,
       items: (itemsRes.data ?? []).map((item) => {
-        const unit = unitsById.get(String(item.unit_of_measure_id ?? ''));
         const product = Array.isArray(item.items) ? item.items[0] : item.items;
+        const resolvedUnitId = String(
+          item.unit_of_measure_id ?? (product as Record<string, unknown> | null)?.unit_of_measure_id ?? '',
+        );
+        const unit = unitsById.get(resolvedUnitId);
         return {
           id: item.id,
           quantityOrdered: Number(item.quantity_ordered ?? 0),
