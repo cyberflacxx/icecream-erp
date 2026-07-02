@@ -30,7 +30,7 @@ export async function GET(_request: NextRequest) {
         .order('name'),
       service
         .from('items')
-        .select('id, code, name, unit_of_measure_id')
+        .select('id, code, name, description, item_type, unit_of_measure_id')
         .is('deleted_at', null)
         .eq('is_active', true)
         .eq('organization_id', ctx.organizationId)
@@ -68,7 +68,7 @@ export async function GET(_request: NextRequest) {
       itemsPrimary.error && isMissingColumnError(itemsPrimary.error, 'items', 'deleted_at')
         ? await service
             .from('items')
-            .select('id, code, name, unit_of_measure_id')
+            .select('id, code, name, description, item_type, unit_of_measure_id')
             .eq('is_active', true)
             .eq('organization_id', ctx.organizationId)
             .order('name')
@@ -104,7 +104,14 @@ export async function GET(_request: NextRequest) {
           role: user.role ? String(user.role) : null,
         })),
       suppliers: suppliersRes.data ?? [],
-      items: itemsRes.data ?? [],
+      items: (itemsRes.data ?? []).map((item) => ({
+        code: String(item.code ?? ''),
+        description: item.description ? String(item.description) : null,
+        id: String(item.id),
+        itemType: item.item_type ? String(item.item_type) : null,
+        name: String(item.name ?? item.code ?? 'Unnamed item'),
+        unitOfMeasureId: item.unit_of_measure_id ? String(item.unit_of_measure_id) : null,
+      })),
       units: unitsRes.data ?? [],
       warehouses: (warehousesRes.data ?? []).map((warehouse) => ({
         branchId: warehouse.branch_id ? String(warehouse.branch_id) : null,

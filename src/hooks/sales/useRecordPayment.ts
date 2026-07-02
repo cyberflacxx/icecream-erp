@@ -16,14 +16,28 @@ interface RecordPaymentPayload {
   referenceNumber?: string;
 }
 
+export interface RecordPaymentResponse {
+  invoice?: Record<string, unknown>;
+  journal?: { entryNumber: string; id: string } | null;
+  linkedTransaction?: { id: string; table: string } | null;
+  payment: {
+    amount?: number;
+    id: string;
+    payment_date?: string;
+    payment_method?: string;
+    payment_number?: string;
+    reference_number?: string | null;
+  };
+}
+
 export function useRecordPayment() {
   const { getToken } = useAppAuth();
   const queryClient = useQueryClient();
 
-  return useMutation({
+  return useMutation<RecordPaymentResponse, Error, RecordPaymentPayload>({
     mutationFn: async ({ invoiceId, ...payload }: RecordPaymentPayload) => {
       const token = await getToken();
-      return apiFetch(API_ROUTES.SALES.INVOICE_PAYMENT(invoiceId), {
+      return apiFetch<RecordPaymentResponse>(API_ROUTES.SALES.INVOICE_PAYMENT(invoiceId), {
         body: JSON.stringify(payload),
         method: 'POST',
         token

@@ -90,6 +90,9 @@ export default function RequisitionsPage() {
 
   const requisitions = requisitionsQuery.data?.data ?? [];
   const pagination = requisitionsQuery.data?.pagination;
+  const selectedItems = formState.items.map((item) =>
+    metaQuery.data?.items.find((candidate) => candidate.id === item.itemId) ?? null,
+  );
 
   async function refresh() {
     await queryClient.invalidateQueries({
@@ -408,90 +411,106 @@ export default function RequisitionsPage() {
               </Button>
             </div>
             {formState.items.map((item, index) => (
-              <div key={index} className="grid gap-3 md:grid-cols-[1fr_120px_140px_140px_auto]">
-                <select
-                  value={item.itemId}
-                  onChange={(event) =>
-                    setFormState((current) => ({
-                      ...current,
-                      items: current.items.map((row, rowIndex) =>
-                        rowIndex === index ? { ...row, itemId: event.target.value } : row,
-                      )
-                    }))
-                  }
-                  className="surface-input-soft"
-                >
-                  <option value="">Select item</option>
-                  {(metaQuery.data?.items ?? []).map((row) => (
-                    <option key={row.id} value={row.id}>
-                      {row.code} - {row.name}
-                    </option>
-                  ))}
-                </select>
-                <input
-                  min="0.001"
-                  step="0.001"
-                  type="number"
-                  value={item.quantityRequested}
-                  onChange={(event) =>
-                    setFormState((current) => ({
-                      ...current,
-                      items: current.items.map((row, rowIndex) =>
-                        rowIndex === index ? { ...row, quantityRequested: event.target.value } : row,
-                      )
-                    }))
-                  }
-                  className="surface-input-soft"
-                />
-                <select
-                  value={item.unitOfMeasureId}
-                  onChange={(event) =>
-                    setFormState((current) => ({
-                      ...current,
-                      items: current.items.map((row, rowIndex) =>
-                        rowIndex === index ? { ...row, unitOfMeasureId: event.target.value } : row,
-                      )
-                    }))
-                  }
-                  className="surface-input-soft"
-                >
-                  <option value="">UOM</option>
-                  {(metaQuery.data?.units ?? []).map((row) => (
-                    <option key={row.id} value={row.id}>
-                      {row.abbreviation}
-                    </option>
-                  ))}
-                </select>
-                <input
-                  min="0"
-                  step="0.01"
-                  type="number"
-                  value={item.estimatedUnitCost}
-                  onChange={(event) =>
-                    setFormState((current) => ({
-                      ...current,
-                      items: current.items.map((row, rowIndex) =>
-                        rowIndex === index ? { ...row, estimatedUnitCost: event.target.value } : row,
-                      )
-                    }))
-                  }
-                  className="surface-input-soft"
-                />
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() =>
-                    setFormState((current) => ({
-                      ...current,
-                      items:
-                        current.items.length === 1
-                          ? current.items
-                          : current.items.filter((_, rowIndex) => rowIndex !== index)
-                    }))
-                  }
-                >
-                  Remove
-                </Button>
+              <div key={index} className="rounded-2xl border border-border/70 bg-white/80 p-4">
+                <div className="grid gap-3 md:grid-cols-[minmax(0,1.4fr)_120px_140px_140px_auto]">
+                  <div className="space-y-2">
+                    <select
+                      value={item.itemId}
+                      onChange={(event) => {
+                        const selectedItem = metaQuery.data?.items.find((candidate) => candidate.id === event.target.value);
+                        setFormState((current) => ({
+                          ...current,
+                          items: current.items.map((row, rowIndex) =>
+                            rowIndex === index
+                              ? {
+                                  ...row,
+                                  itemId: event.target.value,
+                                  unitOfMeasureId: selectedItem?.unitOfMeasureId ?? row.unitOfMeasureId,
+                                }
+                              : row,
+                          )
+                        }));
+                      }}
+                      className="surface-input-soft"
+                    >
+                      <option value="">Select item</option>
+                      {(metaQuery.data?.items ?? []).map((row) => (
+                        <option key={row.id} value={row.id}>
+                          {row.code} - {row.name}
+                        </option>
+                      ))}
+                    </select>
+                    <div className="rounded-xl border border-border/60 bg-cream/50 px-3 py-2 text-xs text-muted">
+                      {selectedItems[index]
+                        ? `${selectedItems[index]?.itemType?.replace(/_/g, ' ') ?? 'Item'}${selectedItems[index]?.description ? ` • ${selectedItems[index]?.description}` : ''}`
+                        : 'Select an item to show its type and description.'}
+                    </div>
+                  </div>
+                  <input
+                    min="0.001"
+                    step="0.001"
+                    type="number"
+                    value={item.quantityRequested}
+                    onChange={(event) =>
+                      setFormState((current) => ({
+                        ...current,
+                        items: current.items.map((row, rowIndex) =>
+                          rowIndex === index ? { ...row, quantityRequested: event.target.value } : row,
+                        )
+                      }))
+                    }
+                    className="surface-input-soft"
+                  />
+                  <select
+                    value={item.unitOfMeasureId}
+                    onChange={(event) =>
+                      setFormState((current) => ({
+                        ...current,
+                        items: current.items.map((row, rowIndex) =>
+                          rowIndex === index ? { ...row, unitOfMeasureId: event.target.value } : row,
+                        )
+                      }))
+                    }
+                    className="surface-input-soft"
+                  >
+                    <option value="">UOM</option>
+                    {(metaQuery.data?.units ?? []).map((row) => (
+                      <option key={row.id} value={row.id}>
+                        {row.abbreviation}
+                      </option>
+                    ))}
+                  </select>
+                  <input
+                    min="0"
+                    step="0.01"
+                    type="number"
+                    value={item.estimatedUnitCost}
+                    onChange={(event) =>
+                      setFormState((current) => ({
+                        ...current,
+                        items: current.items.map((row, rowIndex) =>
+                          rowIndex === index ? { ...row, estimatedUnitCost: event.target.value } : row,
+                        )
+                      }))
+                    }
+                    className="surface-input-soft"
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() =>
+                      setFormState((current) => ({
+                        ...current,
+                        items:
+                          current.items.length === 1
+                            ? current.items
+                            : current.items.filter((_, rowIndex) => rowIndex !== index)
+                      }))
+                    }
+                  >
+                    Remove
+                  </Button>
+                </div>
               </div>
             ))}
           </div>

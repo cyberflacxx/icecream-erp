@@ -24,7 +24,7 @@ function isOptionalTableError(error: unknown) {
 }
 
 async function fetchRows(service: ReturnType<typeof createServiceRoleClient>, table: string) {
-  const { data, error } = await service.from(table).select('*');
+  const { data, error } = await service.schema('icecream_erp').from(table).select('*');
   if (error) {
     if (isOptionalTableError(error)) return [];
     throw new Error(error.message);
@@ -239,6 +239,8 @@ export async function GET() {
           warehouseId: row.warehouse_id ? String(row.warehouse_id) : salesOrderId ? orderWarehouseById.get(salesOrderId) ?? null : null,
         };
       })
+      .filter((invoice) => invoice.balanceDue > 0)
+      .filter((invoice) => !['cancelled', 'paid'].includes(invoice.status.toLowerCase()))
       .filter((invoice) => !ctx.isBranchScoped || !ctx.branchId || !invoice.warehouseId || warehouseIdSet.has(invoice.warehouseId))
       .sort((a, b) => String(b.invoiceDate ?? '').localeCompare(String(a.invoiceDate ?? '')));
 

@@ -4,6 +4,8 @@
 Absolute Ice Cream ERP is a full-stack manufacturing ERP tailored for ice cream production and distribution workflows.  
 It covers procurement, inventory, production, branch operations, sales, finance-ready reporting, role-based access control, and operational auditability.
 
+Current delivery tracking for the latest client feedback lives in [CLIENT_CHANGE_TRACKER.md](./CLIENT_CHANGE_TRACKER.md).
+
 ## Tech Stack
 - Monorepo: Turborepo
 - Frontend: Next.js 14 (App Router), TypeScript, Tailwind CSS, Recharts, shadcn/ui primitives

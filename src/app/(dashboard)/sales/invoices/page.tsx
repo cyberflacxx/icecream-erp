@@ -10,9 +10,10 @@ import { createSalesLineDraft, normalizeSalesLines, SalesLineItemsEditor } from 
 import { Button } from '@/components/ui/button';
 import { DataTable, EmptyState, FormDrawer, LoadingState, StatCard } from '@/components/ui-library';
 import { type InvoiceListItem, useInvoices } from '@/hooks/sales/useInvoices';
-import { useRecordPayment } from '@/hooks/sales/useRecordPayment';
+import { type RecordPaymentResponse, useRecordPayment } from '@/hooks/sales/useRecordPayment';
 import { useSalesMeta } from '@/hooks/sales/useSalesMeta';
 import { useSalesRequest } from '@/hooks/sales/useSalesRequest';
+import { buildSalesReceiptPrintUrl } from '@/lib/sales-payments';
 import { API_ROUTES } from '@/lib/shared';
 
 const currency = new Intl.NumberFormat('en-US', {
@@ -53,6 +54,8 @@ export default function InvoicesPage() {
   const [invoiceForm, setInvoiceForm] = useState(initialInvoiceForm);
   const [receiptForm, setReceiptForm] = useState(initialReceiptForm);
   const [formError, setFormError] = useState<string | null>(null);
+  const [receiptSubmitMode, setReceiptSubmitMode] = useState<'save' | 'print'>('save');
+  const [receiptContext, setReceiptContext] = useState<InvoiceListItem | null>(null);
 
   async function refresh() {
     await queryClient.invalidateQueries({ queryKey: ['sales'] });
@@ -104,6 +107,7 @@ export default function InvoicesPage() {
   }
 
   function openReceiptDrawer(row: InvoiceListItem) {
+    setReceiptContext(row);
     setReceiptForm({
       ...initialReceiptForm,
       amount: String(row.balanceDue),
@@ -118,7 +122,7 @@ export default function InvoicesPage() {
     event.preventDefault();
 
     try {
-      await recordPayment.mutateAsync({
+      const response = await recordPayment.mutateAsync({
         amount: Number(receiptForm.amount),
         customerId: receiptForm.customerId,
         invoiceId: receiptForm.invoiceId,
@@ -127,7 +131,9 @@ export default function InvoicesPage() {
         paymentMethod: receiptForm.paymentMethod,
         referenceNumber: receiptForm.referenceNumber || undefined,
       });
+      maybePrintReceipt(response);
       setReceiptForm(initialReceiptForm);
+      setReceiptContext(null);
       setFormError(null);
       setIsReceiptDrawerOpen(false);
       await refresh();
@@ -147,6 +153,27 @@ export default function InvoicesPage() {
     .filter((row) => row.balanceDue > 0 && row.dueDate && new Date(row.dueDate).getTime() < Date.now())
     .reduce((sum, row) => sum + row.balanceDue, 0);
   const collected = rows.reduce((sum, row) => sum + row.amountPaid, 0);
+
+  function maybePrintReceipt(response: RecordPaymentResponse) {
+    if (receiptSubmitMode !== 'print') return;
+
+    const payment = response.payment;
+    const printUrl = buildSalesReceiptPrintUrl(
+      {
+        amount: Number(payment.amount ?? receiptForm.amount),
+        customerName: receiptContext?.customer?.name ?? 'Customer',
+        invoiceNumber: receiptContext?.invoiceNumber ?? 'Invoice',
+        notes: receiptForm.notes || undefined,
+        paymentDate: String(payment.payment_date ?? receiptForm.paymentDate),
+        paymentMethod: String(payment.payment_method ?? receiptForm.paymentMethod),
+        paymentNumber: String(payment.payment_number ?? 'Pending'),
+        referenceNumber: payment.reference_number ?? receiptForm.referenceNumber ?? undefined,
+      },
+      { autoPrint: true },
+    );
+
+    window.open(printUrl, '_blank', 'noopener,noreferrer');
+  }
 
   return (
     <div className="space-y-8">
@@ -301,18 +328,45 @@ export default function InvoicesPage() {
               {formError}
             </div>
           ) : null}
+          {receiptContext ? (
+            <div className="rounded-3xl border border-border/70 bg-[linear-gradient(135deg,rgba(255,247,232,0.96),rgba(255,255,255,0.92))] px-4 py-4">
+              <div className="grid gap-3 sm:grid-cols-3">
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">Customer</p>
+                  <p className="mt-1 text-sm font-medium text-brown">{receiptContext.customer?.name ?? 'Not assigned'}</p>
+                </div>
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">Invoice</p>
+                  <p className="mt-1 text-sm font-medium text-brown">{receiptContext.invoiceNumber}</p>
+                </div>
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">Outstanding Balance</p>
+                  <p className="mt-1 text-sm font-medium text-brown">{currency.format(receiptContext.balanceDue)}</p>
+                </div>
+              </div>
+            </div>
+          ) : null}
           <div className="grid gap-5 sm:grid-cols-2">
             <label className="space-y-2 text-sm text-muted">
               <span>Receipt date</span>
-              <input className="surface-input-soft" required type="date" value={receiptForm.paymentDate} onChange={(event) => setReceiptForm((current) => ({ ...current, paymentDate: event.target.value }))} />
+              <input className="surface-input-soft" required type="date" value={receiptForm.paymentDate} onChange={(event) => {
+                setFormError(null);
+                setReceiptForm((current) => ({ ...current, paymentDate: event.target.value }));
+              }} />
             </label>
             <label className="space-y-2 text-sm text-muted">
               <span>Amount</span>
-              <input className="surface-input-soft" min="0.01" step="0.01" type="number" value={receiptForm.amount} onChange={(event) => setReceiptForm((current) => ({ ...current, amount: event.target.value }))} />
+              <input className="surface-input-soft" min="0.01" step="0.01" type="number" value={receiptForm.amount} onChange={(event) => {
+                setFormError(null);
+                setReceiptForm((current) => ({ ...current, amount: event.target.value }));
+              }} />
             </label>
             <label className="space-y-2 text-sm text-muted">
               <span>Source of payment</span>
-              <select className="surface-input-soft" value={receiptForm.paymentMethod} onChange={(event) => setReceiptForm((current) => ({ ...current, paymentMethod: event.target.value as typeof current.paymentMethod }))}>
+              <select className="surface-input-soft" value={receiptForm.paymentMethod} onChange={(event) => {
+                setFormError(null);
+                setReceiptForm((current) => ({ ...current, paymentMethod: event.target.value as typeof current.paymentMethod }));
+              }}>
                 <option value="CASH">Cash</option>
                 <option value="BANK_TRANSFER">Bank</option>
                 <option value="PETTY_CASH">Petty cash</option>
@@ -320,19 +374,28 @@ export default function InvoicesPage() {
             </label>
             <label className="space-y-2 text-sm text-muted">
               <span>Reference</span>
-              <input className="surface-input-soft" value={receiptForm.referenceNumber} onChange={(event) => setReceiptForm((current) => ({ ...current, referenceNumber: event.target.value }))} />
+              <input className="surface-input-soft" value={receiptForm.referenceNumber} onChange={(event) => {
+                setFormError(null);
+                setReceiptForm((current) => ({ ...current, referenceNumber: event.target.value }));
+              }} />
             </label>
           </div>
           <label className="space-y-2 text-sm text-muted">
             <span>Notes</span>
-            <textarea className="surface-textarea-soft" rows={3} value={receiptForm.notes} onChange={(event) => setReceiptForm((current) => ({ ...current, notes: event.target.value }))} />
+            <textarea className="surface-textarea-soft" rows={3} value={receiptForm.notes} onChange={(event) => {
+              setFormError(null);
+              setReceiptForm((current) => ({ ...current, notes: event.target.value }));
+            }} />
           </label>
           <div className="flex justify-end gap-3">
             <Button type="button" variant="outline" onClick={() => setIsReceiptDrawerOpen(false)}>
               Cancel
             </Button>
-            <Button type="submit" disabled={recordPayment.isPending}>
-              {recordPayment.isPending ? 'Saving...' : 'Record Receipt'}
+            <Button type="submit" variant="outline" disabled={recordPayment.isPending} onClick={() => setReceiptSubmitMode('save')}>
+              {recordPayment.isPending && receiptSubmitMode === 'save' ? 'Saving...' : 'Save'}
+            </Button>
+            <Button type="submit" variant="secondary" disabled={recordPayment.isPending} onClick={() => setReceiptSubmitMode('print')}>
+              {recordPayment.isPending && receiptSubmitMode === 'print' ? 'Saving & opening...' : 'Save & Print'}
             </Button>
           </div>
         </form>

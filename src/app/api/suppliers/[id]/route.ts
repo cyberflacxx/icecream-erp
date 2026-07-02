@@ -5,6 +5,17 @@ import { isMissingColumnError } from '@/lib/postgrest-compat';
 import { recordAuditLog } from '@/lib/security-server';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
+const OPTIONAL_SUPPLIER_COLUMNS = ['current_balance', 'deleted_at', 'document_name', 'document_url', 'tax_number'] as const;
+
+function stripMissingSupplierColumn<T extends Record<string, unknown>>(payload: T, error: unknown) {
+  const entry = OPTIONAL_SUPPLIER_COLUMNS.find((column) => isMissingColumnError(error, 'suppliers', column));
+  if (!entry) return null;
+
+  const nextPayload = { ...payload };
+  delete nextPayload[entry];
+  return nextPayload;
+}
+
 export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
@@ -32,14 +43,7 @@ export async function GET(
     let supplier = (primary.data as Record<string, unknown> | null) ?? null;
     let errorMessage = primary.error?.message ?? null;
 
-    if (
-      primary.error &&
-      (
-        isMissingColumnError(primary.error, 'suppliers', 'tax_number') ||
-        isMissingColumnError(primary.error, 'suppliers', 'current_balance') ||
-        isMissingColumnError(primary.error, 'suppliers', 'deleted_at')
-      )
-    ) {
+    if (primary.error && OPTIONAL_SUPPLIER_COLUMNS.some((column) => isMissingColumnError(primary.error, 'suppliers', column))) {
       const fallback = await service
         .from('suppliers')
         .select(
@@ -197,11 +201,14 @@ export async function PATCH(
       .select('*, supplier_categories(id, name)')
       .single();
 
-    if (updateErr && isMissingColumnError(updateErr, 'suppliers', 'tax_number')) {
-      const { tax_number, ...fallbackPayload } = updatePayload;
+    let retryPayload: Record<string, unknown> | null = updatePayload;
+    while (updateErr && retryPayload) {
+      retryPayload = stripMissingSupplierColumn(retryPayload, updateErr);
+      if (!retryPayload) break;
+
       const fallback = await service
         .from('suppliers')
-        .update(fallbackPayload)
+        .update(retryPayload)
         .eq('id', id)
         .select('*, supplier_categories(id, name)')
         .single();

@@ -16,7 +16,10 @@ export interface ProcurementMetaResponse {
   items: Array<{
     id: string;
     code: string;
+    description: string | null;
+    itemType: string | null;
     name: string;
+    unitOfMeasureId: string | null;
   }>;
   purchaseOrders: Array<{
     id: string;

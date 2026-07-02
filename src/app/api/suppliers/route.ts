@@ -5,6 +5,17 @@ import { isMissingColumnError } from '@/lib/postgrest-compat';
 import { recordAuditLog } from '@/lib/security-server';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
+const OPTIONAL_SUPPLIER_COLUMNS = ['current_balance', 'deleted_at', 'document_name', 'document_url', 'tax_number'] as const;
+
+function stripMissingSupplierColumn<T extends Record<string, unknown>>(payload: T, error: unknown) {
+  const entry = OPTIONAL_SUPPLIER_COLUMNS.find((column) => isMissingColumnError(error, 'suppliers', column));
+  if (!entry) return null;
+
+  const nextPayload = { ...payload };
+  delete nextPayload[entry];
+  return nextPayload;
+}
+
 export async function GET(request: NextRequest) {
   const ctx = await getAuthContext();
   if (!ctx) return unauthorized();
@@ -71,13 +82,7 @@ export async function GET(request: NextRequest) {
     let total = primary.count ?? 0;
     let errorMessage = primary.error?.message ?? null;
 
-    if (
-      primary.error &&
-      (
-        isMissingColumnError(primary.error, 'suppliers', 'tax_number') ||
-        isMissingColumnError(primary.error, 'suppliers', 'current_balance')
-      )
-    ) {
+    if (primary.error && OPTIONAL_SUPPLIER_COLUMNS.some((column) => isMissingColumnError(primary.error, 'suppliers', column))) {
       const fallback = await applyFilters(buildFallbackQuery()).range(from, from + pageSize - 1);
       rows = ((fallback.data ?? []) as unknown) as Record<string, unknown>[];
       total = fallback.count ?? 0;
@@ -243,9 +248,12 @@ export async function POST(request: NextRequest) {
       .select()
       .single();
 
-    if (supErr && isMissingColumnError(supErr, 'suppliers', 'tax_number')) {
-      const { tax_number, ...fallbackPayload } = insertPayload;
-      const fallback = await service.from('suppliers').insert(fallbackPayload).select().single();
+    let retryPayload: Record<string, unknown> | null = insertPayload;
+    while (supErr && retryPayload) {
+      retryPayload = stripMissingSupplierColumn(retryPayload, supErr);
+      if (!retryPayload) break;
+
+      const fallback = await service.from('suppliers').insert(retryPayload).select().single();
       supplier = fallback.data;
       supErr = fallback.error;
     }
