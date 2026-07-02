@@ -12,7 +12,7 @@ export async function GET(_request: NextRequest) {
   const service = createServiceRoleClient();
 
   try {
-    const poStatusFilter = ['sent_to_supplier', 'partial_received'];
+    const poStatusFilter = new Set(['approved', 'partial_received', 'sent_to_supplier']);
     const warehouseQuery = service
       .from('warehouses')
       .select('id, code, name, type, warehouse_type, branch_id')
@@ -46,7 +46,6 @@ export async function GET(_request: NextRequest) {
         .select('id, po_number, status, supplier_id, suppliers(id, name)')
         .is('deleted_at', null)
         .eq('organization_id', ctx.organizationId)
-        .in('status', poStatusFilter)
         .order('created_at', { ascending: false }),
       service
         .from('users')
@@ -115,14 +114,16 @@ export async function GET(_request: NextRequest) {
         type: warehouse.type ? String(warehouse.type) : null,
         warehouseType: warehouse.warehouse_type ? String(warehouse.warehouse_type) : null,
       })),
-      purchaseOrders: (purchaseOrdersRes.data ?? []).map((o: Record<string, unknown>) => ({
-        id: o.id,
-        poNumber: o.po_number,
-        status: o.status,
-        supplier: o.suppliers
-          ? { id: (o.suppliers as Record<string, unknown>).id, name: (o.suppliers as Record<string, unknown>).name }
-          : null,
-      })),
+      purchaseOrders: (purchaseOrdersRes.data ?? [])
+        .filter((o) => poStatusFilter.has(String(o.status ?? '').toLowerCase()))
+        .map((o: Record<string, unknown>) => ({
+          id: o.id,
+          poNumber: o.po_number,
+          status: o.status,
+          supplier: o.suppliers
+            ? { id: (o.suppliers as Record<string, unknown>).id, name: (o.suppliers as Record<string, unknown>).name }
+            : null,
+        })),
       departments: uniqueDepartments,
     });
   } catch (err) {
