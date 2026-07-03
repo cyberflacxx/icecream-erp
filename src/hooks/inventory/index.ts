@@ -5,6 +5,7 @@ export * from './useExpiringBatches';
 export * from './useInventoryMeta';
 export * from './useInventoryMutations';
 export * from './useInventoryReport';
+export * from './useInventoryRequest';
 export * from './useItems';
 export * from './useLowStock';
 export * from './useStockBalances';
