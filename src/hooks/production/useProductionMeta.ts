@@ -26,8 +26,13 @@ export type ProductionMetaRecipe = Record<string, unknown> & {
 
 export type ProductionMetaWarehouse = Record<string, unknown> & {
   id: string;
+  isMainWarehouse?: boolean;
+  isProductionFinishedWarehouse?: boolean;
+  isProductionMaterialWarehouse?: boolean;
   isProductionWarehouse: boolean;
   name: string;
+  productionRole?: string | null;
+  warehouseType?: string | null;
 };
 
 export type ProductionMetaResponse = {
@@ -37,7 +42,10 @@ export type ProductionMetaResponse = {
   finishedGoods: ProductionMetaItem[];
   flavours: Array<Record<string, unknown>>;
   items: ProductionMetaItem[];
+  mainWarehouses?: ProductionMetaWarehouse[];
   packagingItems: ProductionMetaItem[];
+  productionFinishedWarehouses?: ProductionMetaWarehouse[];
+  productionMaterialWarehouses?: ProductionMetaWarehouse[];
   productionCategories: Array<{ label: string; value: string }>;
   rawMaterials: ProductionMetaItem[];
   recipes: ProductionMetaRecipe[];

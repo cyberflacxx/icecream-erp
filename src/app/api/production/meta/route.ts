@@ -22,6 +22,18 @@ function unitId(row: Record<string, unknown>) {
   return row.unit_of_measure_id ?? row.unit_id ?? null;
 }
 
+function warehouseType(row: Record<string, unknown>) {
+  return String(row.warehouse_type ?? row.type ?? '').toUpperCase();
+}
+
+function warehouseRole(row: Record<string, unknown>) {
+  return String(row.production_role ?? '').toUpperCase();
+}
+
+function warehouseName(row: Record<string, unknown>) {
+  return String(row.name ?? '').toLowerCase();
+}
+
 export async function GET() {
   const ctx = await getAuthContext();
   if (!ctx) return unauthorized();
@@ -117,6 +129,37 @@ export async function GET() {
       packagingItems: packagingItemsByRecipe.get(String(recipe.id)) ?? [],
     }));
 
+    const normalizedWarehouses = warehouses.map((warehouse) => {
+      const type = warehouseType(warehouse);
+      const role = warehouseRole(warehouse);
+      const name = warehouseName(warehouse);
+      const isProductionWarehouse =
+        Boolean(warehouse.is_production_warehouse) ||
+        role === 'PRODUCTION' ||
+        type.includes('PRODUCTION') ||
+        name.includes('production');
+
+      return {
+        ...warehouse,
+        isMainWarehouse:
+          type === 'MAIN' ||
+          name.includes('main') ||
+          name.includes('hq') ||
+          name.includes('head office'),
+        isProductionFinishedWarehouse:
+          isProductionWarehouse &&
+          (type.includes('FINISHED') || name.includes('finished') || name.includes('fg')),
+        isProductionMaterialWarehouse:
+          isProductionWarehouse ||
+          type.includes('PRODUCTION_MATERIAL') ||
+          name.includes('production raw') ||
+          name.includes('production material'),
+        isProductionWarehouse,
+        productionRole: role || null,
+        warehouseType: type || null,
+      };
+    });
+
     return NextResponse.json({
       categories,
       chocolateTypes,
@@ -127,23 +170,20 @@ export async function GET() {
       flavours,
       items: normalizedItems,
       rawMaterials: normalizedItems.filter((item) => ['RAW_MATERIAL', 'RAW'].includes(String(item.itemType))),
-      packagingItems: normalizedItems.filter((item) => String(item.itemType) === 'PACKAGING'),
+      packagingItems: normalizedItems.filter((item) => ['PACKAGING', 'PACKAGING_MATERIAL'].includes(String(item.itemType))),
       finishedGoods: normalizedItems.filter((item) => ['FINISHED_GOOD', 'FINISHED'].includes(String(item.itemType))),
+      mainWarehouses: normalizedWarehouses.filter((warehouse) => warehouse.isMainWarehouse),
       productionCategories: [
         { label: 'Ice Cream Making', value: 'ICE_CREAM_MAKING' },
         { label: 'Packaging', value: 'PACKAGING' },
       ],
+      productionFinishedWarehouses: normalizedWarehouses.filter((warehouse) => warehouse.isProductionFinishedWarehouse),
+      productionMaterialWarehouses: normalizedWarehouses.filter((warehouse) => warehouse.isProductionMaterialWarehouse),
       recipes: normalizedRecipes,
       stockByItemId: Object.fromEntries(stockByItemId.entries()),
       stockByItemWarehouse: Object.fromEntries(stockByItemWarehouse.entries()),
       unitsOfMeasure,
-      warehouses: warehouses.map((warehouse) => ({
-        ...warehouse,
-        isProductionWarehouse:
-          Boolean(warehouse.is_production_warehouse) ||
-          String(warehouse.production_role ?? '').toUpperCase() === 'PRODUCTION' ||
-          String(warehouse.name ?? '').toLowerCase().includes('production'),
-      })),
+      warehouses: normalizedWarehouses,
     });
   } catch (err) {
     return serverError(err instanceof Error ? err.message : 'Internal server error');

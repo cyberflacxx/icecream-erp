@@ -1,6 +1,6 @@
 'use client';
 
-import { AlertCircle, Plus } from 'lucide-react';
+import { AlertCircle, CheckCircle2, FileSpreadsheet, Plus } from 'lucide-react';
 import { type FormEvent, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 
@@ -13,30 +13,36 @@ import { useProductionRequest } from '@/hooks/production/useProductionRequest';
 import { useRecipes } from '@/hooks/production/useRecipes';
 
 type FormulaLine = {
+  rowId: string;
   itemId: string;
   quantityRequired: string;
   unitId: string;
   wastageAllowancePercent: string;
 };
 
-const emptyLine: FormulaLine = {
-  itemId: '',
-  quantityRequired: '1',
-  unitId: '',
-  wastageAllowancePercent: '0',
-};
+function createFormulaLine(): FormulaLine {
+  return {
+    rowId: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    itemId: '',
+    quantityRequired: '1',
+    unitId: '',
+    wastageAllowancePercent: '0',
+  };
+}
 
-const initialFormState = {
-  expectedOutputQuantity: '100',
-  finishedItemId: '',
-  ingredients: [emptyLine],
-  instructions: '',
-  name: '',
-  outputUnitId: '',
-  packagingItems: [] as FormulaLine[],
-  packagingRequirement: '',
-  productionCategory: 'ICE_CREAM_MAKING',
-};
+function createInitialFormState() {
+  return {
+    expectedOutputQuantity: '1',
+    finishedItemId: '',
+    ingredients: [createFormulaLine()],
+    instructions: '',
+    name: '',
+    outputUnitId: '',
+    packagingItems: [] as FormulaLine[],
+    packagingRequirement: '',
+    productionCategory: 'ICE_CREAM_MAKING',
+  };
+}
 
 function toPayloadLine(line: FormulaLine) {
   return {
@@ -53,7 +59,8 @@ export default function ProductionRecipesPage() {
   const request = useProductionRequest();
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
-  const [formState, setFormState] = useState(initialFormState);
+  const [feedback, setFeedback] = useState<{ message: string; tone: 'error' | 'success' } | null>(null);
+  const [formState, setFormState] = useState(() => createInitialFormState());
   const [formError, setFormError] = useState<string | null>(null);
 
   const recipes = Array.isArray(query.data) ? query.data as Array<Record<string, unknown>> : [];
@@ -71,7 +78,7 @@ export default function ProductionRecipesPage() {
   function addLine(section: 'ingredients' | 'packagingItems') {
     setFormState((current) => ({
       ...current,
-      [section]: [...current[section], { ...emptyLine }],
+      [section]: [...current[section], createFormulaLine()],
     }));
   }
 
@@ -112,15 +119,29 @@ export default function ProductionRecipesPage() {
         }),
         method: 'POST',
       });
-      setFormState(initialFormState);
+      setFormState(createInitialFormState());
       setFormError(null);
       setOpen(false);
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['recipes'] }),
         queryClient.invalidateQueries({ queryKey: ['production'] }),
       ]);
+      setFeedback({ message: 'BOM saved as the active production standard.', tone: 'success' });
     } catch (error) {
       setFormError(error instanceof Error ? error.message : 'Failed to create recipe.');
+    }
+  }
+
+  async function activateRecipe(id: string) {
+    try {
+      await request(`/api/production/recipes/${id}/activate`, { method: 'POST' });
+      setFeedback({ message: 'BOM activated as the production standard.', tone: 'success' });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['recipes'] }),
+        queryClient.invalidateQueries({ queryKey: ['production'] }),
+      ]);
+    } catch (error) {
+      setFeedback({ message: error instanceof Error ? error.message : 'Failed to activate BOM.', tone: 'error' });
     }
   }
 
@@ -130,22 +151,52 @@ export default function ProductionRecipesPage() {
   }
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-6">
       <PageHeader
-        title="Recipe Management"
-        description="Create standard raw-material and packaging formulas for target production volumes."
+        title="BOM Standards"
+        description="Create the standard Bill of Materials for one finished product. Production uses this BOM to calculate every issue quantity automatically."
         actions={
           <Button type="button" size="sm" onClick={() => setOpen(true)}>
             <Plus className="mr-2 h-4 w-4" />
-            New Recipe Formula
+            New BOM
           </Button>
         }
       />
       <ProductionNav />
+
+      {feedback ? (
+        <div
+          className={`rounded-3xl border px-4 py-3 text-sm shadow-sm ${
+            feedback.tone === 'success'
+              ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+              : 'border-rose-200 bg-rose-50 text-rose-700'
+          }`}
+        >
+          {feedback.message}
+        </div>
+      ) : null}
+
+      <section className="grid gap-4 md:grid-cols-3">
+        <div className="surface-card bg-gradient-to-br from-white via-white to-amber-50">
+          <p className="text-xs uppercase tracking-[0.22em] text-muted">BOM Records</p>
+          <p className="mt-3 text-3xl font-semibold text-brown">{recipes.length}</p>
+        </div>
+        <div className="surface-card bg-gradient-to-br from-white via-white to-emerald-50">
+          <p className="text-xs uppercase tracking-[0.22em] text-muted">Active Standards</p>
+          <p className="mt-3 text-3xl font-semibold text-brown">
+            {recipes.filter((recipe) => String(recipe.status ?? '').toUpperCase() === 'ACTIVE').length}
+          </p>
+        </div>
+        <div className="surface-card bg-gradient-to-br from-white via-white to-sky-50">
+          <p className="text-xs uppercase tracking-[0.22em] text-muted">SAP Flow</p>
+          <p className="mt-3 text-sm font-semibold text-brown">BOM {'->'} Issue {'->'} Release</p>
+        </div>
+      </section>
+
       <DataTable
         columns={[
           { key: 'code', header: 'Code' },
-          { key: 'name', header: 'Recipe' },
+          { key: 'name', header: 'BOM / Product Standard' },
           { key: 'version', header: 'Version' },
           {
             key: 'production_category',
@@ -159,15 +210,39 @@ export default function ProductionRecipesPage() {
           },
           {
             key: 'expected_output_quantity',
-            header: 'Formula Volume',
+            header: 'Standard Output',
             render: (row) => String((row as Record<string, unknown>).expected_output_quantity ?? (row as Record<string, unknown>).batch_size ?? ''),
+          },
+          {
+            key: 'actions',
+            header: 'Actions',
+            render: (row) => {
+              const record = row as Record<string, unknown>;
+              const isActive = String(record.status ?? '').toUpperCase() === 'ACTIVE';
+              return isActive ? (
+                <span className="inline-flex items-center gap-2 text-sm font-semibold text-emerald-700">
+                  <CheckCircle2 className="h-4 w-4" />
+                  Standard
+                </span>
+              ) : (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="border-emerald-200 bg-emerald-50 text-emerald-700 hover:border-emerald-600 hover:bg-emerald-600 hover:text-white"
+                  onClick={() => activateRecipe(String(record.id))}
+                >
+                  Activate
+                </Button>
+              );
+            },
           },
         ]}
         data={recipes}
-        emptyState={<EmptyState icon={<Plus className="h-6 w-6" />} title="No recipes" description="Create the first standard formula before planning production." />}
+        emptyState={<EmptyState icon={<FileSpreadsheet className="h-6 w-6" />} title="No BOM standards" description="Create the first BOM before issuing materials to production." />}
       />
 
-      <FormDrawer title="New Recipe Formula" open={open} onClose={() => setOpen(false)}>
+      <FormDrawer title="New BOM Standard" open={open} onClose={() => setOpen(false)}>
         <form className="space-y-5" onSubmit={handleSubmit}>
           {formError ? (
             <div className="rounded-2xl border border-error/20 bg-error/5 px-4 py-3 text-sm text-error">
@@ -175,9 +250,12 @@ export default function ProductionRecipesPage() {
             </div>
           ) : null}
 
-          <div className="grid gap-5 sm:grid-cols-2">
+          <div className="rounded-3xl border border-border/70 bg-[linear-gradient(180deg,rgba(255,255,255,0.96),rgba(255,247,232,0.88))] p-5">
+            <p className="text-sm font-semibold uppercase tracking-[0.18em] text-orange">BOM Header</p>
+            <p className="mt-1 text-sm text-muted">Enter the standard recipe once. Use output quantity `1` when the BOM is per single finished unit.</p>
+            <div className="mt-4 grid gap-5 sm:grid-cols-2">
             <label className="space-y-2 text-sm text-muted">
-              <span>Recipe Name</span>
+              <span>BOM Name</span>
               <input
                 required
                 className="surface-input-soft"
@@ -226,7 +304,7 @@ export default function ProductionRecipesPage() {
               </select>
             </label>
             <label className="space-y-2 text-sm text-muted">
-              <span>Formula Output Volume</span>
+              <span>Standard Output Quantity</span>
               <input
                 required
                 min="0.001"
@@ -245,6 +323,7 @@ export default function ProductionRecipesPage() {
                 onChange={(event) => setFormState((current) => ({ ...current, packagingRequirement: event.target.value }))}
               />
             </label>
+            </div>
           </div>
 
           <FormulaLines
@@ -312,7 +391,7 @@ function FormulaLines({
       </div>
       {lines.length === 0 ? <p className="text-sm text-muted">No lines added.</p> : null}
       {lines.map((line, index) => (
-        <div key={index} className="grid gap-3 md:grid-cols-[1fr_120px_120px_120px_auto]">
+        <div key={line.rowId} className="grid gap-3 md:grid-cols-[1fr_120px_120px_120px_auto]">
           <select className="surface-input-soft" value={line.itemId} onChange={(event) => onUpdate(index, { itemId: event.target.value })}>
             <option value="">Select item</option>
             {items.map((item) => (

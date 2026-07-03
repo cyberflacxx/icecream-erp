@@ -41,14 +41,17 @@ export async function POST(
       if (warehouse?.branch_id !== ctx.branchId) return forbidden();
     }
 
-    if (batch.status !== 'QUALITY_CHECK') {
-      return badRequest(`Cannot close batch: must be in QUALITY_CHECK status (current: ${batch.status})`);
+    const status = String(batch.status);
+    const directReleaseStatus = ['IN_PROGRESS', 'WIP', 'MATERIALS_RESERVED'].includes(status);
+    const qualityReleaseStatus = status === 'QUALITY_CHECK';
+    if (!directReleaseStatus && !qualityReleaseStatus) {
+      return badRequest(`Cannot release finished goods from status ${batch.status}. Issue materials first.`);
     }
-    if (batch.quality_status === 'FAILED') {
-      return badRequest(`Cannot close batch: quality check FAILED. Cancel this batch instead.`);
+    if (qualityReleaseStatus && batch.quality_status === 'FAILED') {
+      return badRequest('Cannot release finished goods: quality check FAILED. Cancel this batch instead.');
     }
-    if (batch.quality_status === 'PENDING') {
-      return badRequest(`Cannot close batch: quality check has not been completed yet.`);
+    if (qualityReleaseStatus && batch.quality_status === 'PENDING') {
+      return badRequest('Cannot release finished goods: quality check has not been completed yet.');
     }
 
     const [materialsResult, outputsResult, recipeResult] = await Promise.all([
@@ -73,10 +76,25 @@ export async function POST(
     if (outputsResult.error) throw outputsResult.error;
     if (recipeResult.error) throw recipeResult.error;
 
+    const { data: issuedMovements, error: issuedMovementsError } = await service
+      .schema('icecream_erp')
+      .from('stock_movements')
+      .select('item_id')
+      .eq('reference_type', 'production_batch')
+      .eq('reference_id', id)
+      .eq('movement_type', 'PRODUCTION_ISSUE')
+      .eq('warehouse_id', batch.warehouse_id);
+    if (issuedMovementsError) throw issuedMovementsError;
+    const issuedItemIds = new Set((issuedMovements ?? []).map((row) => String(row.item_id)));
+
     const actualByItemId = new Map((body.actualMaterials ?? []).map((r) => [r.itemId, r.quantityActual]));
     const materials = (materialsResult.data ?? []) as Array<{
       id: string; item_id: string; quantity_required: number; quantity_issued: number; quantity_actual: number;
     }>;
+
+    if (materials.length === 0) {
+      return badRequest('Issue materials before releasing finished goods.');
+    }
 
     // Issue stock for materials consumed
     for (const material of materials) {
@@ -84,6 +102,15 @@ export async function POST(
       const defaultIssued = Number(material.quantity_issued);
       const actualQty = actualByItemId.get(material.item_id) ?? (defaultIssued || required);
       if (actualQty <= 0) continue;
+
+      if (issuedItemIds.has(material.item_id)) {
+        await service.schema('icecream_erp').from('production_batch_materials').update({
+          quantity_actual: actualQty,
+          quantity_issued: defaultIssued || actualQty,
+          variance: actualQty - required,
+        }).eq('id', material.id);
+        continue;
+      }
 
       const { data: balance, error: balanceError } = await service
         .schema('icecream_erp')
@@ -196,6 +223,10 @@ export async function POST(
     }
 
     const expectedOutput = Number(batch.expected_output);
+    if (totalActualOutput <= 0) {
+      return badRequest('Enter the actual quantity produced before releasing finished goods.');
+    }
+
     const wastageQuantity = Math.max(0, expectedOutput - totalActualOutput);
     const wastagePercentage = expectedOutput > 0 ? (wastageQuantity / expectedOutput) * 100 : 0;
     const efficiencyPercentage = expectedOutput > 0 ? (totalActualOutput / expectedOutput) * 100 : 0;

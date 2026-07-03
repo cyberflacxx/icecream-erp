@@ -1,6 +1,8 @@
 'use client';
 
-import { AlertCircle, Factory, Gauge, PackageOpen, ShieldAlert, TriangleAlert } from 'lucide-react';
+import Link from 'next/link';
+import { AlertCircle, ArrowRight, Factory, FileSpreadsheet, Gauge, PackageOpen, Scale, ShieldAlert, TriangleAlert } from 'lucide-react';
+import type { ReactNode } from 'react';
 import { Bar, BarChart, CartesianGrid, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 
 import { PageHeader } from '@/components/dashboard/page-header';
@@ -33,10 +35,30 @@ export function ProductionDashboard() {
     <div className="space-y-8">
       <PageHeader
         title="Production Module"
-        description="Plan, execute, inspect, and transfer finished production from one workspace."
-        status="partial"
+        description="Simple SAP-style manufacturing: BOM standard, issue raw materials, release finished goods."
       />
       <ProductionNav />
+
+      <section className="grid gap-4 md:grid-cols-3">
+        <WorkflowCard
+          description="Create the standard recipe for one finished product."
+          href="/production/recipes"
+          icon={<FileSpreadsheet className="h-5 w-5" />}
+          label="1. BOM"
+        />
+        <WorkflowCard
+          description="Enter production quantity and auto-deduct raw materials."
+          href="/production/batches"
+          icon={<Scale className="h-5 w-5" />}
+          label="2. Issue"
+        />
+        <WorkflowCard
+          description="Post actual output into the production warehouse."
+          href="/production/batches"
+          icon={<PackageOpen className="h-5 w-5" />}
+          label="3. Release"
+        />
+      </section>
 
       <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-5">
         <StatCard title="Planned Batches" value={formatNumber(stats.plannedBatches)} icon={<PackageOpen className="h-5 w-5" />} />
@@ -105,5 +127,23 @@ export function ProductionDashboard() {
         <StatCard title="Quality Failed" value={formatNumber(qualityAlerts.failed)} icon={<TriangleAlert className="h-5 w-5" />} color="warning" />
       </div>
     </div>
+  );
+}
+
+function WorkflowCard({ description, href, icon, label }: { description: string; href: string; icon: ReactNode; label: string }) {
+  return (
+    <Link
+      href={href}
+      className="surface-card group flex items-start justify-between gap-4 bg-gradient-to-br from-white via-white to-amber-50 transition hover:-translate-y-0.5 hover:shadow-md"
+    >
+      <div className="flex gap-3">
+        <span className="app-icon-chip h-11 w-11">{icon}</span>
+        <div>
+          <p className="font-semibold text-brown">{label}</p>
+          <p className="mt-1 text-sm text-muted">{description}</p>
+        </div>
+      </div>
+      <ArrowRight className="mt-1 h-4 w-4 text-muted transition group-hover:translate-x-1 group-hover:text-brown" />
+    </Link>
   );
 }

@@ -454,6 +454,7 @@ export const API_ROUTES = {
     SHIFT_CLOSE: (id: string) => `/api/production/shifts/${id}/close`,
     SHIFT_TARGETS: '/api/production/shift-targets',
     TRANSFERS: '/api/production/transfers',
+    RAW_MATERIAL_TRANSFERS: '/api/production/raw-material-transfers',
     WASTAGE: '/api/production/wastage',
     REPORT_PERFORMANCE: '/api/production/reports/performance',
     REPORT_BATCH_PERFORMANCE: '/api/production/reports/batch-performance',
