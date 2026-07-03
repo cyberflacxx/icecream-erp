@@ -17,7 +17,7 @@ import {
   useProcurementMeta,
   useProcurementRequest,
   usePurchaseOrder,
-  type GRNRow
+  type GRNRow,
 } from '@/hooks/procurement';
 import { usePermission } from '@/hooks/usePermission';
 
@@ -30,32 +30,42 @@ const initialFormState = {
   warehouseId: ''
 };
 
+type GrnLineItem = {
+  batchNumber: string;
+  expiryDate: string;
+  itemId: string;
+  poItemId?: string;
+  qualityNotes: string;
+  quantityExpected: number;
+  quantityReceived: string;
+  quantityRejected: string;
+  reason: string;
+  unitCost: string;
+};
+
+interface FeedbackState {
+  message: string;
+  tone: 'error' | 'success';
+}
+
 export default function GoodsReceivedPage() {
   const searchParams = useSearchParams();
   const purchaseOrderIdParam = searchParams.get('purchaseOrderId');
   const canCreate = usePermission([PERMISSIONS.goodsReceived.create, 'procurement.write']);
+  const canApprove = usePermission(['stores.grn.approve', 'procurement.approve']);
+  const canPost = usePermission(['stores.grn.post', 'procurement.grn.post', 'inventory.write']);
   const [filters, setFilters] = useState({
     page: 1,
     pageSize: 10,
     purchaseOrderId: '',
     status: ''
   });
+  const [feedback, setFeedback] = useState<FeedbackState | null>(null);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [formState, setFormState] = useState(initialFormState);
-  const [lineItems, setLineItems] = useState<
-    Array<{
-      batchNumber: string;
-      expiryDate: string;
-      itemId: string;
-      poItemId?: string;
-      qualityNotes: string;
-      quantityExpected: number;
-      quantityReceived: string;
-      quantityRejected: string;
-      reason: string;
-    }>
-  >([]);
+  const [lineItems, setLineItems] = useState<GrnLineItem[]>([]);
   const [formError, setFormError] = useState<string | null>(null);
+  const [pendingAction, setPendingAction] = useState<string | null>(null);
 
   const queryClient = useQueryClient();
   const request = useProcurementRequest();
@@ -67,6 +77,7 @@ export default function GoodsReceivedPage() {
     status: filters.status || undefined
   });
   const purchaseOrderQuery = usePurchaseOrder(formState.purchaseOrderId || undefined);
+  const hqWarehouses = (metaQuery.data?.warehouses ?? []).filter((warehouse) => warehouse.branchId === null);
 
   useEffect(() => {
     if (!purchaseOrderIdParam) {
@@ -104,10 +115,11 @@ export default function GoodsReceivedPage() {
         quantityExpected: Math.max(0, item.quantityOrdered - item.quantityReceived),
         quantityReceived: String(Math.max(0, item.quantityOrdered - item.quantityReceived)),
         quantityRejected: '0',
-        reason: ''
+        reason: '',
+        unitCost: '0',
       })),
     );
-  }, [purchaseOrderQuery.data]);
+  }, [purchaseOrderQuery.data, formState.entryMode]);
 
   useEffect(() => {
     if (formState.entryMode === 'MANUAL' && lineItems.length === 0) {
@@ -120,7 +132,8 @@ export default function GoodsReceivedPage() {
           quantityExpected: 0,
           quantityReceived: '0',
           quantityRejected: '0',
-          reason: ''
+          reason: '',
+          unitCost: '0',
         }
       ]);
     }
@@ -135,8 +148,43 @@ export default function GoodsReceivedPage() {
     });
   }
 
+  async function runRowAction(actionKey: string, successMessage: string, task: () => Promise<void>) {
+    setPendingAction(actionKey);
+    setFeedback(null);
+
+    try {
+      await task();
+      setFeedback({ message: successMessage, tone: 'success' });
+    } catch (error) {
+      setFeedback({
+        message: error instanceof Error ? error.message : 'GRN action failed.',
+        tone: 'error',
+      });
+    } finally {
+      setPendingAction(null);
+    }
+  }
+
+  function addManualLine() {
+    setLineItems((current) => [
+      ...current,
+      {
+        batchNumber: '',
+        expiryDate: '',
+        itemId: '',
+        qualityNotes: '',
+        quantityExpected: 0,
+        quantityReceived: '0',
+        quantityRejected: '0',
+        reason: '',
+        unitCost: '0',
+      },
+    ]);
+  }
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    setFeedback(null);
 
     if (!formState.warehouseId) {
       setFormError('HQ warehouse is required.');
@@ -165,8 +213,10 @@ export default function GoodsReceivedPage() {
       overReceiveReason: item.reason || null,
       poItemId: item.poItemId,
       qualityNotes: item.qualityNotes || null,
+      quantityExpected: Number(item.quantityExpected || 0),
       quantityReceived: Number(item.quantityReceived),
-      quantityRejected: Number(item.quantityRejected)
+      quantityRejected: Number(item.quantityRejected),
+      unitCost: Number(item.unitCost || 0),
     }));
 
     if (
@@ -182,6 +232,21 @@ export default function GoodsReceivedPage() {
       return;
     }
 
+    if (
+      formState.entryMode === 'MANUAL' &&
+      receiveItems.some(
+        (item) =>
+          !item.itemId ||
+          Number.isNaN(item.quantityExpected) ||
+          Number.isNaN(item.unitCost) ||
+          item.quantityExpected <= 0 ||
+          item.unitCost < 0,
+      )
+    ) {
+      setFormError('Manual GRNs need an item, expected quantity, and valid unit cost on every line.');
+      return;
+    }
+
     try {
       const grn = await request<{ id: string }>('/api/procurement/grns', {
         body: JSON.stringify({
@@ -190,7 +255,20 @@ export default function GoodsReceivedPage() {
           purchaseOrderId: formState.entryMode === 'PO_LINKED' ? formState.purchaseOrderId : null,
           qualityNotes: formState.qualityNotes || null,
           supplierId: formState.entryMode === 'MANUAL' ? formState.supplierId : null,
-          warehouseId: formState.warehouseId
+          warehouseId: formState.warehouseId,
+          items:
+            formState.entryMode === 'MANUAL'
+              ? receiveItems.map((item) => ({
+                  batchNumber: item.batchNumber,
+                  expiryDate: item.expiryDate,
+                  itemId: item.itemId,
+                  qualityNotes: item.qualityNotes,
+                  quantityExpected: item.quantityExpected,
+                  quantityReceived: item.quantityReceived,
+                  quantityRejected: item.quantityRejected,
+                  unitCost: item.unitCost,
+                }))
+              : undefined,
         }),
         method: 'POST'
       });
@@ -207,6 +285,7 @@ export default function GoodsReceivedPage() {
       setFormError(null);
       setFormState(initialFormState);
       setLineItems([]);
+      setFeedback({ message: 'GRN submitted into the approval queue.', tone: 'success' });
       await refresh();
     } catch (error) {
       setFormError(error instanceof Error ? error.message : 'Failed to receive GRN.');
@@ -230,6 +309,18 @@ export default function GoodsReceivedPage() {
 
       <ProcurementNav />
 
+      {feedback ? (
+        <div
+          className={`rounded-2xl border px-4 py-3 text-sm ${
+            feedback.tone === 'success'
+              ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+              : 'border-rose-200 bg-rose-50 text-rose-700'
+          }`}
+        >
+          {feedback.message}
+        </div>
+      ) : null}
+
       <FilterBar
         filters={[
           {
@@ -249,7 +340,8 @@ export default function GoodsReceivedPage() {
               { label: 'Draft', value: 'DRAFT' },
               { label: 'Pending Approval', value: 'PENDING_APPROVAL' },
               { label: 'Approved', value: 'APPROVED' },
-              { label: 'Posted', value: 'POSTED' }
+              { label: 'Posted', value: 'POSTED' },
+              { label: 'Rejected', value: 'REJECTED' },
             ],
             type: 'select',
             value: filters.status
@@ -299,7 +391,22 @@ export default function GoodsReceivedPage() {
           {
             key: 'status',
             header: 'Status',
-            render: (row) => <StatusBadge status={row.status} />
+            render: (row) => (
+              <div className="space-y-1">
+                <StatusBadge status={row.status} />
+                <p className="text-xs text-muted">
+                  {row.status === 'PENDING_APPROVAL'
+                    ? 'Waiting for supervisor sign-off.'
+                    : row.status === 'APPROVED'
+                      ? 'Approved and ready to post into HQ inventory.'
+                      : row.status === 'POSTED'
+                        ? 'Inventory posted.'
+                        : row.status === 'REJECTED'
+                          ? 'Rejected and not posted.'
+                          : 'Draft receipt.'}
+                </p>
+              </div>
+            )
           },
           {
             key: 'actions',
@@ -308,39 +415,57 @@ export default function GoodsReceivedPage() {
               if (row.status === 'PENDING_APPROVAL') {
                 return (
                   <div className="flex flex-wrap gap-2">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() =>
-                        request(`/api/procurement/grns/${row.id}/approve`, { body: JSON.stringify({}), method: 'POST' }).then(refresh)
-                      }
-                    >
-                      Approve
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() =>
-                        request(`/api/procurement/grns/${row.id}/reject`, { body: JSON.stringify({}), method: 'POST' }).then(refresh)
-                      }
-                    >
-                      Reject
-                    </Button>
+                    {canApprove ? (
+                      <>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={pendingAction === `approve:${row.id}`}
+                          onClick={() =>
+                            void runRowAction(`approve:${row.id}`, 'GRN approved.', async () => {
+                              await request(`/api/procurement/grns/${row.id}/approve`, { body: JSON.stringify({}), method: 'POST' });
+                              await refresh();
+                            })
+                          }
+                        >
+                          {pendingAction === `approve:${row.id}` ? 'Approving...' : 'Approve'}
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={pendingAction === `reject:${row.id}`}
+                          onClick={() =>
+                            void runRowAction(`reject:${row.id}`, 'GRN rejected.', async () => {
+                              await request(`/api/procurement/grns/${row.id}/reject`, { body: JSON.stringify({}), method: 'POST' });
+                              await refresh();
+                            })
+                          }
+                        >
+                          {pendingAction === `reject:${row.id}` ? 'Rejecting...' : 'Reject'}
+                        </Button>
+                      </>
+                    ) : null}
                   </div>
                 );
               }
 
               if (row.status === 'APPROVED') {
                 return (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() =>
-                      request(`/api/procurement/grns/${row.id}/post`, { body: JSON.stringify({}), method: 'POST' }).then(refresh)
-                    }
-                  >
-                    Post to Inventory
-                  </Button>
+                  canPost ? (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={pendingAction === `post:${row.id}`}
+                      onClick={() =>
+                        void runRowAction(`post:${row.id}`, 'GRN posted into HQ inventory.', async () => {
+                          await request(`/api/procurement/grns/${row.id}/post`, { body: JSON.stringify({}), method: 'POST' });
+                          await refresh();
+                        })
+                      }
+                    >
+                      {pendingAction === `post:${row.id}` ? 'Posting...' : 'Post to HQ Inventory'}
+                    </Button>
+                  ) : null
                 );
               }
 
@@ -379,6 +504,10 @@ export default function GoodsReceivedPage() {
             </div>
           ) : null}
 
+          <div className="rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-800">
+            This GRN workflow posts accepted stock into an HQ warehouse only after supervisor approval and inventory posting.
+          </div>
+
           <div className="grid gap-5 sm:grid-cols-2">
             <label className="space-y-2 text-sm text-muted">
               <span>Entry Mode</span>
@@ -395,7 +524,7 @@ export default function GoodsReceivedPage() {
                 className="surface-input-soft"
               >
                 <option value="PO_LINKED">Linked to Purchase Order</option>
-                <option value="MANUAL">Manual Receipt</option>
+                <option value="MANUAL">Manual Receipt Without PO</option>
               </select>
             </label>
             <label className="space-y-2 text-sm text-muted">
@@ -442,8 +571,8 @@ export default function GoodsReceivedPage() {
                 onChange={(event) => setFormState((current) => ({ ...current, warehouseId: event.target.value }))}
                 className="surface-input-soft"
               >
-                <option value="">Select warehouse</option>
-                {(metaQuery.data?.warehouses ?? []).map((warehouse) => (
+                <option value="">Select HQ warehouse</option>
+                {hqWarehouses.map((warehouse) => (
                   <option key={warehouse.id} value={warehouse.id}>
                     {warehouse.name}
                   </option>
@@ -465,9 +594,14 @@ export default function GoodsReceivedPage() {
           </label>
 
           <div className="space-y-3 rounded-2xl border border-border bg-cream/60 p-4">
-            <p className="text-sm font-semibold uppercase tracking-[0.18em] text-orange">Expected and Received</p>
+            <div>
+              <p className="text-sm font-semibold uppercase tracking-[0.18em] text-orange">Expected and Received</p>
+              <p className="mt-1 text-xs text-muted">
+                PO-linked receipts inherit the selected PO lines. Manual receipts let you capture stock even when no PO was used.
+              </p>
+            </div>
             {lineItems.map((item, index) => (
-              <div key={item.poItemId ?? `${item.itemId}-${index}`} className="grid gap-3 md:grid-cols-[1fr_120px_120px_120px_1fr_1fr]">
+              <div key={item.poItemId ?? `${item.itemId}-${index}`} className="grid gap-3 md:grid-cols-[1fr_120px_120px_120px_120px_1fr_1fr]">
                 <select
                   value={item.itemId}
                   disabled={formState.entryMode === 'PO_LINKED'}
@@ -530,6 +664,21 @@ export default function GoodsReceivedPage() {
                   className="surface-input-soft"
                 />
                 <input
+                  min="0"
+                  step="0.01"
+                  type="number"
+                  placeholder="Unit cost"
+                  value={item.unitCost}
+                  onChange={(event) =>
+                    setLineItems((current) =>
+                      current.map((row, rowIndex) =>
+                        rowIndex === index ? { ...row, unitCost: event.target.value } : row,
+                      ),
+                    )
+                  }
+                  className="surface-input-soft"
+                />
+                <input
                   placeholder="Batch #"
                   value={item.batchNumber}
                   onChange={(event) =>
@@ -572,21 +721,7 @@ export default function GoodsReceivedPage() {
                 type="button"
                 size="sm"
                 variant="outline"
-                onClick={() =>
-                  setLineItems((current) => [
-                    ...current,
-                    {
-                      batchNumber: '',
-                      expiryDate: '',
-                      itemId: '',
-                      qualityNotes: '',
-                      quantityExpected: 0,
-                      quantityReceived: '0',
-                      quantityRejected: '0',
-                      reason: ''
-                    }
-                  ])
-                }
+                onClick={addManualLine}
               >
                 Add Manual Item
               </Button>

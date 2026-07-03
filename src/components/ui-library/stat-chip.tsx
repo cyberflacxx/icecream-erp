@@ -12,7 +12,7 @@ export function StatChip({ label, icon, className }: StatChipProps) {
   return (
     <div
       className={cn(
-        'inline-flex items-center gap-2 rounded-full border border-border bg-white px-4 py-2 text-sm font-medium text-brown dark:border-darkBorder dark:bg-darkCard dark:text-darkText',
+        'inline-flex items-center gap-2 rounded-full border border-[color:var(--app-border)] bg-[color:var(--app-surface)] px-3.5 py-2 text-[13px] font-medium text-[color:var(--app-text)] shadow-sm',
         className,
       )}
     >

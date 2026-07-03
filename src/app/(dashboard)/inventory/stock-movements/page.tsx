@@ -78,7 +78,7 @@ export default function StockMovementsPage() {
     <div className="space-y-6">
       <PageHeader
         title="Stock Movements"
-        description="Review every receipt, issue, transfer, and adjustment recorded by the inventory engine, including who triggered it and the reference trail behind it."
+        description="Review every receipt, issue, transfer, and adjustment recorded by the inventory engine, including who triggered it, the warehouse touched, and the reference trail behind it."
       />
 
       <InventoryNav />
@@ -195,7 +195,12 @@ export default function StockMovementsPage() {
             key: 'createdBy',
             header: 'Created By',
             render: (row) => row.createdBy?.name || 'System'
-          }
+          },
+          {
+            key: 'notes',
+            header: 'Notes',
+            render: (row) => row.notes || '-'
+          },
         ]}
         emptyState={
           <EmptyState
@@ -224,6 +229,20 @@ export default function StockMovementsPage() {
         <div className="flex items-center gap-3">
           <ArrowRightLeft className="h-5 w-5 text-orange" />
           <h2 className="text-lg font-semibold text-brown">Audit trail posture</h2>
+        </div>
+        <div className="mt-4 grid gap-3 md:grid-cols-3">
+          <div className="surface-tile">
+            <p className="text-sm font-medium text-brown">By item</p>
+            <p className="mt-2 text-sm text-muted">Use the item filter to follow one material or product across every stock touch.</p>
+          </div>
+          <div className="surface-tile">
+            <p className="text-sm font-medium text-brown">By warehouse</p>
+            <p className="mt-2 text-sm text-muted">Use the warehouse filter to isolate raw materials, production, finished goods, dispatch, or returns activity.</p>
+          </div>
+          <div className="surface-tile">
+            <p className="text-sm font-medium text-brown">By reference</p>
+            <p className="mt-2 text-sm text-muted">Each movement keeps its reference type, reference id, user, and notes for audit follow-through.</p>
+          </div>
         </div>
         <p className="mt-3 max-w-3xl text-sm leading-7 text-muted">
           Every inventory movement is tied to a user, a reference type, a reference id, and an exact timestamp.

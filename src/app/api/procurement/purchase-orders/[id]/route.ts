@@ -24,8 +24,8 @@ export async function GET(
       .from('purchase_orders')
       .select(
         `id, po_number, order_date, expected_delivery_date, status,
-         subtotal, tax_amount, discount_amount, total, approved_at, sent_at, rejected_at,
-         suppliers(id, name)`,
+         subtotal, tax_amount, discount_amount, total, notes, approved_at, approved_by, approver_user_id, sent_at, rejected_at, requisition_id,
+         suppliers(id, name, email, phone, address)`,
       )
       .is('deleted_at', null)
       .eq('organization_id', ctx.organizationId)
@@ -102,14 +102,24 @@ export async function GET(
         status: o.status,
       }),
       approvedAt: o.approved_at ? String(o.approved_at) : null,
+      approvedBy: o.approved_by ? String(o.approved_by) : null,
+      approverUserId: o.approver_user_id ? String(o.approver_user_id) : null,
       sentAt: o.sent_at ? String(o.sent_at) : null,
       rejectedAt: o.rejected_at ? String(o.rejected_at) : null,
+      requisitionId: o.requisition_id ? String(o.requisition_id) : null,
+      notes: o.notes ? String(o.notes) : null,
       subtotal: Number(o.subtotal ?? 0),
       taxAmount: Number(o.tax_amount ?? 0),
       discountAmount: Number(o.discount_amount ?? 0),
       total: Number(o.total ?? 0),
       supplier: o.suppliers
-        ? { id: (o.suppliers as Record<string, unknown>).id, name: (o.suppliers as Record<string, unknown>).name }
+        ? {
+            id: (o.suppliers as Record<string, unknown>).id,
+            name: (o.suppliers as Record<string, unknown>).name,
+            email: (o.suppliers as Record<string, unknown>).email ?? null,
+            phone: (o.suppliers as Record<string, unknown>).phone ?? null,
+            address: (o.suppliers as Record<string, unknown>).address ?? null,
+          }
         : null,
       items: (itemsRes.data ?? []).map((item) => {
         const product = Array.isArray(item.items) ? item.items[0] : item.items;
@@ -168,10 +178,11 @@ export async function PATCH(
     supplierId?: string;
     orderDate?: string | null;
     expectedDeliveryDate?: string | null;
-    notes?: string | null;
-    taxAmount?: number;
-    discountAmount?: number;
-    items?: Array<{
+      notes?: string | null;
+      taxAmount?: number;
+      discountAmount?: number;
+      approverUserId?: string | null;
+      items?: Array<{
       itemId: string;
       unitOfMeasureId: string;
       quantityOrdered: number;
@@ -223,6 +234,20 @@ export async function PATCH(
       }
     }
 
+    if (body.approverUserId) {
+      const { data: approver } = await service
+        .from('users')
+        .select('id')
+        .eq('organization_id', ctx.organizationId)
+        .eq('status', 'active')
+        .eq('id', body.approverUserId)
+        .single();
+
+      if (!approver) {
+        return badRequest('Selected approver is not available.');
+      }
+    }
+
     // Recalculate totals
     const nextItems = body.items
       ? body.items
@@ -244,6 +269,7 @@ export async function PATCH(
     if (body.notes !== undefined) updatePayload.notes = body.notes;
     if (body.taxAmount !== undefined) updatePayload.tax_amount = body.taxAmount;
     if (body.discountAmount !== undefined) updatePayload.discount_amount = body.discountAmount;
+    if (body.approverUserId !== undefined) updatePayload.approver_user_id = body.approverUserId;
 
     const { error: updateErr } = await service
       .from('purchase_orders')

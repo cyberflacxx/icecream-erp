@@ -20,7 +20,7 @@ const links = [
 export function WorkflowNav() {
   const pathname = usePathname();
   return (
-    <div className="overflow-x-auto rounded-2xl border border-border bg-white p-2 shadow-sm dark:border-darkBorder dark:bg-darkCard">
+    <div className="overflow-x-auto rounded-xl border border-[color:var(--app-border)] bg-[color:var(--app-surface)] p-1.5 shadow-sm">
       <div className="flex min-w-max gap-2">
         {links.map((link) => {
           const Icon = link.icon;
@@ -30,13 +30,13 @@ export function WorkflowNav() {
               key={link.href}
               href={link.href}
               className={cn(
-                'inline-flex items-center gap-2 rounded-2xl px-4 py-3 text-sm font-medium transition',
+                'inline-flex items-center gap-2 rounded-lg px-3.5 py-2 text-[13px] font-medium transition',
                 isActive
-                  ? 'bg-brown text-white shadow-sm dark:bg-darkBg dark:text-darkText'
-                  : 'text-muted hover:bg-cream hover:text-brown dark:text-darkMuted dark:hover:bg-darkBg dark:hover:text-darkText',
+                  ? 'bg-[color:var(--app-accent-soft)] text-[color:var(--app-accent-strong)] shadow-sm'
+                  : 'text-[color:var(--app-muted)] hover:bg-[color:var(--app-bg-subtle)] hover:text-[color:var(--app-text)]',
               )}
             >
-              <Icon className="h-4 w-4" />
+              <Icon className="h-3.5 w-3.5" />
               {link.label}
             </Link>
           );

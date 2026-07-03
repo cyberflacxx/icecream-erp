@@ -1,14 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { badRequest, can, forbidden, getAuthContext, notFound, serverError, unauthorized } from '@/lib/api-auth';
+import { sendTransactionalEmail } from '@/lib/email';
 import {
   derivePurchaseOrderStatus,
   formatPurchaseOrderDbStatus,
 } from '@/lib/procurement-purchase-orders';
+import { getCompanyProfile } from '@/lib/settings-server';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
 export async function POST(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
   const ctx = await getAuthContext();
@@ -21,7 +23,7 @@ export async function POST(
   try {
     const { data: existing, error: fetchErr } = await service
       .from('purchase_orders')
-      .select('id, status, approved_by, approved_at, sent_at, rejected_at')
+      .select('id, po_number, total, notes, status, approved_by, approved_at, sent_at, rejected_at, suppliers(name, email)')
       .is('deleted_at', null)
       .eq('organization_id', ctx.organizationId)
       .eq('id', id)
@@ -41,6 +43,42 @@ export async function POST(
     if (!order.approved_by && !order.approved_at) {
       return badRequest('Purchase order must be approved before sending.');
     }
+
+    const supplier = Array.isArray(order.suppliers) ? order.suppliers[0] : order.suppliers;
+    const supplierEmail = String((supplier as Record<string, unknown> | null)?.email ?? '').trim();
+    const supplierName = String((supplier as Record<string, unknown> | null)?.name ?? 'Supplier').trim();
+
+    if (!supplierEmail) {
+      return badRequest('Supplier email is required before sending this purchase order.');
+    }
+
+    const appUrl =
+      process.env.NEXT_PUBLIC_APP_URL?.trim() ||
+      `${request.nextUrl.protocol}//${request.nextUrl.host}`;
+    const documentUrl = `${appUrl}/api/procurement/purchase-orders/${id}/pdf`;
+    const company = await getCompanyProfile().catch(() => null);
+    const companyName = company?.name?.trim() || 'Absolute Ice Cream';
+
+    await sendTransactionalEmail({
+      to: supplierEmail,
+      subject: `${companyName} Purchase Order ${String(order.po_number ?? id)}`,
+      text: `Please review purchase order ${String(order.po_number ?? id)} from ${companyName}. Open: ${documentUrl}`,
+      html: `
+        <div style="font-family:Arial,sans-serif;color:#1f2937;line-height:1.6">
+          <h2 style="margin-bottom:8px;">Purchase Order ${String(order.po_number ?? id)}</h2>
+          <p>Hello ${supplierName},</p>
+          <p>Please find our purchase order attached via the secure document link below.</p>
+          <p><strong>Total:</strong> USD ${Number(order.total ?? 0).toFixed(2)}</p>
+          ${order.notes ? `<p><strong>Notes:</strong> ${String(order.notes)}</p>` : ''}
+          <p>
+            <a href="${documentUrl}" style="display:inline-block;padding:12px 18px;background:#f97316;color:#ffffff;text-decoration:none;border-radius:999px;">
+              Open Purchase Order
+            </a>
+          </p>
+          <p>Regards,<br />${companyName}</p>
+        </div>
+      `,
+    });
 
     const { data: updated, error: updateErr } = await service
       .from('purchase_orders')

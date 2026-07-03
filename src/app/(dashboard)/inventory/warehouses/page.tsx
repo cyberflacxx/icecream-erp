@@ -40,8 +40,16 @@ const initialFormState = {
   code: '',
   isActive: true,
   name: '',
-  type: 'MAIN'
+  type: 'RAW_MATERIALS'
 };
+
+const requiredWarehouseTypes = [
+  'RAW_MATERIALS',
+  'PRODUCTION_MATERIALS',
+  'FINISHED_GOODS',
+  'DISPATCH',
+  'RETURNS',
+] as const;
 
 function formatWarehouseType(value: string) {
   return value.replaceAll('_', ' ').toLowerCase().replace(/\b\w/g, (character) => character.toUpperCase());
@@ -58,6 +66,11 @@ export default function WarehousesPage() {
   const createWarehouseMutation = useCreateWarehouse();
 
   const warehouses = warehousesQuery.data ?? [];
+  const warehouseCoverage = requiredWarehouseTypes.map((type) => ({
+    label: formatWarehouseType(type),
+    type,
+    warehouses: warehouses.filter((warehouse) => warehouse.type === type),
+  }));
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -103,10 +116,24 @@ export default function WarehousesPage() {
       <InventoryNav />
 
       {warehouses.length ? (
-        <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
-          {warehouses.map((warehouse) => (
-            <WarehouseCardView key={warehouse.id} warehouse={warehouse} />
-          ))}
+        <div className="space-y-6">
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+            {warehouseCoverage.map((group) => (
+              <div key={group.type} className="rounded-2xl border border-border bg-white px-4 py-4">
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-orange">{group.label}</p>
+                <p className="mt-3 text-2xl font-semibold text-brown">{group.warehouses.length}</p>
+                <p className="mt-2 text-sm text-muted">
+                  {group.warehouses.length > 0 ? 'Configured and balance-ready.' : 'Still missing from the warehouse map.'}
+                </p>
+              </div>
+            ))}
+          </div>
+
+          <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
+            {warehouses.map((warehouse) => (
+              <WarehouseCardView key={warehouse.id} warehouse={warehouse} />
+            ))}
+          </div>
         </div>
       ) : (
         <EmptyState
@@ -212,6 +239,16 @@ export default function WarehousesPage() {
           </div>
         </form>
       </FormDrawer>
+
+      <div className="surface-card">
+        <div className="flex items-center gap-3">
+          <Warehouse className="h-5 w-5 text-orange" />
+          <h2 className="text-lg font-semibold text-brown">Warehouse structure guidance</h2>
+        </div>
+        <p className="mt-3 max-w-3xl text-sm leading-7 text-muted">
+          Independent balances work best when raw materials, production materials, finished goods, dispatch, and returns are each given their own warehouse record instead of being mixed into one location.
+        </p>
+      </div>
     </div>
   );
 }

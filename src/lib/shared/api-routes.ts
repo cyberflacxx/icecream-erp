@@ -354,6 +354,7 @@ export const API_ROUTES = {
     SUPPLIER_META: '/api/procurement/suppliers/meta',
     SUPPLIER_ACTIVATE: (id: string) => `/api/procurement/suppliers/${id}/activate`,
     SUPPLIER_DEACTIVATE: (id: string) => `/api/procurement/suppliers/${id}/deactivate`,
+    SUPPLIER_UPLOAD_DOCUMENT: '/api/procurement/suppliers/upload',
     SUPPLIER_BALANCE: (id: string) => `/api/procurement/suppliers/${id}/balance`,
     SUPPLIER_HISTORY: (id: string) => `/api/procurement/suppliers/${id}/history`,
     SUPPLIER_STATEMENT: (id: string) => `/api/procurement/suppliers/${id}/statement`,

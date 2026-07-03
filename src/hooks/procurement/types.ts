@@ -54,9 +54,14 @@ export interface RequisitionRow {
   status: string;
   approvalStatus: string;
   requestedBy: string;
+  requestedById: string | null;
   approverName: string | null;
+  approverUserId: string | null;
   approvedBy: string | null;
   approvedAt: string | null;
+  rejectedBy: string | null;
+  rejectedAt: string | null;
+  remarks: string | null;
 }
 
 export interface RequisitionFilters {
@@ -75,8 +80,11 @@ export interface PurchaseOrderRow {
   expectedDeliveryDate: string | null;
   status: string;
   approverName: string | null;
+  approverUserId: string | null;
   approvedBy: string | null;
   approvedAt: string | null;
+  sentAt: string | null;
+  rejectedAt: string | null;
   supplier: {
     id: string;
     name: string;
@@ -172,10 +180,13 @@ export interface SupplierReturnRow {
 export interface SupplierInvoiceRow {
   balance: number;
   dueDate: string | null;
+  goodsReceivedNoteId: string | null;
+  goodsReceivedNoteNumber: string | null;
   id: string;
   invoiceDate: string;
   invoiceNumber: string;
   paidAmount: number;
+  purchaseOrderId: string | null;
   purchaseOrderNumber: string | null;
   status: string;
   supplierId: string;
@@ -186,6 +197,7 @@ export interface SupplierInvoiceRow {
 export interface SupplierPaymentRow {
   amountPaid: number;
   id: string;
+  invoiceId?: string | null;
   invoiceNumber: string | null;
   method: string;
   paymentDate: string;

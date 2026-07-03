@@ -7,50 +7,50 @@
 @layer base {
   :root {
     color-scheme: light;
-    --app-bg: #fff7e8;
-    --app-bg-canvas: #fff7e8;
-    --app-bg-default: #fffaf1;
-    --app-bg-subtle: #fff1dd;
-    --app-bg-inset: #f6e3c8;
-    --app-surface: #fffdf8;
-    --app-surface-strong: #fff1dd;
-    --app-sidebar: rgba(255, 250, 241, 0.86);
-    --app-border: #f3d7b6;
-    --app-border-muted: #efdcc7;
-    --app-border-strong: #dbb488;
-    --app-text: #1f130d;
-    --app-muted: #6b4a3a;
-    --app-subtle: #8b6a58;
-    --app-accent: #f97316;
-    --app-accent-strong: #c2410c;
-    --app-accent-soft: rgba(249, 115, 22, 0.12);
-    --app-shadow-sm: 0 1px 2px rgba(59, 31, 18, 0.06);
-    --app-shadow-md: 0 14px 34px rgba(59, 31, 18, 0.08);
-    --app-shadow-lg: 0 28px 70px rgba(59, 31, 18, 0.14);
+    --app-bg: #f3f6fa;
+    --app-bg-canvas: #eef2f7;
+    --app-bg-default: #f7f9fc;
+    --app-bg-subtle: #edf2f8;
+    --app-bg-inset: #e2e8f0;
+    --app-surface: #ffffff;
+    --app-surface-strong: #f8fbff;
+    --app-sidebar: rgba(246, 248, 252, 0.92);
+    --app-border: #d7dee8;
+    --app-border-muted: #e1e7ef;
+    --app-border-strong: #9db0c7;
+    --app-text: #17212b;
+    --app-muted: #4f6278;
+    --app-subtle: #73849a;
+    --app-accent: #2563eb;
+    --app-accent-strong: #1d4ed8;
+    --app-accent-soft: rgba(37, 99, 235, 0.1);
+    --app-shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.05);
+    --app-shadow-md: 0 8px 22px rgba(15, 23, 42, 0.08);
+    --app-shadow-lg: 0 18px 44px rgba(15, 23, 42, 0.12);
   }
 
   .dark {
     color-scheme: dark;
-    --app-bg: #120904;
-    --app-bg-canvas: #120904;
-    --app-bg-default: #1a0d07;
-    --app-bg-subtle: #24120b;
-    --app-bg-inset: #0d0501;
-    --app-surface: #1d1008;
-    --app-surface-strong: #25140b;
-    --app-sidebar: rgba(26, 13, 7, 0.88);
-    --app-border: #4a2010;
-    --app-border-muted: #3a1a0d;
-    --app-border-strong: #6f3820;
-    --app-text: #ffe8b8;
-    --app-muted: #c9956a;
-    --app-subtle: #9e7352;
-    --app-accent: #fb923c;
-    --app-accent-strong: #f97316;
-    --app-accent-soft: rgba(249, 115, 22, 0.16);
+    --app-bg: #0f1722;
+    --app-bg-canvas: #0b1220;
+    --app-bg-default: #111b2d;
+    --app-bg-subtle: #172235;
+    --app-bg-inset: #07101d;
+    --app-surface: #121e32;
+    --app-surface-strong: #162338;
+    --app-sidebar: rgba(14, 23, 38, 0.9);
+    --app-border: #263549;
+    --app-border-muted: #1f2d41;
+    --app-border-strong: #38557c;
+    --app-text: #e6edf7;
+    --app-muted: #a8b6c8;
+    --app-subtle: #7f93ad;
+    --app-accent: #60a5fa;
+    --app-accent-strong: #3b82f6;
+    --app-accent-soft: rgba(96, 165, 250, 0.14);
     --app-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.28);
-    --app-shadow-md: 0 16px 36px rgba(0, 0, 0, 0.34);
-    --app-shadow-lg: 0 30px 80px rgba(0, 0, 0, 0.48);
+    --app-shadow-md: 0 12px 30px rgba(2, 6, 23, 0.3);
+    --app-shadow-lg: 0 24px 60px rgba(2, 6, 23, 0.44);
   }
 
   * {
@@ -58,59 +58,69 @@
   }
 
   html {
+    font-size: 14.5px;
     scroll-behavior: smooth;
     background: var(--app-bg-canvas);
+    overscroll-behavior: none;
   }
 
   body {
     @apply bg-cream text-textDark;
     background:
-      radial-gradient(circle at top left, rgba(249, 115, 22, 0.08), transparent 24%),
-      linear-gradient(180deg, color-mix(in srgb, var(--app-bg-canvas) 94%, white) 0%, var(--app-bg-canvas) 100%);
+      radial-gradient(circle at top left, rgba(37, 99, 235, 0.06), transparent 22%),
+      linear-gradient(180deg, #f8fbff 0%, var(--app-bg-canvas) 100%);
     color: var(--app-text);
     font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+    font-size: 0.95rem;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }
 
   ::selection {
-    @apply bg-orange text-white;
+    background: color-mix(in srgb, var(--app-accent) 18%, white);
+    color: var(--app-accent-strong);
   }
 
   .dark body {
     background:
-      radial-gradient(circle at top left, rgba(249, 115, 22, 0.12), transparent 22%),
-      linear-gradient(180deg, #140904 0%, var(--app-bg-canvas) 100%);
+      radial-gradient(circle at top left, rgba(59, 130, 246, 0.12), transparent 20%),
+      linear-gradient(180deg, #0d1524 0%, var(--app-bg-canvas) 100%);
+  }
+
+  @media (max-width: 640px) {
+    html {
+      font-size: 15.5px;
+    }
   }
 }
 
 @layer utilities {
   .section-shell {
-    @apply mx-auto max-w-7xl px-6;
+    @apply mx-auto max-w-7xl px-4 sm:px-5 lg:px-6;
   }
 
   .app-panel {
-    @apply rounded-2xl border backdrop-blur-sm;
+    @apply rounded-xl border backdrop-blur-sm;
     border-color: color-mix(in srgb, var(--app-border) 80%, transparent);
     background: color-mix(in srgb, var(--app-surface) 94%, transparent);
     box-shadow: var(--app-shadow-sm);
   }
 
   .app-panel-strong {
-    @apply rounded-2xl border;
+    @apply rounded-xl border;
     border-color: color-mix(in srgb, var(--app-border-strong) 74%, transparent);
     background: color-mix(in srgb, var(--app-surface-strong) 96%, transparent);
     box-shadow: var(--app-shadow-md);
   }
 
   .app-panel-subtle {
-    @apply rounded-xl border;
+    @apply rounded-lg border;
     border-color: color-mix(in srgb, var(--app-border-muted) 70%, transparent);
     background: color-mix(in srgb, var(--app-bg-subtle) 88%, transparent);
   }
 
   .app-icon-chip {
-    @apply inline-flex items-center justify-center rounded-xl border;
+    @apply inline-flex items-center justify-center rounded-lg border;
     border-color: color-mix(in srgb, var(--app-border) 78%, transparent);
     background: color-mix(in srgb, var(--app-bg-subtle) 92%, transparent);
     color: var(--app-muted);
@@ -129,42 +139,42 @@
   }
 
   .surface-card {
-    @apply rounded-2xl border p-5 shadow-sm;
+    @apply rounded-xl border p-4 shadow-sm;
     border-color: color-mix(in srgb, var(--app-border) 80%, transparent);
     background: var(--app-surface);
   }
 
   .surface-card-lg {
-    @apply rounded-2xl border p-6 shadow-sm;
+    @apply rounded-xl border p-5 shadow-sm;
     border-color: color-mix(in srgb, var(--app-border) 80%, transparent);
     background: var(--app-surface);
   }
 
   .surface-tile {
-    @apply rounded-2xl px-4 py-3;
+    @apply rounded-xl px-3.5 py-2.5;
     background: color-mix(in srgb, var(--app-surface-strong) 72%, white);
   }
 
   .surface-input {
-    @apply h-11 w-full rounded-xl border px-3 text-brown outline-none transition dark:text-darkText;
+    @apply h-10 w-full rounded-lg border px-3 text-brown outline-none transition dark:text-darkText;
     border-color: color-mix(in srgb, var(--app-border) 80%, transparent);
     background: color-mix(in srgb, var(--app-surface-strong) 72%, white);
   }
 
   .surface-input-soft {
-    @apply h-11 w-full rounded-2xl border px-4 text-brown outline-none transition dark:text-darkText;
+    @apply h-10 w-full rounded-lg border px-3.5 text-brown outline-none transition dark:text-darkText;
     border-color: color-mix(in srgb, var(--app-border) 80%, transparent);
     background: color-mix(in srgb, var(--app-surface-strong) 72%, white);
   }
 
   .surface-textarea-soft {
-    @apply w-full rounded-2xl border px-4 py-3 text-brown outline-none transition dark:text-darkText;
+    @apply w-full rounded-lg border px-3.5 py-2.5 text-brown outline-none transition dark:text-darkText;
     border-color: color-mix(in srgb, var(--app-border) 80%, transparent);
     background: color-mix(in srgb, var(--app-surface-strong) 72%, white);
   }
 
   .surface-checkbox-row {
-    @apply flex items-center gap-3 rounded-xl border px-4 py-3 text-sm text-brown transition dark:text-darkText;
+    @apply flex items-center gap-3 rounded-lg border px-3.5 py-2.5 text-sm text-brown transition dark:text-darkText;
     border-color: color-mix(in srgb, var(--app-border) 80%, transparent);
     background: color-mix(in srgb, var(--app-surface-strong) 72%, white);
   }
@@ -206,7 +216,7 @@
     @apply bg-white/10 backdrop-blur-xl border border-white/20;
   }
   .glass-dark {
-    background: rgba(20, 8, 3, 0.55);
+    background: rgba(9, 18, 32, 0.65);
     -webkit-backdrop-filter: blur(24px);
     backdrop-filter: blur(24px);
     border: 1px solid rgba(255, 255, 255, 0.07);
@@ -217,7 +227,7 @@
     @apply bg-gradient-to-r from-orange via-amber-400 to-deepOrange bg-clip-text text-transparent;
   }
   .grad-text-cool {
-    background: linear-gradient(135deg, #f97316 0%, #fbbf24 50%, #c2410c 100%);
+    background: linear-gradient(135deg, #2563eb 0%, #38bdf8 50%, #1d4ed8 100%);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
@@ -225,10 +235,10 @@
 
   /* Glow effects */
   .glow-orange {
-    box-shadow: 0 0 30px rgba(249, 115, 22, 0.35), 0 0 60px rgba(249, 115, 22, 0.15);
+    box-shadow: 0 0 28px rgba(37, 99, 235, 0.22), 0 0 56px rgba(37, 99, 235, 0.1);
   }
   .glow-blue {
-    box-shadow: 0 0 30px rgba(249, 115, 22, 0.3), 0 0 60px rgba(194, 65, 12, 0.14);
+    box-shadow: 0 0 28px rgba(56, 189, 248, 0.2), 0 0 60px rgba(29, 78, 216, 0.12);
   }
 
   /* Interactive card tilt */
@@ -502,49 +512,45 @@
 }
 
 ::-webkit-scrollbar-track {
-  background: #fff7e8;
+  background: var(--app-bg-default);
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #c2410c;
+  background: color-mix(in srgb, var(--app-border-strong) 86%, var(--app-accent));
   border-radius: 9999px;
-  border: 2px solid #fff7e8;
+  border: 2px solid var(--app-bg-default);
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #7c3f22;
-}
-
-.dark ::-webkit-scrollbar-track {
-  background: #1a0d07;
+  background: var(--app-accent-strong);
 }
 
 .dark ::-webkit-scrollbar-thumb {
-  background: #4a2010;
-  border: 2px solid #1a0d07;
+  background: color-mix(in srgb, var(--app-border-strong) 74%, var(--app-accent));
+  border: 2px solid var(--app-bg-default);
 }
 
 .dark ::-webkit-scrollbar-thumb:hover {
-  background: #c9956a;
+  background: var(--app-accent);
 }
 
 .dark .bg-white {
-  background-color: #2c1509;
+  background-color: var(--app-surface);
 }
 
 .dark .bg-cream {
-  background-color: #1a0d07;
+  background-color: var(--app-bg-default);
 }
 
 .dark .border-border {
-  border-color: #4a2010;
+  border-color: var(--app-border);
 }
 
 .dark .text-brown,
 .dark .text-textDark {
-  color: #ffe8b8;
+  color: var(--app-text);
 }
 
 .dark .text-muted {
-  color: #c9956a;
+  color: var(--app-muted);
 }

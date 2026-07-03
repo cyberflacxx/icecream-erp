@@ -1,7 +1,38 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { badRequest, can, forbidden, getAuthContext, notFound, serverError, unauthorized } from '@/lib/api-auth';
+import { isMissingColumnError } from '@/lib/postgrest-compat';
 import { createServiceRoleClient } from '@/lib/supabase/server';
+
+export async function GET(
+  _request: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const ctx = await getAuthContext();
+  if (!ctx) return unauthorized();
+  if (!can(ctx, 'procurement.read')) return forbidden();
+
+  const { id } = await params;
+  const service = createServiceRoleClient();
+
+  try {
+    const { data: requisition, error } = await service
+      .from('purchase_requisitions')
+      .select(
+        'id, requisition_number, department, needed_by_date, remarks, status, approval_status, approver_user_id, requested_by, approved_by, approved_at, rejected_by, rejected_at, purchase_requisition_items(id, item_id, unit_of_measure_id, quantity_requested, quantity_approved, estimated_unit_cost, remarks)',
+      )
+      .is('deleted_at', null)
+      .eq('organization_id', ctx.organizationId)
+      .eq('id', id)
+      .single();
+
+    if (error || !requisition) return notFound('Purchase requisition not found.');
+
+    return NextResponse.json(requisition);
+  } catch (err) {
+    return serverError((err as Error).message);
+  }
+}
 
 export async function PATCH(
   request: NextRequest,
@@ -18,6 +49,7 @@ export async function PATCH(
     department?: string;
     neededByDate?: string | null;
     remarks?: string | null;
+    approverUserId?: string | null;
     items?: Array<{
       itemId: string;
       unitOfMeasureId: string;
@@ -53,7 +85,7 @@ export async function PATCH(
       const itemIds = [...new Set(body.items.map((i) => i.itemId))];
       const unitIds = [...new Set(body.items.map((i) => i.unitOfMeasureId))];
 
-      const [itemsCheck, unitsCheck] = await Promise.all([
+      const [itemsPrimary, unitsCheck] = await Promise.all([
         service
           .from('items')
           .select('id')
@@ -67,6 +99,11 @@ export async function PATCH(
           .in('id', unitIds),
       ]);
 
+      const itemsCheck =
+        itemsPrimary.error && isMissingColumnError(itemsPrimary.error, 'items', 'deleted_at')
+          ? await service.from('items').select('id').eq('organization_id', ctx.organizationId).in('id', itemIds)
+          : itemsPrimary;
+
       if (
         (itemsCheck.data?.length ?? 0) !== itemIds.length ||
         (unitsCheck.data?.length ?? 0) !== unitIds.length
@@ -75,11 +112,26 @@ export async function PATCH(
       }
     }
 
+    if (body.approverUserId) {
+      const { data: approver } = await service
+        .from('users')
+        .select('id')
+        .eq('organization_id', ctx.organizationId)
+        .eq('status', 'active')
+        .eq('id', body.approverUserId)
+        .single();
+
+      if (!approver) {
+        return badRequest('Selected approver is not available.');
+      }
+    }
+
     // Update header fields
     const updatePayload: Record<string, unknown> = {};
     if (body.department !== undefined) updatePayload.department = body.department;
     if (body.neededByDate !== undefined) updatePayload.needed_by_date = body.neededByDate;
     if (body.remarks !== undefined) updatePayload.remarks = body.remarks;
+    if (body.approverUserId !== undefined) updatePayload.approver_user_id = body.approverUserId;
 
     if (Object.keys(updatePayload).length > 0) {
       const { error: updateErr } = await service

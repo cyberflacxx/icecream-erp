@@ -10,7 +10,14 @@ export async function GET(_request: NextRequest) {
 
   const service = createServiceRoleClient();
   const [invoices, payments] = await Promise.all([
-    service.from('supplier_invoices').select('id, supplier_id, invoice_number, invoice_date, due_date, invoice_total, status, suppliers(name), purchase_orders(po_number)').eq('organization_id', ctx.organizationId).is('deleted_at', null).order('invoice_date', { ascending: false }),
+    service
+      .from('supplier_invoices')
+      .select(
+        'id, supplier_id, purchase_order_id, goods_received_note_id, invoice_number, invoice_date, due_date, invoice_total, status, suppliers(name), purchase_orders(po_number), goods_received_notes(grn_number)',
+      )
+      .eq('organization_id', ctx.organizationId)
+      .is('deleted_at', null)
+      .order('invoice_date', { ascending: false }),
     service.from('supplier_payments').select('supplier_invoice_id, amount_paid').eq('organization_id', ctx.organizationId).is('deleted_at', null),
   ]);
 
@@ -38,15 +45,19 @@ export async function GET(_request: NextRequest) {
   return NextResponse.json((invoices.data ?? []).map((row) => {
     const supplier = Array.isArray(row.suppliers) ? row.suppliers[0] : row.suppliers;
     const po = Array.isArray(row.purchase_orders) ? row.purchase_orders[0] : row.purchase_orders;
+    const grn = Array.isArray(row.goods_received_notes) ? row.goods_received_notes[0] : row.goods_received_notes;
     const total = Number(row.invoice_total ?? 0);
     const paidAmount = paidByInvoice.get(String(row.id)) ?? 0;
     return {
       balance: total - paidAmount,
       dueDate: row.due_date,
+      goodsReceivedNoteId: row.goods_received_note_id ?? null,
+      goodsReceivedNoteNumber: grn?.grn_number ?? null,
       id: row.id,
       invoiceDate: row.invoice_date,
       invoiceNumber: row.invoice_number,
       paidAmount,
+      purchaseOrderId: row.purchase_order_id ?? null,
       purchaseOrderNumber: po?.po_number ?? null,
       status: row.status,
       supplierId: row.supplier_id,

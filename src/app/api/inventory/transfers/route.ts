@@ -116,6 +116,7 @@ export async function POST(request: NextRequest) {
         batchNumber?: string | null;
         itemId: string;
         quantity: number;
+        unitCost?: number | null;
       }>;
     };
 
@@ -143,6 +144,7 @@ export async function POST(request: NextRequest) {
       requireWarehouseAccess(service, toWarehouseId, ctx.branchId, ctx.isBranchScoped),
     ]);
 
+    const requiresAvailableStock = normalizedStatus === 'COMPLETED';
     const validatedItems = [];
     for (const itemRow of items) {
       const qty = Number(itemRow.quantity);
@@ -151,19 +153,25 @@ export async function POST(request: NextRequest) {
       }
 
       const item = await requireItem(service, itemRow.itemId);
-      const sourceBalance = await getBalance(service, itemRow.itemId, fromWarehouseId);
-      const sourceAvailable = Number(sourceBalance?.quantity_available ?? 0);
+      if (requiresAvailableStock) {
+        const sourceBalance = await getBalance(service, itemRow.itemId, fromWarehouseId);
+        const sourceAvailable = Number(sourceBalance?.quantity_available ?? 0);
 
-      if (sourceAvailable < qty) {
-        return badRequest(
-          `Insufficient stock for ${item.name}. Available: ${sourceAvailable.toFixed(3)}, Required: ${qty.toFixed(3)}`,
-        );
+        if (sourceAvailable < qty) {
+          return badRequest(
+            `Insufficient stock for ${item.name}. Available: ${sourceAvailable.toFixed(3)}, Required: ${qty.toFixed(3)}`,
+          );
+        }
       }
 
       validatedItems.push({
         batchNumber: itemRow.batchNumber ?? null,
         item,
         quantity: qty,
+        unitCost:
+          itemRow.unitCost === null || itemRow.unitCost === undefined || Number.isNaN(Number(itemRow.unitCost))
+            ? item.unit_cost ?? null
+            : Number(itemRow.unitCost),
       });
     }
 
@@ -214,7 +222,7 @@ export async function POST(request: NextRequest) {
         quantity_requested: validatedItem.quantity,
         quantity_received: normalizedStatus === 'COMPLETED' ? validatedItem.quantity : 0,
         quantity_sent: normalizedStatus === 'COMPLETED' ? validatedItem.quantity : 0,
-        unit_cost: validatedItem.item.unit_cost ?? null,
+        unit_cost: validatedItem.unitCost,
       });
       if (transferItemError) return serverError(transferItemError.message);
 
@@ -296,7 +304,7 @@ export async function POST(request: NextRequest) {
         quantityReceived: normalizedStatus === 'COMPLETED' ? validatedItem.quantity : 0,
         quantityRequested: validatedItem.quantity,
         quantitySent: normalizedStatus === 'COMPLETED' ? validatedItem.quantity : 0,
-        unitCost: validatedItem.item.unit_cost ?? null,
+        unitCost: validatedItem.unitCost,
       })),
     }, { status: 201 });
   } catch (error) {

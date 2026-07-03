@@ -34,7 +34,7 @@ import {
   useProcurementMeta,
   useProcurementRequest,
   usePurchaseOrders,
-  type PurchaseOrderRow
+  type PurchaseOrderRow,
 } from '@/hooks/procurement';
 import { usePermission } from '@/hooks/usePermission';
 
@@ -301,14 +301,12 @@ export default function PurchaseOrdersPage() {
         }
 
         if (field === 'itemId') {
-          const matchedItem = (metaQuery.data?.items ?? []).find((item) => item.id === value) as
-            | { unit_of_measure_id?: string | null }
-            | undefined;
+          const matchedItem = (metaQuery.data?.items ?? []).find((item) => item.id === value);
 
           return {
             ...row,
             itemId: value,
-            unitOfMeasureId: row.unitOfMeasureId || matchedItem?.unit_of_measure_id || ''
+            unitOfMeasureId: row.unitOfMeasureId || matchedItem?.unitOfMeasureId || '',
           };
         }
 
@@ -554,7 +552,7 @@ export default function PurchaseOrdersPage() {
                         onClick={() => sendOrder(row.id)}
                       >
                         <Send className="mr-2 h-4 w-4" />
-                        {isSending ? 'Sending...' : 'Send to Supplier'}
+                        {isSending ? 'Emailing...' : 'Email Supplier'}
                       </Button>
                     ) : null}
 

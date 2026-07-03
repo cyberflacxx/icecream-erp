@@ -16,7 +16,9 @@ export async function GET(_request: NextRequest) {
   const service = createServiceRoleClient();
   const { data, error } = await service
     .from('supplier_payments')
-    .select('id, payment_date, payment_method, reference_number, amount_paid, status, suppliers(name), supplier_invoices(invoice_number)')
+    .select(
+      'id, supplier_invoice_id, payment_date, payment_method, reference_number, amount_paid, status, suppliers(name), supplier_invoices(invoice_number)',
+    )
     .eq('organization_id', ctx.organizationId)
     .is('deleted_at', null)
     .order('payment_date', { ascending: false });
@@ -34,6 +36,7 @@ export async function GET(_request: NextRequest) {
     return {
       amountPaid: Number(row.amount_paid ?? 0),
       id: row.id,
+      invoiceId: row.supplier_invoice_id ?? null,
       invoiceNumber: invoice?.invoice_number ?? null,
       method: row.payment_method,
       paymentDate: row.payment_date,

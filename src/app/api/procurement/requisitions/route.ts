@@ -23,7 +23,7 @@ export async function GET(request: NextRequest) {
     let query = service
       .from('purchase_requisitions')
       .select(
-        'id, requisition_number, department, request_date, needed_by_date, status, approval_status, requested_by, approver_user_id, approved_by, approved_at',
+        'id, requisition_number, department, request_date, needed_by_date, status, approval_status, requested_by, approver_user_id, approved_by, approved_at, rejected_by, rejected_at, remarks',
         { count: 'exact' },
       )
       .is('deleted_at', null)
@@ -43,7 +43,7 @@ export async function GET(request: NextRequest) {
     const userIds = [
       ...new Set(
         (data ?? [])
-          .flatMap((row) => [row.requested_by, row.approver_user_id, row.approved_by])
+          .flatMap((row) => [row.requested_by, row.approver_user_id, row.approved_by, row.rejected_by])
           .map((value) => String(value ?? ''))
           .filter(Boolean),
       ),
@@ -64,9 +64,14 @@ export async function GET(request: NextRequest) {
       status: r.status,
       approvalStatus: r.approval_status ?? r.status,
       requestedBy: usersById.get(String(r.requested_by ?? '')) ?? 'Unknown',
+      requestedById: r.requested_by ? String(r.requested_by) : null,
       approverName: usersById.get(String(r.approver_user_id ?? '')) ?? null,
+      approverUserId: r.approver_user_id ? String(r.approver_user_id) : null,
       approvedBy: usersById.get(String(r.approved_by ?? '')) ?? null,
       approvedAt: r.approved_at ? String(r.approved_at) : null,
+      rejectedBy: usersById.get(String(r.rejected_by ?? '')) ?? null,
+      rejectedAt: r.rejected_at ? String(r.rejected_at) : null,
+      remarks: r.remarks ? String(r.remarks) : null,
     }));
 
     return NextResponse.json({
@@ -135,6 +140,20 @@ export async function POST(request: NextRequest) {
 
     if ((itemsCheck.data?.length ?? 0) !== itemIds.length || (unitsCheck.data?.length ?? 0) !== unitIds.length) {
       return badRequest('One or more requisition items are invalid.');
+    }
+
+    if (body.approverUserId) {
+      const { data: approver } = await service
+        .from('users')
+        .select('id')
+        .eq('organization_id', ctx.organizationId)
+        .eq('status', 'active')
+        .eq('id', body.approverUserId)
+        .single();
+
+      if (!approver) {
+        return badRequest('Selected approver is not available.');
+      }
     }
 
     // Generate requisition number

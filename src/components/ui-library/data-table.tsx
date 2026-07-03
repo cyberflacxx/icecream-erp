@@ -28,10 +28,10 @@ export function DataTable<T extends object>({
 }: DataTableProps<T>) {
   if (loading) {
     return (
-      <div className="rounded-2xl border border-border bg-white p-6 shadow-sm dark:border-darkBorder dark:bg-darkCard">
+      <div className="rounded-xl border border-[color:var(--app-border)] bg-[color:var(--app-surface)] p-5 shadow-sm">
         <div className="space-y-3">
           {Array.from({ length: 6 }).map((_, index) => (
-            <div key={index} className="h-11 animate-pulse rounded-2xl bg-cream dark:bg-darkBg" />
+            <div key={index} className="h-10 animate-pulse rounded-lg bg-[color:var(--app-bg-subtle)]" />
           ))}
         </div>
       </div>
@@ -43,17 +43,17 @@ export function DataTable<T extends object>({
   }
 
   return (
-    <div className="overflow-hidden rounded-2xl border border-border bg-white shadow-sm dark:border-darkBorder dark:bg-darkCard">
+    <div className="overflow-hidden rounded-xl border border-[color:var(--app-border)] bg-[color:var(--app-surface)] shadow-sm">
       <div className="overflow-x-auto">
-        <table className="min-w-full divide-y divide-border dark:divide-darkBorder">
-          <thead className="bg-cream dark:bg-tableHeaderDark">
+        <table className="min-w-full divide-y divide-[color:var(--app-border-muted)]">
+          <thead className="bg-[color:var(--app-bg-subtle)]">
             <tr>
               {columns.map((column) => (
                 <th
                   key={String(column.key)}
                   className={
                     column.className ??
-                    'px-5 py-4 text-left text-xs font-semibold uppercase tracking-[0.2em] text-muted dark:text-darkMuted'
+                    'px-4 py-3 text-left text-[10px] font-semibold uppercase tracking-[0.18em] text-[color:var(--app-subtle)]'
                   }
                 >
                   {column.header}
@@ -61,13 +61,13 @@ export function DataTable<T extends object>({
               ))}
             </tr>
           </thead>
-          <tbody className="divide-y divide-border dark:divide-darkBorder">
+          <tbody className="divide-y divide-[color:var(--app-border-muted)]">
             {data.map((row, rowIndex) => (
-              <tr key={rowIndex} className="hover:bg-cream/40 dark:hover:bg-tableHoverDark">
+              <tr key={rowIndex} className="transition hover:bg-[color:var(--app-bg-subtle)]/70">
                 {columns.map((column) => (
                   <td
                     key={String(column.key)}
-                    className={column.className ?? 'px-5 py-4 text-sm text-brown dark:text-darkText'}
+                    className={column.className ?? 'px-4 py-3 text-sm text-[color:var(--app-text)]'}
                   >
                     {column.render
                       ? column.render(row)
@@ -80,7 +80,7 @@ export function DataTable<T extends object>({
         </table>
       </div>
       {pagination ? (
-        <div className="flex items-center justify-between border-t border-border px-5 py-4 text-sm text-muted dark:border-darkBorder dark:text-darkMuted">
+        <div className="flex items-center justify-between border-t border-[color:var(--app-border-muted)] px-4 py-3 text-sm text-[color:var(--app-muted)]">
           <span>
             Page {pagination.page} of {Math.max(1, Math.ceil(pagination.total / pagination.pageSize))}
           </span>

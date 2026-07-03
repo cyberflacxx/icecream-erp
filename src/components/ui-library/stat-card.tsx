@@ -13,8 +13,8 @@ interface StatCardProps {
 }
 
 const colorStyles = {
-  orange: 'bg-orange/10 text-orange',
-  brown: 'bg-brown/10 text-brown',
+  orange: 'bg-[color:var(--app-accent-soft)] text-[color:var(--app-accent-strong)]',
+  brown: 'bg-slate-100 text-[color:var(--app-text)] dark:bg-slate-800/70 dark:text-[color:var(--app-text)]',
   success: 'bg-success/10 text-success',
   warning: 'bg-warning/10 text-warning'
 } as const;
@@ -28,21 +28,21 @@ export function StatCard({
   color = 'orange'
 }: StatCardProps) {
   return (
-    <article className="rounded-2xl border border-border bg-white p-6 shadow-sm dark:border-darkBorder dark:bg-darkCard">
+    <article className="rounded-xl border border-[color:var(--app-border)] bg-[color:var(--app-surface)] p-5 shadow-sm">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <p className="text-sm font-medium text-muted dark:text-darkMuted">{title}</p>
-          <p className="mt-3 text-3xl font-semibold tracking-tight text-brown dark:text-darkText">{value}</p>
+          <p className="text-sm font-medium text-[color:var(--app-muted)]">{title}</p>
+          <p className="mt-2.5 text-[1.9rem] font-semibold tracking-[-0.03em] text-[color:var(--app-text)]">{value}</p>
         </div>
-        <div className={cn('rounded-full p-3', colorStyles[color])}>{icon}</div>
+        <div className={cn('rounded-lg border border-[color:var(--app-border)] p-2.5', colorStyles[color])}>{icon}</div>
       </div>
       {trendValue ? (
         <div
           className={cn(
-            'mt-5 inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-semibold',
+            'mt-4 inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em]',
             trend === 'up' && 'bg-success/10 text-success',
             trend === 'down' && 'bg-error/10 text-error',
-            trend === 'neutral' && 'bg-cream text-muted dark:bg-darkBg dark:text-darkMuted',
+            trend === 'neutral' && 'border-[color:var(--app-border)] bg-[color:var(--app-bg-subtle)] text-[color:var(--app-muted)]',
           )}
         >
           {trend === 'up' ? <ArrowUpRight className="h-3.5 w-3.5" /> : null}

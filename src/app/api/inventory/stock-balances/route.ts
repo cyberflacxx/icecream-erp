@@ -94,7 +94,7 @@ async function mapBalances(service: ReturnType<typeof createServiceRoleClient>, 
   const itemIds = [...new Set(rows.map((row) => String(row.item_id ?? '')).filter(Boolean))];
   const warehouseIds = [...new Set(rows.map((row) => String(row.warehouse_id ?? '')).filter(Boolean))];
   const [itemsResult, warehousesResult] = await Promise.all([
-    itemIds.length ? service.from('items').select('id, code, name, item_type, reorder_level, unit_of_measure_id').in('id', itemIds) : Promise.resolve({ data: [], error: null }),
+    itemIds.length ? service.from('items').select('id, code, name, item_type, reorder_level, reorder_quantity, reorder_qty, unit_of_measure_id, unit_cost, standard_cost').in('id', itemIds) : Promise.resolve({ data: [], error: null }),
     warehouseIds.length ? service.from('warehouses').select('id, code, name, branch_id').in('id', warehouseIds) : Promise.resolve({ data: [], error: null }),
   ]);
   if (itemsResult.error) throw new Error(itemsResult.error.message);
@@ -122,12 +122,14 @@ async function mapBalances(service: ReturnType<typeof createServiceRoleClient>, 
     const quantityOnHand = Number(row.quantity_on_hand ?? 0);
     const quantityReserved = Number(row.quantity_reserved ?? 0);
     const quantityAvailable = Number(row.quantity_available ?? (quantityOnHand - quantityReserved));
+    const unitCost = Number(item?.unit_cost ?? item?.standard_cost ?? 0);
     return {
       id: row.id,
       lastUpdated: row.last_updated,
       quantityOnHand,
       quantityAvailable,
       quantityReserved,
+      stockValue: quantityOnHand * unitCost,
       item: item
         ? {
             id: item.id,
@@ -135,6 +137,8 @@ async function mapBalances(service: ReturnType<typeof createServiceRoleClient>, 
             name: item.name,
             itemType: item.item_type,
             reorderLevel: Number(item.reorder_level ?? 0),
+            reorderQuantity: Number(item.reorder_quantity ?? item.reorder_qty ?? 0),
+            unitCost,
             unitOfMeasure: unitOfMeasure
               ? { id: unitOfMeasure.id, name: unitOfMeasure.name, abbreviation: unitOfMeasure.abbreviation }
               : null,

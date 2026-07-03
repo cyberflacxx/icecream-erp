@@ -17,17 +17,17 @@ const links = [
 export function AdminNav() {
   const pathname = usePathname();
   return (
-    <div className="overflow-x-auto rounded-2xl border border-border bg-white p-2 shadow-sm dark:border-darkBorder dark:bg-darkCard">
+    <div className="overflow-x-auto rounded-xl border border-[color:var(--app-border)] bg-[color:var(--app-surface)] p-1.5 shadow-sm">
       <div className="flex min-w-max gap-2">
         {links.map((link) => (
           <Link
             key={link.href}
             href={link.href}
             className={cn(
-              'rounded-2xl px-4 py-3 text-sm font-medium transition',
+              'rounded-lg px-3.5 py-2 text-[13px] font-medium transition',
               pathname === link.href
-                ? 'bg-brown text-white dark:bg-darkBg dark:text-darkText'
-                : 'text-muted hover:bg-cream hover:text-brown dark:text-darkMuted dark:hover:bg-darkBg dark:hover:text-darkText',
+                ? 'bg-[color:var(--app-accent-soft)] text-[color:var(--app-accent-strong)]'
+                : 'text-[color:var(--app-muted)] hover:bg-[color:var(--app-bg-subtle)] hover:text-[color:var(--app-text)]',
             )}
           >
             {link.label}

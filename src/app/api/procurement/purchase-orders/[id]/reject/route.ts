@@ -9,7 +9,7 @@ import {
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
 export async function POST(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
   const ctx = await getAuthContext();
@@ -19,10 +19,18 @@ export async function POST(
   const { id } = await params;
   const service = createServiceRoleClient();
 
+  let remarks: string | null = null;
+  try {
+    const body = await request.json();
+    remarks = body.remarks ?? null;
+  } catch {
+    // remarks optional
+  }
+
   try {
     const { data: existing, error: fetchErr } = await service
       .from('purchase_orders')
-      .select('id, status, approver_user_id, sent_at, rejected_at')
+      .select('id, status, approver_user_id, sent_at, rejected_at, notes')
       .is('deleted_at', null)
       .eq('organization_id', ctx.organizationId)
       .eq('id', id)
@@ -48,6 +56,7 @@ export async function POST(
       .update({
         rejected_at: new Date().toISOString(),
         rejected_by: ctx.userId,
+        notes: remarks ?? order.notes ?? null,
         status: formatPurchaseOrderDbStatus('cancelled', order.status),
       })
       .eq('id', id)

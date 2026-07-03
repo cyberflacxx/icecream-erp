@@ -102,19 +102,19 @@ export function InstallPwaPrompt() {
   }
 
   return (
-    <div className="fixed bottom-4 left-1/2 z-[100] w-[calc(100%-1.5rem)] max-w-md -translate-x-1/2 rounded-2xl border border-orange/30 bg-[rgba(255,247,232,0.96)] p-4 shadow-[0_18px_50px_rgba(124,63,34,0.25)] backdrop-blur-xl">
+    <div className="fixed bottom-4 left-1/2 z-[100] w-[calc(100%-1.5rem)] max-w-md -translate-x-1/2 rounded-xl border border-[color:var(--app-border)] bg-[color:var(--app-surface)]/95 p-4 shadow-[var(--app-shadow-lg)] backdrop-blur-xl">
       <button
         type="button"
         aria-label="Close install prompt"
         onClick={() => setDismissed(true)}
-        className="absolute right-3 top-3 inline-flex h-7 w-7 items-center justify-center rounded-full border border-orange/20 bg-white text-brown"
+        className="absolute right-3 top-3 inline-flex h-7 w-7 items-center justify-center rounded-full border border-[color:var(--app-border)] bg-[color:var(--app-bg-subtle)] text-[color:var(--app-muted)]"
       >
         <X className="h-4 w-4" />
       </button>
 
       <div className="pr-8">
-        <p className="text-sm font-semibold text-brown">Install ERP App</p>
-        <p className="mt-1 text-xs text-muted">
+        <p className="text-sm font-semibold text-[color:var(--app-text)]">Install ERP App</p>
+        <p className="mt-1 text-xs text-[color:var(--app-muted)]">
           {deferredPrompt
             ? 'Add this ERP to your home screen for faster access.'
             : 'On iPhone/iPad, tap Share then "Add to Home Screen".'}
@@ -134,7 +134,7 @@ export function InstallPwaPrompt() {
             setDeferredPrompt(null);
             setDismissed(true);
           }}
-          className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-full bg-orange px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-deepOrange"
+          className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-[color:var(--app-accent-strong)] px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-[color:var(--app-accent)]"
         >
           <Download className="h-4 w-4" />
           Install App

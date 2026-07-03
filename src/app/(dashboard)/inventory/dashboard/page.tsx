@@ -1,7 +1,8 @@
 'use client';
 
+import Link from 'next/link';
 import type { ReactNode } from 'react';
-import { AlertTriangle, ClipboardCheck, PackageSearch, Wallet } from 'lucide-react';
+import { AlertTriangle, ArrowRightLeft, ClipboardCheck, History, PackageSearch, ReceiptText, Wallet, Warehouse } from 'lucide-react';
 
 import { PageHeader } from '@/components/dashboard/page-header';
 import { InventoryNav } from '@/components/inventory/inventory-nav';
@@ -71,6 +72,56 @@ export default function InventoryDashboardPage() {
             <CountTile label="Low stock" value={metrics?.lowStockCount ?? 0} />
             <CountTile label="Shortages" value={metrics?.supplierShortageCount ?? 0} />
           </div>
+          <div className="mt-4 rounded-2xl border border-border bg-white px-4 py-4 text-sm text-muted">
+            Duplicate transfer posting and missing ledger entries can be reviewed from{' '}
+            <Link href="/admin/data-integrity" className="font-medium text-orange underline-offset-4 hover:underline">
+              Data Integrity
+            </Link>
+            .
+          </div>
+        </div>
+      </div>
+
+      <div className="surface-card">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h2 className="text-lg font-semibold text-brown">Stores Control Center</h2>
+            <p className="mt-1 text-sm text-muted">
+              Move through the main stores controls from one place: receiving, transfers, approvals, movement history, and warehouse structure.
+            </p>
+          </div>
+        </div>
+        <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+          <ControlTile
+            href="/procurement/goods-received"
+            icon={<ReceiptText className="h-4 w-4 text-orange" />}
+            label="GRN Control"
+            helper="Receive, approve, and post incoming stock"
+          />
+          <ControlTile
+            href="/inventory/transfers"
+            icon={<ArrowRightLeft className="h-4 w-4 text-orange" />}
+            label="Transfers"
+            helper="Warehouse-to-warehouse movements"
+          />
+          <ControlTile
+            href="/inventory/approvals"
+            icon={<ClipboardCheck className="h-4 w-4 text-orange" />}
+            label="Approvals"
+            helper="Pending transfer, return, and adjustment approvals"
+          />
+          <ControlTile
+            href="/inventory/stock-movements"
+            icon={<History className="h-4 w-4 text-orange" />}
+            label="Movement Trail"
+            helper="Audit by item, warehouse, and reference"
+          />
+          <ControlTile
+            href="/inventory/warehouses"
+            icon={<Warehouse className="h-4 w-4 text-orange" />}
+            label="Warehouses"
+            helper="Maintain stores structure and balance points"
+          />
         </div>
       </div>
 
@@ -100,6 +151,31 @@ export default function InventoryDashboardPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+function ControlTile({
+  helper,
+  href,
+  icon,
+  label,
+}: {
+  helper: string;
+  href: string;
+  icon: ReactNode;
+  label: string;
+}) {
+  return (
+    <Link
+      href={href}
+      className="rounded-2xl border border-border bg-white px-4 py-4 text-sm transition hover:border-orange/30 hover:bg-cream/60"
+    >
+      <div className="flex items-center justify-between">
+        <p className="font-semibold text-brown">{label}</p>
+        {icon}
+      </div>
+      <p className="mt-2 text-muted">{helper}</p>
+    </Link>
   );
 }
 

@@ -23,7 +23,7 @@ export function SalesNav() {
   const pathname = usePathname();
 
   return (
-    <div className="overflow-x-auto rounded-2xl border border-border bg-white p-2 shadow-sm">
+    <div className="overflow-x-auto rounded-xl border border-[color:var(--app-border)] bg-[color:var(--app-surface)] p-1.5 shadow-sm">
       <div className="flex min-w-max gap-2">
         {links.map((link) => {
           const Icon = link.icon;
@@ -34,11 +34,11 @@ export function SalesNav() {
               key={link.href}
               href={link.href}
               className={cn(
-                'inline-flex items-center gap-2 rounded-2xl px-4 py-3 text-sm font-medium transition',
-                isActive ? 'bg-brown text-white shadow-sm' : 'text-muted hover:bg-cream hover:text-brown',
+                'inline-flex items-center gap-2 rounded-lg px-3.5 py-2 text-[13px] font-medium transition',
+                isActive ? 'bg-[color:var(--app-accent-soft)] text-[color:var(--app-accent-strong)] shadow-sm' : 'text-[color:var(--app-muted)] hover:bg-[color:var(--app-bg-subtle)] hover:text-[color:var(--app-text)]',
               )}
             >
-              <Icon className="h-4 w-4" />
+              <Icon className="h-3.5 w-3.5" />
               {link.label}
             </Link>
           );

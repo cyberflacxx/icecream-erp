@@ -24,6 +24,7 @@ export interface CreateTransferPayload {
     batchNumber?: string | null;
     itemId: string;
     quantity: number;
+    unitCost?: number | null;
   }>;
   notes?: string | null;
   referenceNumber?: string;

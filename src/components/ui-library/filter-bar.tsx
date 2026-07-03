@@ -19,14 +19,14 @@ interface FilterBarProps {
 
 export function FilterBar({ filters, onFilterChange }: FilterBarProps) {
   return (
-    <div className="flex flex-col gap-4 rounded-2xl border border-border bg-white p-4 shadow-sm lg:flex-row lg:flex-wrap dark:border-darkBorder dark:bg-darkCard">
+    <div className="flex flex-col gap-3 rounded-xl border border-[color:var(--app-border)] bg-[color:var(--app-surface)] p-3.5 shadow-sm lg:flex-row lg:flex-wrap">
       {filters.map((filter) => {
         if (filter.type === 'select') {
           return (
-            <label key={filter.key} className="flex min-w-[180px] flex-1 flex-col gap-2 text-sm text-muted dark:text-darkMuted">
+            <label key={filter.key} className="flex min-w-[180px] flex-1 flex-col gap-1.5 text-sm text-[color:var(--app-muted)]">
               <span>{filter.label}</span>
               <select
-                className="h-11 rounded-2xl border border-border bg-cream px-4 text-brown outline-none dark:border-darkBorder dark:bg-darkCard dark:text-darkText"
+                className="surface-input"
                 value={filter.value ?? ''}
                 onChange={(event) => onFilterChange(filter.key, event.target.value)}
               >
@@ -43,7 +43,7 @@ export function FilterBar({ filters, onFilterChange }: FilterBarProps) {
 
         if (filter.type === 'date-range') {
           return (
-            <label key={filter.key} className="flex min-w-[180px] flex-1 flex-col gap-2 text-sm text-muted dark:text-darkMuted">
+            <label key={filter.key} className="flex min-w-[180px] flex-1 flex-col gap-1.5 text-sm text-[color:var(--app-muted)]">
               <span>{filter.label}</span>
               <input
                 type="text"
@@ -52,7 +52,7 @@ export function FilterBar({ filters, onFilterChange }: FilterBarProps) {
                 onChange={(event: ChangeEvent<HTMLInputElement>) =>
                   onFilterChange(filter.key, event.target.value)
                 }
-                className="h-11 rounded-2xl border border-border bg-cream px-4 text-brown outline-none dark:border-darkBorder dark:bg-darkCard dark:text-darkText"
+                className="surface-input"
               />
             </label>
           );
@@ -60,7 +60,7 @@ export function FilterBar({ filters, onFilterChange }: FilterBarProps) {
 
         if (filter.type === 'date') {
           return (
-            <label key={filter.key} className="flex min-w-[180px] flex-1 flex-col gap-2 text-sm text-muted dark:text-darkMuted">
+            <label key={filter.key} className="flex min-w-[180px] flex-1 flex-col gap-1.5 text-sm text-[color:var(--app-muted)]">
               <span>{filter.label}</span>
               <input
                 type="date"
@@ -68,7 +68,7 @@ export function FilterBar({ filters, onFilterChange }: FilterBarProps) {
                 onChange={(event: ChangeEvent<HTMLInputElement>) =>
                   onFilterChange(filter.key, event.target.value)
                 }
-                className="h-11 rounded-2xl border border-border bg-cream px-4 text-brown outline-none dark:border-darkBorder dark:bg-darkCard dark:text-darkText"
+                className="surface-input"
               />
             </label>
           );
@@ -78,16 +78,16 @@ export function FilterBar({ filters, onFilterChange }: FilterBarProps) {
           return (
             <label
               key={filter.key}
-              className="flex min-w-[180px] flex-1 items-end text-sm text-muted dark:text-darkMuted"
+              className="flex min-w-[180px] flex-1 items-end text-sm text-[color:var(--app-muted)]"
             >
-              <span className="flex h-11 items-center gap-3 rounded-2xl border border-border bg-cream px-4 dark:border-darkBorder dark:bg-darkCard">
+              <span className="flex h-10 items-center gap-3 rounded-lg border border-[color:var(--app-border)] bg-[color:var(--app-surface-strong)] px-3.5">
                 <input
                   type="checkbox"
                   checked={filter.checked ?? false}
                   onChange={(event: ChangeEvent<HTMLInputElement>) =>
                     onFilterChange(filter.key, String(event.target.checked))
                   }
-                  className="h-4 w-4 rounded border-border text-orange focus:ring-orange dark:border-darkBorder"
+                  className="h-4 w-4 rounded border-[color:var(--app-border)] text-[color:var(--app-accent)] focus:ring-[color:var(--app-accent)]"
                 />
                 {filter.label}
               </span>
@@ -96,7 +96,7 @@ export function FilterBar({ filters, onFilterChange }: FilterBarProps) {
         }
 
         return (
-          <label key={filter.key} className="flex min-w-[220px] flex-[1.4] flex-col gap-2 text-sm text-muted dark:text-darkMuted">
+          <label key={filter.key} className="flex min-w-[220px] flex-[1.4] flex-col gap-1.5 text-sm text-[color:var(--app-muted)]">
             <span>{filter.label}</span>
             <input
               type="search"
@@ -105,7 +105,7 @@ export function FilterBar({ filters, onFilterChange }: FilterBarProps) {
               onChange={(event: ChangeEvent<HTMLInputElement>) =>
                 onFilterChange(filter.key, event.target.value)
               }
-              className="h-11 rounded-2xl border border-border bg-cream px-4 text-brown outline-none dark:border-darkBorder dark:bg-darkCard dark:text-darkText"
+              className="surface-input"
             />
           </label>
         );

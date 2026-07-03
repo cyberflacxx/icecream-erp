@@ -3,13 +3,15 @@ interface ApiFetchOptions extends RequestInit {
 }
 
 export async function apiFetch<T>(path: string, options: ApiFetchOptions = {}) {
-  const { headers, token, ...rest } = options;
+  const { headers, token, body, ...rest } = options;
+  const isFormData = typeof FormData !== 'undefined' && body instanceof FormData;
 
   const response = await fetch(path, {
     ...rest,
+    body,
     credentials: 'include',
     headers: {
-      'Content-Type': 'application/json',
+      ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...headers,
     },

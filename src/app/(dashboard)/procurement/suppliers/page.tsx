@@ -12,7 +12,6 @@ import { API_ROUTES, PERMISSIONS } from '@/lib/shared';
 import { PageHeader } from '@/components/dashboard/page-header';
 import { PaginationControls } from '@/components/inventory/pagination-controls';
 import { ProcurementNav } from '@/components/procurement/procurement-nav';
-import { createClient, hasSupabaseClientEnv } from '@/lib/supabase/client';
 import { Button } from '@/components/ui/button';
 import {
   useCreateSupplier,
@@ -171,38 +170,25 @@ export default function SuppliersPage() {
     const file = event.target.files?.[0];
     if (!file) return;
 
-    if (!hasSupabaseClientEnv()) {
-      setFormError('Supabase storage is not configured here. Paste the supplier document URL manually.');
-      return;
-    }
-
     setIsUploadingDocument(true);
     setFormError(null);
 
     try {
-      const supabase = createClient();
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
+      const payload = new FormData();
+      payload.append('file', file);
 
-      if (!user) throw new Error('You must be signed in to upload supplier documents.');
-
-      const safeFileName = file.name.replace(/[^a-zA-Z0-9._-]/g, '-');
-      const filePath = `icecream_erp/suppliers/${user.id}/${Date.now()}-${safeFileName}`;
-      const { error: uploadError } = await supabase.storage
-        .from('procurement-documents')
-        .upload(filePath, file, { cacheControl: '3600', upsert: false });
-
-      if (uploadError) throw new Error(uploadError.message);
-
-      const {
-        data: { publicUrl },
-      } = supabase.storage.from('procurement-documents').getPublicUrl(filePath);
+      const response = await request<{ documentName: string; documentUrl: string }>(
+        API_ROUTES.PROCUREMENT.SUPPLIER_UPLOAD_DOCUMENT,
+        {
+          method: 'POST',
+          body: payload,
+        },
+      );
 
       setFormState((current) => ({
         ...current,
-        documentName: file.name,
-        documentUrl: publicUrl,
+        documentName: response.documentName,
+        documentUrl: response.documentUrl,
       }));
     } catch (error) {
       setFormError(error instanceof Error ? error.message : 'Failed to upload supplier document.');

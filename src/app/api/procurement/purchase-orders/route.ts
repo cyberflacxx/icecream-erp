@@ -79,8 +79,11 @@ export async function GET(request: NextRequest) {
         status: r.status,
       }),
       approverName: usersById.get(String(r.approver_user_id ?? '')) ?? null,
+      approverUserId: r.approver_user_id ? String(r.approver_user_id) : null,
       approvedBy: usersById.get(String(r.approved_by ?? '')) ?? null,
       approvedAt: r.approved_at ? String(r.approved_at) : null,
+      sentAt: r.sent_at ? String(r.sent_at) : null,
+      rejectedAt: r.rejected_at ? String(r.rejected_at) : null,
       total: Number(r.total ?? 0),
       supplier: r.suppliers
         ? { id: (r.suppliers as Record<string, unknown>).id, name: (r.suppliers as Record<string, unknown>).name }
@@ -185,6 +188,20 @@ export async function POST(request: NextRequest) {
 
     if ((itemsCheck.data?.length ?? 0) !== itemIds.length || (unitsCheck.data?.length ?? 0) !== unitIds.length) {
       return badRequest('One or more purchase order items are invalid.');
+    }
+
+    if (body.approverUserId) {
+      const { data: approver } = await service
+        .from('users')
+        .select('id')
+        .eq('organization_id', ctx.organizationId)
+        .eq('status', 'active')
+        .eq('id', body.approverUserId)
+        .single();
+
+      if (!approver) {
+        return badRequest('Selected approver is not available.');
+      }
     }
 
     // Generate PO number

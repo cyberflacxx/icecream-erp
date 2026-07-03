@@ -1,7 +1,9 @@
 'use client';
 
 import { Plus, WalletCards } from 'lucide-react';
-import { type FormEvent, useMemo, useState } from 'react';
+import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
+import { type FormEvent, useEffect, useMemo, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 
 import { PageHeader } from '@/components/dashboard/page-header';
@@ -29,11 +31,18 @@ const initialFormState = {
   supplierInvoiceId: '',
 };
 
+interface FeedbackState {
+  message: string;
+  tone: 'error' | 'success';
+}
+
 function paymentSourceLabel(value: string) {
   return paymentSources.find((source) => source.value === value)?.label ?? value;
 }
 
 export default function ProcurementPaymentsPage() {
+  const searchParams = useSearchParams();
+  const requestedInvoiceId = searchParams.get('invoiceId');
   const canCreate = usePermission([PERMISSIONS.payment.create, 'procurement.write', 'finance.write']);
   const query = useSupplierPayments();
   const invoicesQuery = useSupplierInvoices();
@@ -42,6 +51,7 @@ export default function ProcurementPaymentsPage() {
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [formState, setFormState] = useState(initialFormState);
   const [formError, setFormError] = useState<string | null>(null);
+  const [feedback, setFeedback] = useState<FeedbackState | null>(null);
 
   const payableInvoices = useMemo(
     () => (invoicesQuery.data ?? []).filter((invoice) => invoice.balance > 0),
@@ -49,8 +59,24 @@ export default function ProcurementPaymentsPage() {
   );
   const selectedInvoice = payableInvoices.find((invoice) => invoice.id === formState.supplierInvoiceId) ?? null;
 
+  useEffect(() => {
+    if (!requestedInvoiceId || !payableInvoices.length) return;
+
+    const requestedInvoice = payableInvoices.find((invoice) => invoice.id === requestedInvoiceId);
+    if (!requestedInvoice) return;
+
+    setFormState((current) => ({
+      ...current,
+      amountPaid: current.amountPaid || requestedInvoice.balance.toFixed(2),
+      supplierInvoiceId: requestedInvoice.id,
+    }));
+    setIsDrawerOpen(true);
+    setFeedback(null);
+  }, [payableInvoices, requestedInvoiceId]);
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    setFeedback(null);
 
     if (!selectedInvoice) {
       setFormError('Select an unpaid supplier invoice.');
@@ -80,9 +106,12 @@ export default function ProcurementPaymentsPage() {
       setFormError(null);
       setFormState(initialFormState);
       setIsDrawerOpen(false);
+      setFeedback({ message: 'Supplier payment posted successfully.', tone: 'success' });
       await queryClient.invalidateQueries({ queryKey: ['procurement'] });
     } catch (error) {
-      setFormError(error instanceof Error ? error.message : 'Failed to enter supplier payment.');
+      const message = error instanceof Error ? error.message : 'Failed to enter supplier payment.';
+      setFormError(message);
+      setFeedback({ message, tone: 'error' });
     }
   }
 
@@ -90,10 +119,18 @@ export default function ProcurementPaymentsPage() {
     <div className="space-y-6">
       <PageHeader
         title="Supplier Payments"
-        description="Review posted supplier payments, linked invoices, methods, and references for accounts payable tracking."
+        description="Settle supplier balances with full invoice context so procurement, finance, and payable history stay in step."
         actions={
           canCreate ? (
-            <Button type="button" size="sm" onClick={() => setIsDrawerOpen(true)}>
+            <Button
+              type="button"
+              size="sm"
+              onClick={() => {
+                setFormError(null);
+                setFeedback(null);
+                setIsDrawerOpen(true);
+              }}
+            >
               <Plus className="mr-2 h-4 w-4" />
               New Payment
             </Button>
@@ -101,6 +138,45 @@ export default function ProcurementPaymentsPage() {
         }
       />
       <ProcurementNav />
+
+      {feedback ? (
+        <div
+          className={`rounded-2xl border px-4 py-3 text-sm ${
+            feedback.tone === 'success'
+              ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+              : 'border-rose-200 bg-rose-50 text-rose-700'
+          }`}
+        >
+          {feedback.message}
+        </div>
+      ) : null}
+
+      {requestedInvoiceId && selectedInvoice ? (
+        <div className="rounded-3xl border border-sky-200 bg-sky-50/80 p-5">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+            <div className="space-y-2">
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-sky-700">Quick Pay Invoice</p>
+              <h2 className="text-xl font-semibold text-brown">{selectedInvoice.invoiceNumber}</h2>
+              <p className="text-sm text-sky-900/80">{selectedInvoice.supplierName}</p>
+            </div>
+            <div className="grid gap-3 text-sm text-sky-900 sm:grid-cols-3">
+              <div className="rounded-2xl border border-sky-200 bg-white/80 px-4 py-3">
+                <p className="text-xs uppercase tracking-[0.16em] text-sky-700">Balance</p>
+                <p className="mt-2 font-semibold">{currencyFormatter.format(selectedInvoice.balance)}</p>
+              </div>
+              <div className="rounded-2xl border border-sky-200 bg-white/80 px-4 py-3">
+                <p className="text-xs uppercase tracking-[0.16em] text-sky-700">PO Link</p>
+                <p className="mt-2 font-semibold">{selectedInvoice.purchaseOrderNumber ?? 'No PO linked'}</p>
+              </div>
+              <div className="rounded-2xl border border-sky-200 bg-white/80 px-4 py-3">
+                <p className="text-xs uppercase tracking-[0.16em] text-sky-700">GRN Link</p>
+                <p className="mt-2 font-semibold">{selectedInvoice.goodsReceivedNoteNumber ?? 'No GRN linked'}</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       <DataTable
         data={query.data ?? []}
         loading={query.isLoading}
@@ -112,8 +188,26 @@ export default function ProcurementPaymentsPage() {
           { key: 'method', header: 'Source', render: (row) => paymentSourceLabel(row.method) },
           { key: 'reference', header: 'Reference' },
           { key: 'status', header: 'Status', render: (row) => <StatusBadge status={row.status} /> },
+          {
+            key: 'actions',
+            header: 'Actions',
+            render: (row) =>
+              row.invoiceId ? (
+                <Button asChild size="sm" variant="outline">
+                  <Link href={`/procurement/payments?invoiceId=${row.invoiceId}`}>Pay Again</Link>
+                </Button>
+              ) : (
+                <span className="text-xs text-muted">No invoice link</span>
+              ),
+          },
         ]}
-        emptyState={<EmptyState icon={<WalletCards className="h-6 w-6" />} title="No supplier payments found" description="Use New Payment to settle supplier invoices from bank, cash, or petty cash." />}
+        emptyState={
+          <EmptyState
+            icon={<WalletCards className="h-6 w-6" />}
+            title="No supplier payments found"
+            description="Use New Payment to settle supplier invoices from bank, cash, or petty cash."
+          />
+        }
       />
 
       <FormDrawer title="New Supplier Payment" open={isDrawerOpen} onClose={() => setIsDrawerOpen(false)}>
@@ -124,12 +218,24 @@ export default function ProcurementPaymentsPage() {
             </div>
           ) : null}
 
+          <div className="rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-800">
+            Always pay against the invoice record so the supplier balance, procurement trail, and finance postings remain aligned.
+          </div>
+
           <label className="space-y-2 text-sm text-muted">
             <span>Supplier Invoice</span>
             <select
               required
               value={formState.supplierInvoiceId}
-              onChange={(event) => setFormState((current) => ({ ...current, supplierInvoiceId: event.target.value }))}
+              onChange={(event) => {
+                const supplierInvoiceId = event.target.value;
+                const invoice = payableInvoices.find((row) => row.id === supplierInvoiceId) ?? null;
+                setFormState((current) => ({
+                  ...current,
+                  amountPaid: invoice ? invoice.balance.toFixed(2) : current.amountPaid,
+                  supplierInvoiceId,
+                }));
+              }}
               className="surface-input-soft"
             >
               <option value="">Select unpaid invoice</option>
@@ -140,6 +246,27 @@ export default function ProcurementPaymentsPage() {
               ))}
             </select>
           </label>
+
+          {selectedInvoice ? (
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              <div className="rounded-2xl border border-border bg-white px-4 py-3 text-sm text-muted">
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-orange">Supplier</p>
+                <p className="mt-2 text-brown">{selectedInvoice.supplierName}</p>
+              </div>
+              <div className="rounded-2xl border border-border bg-white px-4 py-3 text-sm text-muted">
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-orange">Outstanding</p>
+                <p className="mt-2 text-brown">{currencyFormatter.format(selectedInvoice.balance)}</p>
+              </div>
+              <div className="rounded-2xl border border-border bg-white px-4 py-3 text-sm text-muted">
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-orange">Purchase Order</p>
+                <p className="mt-2 text-brown">{selectedInvoice.purchaseOrderNumber ?? 'No PO linked'}</p>
+              </div>
+              <div className="rounded-2xl border border-border bg-white px-4 py-3 text-sm text-muted">
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-orange">GRN</p>
+                <p className="mt-2 text-brown">{selectedInvoice.goodsReceivedNoteNumber ?? 'No GRN linked'}</p>
+              </div>
+            </div>
+          ) : null}
 
           <div className="grid gap-5 sm:grid-cols-2">
             <label className="space-y-2 text-sm text-muted">

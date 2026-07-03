@@ -582,25 +582,25 @@ export function DashboardOverview() {
           </div>
         </ChartCard>
 
-        <div className="rounded-2xl border border-border bg-white p-6 shadow-sm">
-          <p className="text-sm font-semibold uppercase tracking-[0.2em] text-orange">Shift Close Status</p>
+        <div className="rounded-xl border border-[color:var(--app-border)] bg-[color:var(--app-surface)] p-5 shadow-sm">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[color:var(--app-accent-strong)]">Shift Close Status</p>
           {shiftCloseStatus ? (
-            <div className="mt-6 space-y-3 text-sm text-muted">
+            <div className="mt-5 space-y-3 text-sm text-[color:var(--app-muted)]">
               <p>
-                <span className="font-semibold text-brown">Branch:</span> {String(shiftCloseStatus.branch ?? currentUser?.branch?.name ?? 'N/A')}
+                <span className="font-semibold text-[color:var(--app-text)]">Branch:</span> {String(shiftCloseStatus.branch ?? currentUser?.branch?.name ?? 'N/A')}
               </p>
               <p>
-                <span className="font-semibold text-brown">Shift Date:</span> {String(shiftCloseStatus.shiftDate ?? 'N/A')}
+                <span className="font-semibold text-[color:var(--app-text)]">Shift Date:</span> {String(shiftCloseStatus.shiftDate ?? 'N/A')}
               </p>
               <p className="flex items-center gap-2">
-                <span className="font-semibold text-brown">Status:</span>
+                <span className="font-semibold text-[color:var(--app-text)]">Status:</span>
                 <StatusBadge status={String(shiftCloseStatus.status ?? 'UNKNOWN')} />
               </p>
               <p>
-                <span className="font-semibold text-brown">Expected Cash:</span> {formatNumber(shiftCloseStatus.expectedCash)}
+                <span className="font-semibold text-[color:var(--app-text)]">Expected Cash:</span> {formatNumber(shiftCloseStatus.expectedCash)}
               </p>
               <p>
-                <span className="font-semibold text-brown">Actual Cash:</span> {formatNumber(shiftCloseStatus.actualCash)}
+                <span className="font-semibold text-[color:var(--app-text)]">Actual Cash:</span> {formatNumber(shiftCloseStatus.actualCash)}
               </p>
             </div>
           ) : (

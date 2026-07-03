@@ -51,6 +51,7 @@ export async function GET(_request: NextRequest) {
         .from('users')
         .select('id, full_name, role')
         .eq('status', 'active')
+        .eq('organization_id', ctx.organizationId)
         .order('full_name'),
     ]);
 
@@ -94,7 +95,7 @@ export async function GET(_request: NextRequest) {
     return NextResponse.json({
       approvers: ((approversPrimary.error ? [] : approversPrimary.data) ?? [])
         .filter((user) =>
-          ['super_admin', 'branch_manager', 'manager', 'procurement_lead', 'procurement_manager'].includes(
+          ['super_admin', 'branch_manager', 'manager', 'operations_manager', 'procurement_lead', 'procurement_manager'].includes(
             String(user.role ?? ''),
           ),
         )

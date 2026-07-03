@@ -22,6 +22,12 @@ const quantityFormatter = new Intl.NumberFormat('en-US', {
   maximumFractionDigits: 3
 });
 
+const currencyFormatter = new Intl.NumberFormat('en-US', {
+  style: 'currency',
+  currency: 'USD',
+  minimumFractionDigits: 2,
+});
+
 const itemTypeOptions = [
   { label: 'Raw Material', value: 'RAW_MATERIAL' },
   { label: 'Packaging Material', value: 'PACKAGING_MATERIAL' },
@@ -174,9 +180,24 @@ export default function StockBalancesPage() {
             render: (row) => quantityFormatter.format(row.quantityAvailable)
           },
           {
+            key: 'unitCost',
+            header: 'Unit Cost',
+            render: (row) => currencyFormatter.format(row.item.unitCost ?? 0)
+          },
+          {
+            key: 'stockValue',
+            header: 'Stock Value',
+            render: (row) => currencyFormatter.format(row.stockValue ?? 0)
+          },
+          {
             key: 'reorderLevel',
             header: 'Reorder Level',
             render: (row) => quantityFormatter.format(row.item.reorderLevel)
+          },
+          {
+            key: 'reorderQuantity',
+            header: 'Reorder Qty',
+            render: (row) => quantityFormatter.format(row.item.reorderQuantity ?? 0)
           },
           {
             key: 'status',
@@ -228,7 +249,8 @@ export default function StockBalancesPage() {
                 <p className="font-medium text-brown">{row.item.name}</p>
                 <p className="mt-1 text-sm text-muted">
                   {row.warehouse.name}: {quantityFormatter.format(row.quantityAvailable)} available against reorder level{' '}
-                  {quantityFormatter.format(row.item.reorderLevel)}.
+                  {quantityFormatter.format(row.item.reorderLevel)}. Suggested reorder quantity:{' '}
+                  {quantityFormatter.format(row.item.reorderQuantity ?? 0)}.
                 </p>
               </div>
             ))}
@@ -258,6 +280,16 @@ export default function StockBalancesPage() {
             ) : null}
           </div>
         </div>
+      </div>
+
+      <div className="surface-card">
+        <div className="flex items-center gap-3">
+          <Boxes className="h-5 w-5 text-orange" />
+          <h2 className="text-lg font-semibold text-brown">Pricing Link Visibility</h2>
+        </div>
+        <p className="mt-3 max-w-3xl text-sm leading-7 text-muted">
+          Unit cost and stock value are now visible directly on each balance row so procurement pricing and inventory position can be reviewed together, especially for raw materials and packaging items.
+        </p>
       </div>
     </div>
   );

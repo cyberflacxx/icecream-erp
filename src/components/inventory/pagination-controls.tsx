@@ -20,8 +20,8 @@ export function PaginationControls({
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
   return (
-    <div className="flex flex-col gap-3 rounded-2xl border border-border bg-white px-5 py-4 shadow-sm sm:flex-row sm:items-center sm:justify-between">
-      <p className="text-sm text-muted">
+    <div className="flex flex-col gap-3 rounded-xl border border-[color:var(--app-border)] bg-[color:var(--app-surface)] px-4 py-3.5 shadow-sm sm:flex-row sm:items-center sm:justify-between">
+      <p className="text-sm text-[color:var(--app-muted)]">
         Showing page {page} of {totalPages} across {total} records.
       </p>
       <div className="flex gap-3">

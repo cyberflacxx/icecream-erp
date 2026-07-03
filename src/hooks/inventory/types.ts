@@ -143,6 +143,8 @@ export interface StockBalanceRow {
     name: string;
     itemType: string;
     reorderLevel: number;
+    reorderQuantity: number;
+    unitCost: number;
     unitOfMeasure: {
       id: string;
       abbreviation: string;
@@ -153,6 +155,7 @@ export interface StockBalanceRow {
   quantityAvailable: number;
   quantityOnHand: number;
   quantityReserved: number;
+  stockValue: number;
   warehouse: {
     id: string;
     code: string;

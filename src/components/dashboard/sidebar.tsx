@@ -226,10 +226,10 @@ export function Sidebar() {
 
   return (
     <aside className="flex h-full flex-col overflow-hidden border-r border-[color:var(--app-border-muted)] bg-[color:var(--app-sidebar)] backdrop-blur-xl">
-      <div className="border-b border-[color:var(--app-border-muted)] px-4 py-4">
+      <div className="border-b border-[color:var(--app-border-muted)] px-3 py-3">
         <div className="app-panel-subtle px-3 py-3">
           <div className="flex items-center gap-3">
-            <div className="flex h-11 w-11 items-center justify-center overflow-hidden rounded-2xl border border-[color:var(--app-border)] bg-[color:var(--app-bg-canvas)]">
+            <div className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-xl border border-[color:var(--app-border)] bg-[color:var(--app-bg-canvas)] shadow-[var(--app-shadow-sm)]">
               <Image
                 src="/branding/logo.png"
                 alt="Absolute Ice Cream ERP"
@@ -239,16 +239,16 @@ export function Sidebar() {
               />
             </div>
             <div className="min-w-0">
-              <p className="truncate text-sm font-semibold text-[color:var(--app-text)]">
+              <p className="truncate text-sm font-semibold tracking-[-0.02em] text-[color:var(--app-text)]">
                 Absolute Ice Cream ERP
               </p>
               <p className="text-[11px] text-[color:var(--app-muted)]">
-                Manufacturing operations console
+                Internal operations console
               </p>
             </div>
           </div>
 
-          <div className="mt-4 rounded-2xl border border-[color:var(--app-border-muted)] bg-[color:var(--app-bg-default)] px-3 py-3">
+          <div className="mt-3 rounded-xl border border-[color:var(--app-border-muted)] bg-[color:var(--app-bg-default)] px-3 py-3">
             <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-[color:var(--app-subtle)]">
               Signed in as
             </p>
@@ -256,24 +256,24 @@ export function Sidebar() {
               {currentUser?.profile?.fullName ?? 'ERP User'}
             </p>
             <div className="mt-1.5 flex items-center gap-2 text-[11px] text-[color:var(--app-muted)]">
-              <span className="h-2 w-2 rounded-full bg-orange" />
+              <span className="h-2 w-2 rounded-full bg-[color:var(--app-accent)]" />
               <span className="truncate">
                 {isLoading ? 'Loading role...' : roleLabel ?? 'No role assigned'}
               </span>
             </div>
             <Link
               href="/dashboard"
-              className="mt-3 inline-flex items-center gap-2 rounded-xl border border-[color:var(--app-border)] bg-[color:var(--app-bg-subtle)] px-3 py-2 text-[11px] font-semibold text-[color:var(--app-text)] transition hover:border-[color:var(--app-border-strong)]"
+              className="mt-3 inline-flex items-center gap-2 rounded-lg border border-[color:var(--app-border)] bg-[color:var(--app-bg-subtle)] px-3 py-2 text-[11px] font-semibold text-[color:var(--app-text)] transition hover:border-[color:var(--app-border-strong)] hover:bg-[color:var(--app-surface)]"
             >
-              <LayoutDashboard className="h-3.5 w-3.5 text-orange" />
+              <LayoutDashboard className="h-3.5 w-3.5 text-[color:var(--app-accent)]" />
               Open dashboard
             </Link>
           </div>
         </div>
       </div>
 
-      <nav className="flex-1 overflow-y-auto px-3 py-4">
-        <div className="space-y-5">
+      <nav className="flex-1 overflow-y-auto px-2.5 py-3">
+        <div className="space-y-4">
           {navSections.map((section) => {
             const sectionItems = visibleItems.filter((item) => item.section === section);
 
@@ -283,10 +283,10 @@ export function Sidebar() {
 
             return (
               <section key={section}>
-                <p className="px-3 text-[10px] font-semibold uppercase tracking-[0.24em] text-[color:var(--app-subtle)]">
+                <p className="px-2.5 text-[10px] font-semibold uppercase tracking-[0.2em] text-[color:var(--app-subtle)]">
                   {section}
                 </p>
-                <div className="mt-2 space-y-1">
+                <div className="mt-1.5 space-y-1">
                   {sectionItems.map((item) => {
                     const Icon = item.icon;
                     const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`);
@@ -296,24 +296,24 @@ export function Sidebar() {
                         key={item.label}
                         href={item.href}
                         className={cn(
-                          'group flex items-center gap-3 rounded-2xl px-3 py-2.5 text-sm transition-all duration-150',
+                          'group flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13px] transition-all duration-150',
                           isActive
-                            ? 'border border-[color:var(--app-border-strong)] bg-[color:var(--app-accent-soft)] text-[color:var(--app-accent-strong)] shadow-[0_8px_24px_rgba(194,65,12,0.08)]'
+                            ? 'border border-[color:var(--app-border-strong)] bg-[color:var(--app-accent-soft)] text-[color:var(--app-accent-strong)] shadow-[var(--app-shadow-sm)]'
                             : 'border border-transparent text-[color:var(--app-muted)] hover:border-[color:var(--app-border-muted)] hover:bg-[color:var(--app-bg-subtle)] hover:text-[color:var(--app-text)]',
                         )}
                       >
                         <div
                           className={cn(
-                            'flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl border transition',
+                            'flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg border transition',
                             isActive
-                              ? 'border-[color:var(--app-border-strong)] bg-[color:var(--app-bg-canvas)] text-orange'
-                              : 'border-[color:var(--app-border-muted)] bg-[color:var(--app-bg-default)] text-[color:var(--app-subtle)] group-hover:text-orange',
+                              ? 'border-[color:var(--app-border-strong)] bg-[color:var(--app-bg-canvas)] text-[color:var(--app-accent)]'
+                              : 'border-[color:var(--app-border-muted)] bg-[color:var(--app-bg-default)] text-[color:var(--app-subtle)] group-hover:text-[color:var(--app-accent)]',
                           )}
                         >
-                          <Icon className="h-4 w-4" />
+                          <Icon className="h-3.5 w-3.5" />
                         </div>
                         <span className="truncate font-medium">{item.label}</span>
-                        {isActive ? <span className="ml-auto h-2 w-2 rounded-full bg-orange" /> : null}
+                        {isActive ? <span className="ml-auto h-2 w-2 rounded-full bg-[color:var(--app-accent)]" /> : null}
                       </Link>
                     );
                   })}
@@ -324,13 +324,13 @@ export function Sidebar() {
         </div>
       </nav>
 
-      <div className="border-t border-[color:var(--app-border-muted)] px-3 py-4">
+      <div className="border-t border-[color:var(--app-border-muted)] px-2.5 py-3">
         <button
           type="button"
           onClick={async () => { await logoutAndRedirect(router); }}
-          className="flex w-full items-center gap-3 rounded-2xl border border-transparent px-3 py-2.5 text-sm font-medium text-[color:var(--app-muted)] transition hover:border-red-200 hover:bg-red-50 hover:text-red-600 dark:hover:border-red-900/40 dark:hover:bg-red-950/20 dark:hover:text-red-400"
+          className="flex w-full items-center gap-3 rounded-lg border border-transparent px-2.5 py-2 text-sm font-medium text-[color:var(--app-muted)] transition hover:border-red-200 hover:bg-red-50 hover:text-red-600 dark:hover:border-red-900/40 dark:hover:bg-red-950/20 dark:hover:text-red-400"
         >
-          <div className="flex h-9 w-9 items-center justify-center rounded-xl border border-[color:var(--app-border-muted)] bg-[color:var(--app-bg-default)]">
+          <div className="flex h-8 w-8 items-center justify-center rounded-lg border border-[color:var(--app-border-muted)] bg-[color:var(--app-bg-default)]">
             <LogOut className="h-4 w-4" />
           </div>
           <span>Sign out</span>
