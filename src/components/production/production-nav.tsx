@@ -8,13 +8,13 @@ import { cn } from '@/lib/utils';
 
 const links = [
   { href: '/production/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
-  { href: '/production/recipes', icon: FileSpreadsheet, label: 'Recipes' },
+  { href: '/production/recipes', icon: FileSpreadsheet, label: 'BOM' },
   { href: '/production/plans', icon: ClipboardList, label: 'Plans' },
   { href: '/production/requests', icon: PackageCheck, label: 'Requests' },
-  { href: '/production/batches', icon: Factory, label: 'Batches' },
+  { href: '/production/batches', icon: Factory, label: 'Issue & Release' },
   { href: '/production/shifts', icon: TimerReset, label: 'Shifts' },
   { href: '/production/wastage', icon: Droplets, label: 'Wastage' },
-  { href: '/production/transfers', icon: RefreshCcw, label: 'Transfers' },
+  { href: '/production/transfers', icon: RefreshCcw, label: 'Inventory Transfers' },
   { href: '/production/reports', icon: Rows3, label: 'Reports' },
 ] as const;
 

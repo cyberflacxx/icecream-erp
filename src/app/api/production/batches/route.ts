@@ -225,7 +225,7 @@ export async function POST(request: NextRequest) {
         production_date: `${productionDate}T00:00:00.000Z`,
         production_category: productionCategory ?? 'ICE_CREAM_MAKING',
         production_line: productionLine ?? null,
-        shift: shift ?? null,
+        shift: shift ?? 'DAY',
         status: 'PLANNED',
         quality_status: 'PENDING',
         actual_output: 0,

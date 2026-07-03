@@ -84,13 +84,20 @@ export async function POST(request: NextRequest) {
         output_unit_id: body.outputUnitId,
         packaging_requirement: body.packagingRequirement ?? null,
         production_category: body.productionCategory ?? 'ICE_CREAM_MAKING',
-        status: 'DRAFT',
+        status: 'ACTIVE',
         version: body.version ?? 1,
       })
       .select()
       .single();
 
     if (recipeError) throw recipeError;
+
+    await service
+      .from('recipes')
+      .update({ status: 'INACTIVE' })
+      .eq('finished_item_id', body.finishedItemId)
+      .eq('status', 'ACTIVE')
+      .neq('id', recipe.id);
 
     const ingredientRows = body.ingredients.map((ingredient) => ({
       item_id: ingredient.itemId,
@@ -121,6 +128,7 @@ export async function POST(request: NextRequest) {
       ingredientCount: ingredientRows.length,
       packagingCount: packagingRows.length,
       name: recipe.name,
+      status: 'ACTIVE',
     }, 'recipe');
 
     return NextResponse.json(recipe, { status: 201 });
