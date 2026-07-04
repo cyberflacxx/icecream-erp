@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { AlertCircle, ArrowRight, Factory, FileSpreadsheet, Gauge, PackageOpen, Scale, ShieldAlert, TriangleAlert } from 'lucide-react';
+import { AlertCircle, ArrowRight, Boxes, Factory, FileSpreadsheet, Gauge, PackageOpen, Scale, ShieldAlert, TriangleAlert } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { Bar, BarChart, CartesianGrid, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 
@@ -35,28 +35,49 @@ export function ProductionDashboard() {
     <div className="space-y-8">
       <PageHeader
         title="Production Module"
-        description="Simple SAP-style manufacturing: BOM standard, issue raw materials, release finished goods."
+        description="Run production in one straight line: define the BOM, issue raw materials from the production warehouse, then release finished goods back into production inventory."
       />
       <ProductionNav />
 
       <section className="grid gap-4 md:grid-cols-3">
         <WorkflowCard
-          description="Create the standard recipe for one finished product."
+          description="Define the raw materials and standard quantity required per finished unit."
           href="/production/recipes"
           icon={<FileSpreadsheet className="h-5 w-5" />}
           label="1. BOM"
         />
         <WorkflowCard
-          description="Enter production quantity and auto-deduct raw materials."
-          href="/production/batches"
+          description="Enter quantity to produce and issue raw materials from the production warehouse."
+          href="/production/batches?stage=issue"
           icon={<Scale className="h-5 w-5" />}
-          label="2. Issue"
+          label="2. Issues"
         />
         <WorkflowCard
-          description="Post actual output into the production warehouse."
-          href="/production/batches"
+          description="Release actual finished output back into the production warehouse inventory."
+          href="/production/batches?stage=release"
           icon={<PackageOpen className="h-5 w-5" />}
           label="3. Release"
+        />
+      </section>
+
+      <section className="grid gap-4 md:grid-cols-3">
+        <WorkflowCard
+          description="See the current stock held inside production-controlled inventory."
+          href="/inventory/stock-balances"
+          icon={<Boxes className="h-5 w-5" />}
+          label="Stock Balance"
+        />
+        <WorkflowCard
+          description="Receive materials into production and transfer completed output onward."
+          href="/production/transfers"
+          icon={<ArrowRight className="h-5 w-5" />}
+          label="Transfers In"
+        />
+        <WorkflowCard
+          description="Review variance, material usage, yield, and costing reports."
+          href="/production/reports"
+          icon={<Gauge className="h-5 w-5" />}
+          label="Reports"
         />
       </section>
 

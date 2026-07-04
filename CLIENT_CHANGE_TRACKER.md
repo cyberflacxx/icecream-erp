@@ -92,16 +92,19 @@ This file groups the latest client requests into related workstreams so we can t
 
 - `[x]` Define bills of materials for finished goods through production recipe formulas.
 - `[x]` Support raw material quantities per finished item recipe.
+- `[-]` Reshape the production entry flow to match the requested SAP-style layout, with production now landing on BOM first and the guided BOM calculator, issue preview, and release preview in place.
 
 ### Issuing Stage
 
 - `[x]` Issue raw materials from the production store based on approved BOMs through batch material request, approval, reservation, and usage flows.
 - `[x]` Record material consumption for stock accuracy.
+- `[-]` Simplify production issuing into a direct `Open Issue Screen` workflow tied to the BOM quantity calculation, with final live walk-through still pending.
 
 ### Release Stage
 
 - `[x]` Release finished goods into finished goods inventory after production.
 - `[-]` Reduce raw materials and increase finished goods automatically, with the workflow present and final live stock-posting verification still pending.
+- `[-]` Simplify release into a direct finished-goods release step from the same production flow, with final live walk-through still pending.
 
 ### Production Inventory and Reporting
 

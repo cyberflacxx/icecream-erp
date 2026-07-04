@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { type FormEvent, type ReactNode, useEffect, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
+import { useSearchParams } from 'next/navigation';
 
 import { PageHeader } from '@/components/dashboard/page-header';
 import { ProductionNav } from '@/components/production/production-nav';
@@ -132,6 +133,7 @@ function calculateRequirements(input: {
 }
 
 export default function ProductionBatchesPage() {
+  const searchParams = useSearchParams();
   const batchesQuery = useBatches();
   const metaQuery = useProductionMeta();
   const request = useProductionRequest();
@@ -151,6 +153,14 @@ export default function ProductionBatchesPage() {
     batchesQuery.data && typeof batchesQuery.data === 'object' && Array.isArray((batchesQuery.data as { data?: unknown }).data)
       ? (batchesQuery.data as { data: Array<Record<string, unknown>> }).data
       : [];
+  const stage = searchParams.get('stage');
+  const viewMode = stage === 'release' ? 'release' : stage === 'issue' ? 'issue' : 'workflow';
+  const visibleRows = rows.filter((row) => {
+    const status = String(row.status ?? '').toUpperCase();
+    if (viewMode === 'issue') return !['COMPLETED', 'CANCELLED'].includes(status);
+    if (viewMode === 'release') return isIssued(status) || status === 'COMPLETED';
+    return true;
+  });
 
   const activeRecipes = (metaQuery.data?.recipes ?? []).filter((recipe) => String(recipe.status ?? 'ACTIVE').toUpperCase() === 'ACTIVE');
   const productionWarehouses =
@@ -174,7 +184,7 @@ export default function ProductionBatchesPage() {
     warehouseId: String(batchDetail?.warehouseId ?? ''),
   });
 
-  const summary = rows.reduce<{ inProduction: number; released: number; toIssue: number; total: number }>(
+  const summary = visibleRows.reduce<{ inProduction: number; released: number; toIssue: number; total: number }>(
     (accumulator, row) => {
       const status = String(row.status ?? '').toUpperCase();
       accumulator.total += 1;
@@ -299,13 +309,27 @@ export default function ProductionBatchesPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Production Workflow"
-        description="Simple SAP-style manufacturing flow: BOM standard, issue raw materials, then release finished goods into the production warehouse."
+        title={
+          viewMode === 'issue'
+            ? 'Production Issues'
+            : viewMode === 'release'
+              ? 'Production Release'
+              : 'Production Workflow'
+        }
+        description={
+          viewMode === 'issue'
+            ? 'Issue raw materials against the production order using the selected BOM standard and quantity to produce.'
+            : viewMode === 'release'
+              ? 'Release actual finished output back into the production warehouse after production is complete.'
+              : 'Simple SAP-style manufacturing flow: BOM standard, issue raw materials, then release finished goods into the production warehouse.'
+        }
         actions={
-          <Button type="button" size="sm" onClick={() => setCreateOpen(true)}>
-            <Plus className="mr-2 h-4 w-4" />
-            New Production Run
-          </Button>
+          viewMode === 'release' ? undefined : (
+            <Button type="button" size="sm" onClick={() => setCreateOpen(true)}>
+              <Plus className="mr-2 h-4 w-4" />
+              New Production Run
+            </Button>
+          )
         }
       />
       <ProductionNav />
@@ -329,9 +353,9 @@ export default function ProductionBatchesPage() {
         <SummaryCard icon={<PackageCheck className="h-5 w-5" />} tone="emerald" title="Released" value={summary.released} />
       </section>
 
-      {rows.length ? (
+      {visibleRows.length ? (
         <div className="grid gap-4 xl:grid-cols-2">
-          {rows.map((row) => {
+          {visibleRows.map((row) => {
             const status = String(row.status ?? '').toUpperCase();
             const recipe = row.recipe as Record<string, unknown> | undefined;
             const warehouse = row.warehouse as Record<string, unknown> | undefined;
@@ -393,7 +417,7 @@ export default function ProductionBatchesPage() {
 
                   <div className="flex flex-wrap gap-2">
                     <Button type="button" size="sm" variant="outline" className={actionButtonClassNames.view} onClick={() => setManageBatchId(String(row.id))}>
-                      Manage Flow
+                      {viewMode === 'issue' ? 'Open Issue Screen' : viewMode === 'release' ? 'Open Release Screen' : 'Manage Flow'}
                       <ArrowRight className="ml-2 h-4 w-4" />
                     </Button>
                     {!['COMPLETED', 'CANCELLED'].includes(status) ? (
@@ -409,7 +433,17 @@ export default function ProductionBatchesPage() {
           })}
         </div>
       ) : (
-        <EmptyState icon={<Factory className="h-6 w-6" />} title="No production runs" description="Create a production run from an active BOM when production starts." />
+        <EmptyState
+          icon={<Factory className="h-6 w-6" />}
+          title={viewMode === 'release' ? 'No runs ready for release' : viewMode === 'issue' ? 'No production orders to issue' : 'No production runs'}
+          description={
+            viewMode === 'release'
+              ? 'Finish issuing and processing production orders before release becomes available.'
+              : viewMode === 'issue'
+                ? 'Create a production run from an active BOM before issuing materials.'
+                : 'Create a production run from an active BOM when production starts.'
+          }
+        />
       )}
 
       <FormDrawer title="New Production Run" open={createOpen} onClose={() => setCreateOpen(false)}>

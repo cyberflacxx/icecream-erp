@@ -1,32 +1,43 @@
 'use client';
 
 import Link from 'next/link';
-import { ClipboardList, Droplets, Factory, FileSpreadsheet, LayoutDashboard, PackageCheck, RefreshCcw, Rows3, TimerReset } from 'lucide-react';
-import { usePathname } from 'next/navigation';
+import { Boxes, Factory, FileSpreadsheet, LayoutDashboard, PackageCheck, RefreshCcw, Rows3 } from 'lucide-react';
+import { usePathname, useSearchParams } from 'next/navigation';
 
 import { cn } from '@/lib/utils';
 
 const links = [
-  { href: '/production/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
+  { href: '/production/dashboard', icon: LayoutDashboard, label: 'Overview', match: 'overview' },
   { href: '/production/recipes', icon: FileSpreadsheet, label: 'BOM' },
-  { href: '/production/plans', icon: ClipboardList, label: 'Plans' },
-  { href: '/production/requests', icon: PackageCheck, label: 'Requests' },
-  { href: '/production/batches', icon: Factory, label: 'Issue & Release' },
-  { href: '/production/shifts', icon: TimerReset, label: 'Shifts' },
-  { href: '/production/wastage', icon: Droplets, label: 'Wastage' },
-  { href: '/production/transfers', icon: RefreshCcw, label: 'Inventory Transfers' },
+  { href: '/production/batches?stage=issue', icon: Factory, label: 'Issues', match: 'issue' },
+  { href: '/production/batches?stage=release', icon: PackageCheck, label: 'Release', match: 'release' },
+  { href: '/inventory/stock-balances', icon: Boxes, label: 'Stock Balance', match: 'stock-balance' },
+  { href: '/production/transfers', icon: RefreshCcw, label: 'Transfers In', match: 'transfers' },
   { href: '/production/reports', icon: Rows3, label: 'Reports' },
 ] as const;
 
 export function ProductionNav() {
   const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const stage = searchParams.get('stage');
 
   return (
     <div className="overflow-x-auto rounded-xl border border-[color:var(--app-border)] bg-[color:var(--app-surface)] p-1.5 shadow-sm">
       <div className="flex min-w-max gap-2">
         {links.map((link) => {
           const Icon = link.icon;
-          const isActive = pathname === link.href || pathname.startsWith(`${link.href}/`);
+          const isActive =
+            link.match === 'issue'
+              ? pathname === '/production/batches' && stage === 'issue'
+              : link.match === 'release'
+                ? pathname === '/production/batches' && stage === 'release'
+                : link.match === 'overview'
+                  ? pathname === '/production/dashboard'
+                  : link.match === 'stock-balance'
+                    ? pathname === '/inventory/stock-balances'
+                    : link.match === 'transfers'
+                      ? pathname === '/production/transfers'
+                      : pathname === link.href || pathname.startsWith(`${link.href}/`);
 
           return (
             <Link
