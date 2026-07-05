@@ -70,27 +70,29 @@ export async function POST(request: NextRequest) {
     const service = productionService();
     const code = await generateReferenceNumber('recipes', 'RCP');
 
+    const recipePayload: Record<string, unknown> = {
+      batch_size: body.expectedOutputQuantity,
+      batch_unit_id: body.outputUnitId,
+      code,
+      created_by: ctx.userId,
+      expected_output_quantity: body.expectedOutputQuantity,
+      expected_yield: 100,
+      finished_item_id: body.finishedItemId,
+      instructions: body.instructions ?? null,
+      name: body.name.trim(),
+      organization_id: ctx.organizationId,
+      output_unit_id: body.outputUnitId,
+      packaging_requirement: body.packagingRequirement ?? null,
+      production_category: body.productionCategory ?? 'ICE_CREAM_MAKING',
+      status: 'ACTIVE',
+      version: body.version ?? 1,
+    };
+    if (body.chocolateTypeId) recipePayload.chocolate_type_id = body.chocolateTypeId;
+    if (body.flavourId) recipePayload.flavour_id = body.flavourId;
+
     const { data: recipe, error: recipeError } = await service
       .from('recipes')
-      .insert({
-        batch_size: body.expectedOutputQuantity,
-        batch_unit_id: body.outputUnitId,
-        chocolate_type_id: body.chocolateTypeId ?? null,
-        code,
-        created_by: ctx.userId,
-        expected_output_quantity: body.expectedOutputQuantity,
-        expected_yield: 100,
-        finished_item_id: body.finishedItemId,
-        flavour_id: body.flavourId ?? null,
-        instructions: body.instructions ?? null,
-        name: body.name.trim(),
-        organization_id: ctx.organizationId,
-        output_unit_id: body.outputUnitId,
-        packaging_requirement: body.packagingRequirement ?? null,
-        production_category: body.productionCategory ?? 'ICE_CREAM_MAKING',
-        status: 'ACTIVE',
-        version: body.version ?? 1,
-      })
+      .insert(recipePayload)
       .select()
       .single();
 
