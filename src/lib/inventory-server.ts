@@ -2,6 +2,7 @@ import {
   ensureNonNegative,
   ensurePositiveQuantity,
   isInvoiceApprovedForDispatch,
+  isMissingTableColumnError,
   normalizeDate,
   normalizeStockMovementType,
   toNumber,
@@ -60,11 +61,26 @@ export async function requireItem(
   service: ServiceClient,
   itemId: string,
 ) {
-  const { data, error } = await service
+  const withDeletedAt = await service
     .from('items')
     .select('id, code, name, item_type, unit_cost, reorder_level, deleted_at, organization_id')
     .eq('id', itemId)
-    .is('deleted_at', null)
+    .is('deleted_at', null);
+
+  if (!withDeletedAt.error && withDeletedAt.data) {
+    const rows = Array.isArray(withDeletedAt.data) ? withDeletedAt.data : [withDeletedAt.data];
+    const data = rows[0];
+    if (data) return data;
+  }
+
+  if (!isMissingTableColumnError(withDeletedAt.error, 'items', 'deleted_at')) {
+    throw new Error('Inventory item not found.');
+  }
+
+  const { data, error } = await service
+    .from('items')
+    .select('id, code, name, item_type, unit_cost, reorder_level, organization_id')
+    .eq('id', itemId)
     .single();
 
   if (error || !data) {
