@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { badRequest, can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
+import { loadLedgerLines } from '@/lib/finance-server';
+import { emptyReportPayload, normalizeReportErrorMessage, shouldUseEmptyReportFallback } from '@/lib/reporting';
 import { firstRelation } from '@/lib/supabase-relations';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
@@ -12,6 +14,9 @@ const REPORT_TYPES = [
 ] as const;
 
 type ReportType = typeof REPORT_TYPES[number];
+type InvoiceRevenueRow = { invoice_date?: string | null; total?: number | null; total_amount?: number | null };
+type BranchSaleRevenueRow = { branch_id?: string | null; sale_date?: string | null; total_amount?: number | null };
+type ExpenseRow = { amount?: number | null; branch_id?: string | null; expense_date?: string | null; status?: string | null };
 
 function normalizeAccountType(value: unknown) {
   return String(value ?? '').trim().toLowerCase().replace(/_/g, ' ');
@@ -19,6 +24,149 @@ function normalizeAccountType(value: unknown) {
 
 function money(value: unknown) {
   return Number(value ?? 0);
+}
+
+function isWithinDateRange(value: string | null | undefined, startDate?: string, endDate?: string) {
+  if (!value) return !startDate && !endDate;
+  const day = value.slice(0, 10);
+  if (startDate && day < startDate) return false;
+  if (endDate && day > endDate) return false;
+  return true;
+}
+
+function sumLedgerBalances(
+  lines: Awaited<ReturnType<typeof loadLedgerLines>>,
+  startDate?: string,
+  endDate?: string,
+) {
+  const filtered = lines.filter((line) => isWithinDateRange(line.entryDate, startDate, endDate));
+  const grouped = new Map<string, { accountCode: string; accountName: string; accountType: string; credit: number; debit: number }>();
+
+  for (const line of filtered) {
+    const accountCode = String(line.accountCode ?? 'UNKNOWN');
+    const accountName = String(line.accountName ?? 'Unknown account');
+    const accountType = normalizeAccountType(line.accountType);
+    const key = `${accountCode}::${accountName}`;
+    const current = grouped.get(key) ?? { accountCode, accountName, accountType, credit: 0, debit: 0 };
+    current.debit += money(line.debitAmount);
+    current.credit += money(line.creditAmount);
+    grouped.set(key, current);
+  }
+
+  return Array.from(grouped.values());
+}
+
+async function loadInvoiceRevenueRows(
+  service: ReturnType<typeof createServiceRoleClient>,
+  organizationId: string,
+  startDate?: string,
+  endDate?: string,
+) {
+  let modern = service
+    .schema('icecream_erp')
+    .from('invoices')
+    .select('total, total_amount, invoice_date')
+    .eq('organization_id', organizationId)
+    .is('deleted_at', null);
+
+  if (startDate) modern = modern.gte('invoice_date', `${startDate}T00:00:00.000Z`);
+  if (endDate) modern = modern.lte('invoice_date', `${endDate}T23:59:59.999Z`);
+
+  const modernResult = await modern;
+  if (!modernResult.error) return ((modernResult.data ?? []) as unknown as InvoiceRevenueRow[]);
+  if (!shouldUseEmptyReportFallback(modernResult.error)) throw modernResult.error;
+
+  let legacy = service
+    .schema('icecream_erp')
+    .from('invoices')
+    .select('total_amount, invoice_date')
+    .eq('organization_id', organizationId);
+
+  if (startDate) legacy = legacy.gte('invoice_date', `${startDate}T00:00:00.000Z`);
+  if (endDate) legacy = legacy.lte('invoice_date', `${endDate}T23:59:59.999Z`);
+
+  const legacyResult = await legacy;
+  if (legacyResult.error) {
+    if (shouldUseEmptyReportFallback(legacyResult.error)) return [];
+    throw legacyResult.error;
+  }
+  return ((legacyResult.data ?? []) as unknown as InvoiceRevenueRow[]);
+}
+
+async function loadBranchSalesRevenueRows(
+  service: ReturnType<typeof createServiceRoleClient>,
+  organizationId: string,
+  branchId?: string,
+  startDate?: string,
+  endDate?: string,
+) {
+  let modern = service
+    .schema('icecream_erp')
+    .from('branch_sales')
+    .select('total_amount, sale_date, branch_id')
+    .eq('organization_id', organizationId)
+    .is('deleted_at', null);
+
+  if (branchId) modern = modern.eq('branch_id', branchId);
+  if (startDate) modern = modern.gte('sale_date', `${startDate}T00:00:00.000Z`);
+  if (endDate) modern = modern.lte('sale_date', `${endDate}T23:59:59.999Z`);
+
+  const modernResult = await modern;
+  if (!modernResult.error) return ((modernResult.data ?? []) as unknown as BranchSaleRevenueRow[]);
+  if (!shouldUseEmptyReportFallback(modernResult.error)) throw modernResult.error;
+
+  let legacy = service
+    .schema('icecream_erp')
+    .from('branch_sales')
+    .select('total_amount, sale_date, branch_id')
+    .eq('organization_id', organizationId);
+
+  if (branchId) legacy = legacy.eq('branch_id', branchId);
+  if (startDate) legacy = legacy.gte('sale_date', `${startDate}T00:00:00.000Z`);
+  if (endDate) legacy = legacy.lte('sale_date', `${endDate}T23:59:59.999Z`);
+
+  const legacyResult = await legacy;
+  if (legacyResult.error) {
+    if (shouldUseEmptyReportFallback(legacyResult.error)) return [];
+    throw legacyResult.error;
+  }
+  return ((legacyResult.data ?? []) as unknown as BranchSaleRevenueRow[]);
+}
+
+async function loadOptionalExpenseRows(
+  service: ReturnType<typeof createServiceRoleClient>,
+  table: 'finance_expenses' | 'branch_expenses',
+  organizationId: string,
+  branchId?: string,
+  startDate?: string,
+  endDate?: string,
+) {
+  let query =
+    table === 'finance_expenses'
+      ? service
+          .schema('icecream_erp')
+          .from('finance_expenses')
+          .select('amount, expense_date, branch_id, status')
+          .eq('organization_id', organizationId)
+      : service
+          .schema('icecream_erp')
+          .from('branch_expenses')
+          .select('amount, expense_date, branch_id')
+          .eq('organization_id', organizationId);
+
+  if (branchId) query = query.eq('branch_id', branchId);
+  if (startDate) query = query.gte('expense_date', table === 'finance_expenses' ? startDate : `${startDate}T00:00:00.000Z`);
+  if (endDate) query = query.lte('expense_date', table === 'finance_expenses' ? endDate : `${endDate}T23:59:59.999Z`);
+
+  const result = await query;
+  if (result.error) {
+    if (shouldUseEmptyReportFallback(result.error)) return [];
+    throw result.error;
+  }
+
+  return ((result.data ?? []) as unknown as ExpenseRow[]).filter(
+    (row) => table !== 'finance_expenses' || String(row.status ?? '') !== 'REJECTED',
+  );
 }
 
 export async function GET(request: NextRequest) {
@@ -372,32 +520,8 @@ export async function GET(request: NextRequest) {
       }
 
       case 'TRIAL_BALANCE': {
-        let query = service
-          .schema('icecream_erp')
-          .from('journal_entry_lines')
-          .select('debit_amount, credit_amount, accounts(account_code, account_name), journal_entries!inner(organization_id, is_posted, entry_date)')
-          .eq('journal_entries.organization_id', ctx.organizationId)
-          .eq('journal_entries.is_posted', true);
-
-        if (startDate) query = query.gte('journal_entries.entry_date', `${startDate}T00:00:00.000Z`);
-        if (endDate) query = query.lte('journal_entries.entry_date', `${endDate}T23:59:59.999Z`);
-
-        const { data: lines, error } = await query;
-        if (error) throw error;
-
-        const grouped = new Map<string, { accountCode: string; accountName: string; credit: number; debit: number }>();
-        for (const line of lines ?? []) {
-          const account = firstRelation(line.accounts as { account_code?: string; account_name?: string } | Array<{ account_code?: string; account_name?: string }> | null);
-          const accountCode = String(account?.account_code ?? 'UNKNOWN');
-          const accountName = String(account?.account_name ?? 'Unknown account');
-          const key = `${accountCode}::${accountName}`;
-          const current = grouped.get(key) ?? { accountCode, accountName, credit: 0, debit: 0 };
-          current.debit += money(line.debit_amount);
-          current.credit += money(line.credit_amount);
-          grouped.set(key, current);
-        }
-
-        const data = Array.from(grouped.values()).map((row) => ({
+        const ledgerLines = await loadLedgerLines(ctx.organizationId, true);
+        const data = sumLedgerBalances(ledgerLines, startDate, endDate).map((row) => ({
           ...row,
           balance: row.debit - row.credit,
         }));
@@ -416,66 +540,18 @@ export async function GET(request: NextRequest) {
       }
 
       case 'INCOME_STATEMENT': {
-        let invoiceQuery = service
-          .schema('icecream_erp')
-          .from('invoices')
-          .select('total, total_amount, invoice_date')
-          .eq('organization_id', ctx.organizationId)
-          .is('deleted_at', null);
-        let branchSalesQuery = service
-          .schema('icecream_erp')
-          .from('branch_sales')
-          .select('total_amount, sale_date, branch_id')
-          .eq('organization_id', ctx.organizationId)
-          .is('deleted_at', null);
-        let financeExpensesQuery = service
-          .schema('icecream_erp')
-          .from('finance_expenses')
-          .select('amount, expense_date, branch_id, status')
-          .eq('organization_id', ctx.organizationId)
-          .is('deleted_at', null)
-          .neq('status', 'REJECTED');
-        let branchExpensesQuery = service
-          .schema('icecream_erp')
-          .from('branch_expenses')
-          .select('amount, expense_date, branch_id')
-          .eq('organization_id', ctx.organizationId)
-          .is('deleted_at', null);
-
-        if (startDate) {
-          invoiceQuery = invoiceQuery.gte('invoice_date', `${startDate}T00:00:00.000Z`);
-          branchSalesQuery = branchSalesQuery.gte('sale_date', `${startDate}T00:00:00.000Z`);
-          financeExpensesQuery = financeExpensesQuery.gte('expense_date', startDate);
-          branchExpensesQuery = branchExpensesQuery.gte('expense_date', `${startDate}T00:00:00.000Z`);
-        }
-        if (endDate) {
-          invoiceQuery = invoiceQuery.lte('invoice_date', `${endDate}T23:59:59.999Z`);
-          branchSalesQuery = branchSalesQuery.lte('sale_date', `${endDate}T23:59:59.999Z`);
-          financeExpensesQuery = financeExpensesQuery.lte('expense_date', endDate);
-          branchExpensesQuery = branchExpensesQuery.lte('expense_date', `${endDate}T23:59:59.999Z`);
-        }
-        if (effectiveBranchId) {
-          branchSalesQuery = branchSalesQuery.eq('branch_id', effectiveBranchId);
-          financeExpensesQuery = financeExpensesQuery.eq('branch_id', effectiveBranchId);
-          branchExpensesQuery = branchExpensesQuery.eq('branch_id', effectiveBranchId);
-        }
-
         const [invoices, branchSalesRows, financeExpensesRows, branchExpensesRows] = await Promise.all([
-          invoiceQuery,
-          branchSalesQuery,
-          financeExpensesQuery,
-          branchExpensesQuery,
+          loadInvoiceRevenueRows(service, ctx.organizationId, startDate, endDate),
+          loadBranchSalesRevenueRows(service, ctx.organizationId, effectiveBranchId, startDate, endDate),
+          loadOptionalExpenseRows(service, 'finance_expenses', ctx.organizationId, effectiveBranchId, startDate, endDate),
+          loadOptionalExpenseRows(service, 'branch_expenses', ctx.organizationId, effectiveBranchId, startDate, endDate),
         ]);
-        if (invoices.error) throw invoices.error;
-        if (branchSalesRows.error) throw branchSalesRows.error;
-        if (financeExpensesRows.error) throw financeExpensesRows.error;
-        if (branchExpensesRows.error) throw branchExpensesRows.error;
 
-        const invoiceRevenue = (invoices.data ?? []).reduce((sum, row) => sum + money(row.total ?? row.total_amount), 0);
-        const branchRevenue = (branchSalesRows.data ?? []).reduce((sum, row) => sum + money(row.total_amount), 0);
+        const invoiceRevenue = invoices.reduce((sum, row) => sum + money(row.total ?? row.total_amount), 0);
+        const branchRevenue = branchSalesRows.reduce((sum, row) => sum + money(row.total_amount), 0);
         const operatingExpenses =
-          (financeExpensesRows.data ?? []).reduce((sum, row) => sum + money(row.amount), 0) +
-          (branchExpensesRows.data ?? []).reduce((sum, row) => sum + money(row.amount), 0);
+          financeExpensesRows.reduce((sum, row) => sum + money(row.amount), 0) +
+          branchExpensesRows.reduce((sum, row) => sum + money(row.amount), 0);
         const revenue = invoiceRevenue + branchRevenue;
         const grossProfit = revenue;
         const netProfit = grossProfit - operatingExpenses;
@@ -499,24 +575,11 @@ export async function GET(request: NextRequest) {
       }
 
       case 'FINANCIAL_POSITION': {
-        let query = service
-          .schema('icecream_erp')
-          .from('journal_entry_lines')
-          .select('debit_amount, credit_amount, accounts(account_type), journal_entries!inner(organization_id, is_posted, entry_date)')
-          .eq('journal_entries.organization_id', ctx.organizationId)
-          .eq('journal_entries.is_posted', true);
-
-        if (startDate) query = query.gte('journal_entries.entry_date', `${startDate}T00:00:00.000Z`);
-        if (endDate) query = query.lte('journal_entries.entry_date', `${endDate}T23:59:59.999Z`);
-
-        const { data: lines, error } = await query;
-        if (error) throw error;
-
+        const lines = sumLedgerBalances(await loadLedgerLines(ctx.organizationId, true), startDate, endDate);
         const totals = { assets: 0, equity: 0, liabilities: 0 };
-        for (const line of lines ?? []) {
-          const account = firstRelation(line.accounts as { account_type?: string } | Array<{ account_type?: string }> | null);
-          const accountType = normalizeAccountType(account?.account_type);
-          const net = money(line.debit_amount) - money(line.credit_amount);
+        for (const line of lines) {
+          const accountType = normalizeAccountType(line.accountType);
+          const net = money(line.debit) - money(line.credit);
           if (accountType === 'asset') totals.assets += net;
           if (accountType === 'liability') totals.liabilities += -net;
           if (accountType === 'equity') totals.equity += -net;
@@ -537,59 +600,27 @@ export async function GET(request: NextRequest) {
 
       case 'FINANCIAL_RATIOS': {
         const [positionLines, invoiceRows, branchSalesRows, financeExpensesRows, branchExpensesRows] = await Promise.all([
-          service
-            .schema('icecream_erp')
-            .from('journal_entry_lines')
-            .select('debit_amount, credit_amount, accounts(account_type), journal_entries!inner(organization_id, is_posted)')
-            .eq('journal_entries.organization_id', ctx.organizationId)
-            .eq('journal_entries.is_posted', true),
-          service
-            .schema('icecream_erp')
-            .from('invoices')
-            .select('total, total_amount')
-            .eq('organization_id', ctx.organizationId)
-            .is('deleted_at', null),
-          service
-            .schema('icecream_erp')
-            .from('branch_sales')
-            .select('total_amount')
-            .eq('organization_id', ctx.organizationId)
-            .is('deleted_at', null),
-          service
-            .schema('icecream_erp')
-            .from('finance_expenses')
-            .select('amount, status')
-            .eq('organization_id', ctx.organizationId)
-            .is('deleted_at', null)
-            .neq('status', 'REJECTED'),
-          service
-            .schema('icecream_erp')
-            .from('branch_expenses')
-            .select('amount')
-            .eq('organization_id', ctx.organizationId)
-            .is('deleted_at', null),
+          loadLedgerLines(ctx.organizationId, true),
+          loadInvoiceRevenueRows(service, ctx.organizationId),
+          loadBranchSalesRevenueRows(service, ctx.organizationId, effectiveBranchId),
+          loadOptionalExpenseRows(service, 'finance_expenses', ctx.organizationId, effectiveBranchId),
+          loadOptionalExpenseRows(service, 'branch_expenses', ctx.organizationId, effectiveBranchId),
         ]);
-        if (positionLines.error) throw positionLines.error;
-        if (invoiceRows.error) throw invoiceRows.error;
-        if (branchSalesRows.error) throw branchSalesRows.error;
-        if (financeExpensesRows.error) throw financeExpensesRows.error;
-        if (branchExpensesRows.error) throw branchExpensesRows.error;
 
         const totals = { assets: 0, equity: 0, liabilities: 0 };
-        for (const line of positionLines.data ?? []) {
-          const account = firstRelation(line.accounts as { account_type?: string } | Array<{ account_type?: string }> | null);
-          const accountType = normalizeAccountType(account?.account_type);
-          const net = money(line.debit_amount) - money(line.credit_amount);
+        for (const line of sumLedgerBalances(positionLines, startDate, endDate)) {
+          const accountType = normalizeAccountType(line.accountType);
+          const net = money(line.debit) - money(line.credit);
           if (accountType === 'asset') totals.assets += net;
           if (accountType === 'liability') totals.liabilities += -net;
           if (accountType === 'equity') totals.equity += -net;
         }
         const revenue =
-          (invoiceRows.data ?? []).reduce((sum, row) => sum + money(row.total ?? row.total_amount), 0) +
-          (branchSalesRows.data ?? []).reduce((sum, row) => sum + money(row.total_amount), 0);
+          invoiceRows.reduce((sum, row) => sum + money(row.total ?? row.total_amount), 0) +
+          branchSalesRows.reduce((sum, row) => sum + money(row.total_amount), 0);
         const operatingExpenses =
-          (financeExpensesRows.data ?? []).reduce((sum, row) => sum + money(row.amount), 0) +
-          (branchExpensesRows.data ?? []).reduce((sum, row) => sum + money(row.amount), 0);
+          financeExpensesRows.reduce((sum, row) => sum + money(row.amount), 0) +
+          branchExpensesRows.reduce((sum, row) => sum + money(row.amount), 0);
         const netProfit = revenue - operatingExpenses;
         const ratio = (numerator: number, denominator: number) => denominator === 0 ? 0 : Number((numerator / denominator).toFixed(4));
         const data = [
@@ -616,6 +647,15 @@ export async function GET(request: NextRequest) {
         return badRequest('Unsupported report type');
     }
   } catch (err) {
+    if (shouldUseEmptyReportFallback(err)) {
+      return NextResponse.json(
+        emptyReportPayload({
+          meta: { reportType: reportType ?? 'unknown' },
+          warning: normalizeReportErrorMessage(err),
+        }),
+      );
+    }
+
     const message = err instanceof Error ? err.message : 'Internal server error';
     return serverError(message);
   }

@@ -34,6 +34,11 @@ export const DEFAULT_INVENTORY_WAREHOUSES = [
     warehouseType: 'PRODUCTION_MATERIALS',
   },
   {
+    code: 'PRODUCTION_FINISHED_GOODS',
+    name: 'Production Finished Goods Warehouse',
+    warehouseType: 'FINISHED_GOODS',
+  },
+  {
     code: 'FG_WAREHOUSE',
     name: 'Finished Goods Warehouse',
     warehouseType: 'FINISHED_GOODS',
@@ -122,6 +127,21 @@ export function toNumber(value: unknown, fallback = 0): number {
   return Number.isFinite(numberValue) ? numberValue : fallback;
 }
 
+export function getItemReorderQuantity(row: Record<string, unknown> | null | undefined) {
+  return toNumber(row?.reorder_quantity ?? row?.reorder_qty, 0);
+}
+
+export function isMissingTableColumnError(error: unknown, table: string, column: string) {
+  const message =
+    error instanceof Error
+      ? error.message
+      : typeof error === 'object' && error && 'message' in error
+        ? String((error as { message?: unknown }).message ?? '')
+        : String(error ?? '');
+
+  return message.toLowerCase().includes(`column ${table}.${column} does not exist`);
+}
+
 export function ensurePositiveQuantity(quantity: unknown, field = 'quantity') {
   const parsed = toNumber(quantity, NaN);
   if (!Number.isFinite(parsed) || parsed <= 0) {
@@ -181,6 +201,7 @@ export function normalizeWarehouseType(value: string | null | undefined) {
     case 'FG':
     case 'FG_STORE':
     case 'FG_WAREHOUSE':
+    case 'PRODUCTION_FINISHED_GOODS':
       return 'FINISHED_GOODS';
     case 'DISPATCH_WAREHOUSE':
       return 'DISPATCH';
@@ -213,6 +234,7 @@ export function resolveWarehouseDisplayType(input: {
 
   if (code === 'RAW_STORE') return 'RAW_MATERIALS';
   if (code === 'PROD_MATERIALS') return 'PRODUCTION_MATERIALS';
+  if (code === 'PRODUCTION_FINISHED_GOODS') return 'FINISHED_GOODS';
   if (code === 'FG_WAREHOUSE') return 'FINISHED_GOODS';
   if (code === 'DISPATCH_WAREHOUSE') return 'DISPATCH';
   if (code === 'RETURNS_WAREHOUSE') return 'RETURNS';

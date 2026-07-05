@@ -7,5 +7,9 @@ function getErrorMessage(error: unknown) {
 }
 
 export function isMissingColumnError(error: unknown, table: string, columnName: string) {
-  return getErrorMessage(error).includes(`column ${table}.${columnName} does not exist`);
+  const message = getErrorMessage(error);
+  return (
+    message.includes(`column ${table}.${columnName} does not exist`) ||
+    message.includes(`Could not find the '${columnName}' column of '${table}' in the schema cache`)
+  );
 }

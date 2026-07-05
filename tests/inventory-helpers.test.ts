@@ -7,13 +7,15 @@ import {
   calculateShortageQuantity,
   deriveSupplierShortages,
   findMissingDefaultWarehouses,
+  getItemReorderQuantity,
+  isMissingTableColumnError,
   isInvoiceApprovedForDispatch,
-  resolveWarehouseDisplayType,
+  normalizeStockMovementType,
   normalizeTransferStatus,
   normalizeWarehouseCode,
-  resolveWarehouseStorageType,
   normalizeWarehouseType,
-  normalizeStockMovementType,
+  resolveWarehouseDisplayType,
+  resolveWarehouseStorageType,
 } from '../src/lib/inventory';
 
 test('deriveSupplierShortages returns open shortages from ordered versus received quantities', () => {
@@ -121,6 +123,27 @@ test('findMissingDefaultWarehouses returns only missing warehouse seeds', () => 
 
   assert.deepEqual(
     missing.map((warehouse) => warehouse.code),
-    ['PROD_MATERIALS', 'DISPATCH_WAREHOUSE', 'RETURNS_WAREHOUSE'],
+    ['PROD_MATERIALS', 'PRODUCTION_FINISHED_GOODS', 'DISPATCH_WAREHOUSE', 'RETURNS_WAREHOUSE'],
+  );
+});
+
+test('legacy reorder helpers use reorder_qty and detect missing modern column errors', () => {
+  assert.equal(getItemReorderQuantity({ reorder_qty: 24 }), 24);
+  assert.equal(getItemReorderQuantity({ reorder_quantity: 18, reorder_qty: 24 }), 18);
+  assert.equal(
+    isMissingTableColumnError(
+      new Error('column items.reorder_quantity does not exist'),
+      'items',
+      'reorder_quantity',
+    ),
+    true,
+  );
+  assert.equal(
+    isMissingTableColumnError(
+      new Error('column items.standard_cost does not exist'),
+      'items',
+      'reorder_quantity',
+    ),
+    false,
   );
 });

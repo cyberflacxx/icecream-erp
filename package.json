@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "next lint",
     "seed:demo": "node scripts/seed-demo-data.mjs",
-    "typecheck": "tsc --noEmit",
+    "seed:sample-accounts": "node scripts/seed-sample-accounts-supabase.mjs",
+    "typecheck": "tsc --noEmit --incremental false",
     "test:inventory": "tsc --outDir .tmp-tests tests/inventory-helpers.test.ts src/lib/inventory.ts --module commonjs --target es2020 --esModuleInterop --skipLibCheck && node --test .tmp-tests/tests/inventory-helpers.test.js",
     "test:procurement": "tsc --outDir .tmp-tests tests/procurement-helpers.test.ts src/lib/procurement.ts src/lib/inventory.ts --module commonjs --target es2020 --esModuleInterop --skipLibCheck && node --test .tmp-tests/tests/procurement-helpers.test.js",
     "test:production": "tsc --outDir .tmp-tests tests/production-helpers.test.ts src/lib/production.ts src/lib/inventory.ts --module commonjs --target es2020 --esModuleInterop --skipLibCheck && node --test .tmp-tests/tests/production-helpers.test.js",
@@ -23,7 +24,9 @@
     "test:workflow": "tsc --outDir .tmp-tests tests/workflow-helpers.test.ts src/lib/workflow.ts --module commonjs --target es2020 --esModuleInterop --skipLibCheck && node --test .tmp-tests/tests/workflow-helpers.test.js",
     "test:notifications": "tsc --outDir .tmp-tests tests/notifications-helpers.test.ts src/lib/notifications.ts --module commonjs --target es2020 --esModuleInterop --skipLibCheck && node --test .tmp-tests/tests/notifications-helpers.test.js",
     "test:admin": "tsc --outDir .tmp-tests tests/admin-readiness-helpers.test.ts src/lib/admin-readiness.ts src/lib/settings.ts --module commonjs --target es2020 --esModuleInterop --skipLibCheck && node --test .tmp-tests/tests/admin-readiness-helpers.test.js",
-    "test:testing": "tsc --outDir .tmp-tests tests/testing-helpers.test.ts src/lib/testing.ts --module commonjs --target es2020 --esModuleInterop --skipLibCheck && node --test .tmp-tests/tests/testing-helpers.test.js"
+    "test:testing": "tsc --outDir .tmp-tests tests/testing-helpers.test.ts src/lib/testing.ts --module commonjs --target es2020 --esModuleInterop --skipLibCheck && node --test .tmp-tests/tests/testing-helpers.test.js",
+    "verify:production-workflow": "node scripts/verify-production-workflow.mjs",
+    "verify:live-e2e": "node scripts/verify-live-e2e-transactions.mjs"
   },
   "dependencies": {
     "@radix-ui/react-accordion": "^1.2.11",

@@ -1,7 +1,13 @@
 import { NextResponse } from 'next/server';
 
 import { can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
-import { financeErrorMessage, financeService, isMissingFinanceTable, mapNestedRow } from '@/lib/finance-server';
+import {
+  financeErrorMessage,
+  financeService,
+  isMissingFinanceColumn,
+  isMissingFinanceTable,
+  mapNestedRow,
+} from '@/lib/finance-server';
 
 type Row = Record<string, unknown>;
 
@@ -32,6 +38,40 @@ async function optionalRows(table: string, select: string, organizationId: strin
   });
 }
 
+async function optionalJournalRows(organizationId: string) {
+  const modern = await financeService()
+    .from('journal_entries')
+    .select('id, organization_id, entry_number, entry_date, description, total_debit, total_credit, status, is_posted');
+
+  if (!modern.error) {
+    return ((modern.data ?? []) as unknown as Row[]).filter((row) => {
+      const rowOrganizationId = row.organization_id;
+      return !rowOrganizationId || String(rowOrganizationId) === organizationId;
+    });
+  }
+
+  if (
+    !isMissingFinanceTable(modern.error) &&
+    !isMissingFinanceColumn(modern.error, 'journal_entries', 'is_posted')
+  ) {
+    throw modern.error;
+  }
+
+  const legacy = await financeService()
+    .from('journal_entries')
+    .select('id, organization_id, entry_number, entry_date, description, total_debit, total_credit, status');
+
+  if (legacy.error) {
+    if (isMissingFinanceTable(legacy.error)) return [] as Row[];
+    throw legacy.error;
+  }
+
+  return ((legacy.data ?? []) as unknown as Row[]).filter((row) => {
+    const rowOrganizationId = row.organization_id;
+    return !rowOrganizationId || String(rowOrganizationId) === organizationId;
+  });
+}
+
 function safeDate(value: unknown) {
   if (!value) return '';
   return String(value).slice(0, 10);
@@ -57,11 +97,7 @@ export async function GET() {
       branchSales,
       branchExpenses,
     ] = await Promise.all([
-      optionalRows(
-        'journal_entries',
-        'id, organization_id, entry_number, entry_date, description, total_debit, total_credit, status, is_posted',
-        ctx.organizationId,
-      ),
+      optionalJournalRows(ctx.organizationId),
       optionalRows(
         'bank_transactions',
         'id, organization_id, transaction_date, transaction_type, amount, reference_number, description, source_document, status, bank_accounts(account_name, bank_name)',
