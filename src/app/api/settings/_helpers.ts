@@ -368,6 +368,7 @@ export async function createItemResponse(input: {
     reorder_quantity: toPositiveNumber(input.body.reorderQuantity),
     selling_price: toPositiveNumber(input.body.sellingPrice),
     track_expiry: input.body.trackExpiry ?? false,
+    type: normalizeCode(input.body.itemType),
     unit_cost: toPositiveNumber(input.body.unitCost),
     unit_of_measure_id: input.body.unitOfMeasureId,
   };
