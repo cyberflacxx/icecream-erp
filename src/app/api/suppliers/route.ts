@@ -16,6 +16,10 @@ function stripMissingSupplierColumn<T extends Record<string, unknown>>(payload: 
   return nextPayload;
 }
 
+function getForwardedIpAddress(headerValue: string | null) {
+  return headerValue?.split(',')[0]?.trim() || null;
+}
+
 export async function GET(request: NextRequest) {
   const ctx = await getAuthContext();
   if (!ctx) return unauthorized();
@@ -267,7 +271,7 @@ export async function POST(request: NextRequest) {
       action: 'SUPPLIER_CREATED',
       entityId: String((supplier as Record<string, unknown>).id),
       entityType: 'supplier',
-      ipAddress: request.headers.get('x-forwarded-for'),
+      ipAddress: getForwardedIpAddress(request.headers.get('x-forwarded-for')),
       newValues: {
         code,
         creditLimit: body.creditLimit ?? null,

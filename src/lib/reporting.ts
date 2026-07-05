@@ -195,6 +195,10 @@ export function normalizeReportErrorMessage(value: unknown) {
     return normalizeReportErrorMessage((value as { error?: unknown }).error);
   }
 
+  if (typeof value === 'object' && value !== null && 'message' in value) {
+    return normalizeReportErrorMessage((value as { message?: unknown }).message);
+  }
+
   const text = String(value ?? '').trim();
   if (!text) return 'Report data is not currently available.';
 

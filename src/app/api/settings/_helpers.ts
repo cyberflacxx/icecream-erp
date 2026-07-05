@@ -26,6 +26,24 @@ import {
   validateTaxRate,
   validateUnitConversionFactor,
 } from '@/lib/settings';
+import { isMissingTableColumnError } from '@/lib/inventory';
+import { isMissingColumnError } from '@/lib/postgrest-compat';
+
+function stripUnsupportedItemColumn(payload: Record<string, unknown>, error: unknown) {
+  if (isMissingTableColumnError(error, 'items', 'reorder_quantity') || isMissingColumnError(error, 'items', 'reorder_quantity')) {
+    const nextPayload: Record<string, unknown> = { ...payload, reorder_qty: payload['reorder_quantity'] };
+    delete nextPayload['reorder_quantity'];
+    return nextPayload;
+  }
+
+  if (isMissingTableColumnError(error, 'items', 'track_expiry') || isMissingColumnError(error, 'items', 'track_expiry')) {
+    const nextPayload: Record<string, unknown> = { ...payload };
+    delete nextPayload['track_expiry'];
+    return nextPayload;
+  }
+
+  return null;
+}
 
 export async function requireSettingsAccess(permission: 'read' | 'write', request?: NextRequest) {
   const ctx = await getAuthContext(request);
@@ -338,27 +356,52 @@ export async function createItemResponse(input: {
   if (validationError) return badRequest(validationError);
   if (!input.body.categoryId || !input.body.unitOfMeasureId) return badRequest('categoryId and unitOfMeasureId are required');
 
-  return createTableRecord({
-    action: 'ITEM_CREATED',
-    entityType: 'item',
-    payload: {
-      category_id: input.body.categoryId,
-      code: normalizeCode(input.body.code),
-      description: input.body.description ?? null,
-      is_active: input.body.isActive ?? true,
-      item_type: normalizeCode(input.body.itemType),
-      name: normalizeName(input.body.name),
-      organization_id: input.organizationId,
-      reorder_level: toPositiveNumber(input.body.reorderLevel),
-      reorder_quantity: toPositiveNumber(input.body.reorderQuantity),
-      selling_price: toPositiveNumber(input.body.sellingPrice),
-      track_expiry: input.body.trackExpiry ?? false,
-      unit_cost: toPositiveNumber(input.body.unitCost),
-      unit_of_measure_id: input.body.unitOfMeasureId,
-    },
-    table: 'items',
-    userId: input.userId,
-  });
+  const payload: Record<string, unknown> = {
+    category_id: input.body.categoryId,
+    code: normalizeCode(input.body.code),
+    description: input.body.description ?? null,
+    is_active: input.body.isActive ?? true,
+    item_type: normalizeCode(input.body.itemType),
+    name: normalizeName(input.body.name),
+    organization_id: input.organizationId,
+    reorder_level: toPositiveNumber(input.body.reorderLevel),
+    reorder_quantity: toPositiveNumber(input.body.reorderQuantity),
+    selling_price: toPositiveNumber(input.body.sellingPrice),
+    track_expiry: input.body.trackExpiry ?? false,
+    unit_cost: toPositiveNumber(input.body.unitCost),
+    unit_of_measure_id: input.body.unitOfMeasureId,
+  };
+
+  try {
+    return await createTableRecord({
+      action: 'ITEM_CREATED',
+      entityType: 'item',
+      payload,
+      table: 'items',
+      userId: input.userId,
+    });
+  } catch (error) {
+    let fallbackPayload = stripUnsupportedItemColumn(payload, error);
+    if (!fallbackPayload) throw error;
+
+    while (fallbackPayload) {
+      try {
+        return await createTableRecord({
+          action: 'ITEM_CREATED',
+          entityType: 'item',
+          payload: fallbackPayload,
+          table: 'items',
+          userId: input.userId,
+        });
+      } catch (fallbackError) {
+        const nextPayload = stripUnsupportedItemColumn(fallbackPayload, fallbackError);
+        if (!nextPayload) throw fallbackError;
+        fallbackPayload = nextPayload;
+      }
+    }
+
+    throw error;
+  }
 }
 
 export async function generateDocumentNumberResponse(input: {
