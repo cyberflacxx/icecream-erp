@@ -4,6 +4,19 @@ import { badRequest, can, forbidden, getAuthContext, notFound, serverError, unau
 import { isMissingColumnError } from '@/lib/postgrest-compat';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
+const LEGACY_REQUISITION_ITEM_COLUMNS = ['pr_id', 'quantity', 'estimated_cost', 'notes'] as const;
+
+function stripMissingLegacyRequisitionItemColumn<T extends Record<string, unknown>>(payload: T, error: unknown) {
+  const column = LEGACY_REQUISITION_ITEM_COLUMNS.find((entry) =>
+    isMissingColumnError(error, 'purchase_requisition_items', entry),
+  );
+  if (!column) return null;
+
+  const nextPayload = { ...payload };
+  delete nextPayload[column];
+  return nextPayload;
+}
+
 export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
@@ -145,17 +158,30 @@ export async function PATCH(
     if (body.items) {
       await service.from('purchase_requisition_items').delete().eq('requisition_id', id);
 
-      const { error: itemsErr } = await service.from('purchase_requisition_items').insert(
-        body.items.map((item) => ({
-          requisition_id: id,
-          item_id: item.itemId,
-          unit_of_measure_id: item.unitOfMeasureId,
-          quantity_requested: item.quantityRequested,
-          quantity_approved: null,
-          estimated_unit_cost: item.estimatedUnitCost ?? null,
-          remarks: item.remarks ?? null,
-        })),
-      );
+      let itemPayload = body.items.map((item) => ({
+        pr_id: id,
+        requisition_id: id,
+        item_id: item.itemId,
+        unit_of_measure_id: item.unitOfMeasureId,
+        quantity: item.quantityRequested,
+        quantity_requested: item.quantityRequested,
+        quantity_approved: null,
+        estimated_cost: item.estimatedUnitCost ?? null,
+        estimated_unit_cost: item.estimatedUnitCost ?? null,
+        notes: item.remarks ?? null,
+        remarks: item.remarks ?? null,
+      }));
+      let { error: itemsErr } = await service.from('purchase_requisition_items').insert(itemPayload);
+      while (itemsErr) {
+        const nextPayload = itemPayload
+          .map((row) => stripMissingLegacyRequisitionItemColumn(row, itemsErr))
+          .filter((row): row is Record<string, unknown> => Boolean(row));
+        if (nextPayload.length !== itemPayload.length) break;
+        if (JSON.stringify(nextPayload) === JSON.stringify(itemPayload)) break;
+        itemPayload = nextPayload;
+        const retry = await service.from('purchase_requisition_items').insert(itemPayload);
+        itemsErr = retry.error;
+      }
       if (itemsErr) return serverError(itemsErr.message);
     }
 

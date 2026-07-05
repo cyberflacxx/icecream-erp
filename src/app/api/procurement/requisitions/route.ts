@@ -4,6 +4,19 @@ import { badRequest, can, forbidden, getAuthContext, serverError, unauthorized }
 import { isMissingColumnError } from '@/lib/postgrest-compat';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
+const LEGACY_REQUISITION_ITEM_COLUMNS = ['pr_id', 'quantity', 'estimated_cost', 'notes'] as const;
+
+function stripMissingLegacyRequisitionItemColumn<T extends Record<string, unknown>>(payload: T, error: unknown) {
+  const column = LEGACY_REQUISITION_ITEM_COLUMNS.find((entry) =>
+    isMissingColumnError(error, 'purchase_requisition_items', entry),
+  );
+  if (!column) return null;
+
+  const nextPayload = { ...payload };
+  delete nextPayload[column];
+  return nextPayload;
+}
+
 export async function GET(request: NextRequest) {
   const ctx = await getAuthContext();
   if (!ctx) return unauthorized();
@@ -184,17 +197,31 @@ export async function POST(request: NextRequest) {
 
     if (reqErr) return serverError(reqErr.message);
 
-    const { error: itemsErr } = await service.from('purchase_requisition_items').insert(
-      body.items.map((item) => ({
-        requisition_id: (requisition as Record<string, unknown>).id,
-        item_id: item.itemId,
-        unit_of_measure_id: item.unitOfMeasureId,
-        quantity_requested: item.quantityRequested,
-        quantity_approved: null,
-        estimated_unit_cost: item.estimatedUnitCost ?? null,
-        remarks: item.remarks ?? null,
-      })),
-    );
+    let itemPayload = body.items.map((item) => ({
+      pr_id: (requisition as Record<string, unknown>).id,
+      requisition_id: (requisition as Record<string, unknown>).id,
+      item_id: item.itemId,
+      unit_of_measure_id: item.unitOfMeasureId,
+      quantity: item.quantityRequested,
+      quantity_requested: item.quantityRequested,
+      quantity_approved: null,
+      estimated_cost: item.estimatedUnitCost ?? null,
+      estimated_unit_cost: item.estimatedUnitCost ?? null,
+      notes: item.remarks ?? null,
+      remarks: item.remarks ?? null,
+    }));
+
+    let { error: itemsErr } = await service.from('purchase_requisition_items').insert(itemPayload);
+    while (itemsErr) {
+      const nextPayload = itemPayload
+        .map((row) => stripMissingLegacyRequisitionItemColumn(row, itemsErr))
+        .filter((row): row is Record<string, unknown> => Boolean(row));
+      if (nextPayload.length !== itemPayload.length) break;
+      if (JSON.stringify(nextPayload) === JSON.stringify(itemPayload)) break;
+      itemPayload = nextPayload;
+      const retry = await service.from('purchase_requisition_items').insert(itemPayload);
+      itemsErr = retry.error;
+    }
 
     if (itemsErr) return serverError(itemsErr.message);
 
