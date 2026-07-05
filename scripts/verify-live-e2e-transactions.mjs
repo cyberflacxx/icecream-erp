@@ -211,6 +211,12 @@ function createRef(suffix) {
   return `${PREFIX}-${suffix}-${Date.now()}`;
 }
 
+function createCompactCode(prefix, maxLength) {
+  const timestampToken = Date.now().toString(36).toUpperCase();
+  const randomToken = Math.random().toString(36).slice(2, 6).toUpperCase();
+  return `${prefix}-${timestampToken}-${randomToken}`.slice(0, maxLength);
+}
+
 async function authenticateRoles() {
   for (const roleKey of Object.keys(ROLE_CONFIG)) {
     const role = ROLE_CONFIG[roleKey];
@@ -377,7 +383,7 @@ async function createSupplierAndItems() {
 
   const supplierPayload = {
     name: `${supplierRef} Supplier`,
-    code: supplierRef.slice(0, 20).toUpperCase(),
+    code: createCompactCode('SUP', 20),
     categoryId: null,
     contactPerson: 'E2E Verifier',
     phone: '+263771000000',

@@ -167,6 +167,7 @@ export async function POST(request: NextRequest) {
     const { data: requisition, error: reqErr } = await service
       .from('purchase_requisitions')
       .insert({
+        pr_number: requisitionNumber,
         requisition_number: requisitionNumber,
         department: body.department,
         needed_by_date: body.neededByDate ?? null,

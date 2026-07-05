@@ -12,6 +12,7 @@ import {
 } from '@/lib/security-server';
 
 export interface AuthContext {
+  userAccountId: string | null;
   userId: string;
   workId: string;
   role: string;
@@ -76,6 +77,7 @@ export async function getAuthContext(request?: Request | NextRequest): Promise<A
   const branchScoped = !resolved.permissions.includes('view_all_branches') && resolved.branchAssignments.length > 0;
 
   return {
+    userAccountId: resolved.userAccountId,
     userId: resolved.id,
     workId: resolved.workId,
     role: resolved.role,

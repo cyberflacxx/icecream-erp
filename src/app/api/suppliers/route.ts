@@ -283,7 +283,7 @@ export async function POST(request: NextRequest) {
       },
       organizationId: ctx.organizationId,
       userAgent: request.headers.get('user-agent'),
-      userProfileId: ctx.userId,
+      userProfileId: ctx.userAccountId ?? ctx.userId,
     });
 
     return NextResponse.json(supplier, { status: 201 });
