@@ -52,10 +52,7 @@ export async function POST(
     // Fetch GRN with purchase order items
     const { data: grn, error: grnErr } = await service
       .from('goods_received_notes')
-      .select(
-        `id, status, warehouse_id, purchase_order_id, grn_number,
-         purchase_orders(id, purchase_order_items(*), suppliers(id))`,
-      )
+      .select('id, status, warehouse_id, purchase_order_id, po_id, grn_number, notes')
       .is('deleted_at', null)
       .eq('organization_id', ctx.organizationId)
       .eq('id', id)
@@ -82,7 +79,21 @@ export async function POST(
       return badRequest('Only draft GRNs can be submitted.');
     }
 
-    const po = g.purchase_orders as Record<string, unknown> | null;
+    const purchaseOrderId = String(g.purchase_order_id ?? g.po_id ?? '');
+    let po: Record<string, unknown> | null = null;
+    if (purchaseOrderId) {
+      const { data: purchaseOrder, error: purchaseOrderError } = await service
+        .from('purchase_orders')
+        .select('id, purchase_order_items(*)')
+        .eq('organization_id', ctx.organizationId)
+        .eq('id', purchaseOrderId)
+        .single();
+      if (purchaseOrderError || !purchaseOrder) {
+        return badRequest('Linked purchase order not found.');
+      }
+      po = purchaseOrder as Record<string, unknown>;
+    }
+
     const poItemsArr = ((po?.purchase_order_items as Record<string, unknown>[]) ?? []);
     const poItemsById = new Map(poItemsArr.map((i) => [i.id as string, i]));
     const existingGrnItemsResult = await service
@@ -100,18 +111,18 @@ export async function POST(
       const poItem = line.poItemId ? poItemsById.get(line.poItemId) : null;
       const manualGrnItem = grnItemsByItemId.get(line.itemId) ?? null;
 
-      if (g.purchase_order_id && (!poItem || poItem.item_id !== line.itemId)) {
+      if (purchaseOrderId && (!poItem || poItem.item_id !== line.itemId)) {
         return badRequest('GRN line references an invalid purchase order item.');
       }
-      if (!g.purchase_order_id && !manualGrnItem) {
+      if (!purchaseOrderId && !manualGrnItem) {
         return badRequest('GRN line references an invalid manual receipt item.');
       }
 
-      const quantityOrdered = g.purchase_order_id
+      const quantityOrdered = purchaseOrderId
         ? Number(poItem?.quantity_ordered ?? 0)
         : Number(manualGrnItem?.quantity_expected ?? 0);
-      const quantityAlreadyReceived = g.purchase_order_id ? Number(poItem?.quantity_received ?? 0) : 0;
-      const remaining = g.purchase_order_id ? quantityOrdered - quantityAlreadyReceived : quantityOrdered;
+      const quantityAlreadyReceived = purchaseOrderId ? Number(poItem?.quantity_received ?? 0) : 0;
+      const remaining = purchaseOrderId ? quantityOrdered - quantityAlreadyReceived : quantityOrdered;
       const accepted = calculateAcceptedQuantity({
         damagedQuantity: line.damagedQuantity ?? 0,
         receivedQuantity: line.quantityReceived,
@@ -122,20 +133,20 @@ export async function POST(
         receivedQuantity: line.quantityReceived,
       });
 
-      if (g.purchase_order_id && line.quantityReceived > remaining && !line.overReceiveReason) {
+      if (purchaseOrderId && line.quantityReceived > remaining && !line.overReceiveReason) {
         return badRequest(
           `Received quantity exceeds ordered quantity for PO item ${poItem?.id}. Provide overReceiveReason to continue.`,
         );
       }
 
-      if (g.purchase_order_id && line.quantityReceived > remaining && line.overReceiveReason) {
+      if (purchaseOrderId && line.quantityReceived > remaining && line.overReceiveReason) {
         warnings.push(
           `Over-received ${line.quantityReceived} on PO item ${poItem?.id}. Reason: ${line.overReceiveReason}`,
         );
       }
 
       // Upsert GRN item
-      const existingGrnItem = g.purchase_order_id
+      const existingGrnItem = purchaseOrderId
         ? await service
             .from('goods_received_note_items')
             .select('id')
