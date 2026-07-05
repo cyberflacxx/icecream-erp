@@ -5,7 +5,7 @@ import { createServiceRoleClient } from '@/lib/supabase/server';
 
 function isSubmittedGrnStatus(status: unknown) {
   const normalized = String(status ?? '').toUpperCase();
-  return normalized === 'SUBMITTED' || normalized === 'PENDING_APPROVAL';
+  return normalized === 'SUBMITTED' || normalized === 'PENDING_APPROVAL' || normalized === 'RECEIVED';
 }
 
 export async function POST(

@@ -13,6 +13,12 @@ import { applyInventoryDelta, recordStockMovement } from '@/lib/inventory-server
 import { recordAuditLog } from '@/lib/security-server';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
+function isApprovedGrn(grn: { status?: unknown; quality_status?: unknown }) {
+  const status = String(grn.status ?? '').toUpperCase();
+  const qualityStatus = String(grn.quality_status ?? '').toUpperCase();
+  return status === 'APPROVED' || (status === 'RECEIVED' && qualityStatus === 'APPROVED');
+}
+
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
@@ -28,7 +34,7 @@ export async function POST(
     const { data: grn, error: grnError } = await service
       .from('goods_received_notes')
       .select(
-        `id, grn_number, status, warehouse_id, purchase_order_id, notes,
+        `id, grn_number, status, quality_status, warehouse_id, purchase_order_id, notes,
          goods_received_note_items(id, item_id, po_item_id, quantity_expected, quantity_received, quantity_rejected, unit_cost, batch_number, expiry_date)`,
       )
       .eq('organization_id', ctx.organizationId)
@@ -38,7 +44,7 @@ export async function POST(
     if (grnError) return serverError(grnError.message);
     if (!grn) return notFound('Goods received note not found.');
     if (grn.status === 'POSTED') return badRequest('This GRN has already been posted.');
-    if (grn.status !== 'APPROVED') return badRequest('Only approved GRNs can be posted.');
+    if (!isApprovedGrn(grn)) return badRequest('Only approved GRNs can be posted.');
 
     if (ctx.isBranchScoped && ctx.branchId) {
       const { data: warehouse, error: warehouseError } = await service

@@ -6,7 +6,7 @@ import { createServiceRoleClient } from '@/lib/supabase/server';
 
 function isSubmittedGrnStatus(status: unknown) {
   const normalized = String(status ?? '').toUpperCase();
-  return normalized === 'SUBMITTED' || normalized === 'PENDING_APPROVAL';
+  return normalized === 'SUBMITTED' || normalized === 'PENDING_APPROVAL' || normalized === 'RECEIVED';
 }
 
 export async function POST(
@@ -51,7 +51,7 @@ export async function POST(
 
     const { data: updated, error: updateErr } = await service
       .from('goods_received_notes')
-      .update({ status: 'APPROVED', quality_status: 'APPROVED' })
+      .update({ quality_status: 'APPROVED' })
       .eq('id', id)
       .select()
       .single();
@@ -62,7 +62,7 @@ export async function POST(
       action: 'GRN_APPROVED',
       entityId: id,
       entityType: 'goods_received_note',
-      newValues: { status: 'APPROVED' },
+      newValues: { status: 'RECEIVED', qualityStatus: 'APPROVED' },
       organizationId: ctx.organizationId,
       userProfileId: ctx.userId,
       ipAddress: _request.headers.get('x-forwarded-for'),
