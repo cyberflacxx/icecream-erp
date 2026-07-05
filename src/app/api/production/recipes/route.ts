@@ -137,6 +137,6 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json(recipe, { status: 201 });
   } catch (err) {
-    return serverError(err instanceof Error ? err.message : 'Internal server error');
+    return serverError(productionErrorMessage(err) || 'Internal server error');
   }
 }
