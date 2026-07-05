@@ -9,7 +9,7 @@ import {
   serverError,
   unauthorized,
 } from '@/lib/api-auth';
-import { normalizeTransferStatus } from '@/lib/inventory';
+import { normalizeTransferStatus, resolveTransferWriteStatus } from '@/lib/inventory';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
 export async function GET(
@@ -81,7 +81,7 @@ export async function PATCH(
     if (!['DRAFT', 'PENDING_APPROVAL', 'APPROVED', 'CANCELLED'].includes(nextStatus)) {
       return badRequest('Unsupported transfer status.');
     }
-    updates.status = nextStatus;
+    updates.status = resolveTransferWriteStatus(nextStatus);
   }
 
   const { data, error } = await service

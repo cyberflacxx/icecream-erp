@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { badRequest, can, forbidden, getAuthContext, notFound, serverError, unauthorized } from '@/lib/api-auth';
+import { resolveTransferWriteStatus } from '@/lib/inventory';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
 export async function POST(
@@ -22,13 +23,13 @@ export async function POST(
 
   if (error) return serverError(error.message);
   if (!data) return notFound('Stock transfer not found.');
-  if (String(data.status ?? '').toUpperCase() !== 'PENDING_APPROVAL') {
+  if (!['PENDING_APPROVAL', 'DRAFT'].includes(String(data.status ?? '').toUpperCase())) {
     return badRequest('Only submitted transfers can be approved.');
   }
 
   const { data: updated, error: updateError } = await service
     .from('stock_transfers')
-    .update({ status: 'APPROVED', approved_by: ctx.userId })
+    .update({ status: resolveTransferWriteStatus('APPROVED'), approved_by: ctx.userId })
     .eq('id', id)
     .select()
     .single();

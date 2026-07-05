@@ -247,6 +247,17 @@ export function normalizeTransferStatus(value: string | null | undefined) {
   return status === 'POSTED' ? 'COMPLETED' : status;
 }
 
+export function resolveTransferWriteStatus(value: string | null | undefined) {
+  const status = normalizeTransferStatus(value);
+
+  // Live transfer_status currently supports DRAFT/COMPLETED/CANCELLED only.
+  if (status === 'PENDING_APPROVAL' || status === 'APPROVED') {
+    return 'DRAFT';
+  }
+
+  return status;
+}
+
 export function calculateAcceptedQuantity(input: {
   damagedQuantity?: unknown;
   receivedQuantity: unknown;

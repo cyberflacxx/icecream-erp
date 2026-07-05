@@ -15,7 +15,7 @@ import {
   requireItem,
   requireWarehouseAccess,
 } from '@/lib/inventory-server';
-import { normalizeTransferStatus } from '@/lib/inventory';
+import { normalizeTransferStatus, resolveTransferWriteStatus } from '@/lib/inventory';
 import { recordAuditLog } from '@/lib/security-server';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
@@ -125,6 +125,7 @@ export async function POST(request: NextRequest) {
     const items = body.items;
     const notes = body.remarks ?? body.notes ?? null;
     const normalizedStatus = normalizeTransferStatus(body.status ?? 'COMPLETED') || 'COMPLETED';
+    const persistedStatus = resolveTransferWriteStatus(normalizedStatus) || 'COMPLETED';
 
     if (!fromWarehouseId || !toWarehouseId) {
       return badRequest('fromWarehouseId and toWarehouseId are required.');
@@ -204,7 +205,7 @@ export async function POST(request: NextRequest) {
         from_warehouse_id: fromWarehouseId,
         to_warehouse_id: toWarehouseId,
         notes,
-        status: normalizedStatus,
+        status: persistedStatus,
         transfer_date: body.transferDate ? new Date(body.transferDate).toISOString() : new Date().toISOString(),
         requested_by: ctx.userId,
         approved_by: normalizedStatus === 'APPROVED' || normalizedStatus === 'COMPLETED' ? ctx.userId : null,
