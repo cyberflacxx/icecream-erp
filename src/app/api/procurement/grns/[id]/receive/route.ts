@@ -12,6 +12,8 @@ const OPTIONAL_GRN_ITEM_COLUMNS = new Set([
   'shortage_quantity',
 ]);
 
+const SUBMITTED_GRN_STATUSES = new Set(['SUBMITTED', 'PENDING_APPROVAL']);
+
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
@@ -198,7 +200,7 @@ export async function POST(
     const { data: updated, error: updateErr } = await service
       .from('goods_received_notes')
       .update({
-        status: 'PENDING_APPROVAL',
+        status: 'SUBMITTED',
         notes: body.notes ?? (g.notes as string | null),
         received_by: ctx.userId,
         received_date: new Date().toISOString(),
@@ -215,7 +217,8 @@ export async function POST(
       entityType: 'goods_received_note',
       newValues: {
         itemCount: body.items.length,
-        status: 'PENDING_APPROVAL',
+        status: 'SUBMITTED',
+        acceptedSubmittedStates: Array.from(SUBMITTED_GRN_STATUSES),
         warnings,
       },
       organizationId: ctx.organizationId,

@@ -3,6 +3,11 @@ import { NextRequest, NextResponse } from 'next/server';
 import { badRequest, can, forbidden, getAuthContext, notFound, serverError, unauthorized } from '@/lib/api-auth';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
+function isSubmittedGrnStatus(status: unknown) {
+  const normalized = String(status ?? '').toUpperCase();
+  return normalized === 'SUBMITTED' || normalized === 'PENDING_APPROVAL';
+}
+
 export async function POST(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
@@ -26,7 +31,7 @@ export async function POST(
     if (fetchErr || !existing) return notFound('Goods received note not found.');
 
     const grn = existing as Record<string, unknown>;
-    if (grn.status !== 'PENDING_APPROVAL') {
+    if (!isSubmittedGrnStatus(grn.status)) {
       return badRequest('Only submitted GRNs can be rejected.');
     }
 

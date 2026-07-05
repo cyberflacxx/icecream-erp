@@ -4,6 +4,11 @@ import { badRequest, can, forbidden, getAuthContext, notFound, serverError, unau
 import { recordAuditLog } from '@/lib/security-server';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
+function isSubmittedGrnStatus(status: unknown) {
+  const normalized = String(status ?? '').toUpperCase();
+  return normalized === 'SUBMITTED' || normalized === 'PENDING_APPROVAL';
+}
+
 export async function POST(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
@@ -40,7 +45,7 @@ export async function POST(
       }
     }
 
-    if (grn.status !== 'PENDING_APPROVAL') {
+    if (!isSubmittedGrnStatus(grn.status)) {
       return badRequest('Only submitted GRNs can be approved.');
     }
 
