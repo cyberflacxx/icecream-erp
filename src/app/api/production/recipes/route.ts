@@ -73,9 +73,13 @@ export async function POST(request: NextRequest) {
     const { data: recipe, error: recipeError } = await service
       .from('recipes')
       .insert({
+        batch_size: body.expectedOutputQuantity,
+        batch_unit_id: body.outputUnitId,
         chocolate_type_id: body.chocolateTypeId ?? null,
         code,
+        created_by: ctx.userId,
         expected_output_quantity: body.expectedOutputQuantity,
+        expected_yield: 100,
         finished_item_id: body.finishedItemId,
         flavour_id: body.flavourId ?? null,
         instructions: body.instructions ?? null,

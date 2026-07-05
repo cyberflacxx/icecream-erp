@@ -32,8 +32,12 @@ export async function PATCH(
     if (body.expectedOutputQuantity !== undefined) {
       ensurePositiveQuantity(Number(body.expectedOutputQuantity), 'expectedOutputQuantity');
       updates.expected_output_quantity = Number(body.expectedOutputQuantity);
+      updates.batch_size = Number(body.expectedOutputQuantity);
     }
-    if (body.outputUnitId !== undefined) updates.output_unit_id = body.outputUnitId;
+    if (body.outputUnitId !== undefined) {
+      updates.output_unit_id = body.outputUnitId;
+      updates.batch_unit_id = body.outputUnitId;
+    }
     if (body.finishedItemId !== undefined) updates.finished_item_id = body.finishedItemId;
     if (body.flavourId !== undefined) updates.flavour_id = body.flavourId || null;
     if (body.chocolateTypeId !== undefined) updates.chocolate_type_id = body.chocolateTypeId || null;
