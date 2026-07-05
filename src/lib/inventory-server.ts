@@ -50,7 +50,7 @@ export async function requireWarehouseAccess(
     throw new Error('Warehouse not found or inactive.');
   }
 
-  if (isBranchScoped && branchId && data.branch_id !== branchId) {
+  if (isBranchScoped && branchId && data.branch_id && data.branch_id !== branchId) {
     throw new Error('This action is outside the current branch scope.');
   }
 
