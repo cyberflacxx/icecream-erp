@@ -137,7 +137,7 @@ export async function POST(
         batchNumber: item.batch_number ?? null,
         createdBy: ctx.userId,
         itemId: item.item_id,
-        movementType: 'GRN_RECEIPT',
+        movementType: 'PURCHASE_RECEIVE',
         notes: String(grn.notes ?? ''),
         organizationId: ctx.organizationId,
         quantity: acceptedQuantity,
