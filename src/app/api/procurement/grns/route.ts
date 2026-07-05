@@ -178,7 +178,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   const ctx = await getAuthContext();
   if (!ctx) return unauthorized();
-  if (!can(ctx, 'stores.grn.create', 'procurement.write')) return forbidden();
+  if (!can(ctx, 'stores.grn.create', 'procurement.write', 'goods_received.create', 'inventory.write')) return forbidden();
 
   const service = createServiceRoleClient();
 
@@ -252,20 +252,22 @@ export async function POST(request: NextRequest) {
     }
 
     // Validate warehouse
-    let warehouseQuery = service
+    const warehouseQuery = service
       .from('warehouses')
       .select('id, branch_id, type, warehouse_type')
       .eq('id', body.warehouseId)
       .eq('is_active', true)
-      .eq('organization_id', ctx.organizationId)
-      .is('branch_id', null);
-
-    if (ctx.isBranchScoped && ctx.branchId) {
-      warehouseQuery = warehouseQuery.eq('branch_id', ctx.branchId);
-    }
+      .eq('organization_id', ctx.organizationId);
 
     const { data: warehouse, error: whErr } = await warehouseQuery.single();
     if (whErr || !warehouse) return badRequest('Warehouse not found or out of scope.');
+    if (ctx.isBranchScoped && ctx.branchId) {
+      const warehouseBranchId = (warehouse as { branch_id?: string | null }).branch_id ?? null;
+      // Branch-scoped users can work with their own branch warehouse or shared org-level warehouses.
+      if (warehouseBranchId && warehouseBranchId !== ctx.branchId) {
+        return badRequest('Warehouse not found or out of scope.');
+      }
+    }
 
     // Generate GRN number
     const { count: grnCount } = await service

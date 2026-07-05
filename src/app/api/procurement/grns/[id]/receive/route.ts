@@ -18,7 +18,7 @@ export async function POST(
 ) {
   const ctx = await getAuthContext();
   if (!ctx) return unauthorized();
-  if (!can(ctx, 'stores.grn.submit', 'stores.grn.edit', 'procurement.write')) return forbidden();
+  if (!can(ctx, 'stores.grn.submit', 'stores.grn.edit', 'procurement.write', 'inventory.write')) return forbidden();
 
   const { id } = await params;
   const service = createServiceRoleClient();
@@ -72,7 +72,8 @@ export async function POST(
         .select('branch_id')
         .eq('id', g.warehouse_id as string)
         .single();
-      if (!wh || (wh as Record<string, unknown>).branch_id !== ctx.branchId) {
+      const warehouseBranchId = (wh as Record<string, unknown> | null)?.branch_id ?? null;
+      if (!wh || (warehouseBranchId && warehouseBranchId !== ctx.branchId)) {
         return forbidden();
       }
     }

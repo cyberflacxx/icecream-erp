@@ -47,7 +47,7 @@ export async function POST(
         .eq('id', grn.warehouse_id)
         .maybeSingle();
       if (warehouseError) return serverError(warehouseError.message);
-      if (!warehouse || warehouse.branch_id !== ctx.branchId) return forbidden();
+      if (!warehouse || (warehouse.branch_id && warehouse.branch_id !== ctx.branchId)) return forbidden();
     }
 
     const { data: existingMovements, error: movementError } = await service
