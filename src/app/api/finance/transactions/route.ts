@@ -38,6 +38,42 @@ async function optionalRows(table: string, select: string, organizationId: strin
   });
 }
 
+async function optionalBranchSalesRows(organizationId: string) {
+  const modern = await financeService()
+    .from('branch_sales')
+    .select('id, organization_id, branch_id, sale_number, sale_date, total_amount, payment_method, payment_reference, status, branches(name)');
+
+  if (!modern.error) {
+    return ((modern.data ?? []) as unknown as Row[]).filter((row) => {
+      const rowOrganizationId = row.organization_id;
+      return !rowOrganizationId || String(rowOrganizationId) === organizationId;
+    });
+  }
+
+  if (
+    !isMissingFinanceTable(modern.error) &&
+    !isMissingFinanceColumn(modern.error, 'branch_sales', 'sale_number') &&
+    !isMissingFinanceColumn(modern.error, 'branch_sales', 'payment_reference') &&
+    !isMissingFinanceColumn(modern.error, 'branch_sales', 'status')
+  ) {
+    throw modern.error;
+  }
+
+  const legacy = await financeService()
+    .from('branch_sales')
+    .select('id, organization_id, branch_id, sale_date, total_amount, payment_method, branches(name)');
+
+  if (legacy.error) {
+    if (isMissingFinanceTable(legacy.error)) return [] as Row[];
+    throw legacy.error;
+  }
+
+  return ((legacy.data ?? []) as unknown as Row[]).filter((row) => {
+    const rowOrganizationId = row.organization_id;
+    return !rowOrganizationId || String(rowOrganizationId) === organizationId;
+  });
+}
+
 async function optionalJournalRows(organizationId: string) {
   const modern = await financeService()
     .from('journal_entries')
@@ -123,11 +159,7 @@ export async function GET() {
         'id, organization_id, payment_date, payment_method, reference_number, amount_paid, status, suppliers(name), supplier_invoices(invoice_number)',
         ctx.organizationId,
       ),
-      optionalRows(
-        'branch_sales',
-        'id, organization_id, branch_id, sale_number, sale_date, total_amount, payment_method, payment_reference, status, branches(name)',
-        ctx.organizationId,
-      ),
+      optionalBranchSalesRows(ctx.organizationId),
       optionalRows(
         'branch_expenses',
         'id, organization_id, branch_id, expense_date, category, description, amount, payment_method, status, branches(name)',

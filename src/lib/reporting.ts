@@ -17,6 +17,14 @@ export interface ReportDefinition {
   requiredPermission: string;
 }
 
+export interface ReportPayload {
+  chart: Array<Record<string, unknown>>;
+  data: Array<Record<string, unknown>>;
+  meta?: Record<string, unknown>;
+  summary: Record<string, unknown>;
+  warning?: string;
+}
+
 export const REPORT_DEFINITIONS: ReportDefinition[] = [
   { category: 'inventory', code: 'stock-movement', name: 'Stock Movement Report', description: 'Incoming and outgoing stock movements by period.', path: '/api/inventory/reports/stock-movement', requiredPermission: 'inventory.read' },
   { category: 'inventory', code: 'valuation', name: 'Inventory Valuation Report', description: 'Closing stock values by warehouse and item.', path: '/api/inventory/reports/valuation', requiredPermission: 'view_cost' },
@@ -37,13 +45,29 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
 
   { category: 'production', code: 'performance', name: 'Production Performance Report', description: 'Production output and efficiency performance.', path: '/api/production/reports/performance', requiredPermission: 'production.read' },
   { category: 'production', code: 'batches', name: 'Batch Performance Report', description: 'Production batch-level detail.', path: '/api/production/reports/batch-performance', requiredPermission: 'production.read' },
+  { category: 'production', code: 'boms', name: 'Bill of Materials Report', description: 'Active and draft BOM standards by finished product.', path: '/api/production/recipes', requiredPermission: 'production.read' },
+  { category: 'production', code: 'plan-orders', name: 'Production Plan Order Report', description: 'Production plan orders by period, shift, and line.', path: '/api/production/plans', requiredPermission: 'production.read' },
   { category: 'production', code: 'material-consumption', name: 'Material Consumption Report', description: 'Material issues and usage by batch.', path: '/api/production/reports/material-consumption', requiredPermission: 'production.read' },
+  { category: 'production', code: 'material-requirements', name: 'Material Requirement Report', description: 'Required raw materials against planned production output.', path: '/api/production/reports/material-consumption', requiredPermission: 'production.read' },
+  { category: 'production', code: 'goods-receipts', name: 'Production Goods Receipt Report', description: 'Raw-material receipts into production and finished-goods receipts from production.', path: '/api/production/reports/goods-receipts', requiredPermission: 'production.read' },
+  { category: 'production', code: 'goods-issues', name: 'Production Goods Issue Report', description: 'Raw-material goods issues posted to production batches.', path: '/api/production/reports/material-consumption', requiredPermission: 'production.read' },
+  { category: 'production', code: 'raw-material-consumption', name: 'Raw Material Consumption Report', description: 'Consumed raw materials by production batch and variance.', path: '/api/production/reports/material-consumption', requiredPermission: 'production.read' },
   { category: 'production', code: 'expected-vs-actual', name: 'Expected Versus Actual Report', description: 'Expected versus actual production output and material usage.', path: '/api/production/reports/variance', requiredPermission: 'production.read' },
+  { category: 'production', code: 'progress', name: 'Production Progress Report', description: 'Production progress by batch, shift, and output.', path: '/api/production/reports/performance', requiredPermission: 'production.read' },
+  { category: 'production', code: 'planned-vs-actual', name: 'Planned Versus Actual Production Report', description: 'Planned production quantities compared to actual output.', path: '/api/production/reports/variance', requiredPermission: 'production.read' },
   { category: 'production', code: 'wastage', name: 'Wastage Report', description: 'Production wastage and losses.', path: '/api/production/reports/wastage', requiredPermission: 'production.read' },
+  { category: 'production', code: 'wastage-scrap', name: 'Wastage and Scrap Report', description: 'Wastage, scrap, and rejected output by production batch.', path: '/api/production/reports/wastage', requiredPermission: 'production.read' },
   { category: 'production', code: 'yield', name: 'Yield Report', description: 'Yield and recovery report.', path: '/api/production/reports/yield', requiredPermission: 'production.read' },
   { category: 'production', code: 'productivity', name: 'Productivity Report', description: 'Output per worker and productivity trends.', path: '/api/production/reports/productivity', requiredPermission: 'production.read' },
   { category: 'production', code: 'shift-performance', name: 'Shift Performance Report', description: 'Shift performance by output, variance, and wastage.', path: '/api/production/reports/shift-performance', requiredPermission: 'production.read' },
+  { category: 'production', code: 'finished-goods', name: 'Finished Goods Report', description: 'Finished-goods quantities produced, released, and transferred.', path: '/api/production/reports/finished-goods', requiredPermission: 'production.read' },
   { category: 'production', code: 'costing', name: 'Production Costing Report', description: 'Batch and product costing analysis.', path: '/api/production/reports/costing', requiredPermission: 'view_cost' },
+  { category: 'production', code: 'costs', name: 'Production Cost Report', description: 'Production cost totals, unit cost, and variance view.', path: '/api/production/reports/costing', requiredPermission: 'view_cost' },
+  { category: 'production', code: 'inventory-movements', name: 'Production Inventory Movement Report', description: 'Traceability view across raw-material transfers, issues, and finished-goods movements.', path: '/api/production/reports/inventory-movements', requiredPermission: 'production.read' },
+  { category: 'production', code: 'efficiency', name: 'Production Efficiency Report', description: 'Shift and batch efficiency performance.', path: '/api/production/reports/efficiency', requiredPermission: 'production.read' },
+  { category: 'production', code: 'daily', name: 'Daily Production Report', description: 'Daily production totals, output, and wastage.', path: '/api/production/reports/daily', requiredPermission: 'production.read' },
+  { category: 'production', code: 'weekly', name: 'Weekly Production Report', description: 'Weekly production totals, output, and efficiency.', path: '/api/production/reports/weekly', requiredPermission: 'production.read' },
+  { category: 'production', code: 'monthly', name: 'Monthly Production Report', description: 'Monthly production totals, output, and efficiency.', path: '/api/production/reports/monthly', requiredPermission: 'production.read' },
 
   { category: 'sales', code: 'daily-sales', name: 'Daily Sales Report', description: 'Daily sales and cash collection totals.', path: '/api/sales/reports/daily-sales', requiredPermission: 'sales.read' },
   { category: 'sales', code: 'customer-sales', name: 'Customer Sales Report', description: 'Sales by customer.', path: '/api/sales/reports/customer-sales', requiredPermission: 'sales.read' },
@@ -109,14 +133,107 @@ export const DASHBOARD_ROUTES: Record<string, string> = {
   sales: '/api/sales/dashboard',
 };
 
+const PRODUCTION_REPORT_ENDPOINT_ALIASES: Record<string, string> = {
+  'batch-performance': '/api/production/reports/batch-performance',
+  costing: '/api/production/reports/costing',
+  daily: '/api/production/reports/daily',
+  efficiency: '/api/production/reports/efficiency',
+  'expected-vs-actual': '/api/production/reports/variance',
+  'finished-goods': '/api/production/reports/finished-goods',
+  'goods-issues': '/api/production/reports/material-consumption',
+  'goods-receipts': '/api/production/reports/goods-receipts',
+  'inventory-movements': '/api/production/reports/inventory-movements',
+  'material-consumption': '/api/production/reports/material-consumption',
+  monthly: '/api/production/reports/monthly',
+  performance: '/api/production/reports/performance',
+  productivity: '/api/production/reports/productivity',
+  'planned-vs-actual': '/api/production/reports/variance',
+  'raw-material-consumption': '/api/production/reports/material-consumption',
+  'shift-performance': '/api/production/reports/shift-performance',
+  variance: '/api/production/reports/variance',
+  wastage: '/api/production/reports/wastage',
+  'wastage-scrap': '/api/production/reports/wastage',
+  weekly: '/api/production/reports/weekly',
+  yield: '/api/production/reports/yield',
+};
+
 export function findReportDefinition(category: string, reportType: string) {
   return REPORT_DEFINITIONS.find((definition) => definition.category === category && definition.code === reportType) ?? null;
+}
+
+export function resolveReportEndpointPath(category: string, reportType: string, fallbackPath: string) {
+  if (category !== 'production') return fallbackPath;
+  return PRODUCTION_REPORT_ENDPOINT_ALIASES[reportType] ?? fallbackPath;
 }
 
 export function validateReportDateRange(startDate?: string | null, endDate?: string | null) {
   if (startDate && endDate && new Date(startDate).getTime() > new Date(endDate).getTime()) {
     throw new Error('Date from must not be after date to.');
   }
+}
+
+export function emptyReportPayload(options?: {
+  meta?: Record<string, unknown>;
+  summary?: Record<string, unknown>;
+  warning?: string;
+}): ReportPayload {
+  return {
+    chart: [],
+    data: [],
+    ...(options?.meta ? { meta: options.meta } : {}),
+    summary: options?.summary ?? {},
+    ...(options?.warning ? { warning: options.warning } : {}),
+  };
+}
+
+export function normalizeReportErrorMessage(value: unknown) {
+  if (value instanceof Error) {
+    return normalizeReportErrorMessage(value.message);
+  }
+
+  if (typeof value === 'object' && value !== null && 'error' in value) {
+    return normalizeReportErrorMessage((value as { error?: unknown }).error);
+  }
+
+  const text = String(value ?? '').trim();
+  if (!text) return 'Report data is not currently available.';
+
+  try {
+    const parsed = JSON.parse(text) as { error?: unknown; message?: unknown };
+    const candidate = parsed.error ?? parsed.message;
+    if (candidate) return normalizeReportErrorMessage(candidate);
+  } catch {}
+
+  if (text.startsWith('<!DOCTYPE') || text.startsWith('<html')) {
+    return 'Report data is not currently available.';
+  }
+
+  return text.length > 240 ? `${text.slice(0, 237)}...` : text;
+}
+
+export function shouldUseEmptyReportFallback(error: unknown, status?: number) {
+  if (status !== undefined && [400, 401, 403].includes(status)) {
+    return false;
+  }
+
+  const message = normalizeReportErrorMessage(error).toLowerCase();
+  if (!message) return true;
+
+  return (
+    status === 404 ||
+    status === 500 ||
+    message.includes('internal server error') ||
+    message.includes('report data is not currently available') ||
+    message.includes('failed to fetch') ||
+    message.includes('unexpected token') ||
+    message.includes('does not exist') ||
+    message.includes('could not find the table') ||
+    message.includes('could not find a relationship between') ||
+    message.includes('could not find a relationship') ||
+    message.includes('column ') ||
+    message.includes('relation ') ||
+    message.includes('unsupported report type')
+  );
 }
 
 export function toReportCsv(options: {
