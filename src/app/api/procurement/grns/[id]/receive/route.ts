@@ -63,7 +63,7 @@ export async function POST(
     const g = grn as Record<string, unknown>;
 
     // Branch scope check via warehouse.
-    // Only enforce this when the GRN has a warehouse ID. Some live GRNs are created before warehouse assignment.
+    // Check both branch scope and live DB warehouse assignments.
     if (ctx.isBranchScoped && ctx.branchId) {
       const warehouseId = String(g.warehouse_id ?? '');
 
@@ -79,11 +79,23 @@ export async function POST(
           : null;
 
         const allowedBranchIds = new Set([ctx.branchId, ...ctx.branchAssignments].filter(Boolean));
-        const allowedWarehouseIds = new Set(ctx.warehouseAssignments.filter(Boolean));
+        let hasWarehouseAssignment = ctx.warehouseAssignments.includes(warehouseId);
+
+        if (!hasWarehouseAssignment) {
+          const { data: warehouseAssignment } = await service
+            .from('user_warehouse_assignments')
+            .select('id')
+            .eq('user_profile_id', ctx.userId)
+            .eq('warehouse_id', warehouseId)
+            .eq('is_active', true)
+            .maybeSingle();
+
+          hasWarehouseAssignment = Boolean(warehouseAssignment);
+        }
 
         if (
           !wh ||
-          (warehouseBranchId && !allowedBranchIds.has(warehouseBranchId) && !allowedWarehouseIds.has(warehouseId))
+          (warehouseBranchId && !allowedBranchIds.has(warehouseBranchId) && !hasWarehouseAssignment)
         ) {
           return forbidden();
         }
