@@ -63,10 +63,14 @@ export async function loadCustomerBalanceSnapshot(
     .select('status, balance_due, total, total_amount, amount_paid, paid_amount')
     .eq('customer_id', customerId)
     .is('deleted_at', null);
-  if (invoiceResult.error && salesErrorMessage(invoiceResult.error).includes('deleted_at')) {
+  const invoiceErrorMessage = salesErrorMessage(invoiceResult.error);
+  if (
+    invoiceResult.error &&
+    (invoiceErrorMessage.includes('deleted_at') || invoiceErrorMessage.includes('total') || invoiceErrorMessage.includes('amount_paid'))
+  ) {
     invoiceResult = await service
       .from('invoices')
-      .select('status, balance_due, total, total_amount, amount_paid, paid_amount')
+      .select('status, balance_due, total_amount, paid_amount')
       .eq('customer_id', customerId);
   }
   if (invoiceResult.error) {
