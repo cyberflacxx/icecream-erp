@@ -18,14 +18,39 @@ export async function POST(
 ) {
   const ctx = await getAuthContext();
   if (!ctx) return unauthorized();
-  const canReceiveGrn =
-    can(ctx, 'stores.grn.submit', 'stores.grn.edit', 'procurement.write', 'inventory.write') ||
-    ctx.roles.some((role) => role.name.toLowerCase() === 'store keeper');
-
-  if (!canReceiveGrn) return forbidden();
 
   const { id } = await params;
   const service = createServiceRoleClient();
+
+  let isStoreKeeper = ctx.roles.some((role) => role.name.toLowerCase() === 'store keeper');
+
+  if (!isStoreKeeper) {
+    const { data: roleLinks } = await service
+      .from('user_roles')
+      .select('role_id')
+      .eq('user_profile_id', ctx.userId);
+
+    const roleIds = Array.from(
+      new Set((roleLinks ?? []).map((row) => String((row as Record<string, unknown>).role_id ?? '')).filter(Boolean)),
+    );
+
+    if (roleIds.length > 0) {
+      const { data: roleRows } = await service
+        .from('roles')
+        .select('name')
+        .in('id', roleIds);
+
+      isStoreKeeper = (roleRows ?? []).some(
+        (role) => String((role as Record<string, unknown>).name ?? '').toLowerCase() === 'store keeper',
+      );
+    }
+  }
+
+  const canReceiveGrn =
+    can(ctx, 'stores.grn.submit', 'stores.grn.edit', 'procurement.write', 'inventory.write') ||
+    isStoreKeeper;
+
+  if (!canReceiveGrn) return forbidden();
 
   let body: {
     notes?: string | null;
@@ -68,7 +93,7 @@ export async function POST(
 
     // Branch scope check via warehouse.
     // Check both branch scope and live DB warehouse assignments.
-    if (ctx.isBranchScoped && ctx.branchId) {
+    if (ctx.isBranchScoped && ctx.branchId && !isStoreKeeper) {
       const warehouseId = String(g.warehouse_id ?? '');
 
       if (warehouseId) {
