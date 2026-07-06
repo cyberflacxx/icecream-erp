@@ -100,7 +100,17 @@ export async function POST(
       })),
     ];
 
-    // Check stock availability
+    const { data: existingMaterials, error: existingMaterialsError } = await service
+      .schema('icecream_erp')
+      .from('production_batch_materials')
+      .select('id, item_id, quantity_required')
+      .eq('batch_id', id);
+    if (existingMaterialsError) throw existingMaterialsError;
+    const existingMaterialByItemId = new Map(
+      (existingMaterials ?? []).map((row) => [String(row.item_id), row as { id: string; item_id: string; quantity_required: number }]),
+    );
+
+    // Check stock availability for the new reservation delta only.
     const failures: string[] = [];
     for (const ingredient of ingredients) {
       const { data: balance } = await service
@@ -112,9 +122,11 @@ export async function POST(
         .maybeSingle();
 
       const available = balance ? Number(balance.quantity_available) : 0;
-      if (available < ingredient.quantityRequired) {
+      const existingRequired = Number(existingMaterialByItemId.get(String(ingredient.itemId))?.quantity_required ?? 0);
+      const reservationDelta = Math.max(0, ingredient.quantityRequired - existingRequired);
+      if (available < reservationDelta) {
         failures.push(
-          `${ingredient.itemName} (${ingredient.itemCode}): need ${ingredient.quantityRequired.toFixed(3)} ${ingredient.unitAbbreviation}, available ${available.toFixed(3)} ${ingredient.unitAbbreviation}`,
+          `${ingredient.itemName} (${ingredient.itemCode}): need ${reservationDelta.toFixed(3)} ${ingredient.unitAbbreviation}, available ${available.toFixed(3)} ${ingredient.unitAbbreviation}`,
         );
       }
     }
@@ -125,6 +137,10 @@ export async function POST(
 
     // Reserve stock and create batch materials
     for (const ingredient of ingredients) {
+      const existingMaterial = existingMaterialByItemId.get(String(ingredient.itemId));
+      const existingRequired = Number(existingMaterial?.quantity_required ?? 0);
+      const reservationDelta = Math.max(0, ingredient.quantityRequired - existingRequired);
+
       const { data: balance } = await service
         .schema('icecream_erp')
         .from('stock_balances')
@@ -135,30 +151,22 @@ export async function POST(
 
       if (!balance) continue;
 
-      const newReserved = Number(balance.quantity_reserved) + ingredient.quantityRequired;
-      const newAvailable = Number(balance.quantity_on_hand) - newReserved;
+      if (reservationDelta > 0) {
+        const newReserved = Number(balance.quantity_reserved) + reservationDelta;
+        const { error: balanceUpdateError } = await service.schema('icecream_erp').from('stock_balances').update({
+          quantity_reserved: newReserved,
+          last_updated: new Date().toISOString(),
+        }).eq('id', balance.id);
+        if (balanceUpdateError) throw balanceUpdateError;
+      }
 
-      await service.schema('icecream_erp').from('stock_balances').update({
-        quantity_reserved: newReserved,
-        quantity_available: newAvailable,
-        last_updated: new Date().toISOString(),
-      }).eq('id', balance.id);
-
-      // Upsert batch material
-      const { data: existing } = await service
-        .schema('icecream_erp')
-        .from('production_batch_materials')
-        .select('id')
-        .eq('batch_id', id)
-        .eq('item_id', ingredient.itemId)
-        .maybeSingle();
-
-      if (existing) {
-        await service.schema('icecream_erp').from('production_batch_materials').update({
+      if (existingMaterial) {
+        const { error: materialUpdateError } = await service.schema('icecream_erp').from('production_batch_materials').update({
           quantity_required: ingredient.quantityRequired,
-        }).eq('id', existing.id);
+        }).eq('id', existingMaterial.id);
+        if (materialUpdateError) throw materialUpdateError;
       } else {
-        await service.schema('icecream_erp').from('production_batch_materials').insert({
+        const { error: materialInsertError } = await service.schema('icecream_erp').from('production_batch_materials').insert({
           batch_id: id,
           item_id: ingredient.itemId,
           unit_id: ingredient.unitId,
@@ -167,13 +175,14 @@ export async function POST(
           quantity_issued: 0,
           variance: 0,
         });
+        if (materialInsertError) throw materialInsertError;
       }
     }
 
     const { data: updated, error: updateError } = await service
       .schema('icecream_erp')
       .from('production_batches')
-      .update({ status: 'MATERIALS_RESERVED' })
+      .update({ status: 'MATERIALS_APPROVED' })
       .eq('id', id)
       .select()
       .single();
@@ -181,10 +190,10 @@ export async function POST(
     if (updateError) throw updateError;
 
     await service.schema('icecream_erp').from('audit_logs').insert({
-      action: 'MATERIALS_RESERVED',
+      action: 'PRODUCTION_MATERIALS_RESERVED',
       entity_id: id,
       entity_type: 'production_batch',
-      new_values: { itemsReserved: ingredients.length, status: 'MATERIALS_RESERVED' },
+      new_values: { itemsReserved: ingredients.length, status: 'MATERIALS_APPROVED' },
       user_profile_id: ctx.userId,
     });
 

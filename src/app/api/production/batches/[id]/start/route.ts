@@ -95,7 +95,7 @@ export async function POST(
     for (const requirement of requirements) {
       const item = await requireItem(service.schema('icecream_erp'), requirement.itemId);
       const balance = await getBalance(service.schema('icecream_erp'), requirement.itemId, String(batchDetail.warehouse_id));
-      const reservedForThisBatch = batchDetail.status === 'MATERIALS_RESERVED' && materialByItemId.has(requirement.itemId)
+      const reservedForThisBatch = materialByItemId.has(requirement.itemId)
         ? Math.min(toNumber(balance?.quantity_reserved), requirement.quantityRequired)
         : 0;
       const availableForIssue = toNumber(balance?.quantity_available) + reservedForThisBatch;
@@ -120,7 +120,7 @@ export async function POST(
 
       const onHand = toNumber(balance.quantity_on_hand);
       const reserved = toNumber(balance.quantity_reserved);
-      const reservedRelief = batchDetail.status === 'MATERIALS_RESERVED' && materialByItemId.has(requirement.itemId)
+      const reservedRelief = materialByItemId.has(requirement.itemId)
         ? Math.min(reserved, requirement.quantityRequired)
         : 0;
       const nextOnHand = onHand - requirement.quantityRequired;

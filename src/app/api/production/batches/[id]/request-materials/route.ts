@@ -58,23 +58,27 @@ export async function POST(
       user_profile_id: ctx.userId,
     });
 
-    await emitOperationalNotifications({
-      actorUserId: ctx.userId,
-      branchId: String(warehouse?.branch_id ?? ''),
-      documentId: id,
-      documentType: 'production_batch',
-      eventType: 'MATERIAL_REQUEST_PENDING',
-      message: `Production batch ${String(batch.batch_number ?? id)} is requesting materials.`,
-      metadata: {
-        batchNumber: String(batch.batch_number ?? id),
-      },
-      moduleName: 'production',
-      organizationId: ctx.organizationId,
-      recipientRoleNames: ['Production Manager', 'Procurement Officer', 'Stores Manager'],
-      severity: 'MEDIUM',
-      title: 'Production material request pending',
-      warehouseId: String(batch.warehouse_id ?? ''),
-    });
+    try {
+      await emitOperationalNotifications({
+        actorUserId: ctx.userId,
+        branchId: String(warehouse?.branch_id ?? ''),
+        documentId: id,
+        documentType: 'production_batch',
+        eventType: 'MATERIAL_REQUEST_PENDING',
+        message: `Production batch ${String(batch.batch_number ?? id)} is requesting materials.`,
+        metadata: {
+          batchNumber: String(batch.batch_number ?? id),
+        },
+        moduleName: 'production',
+        organizationId: ctx.organizationId,
+        recipientRoleNames: ['Production Manager', 'Procurement Officer', 'Stores Manager'],
+        severity: 'MEDIUM',
+        title: 'Production material request pending',
+        warehouseId: String(batch.warehouse_id ?? ''),
+      });
+    } catch (notificationError) {
+      console.warn('Production material request notification failed', notificationError);
+    }
 
     return NextResponse.json(updated);
   } catch (err) {
