@@ -211,6 +211,36 @@ export async function POST(request: NextRequest) {
       return serverError(error instanceof Error ? error.message : 'Failed to load sales order.');
     }
 
+    if (!order) {
+      const directOrder = await service
+        .schema('icecream_erp')
+        .from('sales_orders')
+        .select('id, branch_id, warehouse_id, status, organization_id')
+        .eq('id', body.salesOrderId)
+        .maybeSingle();
+
+      if (directOrder.error) {
+        return serverError(directOrder.error.message);
+      }
+
+      order = (directOrder.data ?? null) as Record<string, unknown> | null;
+    }
+
+    if (!order) {
+      const orderByNumber = await service
+        .schema('icecream_erp')
+        .from('sales_orders')
+        .select('id, branch_id, warehouse_id, status, organization_id')
+        .eq('order_number', body.salesOrderId)
+        .maybeSingle();
+
+      if (orderByNumber.error) {
+        return serverError(orderByNumber.error.message);
+      }
+
+      order = (orderByNumber.data ?? null) as Record<string, unknown> | null;
+    }
+
     if (!order) return NextResponse.json({ error: 'Sales order not found.' }, { status: 404 });
 
     const ord = order;
@@ -222,7 +252,7 @@ export async function POST(request: NextRequest) {
     }
 
     try {
-      orderItems = await loadSalesOrderItems(service.schema('icecream_erp'), body.salesOrderId);
+      orderItems = await loadSalesOrderItems(service.schema('icecream_erp'), String(ord.id ?? body.salesOrderId));
     } catch (error) {
       return serverError(error instanceof Error ? error.message : 'Failed to load sales order items.');
     }
@@ -405,3 +435,5 @@ export async function POST(request: NextRequest) {
   if (legacyResult.error) return serverError(legacyResult.error.message);
   return NextResponse.json(legacyResult.data, { status: 201 });
 }
+
+
