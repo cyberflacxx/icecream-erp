@@ -8,7 +8,7 @@ import { createServiceRoleClient } from '@/lib/supabase/server';
 
 export async function POST(
   _request: NextRequest,
-  { params }: { params: { id: string } },
+  { params }: { params: { id: string } | Promise<{ id: string }> },
 ) {
   const ctx = await getAuthContext();
   if (!ctx) return unauthorized();
@@ -16,11 +16,13 @@ export async function POST(
 
   const service = createServiceRoleClient();
 
+  const { id } = await Promise.resolve(params);
+
   let order: Record<string, unknown> | null = null;
   try {
     order = await loadSalesOrderById(
       service.schema('icecream_erp'),
-      params.id,
+      id,
       ctx.organizationId,
       '*, customers(*)',
     );
@@ -69,7 +71,7 @@ export async function POST(
     .schema('icecream_erp')
     .from('sales_orders')
     .update({ status: 'CONFIRMED', updated_at: new Date().toISOString() })
-    .eq('id', params.id)
+    .eq('id', id)
     .select()
     .single();
 
