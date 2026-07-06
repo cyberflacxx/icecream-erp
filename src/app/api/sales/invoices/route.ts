@@ -2,16 +2,13 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
 import { isCustomerInactiveStatus } from '@/lib/sales-customers';
-import { isMissingSalesTable, salesErrorMessage } from '@/lib/sales-server';
+import {
+  isMissingSalesColumn,
+  isMissingSalesTable,
+  loadSalesOrderById,
+  loadSalesOrderItems,
+} from '@/lib/sales-server';
 import { createServiceRoleClient } from '@/lib/supabase/server';
-
-function isMissingColumnError(error: unknown, table: string, columnName: string) {
-  const message = salesErrorMessage(error);
-  return (
-    message.includes(`column ${table}.${columnName} does not exist`) ||
-    (message.includes(columnName) && message.includes('schema cache'))
-  );
-}
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -75,11 +72,11 @@ export async function GET(request: NextRequest) {
   const primary = await query;
   if (primary.error) {
     const compatibleLegacy =
-      isMissingColumnError(primary.error, 'invoices', 'total') ||
-      isMissingColumnError(primary.error, 'invoices', 'amount_paid') ||
-      isMissingColumnError(primary.error, 'invoices', 'invoice_items') ||
-      isMissingColumnError(primary.error, 'invoices', 'sales_orders') ||
-      isMissingColumnError(primary.error, 'invoices', 'deleted_at') ||
+      isMissingSalesColumn(primary.error, 'invoices', 'total') ||
+      isMissingSalesColumn(primary.error, 'invoices', 'amount_paid') ||
+      isMissingSalesColumn(primary.error, 'invoices', 'invoice_items') ||
+      isMissingSalesColumn(primary.error, 'invoices', 'sales_orders') ||
+      isMissingSalesColumn(primary.error, 'invoices', 'deleted_at') ||
       isMissingSalesTable(primary.error);
 
     if (!compatibleLegacy) return serverError(primary.error.message);
@@ -174,7 +171,7 @@ export async function POST(request: NextRequest) {
     .select('id, current_balance, status')
     .eq('id', body.customerId)
     .single();
-  if (customerResult.error && isMissingColumnError(customerResult.error, 'customers', 'current_balance')) {
+  if (customerResult.error && isMissingSalesColumn(customerResult.error, 'customers', 'current_balance')) {
     customerResult = await service
       .schema('icecream_erp')
       .from('customers')
@@ -202,30 +199,21 @@ export async function POST(request: NextRequest) {
 
   // If linked to a sales order, pull its items
   if (body.salesOrderId) {
-    const primaryOrderResult = await service
-      .schema('icecream_erp')
-      .from('sales_orders')
-      .select(`id, branch_id, warehouse_id, sales_order_items(item_id, quantity_ordered, unit_price, discount_percent)`)
-      .eq('id', body.salesOrderId)
-      .is('deleted_at', null)
-      .single();
-
-    let order = primaryOrderResult.data as Record<string, unknown> | null;
-    if (primaryOrderResult.error && isMissingColumnError(primaryOrderResult.error, 'sales_order_items', 'quantity_ordered')) {
-      const fallbackOrderResult = await service
-        .schema('icecream_erp')
-        .from('sales_orders')
-        .select(`id, branch_id, warehouse_id, sales_order_items(item_id, quantity, unit_price, discount_pct)`)
-        .eq('id', body.salesOrderId)
-        .is('deleted_at', null)
-        .single();
-
-      order = fallbackOrderResult.data as Record<string, unknown> | null;
+    let order: Record<string, unknown> | null = null;
+    try {
+      order = await loadSalesOrderById(
+        service.schema('icecream_erp'),
+        body.salesOrderId,
+        ctx.organizationId,
+        'id, branch_id, warehouse_id, status',
+      );
+    } catch (error) {
+      return serverError(error instanceof Error ? error.message : 'Failed to load sales order.');
     }
 
     if (!order) return NextResponse.json({ error: 'Sales order not found.' }, { status: 404 });
 
-    const ord = order as Record<string, unknown>;
+    const ord = order;
     branchId = (ord.branch_id as string) ?? null;
     warehouseId = (ord.warehouse_id as string) ?? warehouseId;
 
@@ -233,16 +221,11 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'This role is limited to its assigned branch.' }, { status: 403 });
     }
 
-    orderItems = ((ord.sales_order_items as Array<Record<string, unknown>>) ?? []).map((i) => ({
-      item_id: String(i.item_id),
-      quantity_ordered: Number(i.quantity_ordered ?? i.quantity ?? 0),
-      unit_price: Number(i.unit_price),
-      discount_percent: i.discount_percent !== null && i.discount_percent !== undefined
-        ? Number(i.discount_percent)
-        : i.discount_pct !== null && i.discount_pct !== undefined
-          ? Number(i.discount_pct)
-          : null,
-    }));
+    try {
+      orderItems = await loadSalesOrderItems(service.schema('icecream_erp'), body.salesOrderId);
+    } catch (error) {
+      return serverError(error instanceof Error ? error.message : 'Failed to load sales order items.');
+    }
   }
 
   // Resolve items: explicit body.items > orderItems
@@ -321,11 +304,11 @@ export async function POST(request: NextRequest) {
     if (
       iErr &&
       (
-        isMissingColumnError(iErr, 'invoices', 'sales_order_id') ||
-        isMissingColumnError(iErr, 'invoices', 'warehouse_id') ||
-        isMissingColumnError(iErr, 'invoices', 'discount_amount') ||
-        isMissingColumnError(iErr, 'invoices', 'total') ||
-        isMissingColumnError(iErr, 'invoices', 'amount_paid')
+        isMissingSalesColumn(iErr, 'invoices', 'sales_order_id') ||
+        isMissingSalesColumn(iErr, 'invoices', 'warehouse_id') ||
+        isMissingSalesColumn(iErr, 'invoices', 'discount_amount') ||
+        isMissingSalesColumn(iErr, 'invoices', 'total') ||
+        isMissingSalesColumn(iErr, 'invoices', 'amount_paid')
       )
     ) {
       const fallbackInsert = await service
@@ -384,7 +367,7 @@ export async function POST(request: NextRequest) {
       updated_at: new Date().toISOString(),
     })
     .eq('id', body.customerId);
-  if (customerUpdate.error && isMissingColumnError(customerUpdate.error, 'customers', 'current_balance')) {
+  if (customerUpdate.error && isMissingSalesColumn(customerUpdate.error, 'customers', 'current_balance')) {
     await service
       .schema('icecream_erp')
       .from('customers')

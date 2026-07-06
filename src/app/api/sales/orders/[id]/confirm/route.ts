@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { can, forbidden, getAuthContext, notFound, serverError, unauthorized } from '@/lib/api-auth';
+import { loadSalesOrderById } from '@/lib/sales-server';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
 // ─── POST /api/sales/orders/[id]/confirm ─────────────────────────────────────
@@ -15,18 +16,21 @@ export async function POST(
 
   const service = createServiceRoleClient();
 
-  // Fetch order with customer
-  const { data: order, error: fetchErr } = await service
-    .schema('icecream_erp')
-    .from('sales_orders')
-    .select('*, customers(*)')
-    .eq('id', params.id)
-    .is('deleted_at', null)
-    .single();
+  let order: Record<string, unknown> | null = null;
+  try {
+    order = await loadSalesOrderById(
+      service.schema('icecream_erp'),
+      params.id,
+      ctx.organizationId,
+      '*, customers(*)',
+    );
+  } catch (error) {
+    return serverError(error instanceof Error ? error.message : 'Failed to load sales order.');
+  }
 
-  if (fetchErr || !order) return notFound('Sales order not found.');
+  if (!order) return notFound('Sales order not found.');
 
-  const o = order as Record<string, unknown>;
+  const o = order;
 
   // Branch access check
   if (ctx.isBranchScoped && ctx.branchId && o.branch_id && o.branch_id !== ctx.branchId) {
@@ -44,7 +48,7 @@ export async function POST(
     if (paymentTerms.includes('credit')) {
       const creditLimit = Number(customer.credit_limit ?? 0);
       if (creditLimit > 0) {
-        const currentBalance = Number(customer.current_balance ?? 0);
+        const currentBalance = Number(customer.current_balance ?? customer.outstanding_balance ?? 0);
         const orderTotal = Number(o.total_amount ?? o.total ?? 0);
         const projected = currentBalance + orderTotal;
         if (projected > creditLimit) {

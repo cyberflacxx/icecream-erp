@@ -1,3 +1,4 @@
+import { isMissingColumnError } from '@/lib/postgrest-compat';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
 export function salesService() {
@@ -21,11 +22,98 @@ export function isMissingSalesTable(error: unknown) {
   );
 }
 
+export function isMissingSalesColumn(error: unknown, table: string, columnName: string) {
+  return isMissingColumnError(error, table, columnName);
+}
+
 export async function generateSalesReferenceNumber(table: string, prefix: string) {
   const service = salesService();
   const { count, error } = await service.from(table).select('id', { count: 'exact', head: true });
   if (error) throw error;
   return `${prefix}-${String((count ?? 0) + 1).padStart(5, '0')}`;
+}
+
+type SalesService = ReturnType<typeof salesService>;
+
+export async function loadSalesOrderById(
+  service: SalesService,
+  orderId: string,
+  organizationId: string,
+  selectClause: string,
+) {
+  const buildQuery = (includeDeletedAt: boolean) => {
+    let query = service
+      .from('sales_orders')
+      .select(selectClause)
+      .eq('id', orderId)
+      .eq('organization_id', organizationId);
+
+    if (includeDeletedAt) {
+      query = query.is('deleted_at', null);
+    }
+
+    return query.maybeSingle();
+  };
+
+  const primary = await buildQuery(true);
+  if (!primary.error) {
+    return (primary.data ?? null) as Record<string, unknown> | null;
+  }
+  if (!isMissingSalesColumn(primary.error, 'sales_orders', 'deleted_at')) {
+    throw primary.error;
+  }
+
+  const fallback = await buildQuery(false);
+  if (fallback.error) {
+    throw fallback.error;
+  }
+
+  return (fallback.data ?? null) as Record<string, unknown> | null;
+}
+
+export async function loadSalesOrderItems(service: SalesService, orderId: string) {
+  const primary = await service
+    .from('sales_order_items')
+    .select('item_id, quantity_ordered, unit_price, discount_percent')
+    .eq('order_id', orderId);
+
+  if (!primary.error) {
+    return ((primary.data ?? []) as Array<Record<string, unknown>>).map((item) => ({
+      item_id: String(item.item_id),
+      quantity_ordered: Number(item.quantity_ordered ?? 0),
+      unit_price: Number(item.unit_price ?? 0),
+      discount_percent:
+        item.discount_percent !== null && item.discount_percent !== undefined
+          ? Number(item.discount_percent)
+          : null,
+    }));
+  }
+
+  if (
+    !isMissingSalesColumn(primary.error, 'sales_order_items', 'quantity_ordered') &&
+    !isMissingSalesColumn(primary.error, 'sales_order_items', 'discount_percent')
+  ) {
+    throw primary.error;
+  }
+
+  const fallback = await service
+    .from('sales_order_items')
+    .select('item_id, quantity, unit_price, discount_pct')
+    .eq('order_id', orderId);
+
+  if (fallback.error) {
+    throw fallback.error;
+  }
+
+  return ((fallback.data ?? []) as Array<Record<string, unknown>>).map((item) => ({
+    item_id: String(item.item_id),
+    quantity_ordered: Number(item.quantity ?? 0),
+    unit_price: Number(item.unit_price ?? 0),
+    discount_percent:
+      item.discount_pct !== null && item.discount_pct !== undefined
+        ? Number(item.discount_pct)
+        : null,
+  }));
 }
 
 export async function fetchFinishedGoodsStockMap(warehouseId?: string | null, branchId?: string | null) {
