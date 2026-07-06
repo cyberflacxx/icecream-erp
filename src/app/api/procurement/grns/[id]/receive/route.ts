@@ -18,78 +18,10 @@ export async function POST(
 ) {
   const ctx = await getAuthContext();
   if (!ctx) return unauthorized();
+  if (!can(ctx, 'stores.grn.submit', 'stores.grn.edit', 'procurement.write', 'inventory.write')) return forbidden();
 
   const { id } = await params;
   const service = createServiceRoleClient();
-
-  let securityUserId = ctx.userId;
-  let isStoreKeeper =
-    ctx.roles.some((role) => role.name.toLowerCase() === 'store keeper') ||
-    ctx.role.toLowerCase() === 'store keeper' ||
-    ctx.role.toLowerCase() === 'store_keeper';
-
-  const hasStoreKeeperRole = async (userProfileId: string) => {
-    const { data: roleLinks } = await service
-      .from('user_roles')
-      .select('role_id')
-      .eq('user_profile_id', userProfileId);
-
-    const roleIds = Array.from(
-      new Set(
-        (roleLinks ?? [])
-          .map((row) => String((row as Record<string, unknown>).role_id ?? ''))
-          .filter((roleId): roleId is string => Boolean(roleId)),
-      ),
-    );
-
-    if (roleIds.length === 0) return false;
-
-    const { data: roleRows } = await service
-      .from('roles')
-      .select('name')
-      .in('id', roleIds);
-
-    return (roleRows ?? []).some(
-      (role) => String((role as Record<string, unknown>).name ?? '').toLowerCase() === 'store keeper',
-    );
-  };
-
-  if (!isStoreKeeper) {
-    isStoreKeeper = await hasStoreKeeperRole(ctx.userId);
-  }
-
-  if (!isStoreKeeper && ctx.workId) {
-    const { data: userRow } = await service
-      .from('users')
-      .select('id')
-      .eq('work_id', ctx.workId)
-      .maybeSingle();
-
-    const userIdFromWorkId = String((userRow as Record<string, unknown> | null)?.id ?? '');
-
-    if (userIdFromWorkId) {
-      securityUserId = userIdFromWorkId;
-      isStoreKeeper = await hasStoreKeeperRole(userIdFromWorkId);
-    }
-  }
-
-  const canReceiveGrn =
-    can(ctx, 'stores.grn.submit', 'stores.grn.edit', 'procurement.write', 'inventory.write') ||
-    isStoreKeeper;
-
-  if (false && !canReceiveGrn) {
-    return NextResponse.json(
-      {
-        error: 'Forbidden',
-        reason: 'permission_check',
-        workId: ctx.workId,
-        role: ctx.role,
-        roles: ctx.roles.map((role) => role.name),
-        permissions: ctx.permissions,
-      },
-      { status: 403 },
-    );
-  }
 
   let body: {
     notes?: string | null;
@@ -117,70 +49,26 @@ export async function POST(
   }
 
   try {
-    // Fetch GRN with purchase order items
-    const { data: grn, error: grnErr } = await service
-      .from('goods_received_notes')
-      .select('id, status, warehouse_id, purchase_order_id, po_id, grn_number, notes')
-      .is('deleted_at', null)
-      .eq('organization_id', ctx.organizationId)
-      .eq('id', id)
-      .single();
-
-    if (grnErr || !grn) return notFound('Goods received note not found.');
+    const grn = await loadGrnForReceive(service, ctx.organizationId, id);
+    if (!grn) return notFound('Goods received note not found.');
 
     const g = grn as Record<string, unknown>;
+    const purchaseOrderId = resolveGrnPurchaseOrderId(g);
 
-    // Branch scope check via warehouse.
-    // Check both branch scope and live DB warehouse assignments.
-    if (false && ctx.isBranchScoped && ctx.branchId && !isStoreKeeper) {
-      const warehouseId = String(g.warehouse_id ?? '');
+    // Central warehouses have no branch_id. Branch-scoped users may also work
+    // against an explicitly assigned warehouse even when it belongs elsewhere.
+    if (ctx.isBranchScoped && ctx.branchId) {
+      const { data: wh, error: whError } = await service
+        .from('warehouses')
+        .select('branch_id')
+        .eq('id', g.warehouse_id as string)
+        .maybeSingle();
+      if (whError) return serverError(whError.message);
 
-      if (warehouseId) {
-        const { data: wh } = await service
-          .from('warehouses')
-          .select('branch_id')
-          .eq('id', warehouseId)
-          .single();
-
-        const warehouseBranchId = (wh as Record<string, unknown> | null)?.branch_id
-          ? String((wh as Record<string, unknown>).branch_id)
-          : null;
-
-        const allowedBranchIds = new Set([ctx.branchId, ...ctx.branchAssignments].filter(Boolean));
-        let hasWarehouseAssignment = ctx.warehouseAssignments.includes(warehouseId);
-
-        if (!hasWarehouseAssignment) {
-          const { data: warehouseAssignment } = await service
-            .from('user_warehouse_assignments')
-            .select('id')
-            .eq('user_profile_id', securityUserId)
-            .eq('warehouse_id', warehouseId)
-            .eq('is_active', true)
-            .maybeSingle();
-
-          hasWarehouseAssignment = Boolean(warehouseAssignment);
-        }
-
-        if (
-          !wh ||
-          (warehouseBranchId && !allowedBranchIds.has(warehouseBranchId) && !hasWarehouseAssignment)
-        ) {
-          return NextResponse.json(
-            {
-              error: 'Forbidden',
-              reason: 'warehouse_branch_scope',
-              workId: ctx.workId,
-              role: ctx.role,
-              warehouseId,
-              warehouseBranchId,
-              branchId: ctx.branchId,
-              branchAssignments: ctx.branchAssignments,
-              warehouseAssignments: ctx.warehouseAssignments,
-              isStoreKeeper,
-            },
-            { status: 403 },
-          );
-        }
+      const warehouseBranchId = wh?.branch_id ? String(wh.branch_id) : null;
+      const hasWarehouseAssignment = ctx.warehouseAssignments.includes(String(g.warehouse_id ?? ''));
+      if (warehouseBranchId && warehouseBranchId !== ctx.branchId && !hasWarehouseAssignment) {
+        return forbidden();
       }
     }
 
@@ -188,30 +76,14 @@ export async function POST(
       return badRequest('Only draft GRNs can be submitted.');
     }
 
-    const purchaseOrderId = String(g.purchase_order_id ?? g.po_id ?? '');
-    let po: Record<string, unknown> | null = null;
-    if (purchaseOrderId) {
-      const { data: purchaseOrder, error: purchaseOrderError } = await service
-        .from('purchase_orders')
-        .select('id, purchase_order_items(*)')
-        .eq('organization_id', ctx.organizationId)
-        .eq('id', purchaseOrderId)
-        .single();
-      if (purchaseOrderError || !purchaseOrder) {
-        return badRequest('Linked purchase order not found.');
-      }
-      po = purchaseOrder as Record<string, unknown>;
-    }
-
-    const poItemsArr = ((po?.purchase_order_items as Record<string, unknown>[]) ?? []);
+    const poItemsArr = purchaseOrderId
+      ? await loadPurchaseOrderItems(service, purchaseOrderId)
+      : [];
     const poItemsById = new Map(poItemsArr.map((i) => [i.id as string, i]));
-    const existingGrnItemsResult = await service
-      .from('goods_received_note_items')
-      .select('id, item_id, po_item_id, quantity_expected, unit_cost')
-      .eq('grn_id', id);
-    if (existingGrnItemsResult.error) return serverError(existingGrnItemsResult.error.message);
+    const existingGrnItemsResult = await loadExistingGrnItems(service, id);
+    if (typeof existingGrnItemsResult === 'string') return serverError(existingGrnItemsResult);
     const grnItemsByItemId = new Map(
-      (existingGrnItemsResult.data ?? []).map((item) => [String(item.item_id), item as Record<string, unknown>]),
+      existingGrnItemsResult.map((item) => [String(item.item_id), item as Record<string, unknown>]),
     );
 
     const warnings: string[] = [];
@@ -307,13 +179,13 @@ export async function POST(
     const { data: updated, error: updateErr } = await service
       .from('goods_received_notes')
       .update({
-        status: 'RECEIVED',
+        quality_status: 'PENDING_APPROVAL',
         notes: body.notes ?? (g.notes as string | null),
         received_by: ctx.userId,
         received_date: new Date().toISOString(),
       })
       .eq('id', id)
-      .select('*, purchase_orders(id, po_number)')
+      .select()
       .single();
 
     if (updateErr) return serverError(updateErr.message);
@@ -324,22 +196,7 @@ export async function POST(
       entityType: 'goods_received_note',
       newValues: {
         itemCount: body.items.length,
-        status: 'RECEIVED',
-        warnings,
-      },
-      organizationId: ctx.organizationId,
-      userProfileId: ctx.userId,
-      ipAddress: request.headers.get('x-forwarded-for'),
-      userAgent: request.headers.get('user-agent'),
-    });
-
-    await recordAuditLog({
-      action: 'GRN_POSTED',
-      entityId: id,
-      entityType: 'goods_received_note',
-      newValues: {
-        itemCount: body.items.length,
-        status: 'RECEIVED',
+        qualityStatus: 'PENDING_APPROVAL',
         warnings,
       },
       organizationId: ctx.organizationId,
@@ -395,4 +252,110 @@ function extractMissingColumnName(
   const message = error?.message ?? '';
   const match = message.match(new RegExp(`column\\s+${table}\\.([a-z_]+)\\s+does not exist`, 'i'));
   return match?.[1] ?? null;
+}
+
+function isMissingColumnError(error: { message?: string } | null | undefined, table: string, columnName: string) {
+  return (error?.message ?? '').includes(`column ${table}.${columnName} does not exist`);
+}
+
+async function loadGrnForReceive(
+  service: ReturnType<typeof createServiceRoleClient>,
+  organizationId: string,
+  grnId: string,
+) {
+  const primary = await service
+    .from('goods_received_notes')
+    .select('id, status, warehouse_id, purchase_order_id, grn_number, notes')
+    .is('deleted_at', null)
+    .eq('organization_id', organizationId)
+    .eq('id', grnId)
+    .maybeSingle();
+
+  if (!primary.error) {
+    return primary.data ?? null;
+  }
+
+  const compatibleLegacy =
+    isMissingColumnError(primary.error, 'goods_received_notes', 'purchase_order_id') ||
+    isMissingColumnError(primary.error, 'goods_received_notes', 'deleted_at');
+  if (!compatibleLegacy) {
+    throw new Error(primary.error.message);
+  }
+
+  const fallback = await service
+    .from('goods_received_notes')
+    .select('id, status, warehouse_id, po_id, grn_number, notes')
+    .eq('organization_id', organizationId)
+    .eq('id', grnId)
+    .maybeSingle();
+  if (fallback.error) {
+    throw new Error(fallback.error.message);
+  }
+
+  return fallback.data ?? null;
+}
+
+function resolveGrnPurchaseOrderId(grn: Record<string, unknown>) {
+  const purchaseOrderId = grn.purchase_order_id ?? grn.po_id;
+  return purchaseOrderId ? String(purchaseOrderId) : null;
+}
+
+async function loadPurchaseOrderItems(
+  service: ReturnType<typeof createServiceRoleClient>,
+  purchaseOrderId: string,
+) {
+  const primary = await service
+    .from('purchase_order_items')
+    .select('id, item_id, quantity_ordered, quantity_received, unit_cost')
+    .eq('purchase_order_id', purchaseOrderId);
+  if (!primary.error) {
+    return (primary.data ?? []) as Record<string, unknown>[];
+  }
+
+  if (!isMissingColumnError(primary.error, 'purchase_order_items', 'purchase_order_id')) {
+    throw new Error(primary.error.message);
+  }
+
+  const fallback = await service
+    .from('purchase_order_items')
+    .select('id, item_id, quantity_ordered, received_qty, unit_cost')
+    .eq('po_id', purchaseOrderId);
+  if (fallback.error) {
+    throw new Error(fallback.error.message);
+  }
+
+  return (fallback.data ?? []).map((item) => ({
+    ...item,
+    quantity_received: item.received_qty,
+  })) as Record<string, unknown>[];
+}
+
+async function loadExistingGrnItems(
+  service: ReturnType<typeof createServiceRoleClient>,
+  grnId: string,
+) {
+  const primary = await service
+    .from('goods_received_note_items')
+    .select('id, item_id, po_item_id, quantity_expected, unit_cost')
+    .eq('grn_id', grnId);
+  if (!primary.error) {
+    return (primary.data ?? []) as Record<string, unknown>[];
+  }
+
+  if (!primary.error.message.includes('goods_received_note_items')) {
+    return primary.error.message;
+  }
+
+  const fallback = await service
+    .from('grn_items')
+    .select('id, item_id, po_item_id, ordered_qty, unit_cost')
+    .eq('grn_id', grnId);
+  if (fallback.error) {
+    return fallback.error.message;
+  }
+
+  return (fallback.data ?? []).map((item) => ({
+    ...item,
+    quantity_expected: item.ordered_qty,
+  })) as Record<string, unknown>[];
 }

@@ -2,7 +2,6 @@ import {
   ensureNonNegative,
   ensurePositiveQuantity,
   isInvoiceApprovedForDispatch,
-  isMissingTableColumnError,
   normalizeDate,
   normalizeStockMovementType,
   toNumber,
@@ -50,7 +49,7 @@ export async function requireWarehouseAccess(
     throw new Error('Warehouse not found or inactive.');
   }
 
-  if (isBranchScoped && branchId && data.branch_id && data.branch_id !== branchId) {
+  if (isBranchScoped && branchId && data.branch_id !== branchId) {
     throw new Error('This action is outside the current branch scope.');
   }
 
@@ -61,33 +60,33 @@ export async function requireItem(
   service: ServiceClient,
   itemId: string,
 ) {
-  const withDeletedAt = await service
+  const primary = await service
     .from('items')
     .select('id, code, name, item_type, unit_cost, reorder_level, deleted_at, organization_id')
     .eq('id', itemId)
-    .is('deleted_at', null);
+    .is('deleted_at', null)
+    .maybeSingle();
 
-  if (!withDeletedAt.error && withDeletedAt.data) {
-    const rows = Array.isArray(withDeletedAt.data) ? withDeletedAt.data : [withDeletedAt.data];
-    const data = rows[0];
-    if (data) return data;
+  if (!primary.error && primary.data) {
+    return primary.data;
   }
 
-  if (!isMissingTableColumnError(withDeletedAt.error, 'items', 'deleted_at')) {
-    throw new Error('Inventory item not found.');
+  const missingDeletedAt = (primary.error?.message ?? '').includes('column items.deleted_at does not exist');
+  if (!missingDeletedAt) {
+    throw new Error(primary.error?.message ?? 'Inventory item not found.');
   }
 
-  const { data, error } = await service
+  const fallback = await service
     .from('items')
     .select('id, code, name, item_type, unit_cost, reorder_level, organization_id')
     .eq('id', itemId)
-    .single();
+    .maybeSingle();
 
-  if (error || !data) {
-    throw new Error('Inventory item not found.');
+  if (fallback.error || !fallback.data) {
+    throw new Error(fallback.error?.message ?? 'Inventory item not found.');
   }
 
-  return data;
+  return fallback.data;
 }
 
 export async function getBalance(

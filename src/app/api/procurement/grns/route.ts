@@ -178,7 +178,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   const ctx = await getAuthContext();
   if (!ctx) return unauthorized();
-  if (!can(ctx, 'stores.grn.create', 'procurement.write', 'goods_received.create', 'inventory.write')) return forbidden();
+  if (!can(ctx, 'stores.grn.create', 'procurement.write')) return forbidden();
 
   const service = createServiceRoleClient();
 
@@ -251,22 +251,27 @@ export async function POST(request: NextRequest) {
       if (supplierError || !supplier) return badRequest('Supplier not found.');
     }
 
-    // Validate warehouse
-    const warehouseQuery = service
+    // Validate warehouse. Central warehouses have no branch_id and are valid
+    // for store receiving; branch-scoped users are only blocked from another
+    // branch's warehouse unless explicitly assigned.
+    const { data: warehouse, error: whErr } = await service
       .from('warehouses')
       .select('id, branch_id, type, warehouse_type')
       .eq('id', body.warehouseId)
       .eq('is_active', true)
-      .eq('organization_id', ctx.organizationId);
-
-    const { data: warehouse, error: whErr } = await warehouseQuery.single();
+      .eq('organization_id', ctx.organizationId)
+      .single();
     if (whErr || !warehouse) return badRequest('Warehouse not found or out of scope.');
-    if (ctx.isBranchScoped && ctx.branchId) {
-      const warehouseBranchId = (warehouse as { branch_id?: string | null }).branch_id ?? null;
-      // Branch-scoped users can work with their own branch warehouse or shared org-level warehouses.
-      if (warehouseBranchId && warehouseBranchId !== ctx.branchId) {
-        return badRequest('Warehouse not found or out of scope.');
-      }
+    const warehouseBranchId = warehouse.branch_id ? String(warehouse.branch_id) : null;
+    const hasWarehouseAssignment = ctx.warehouseAssignments.includes(body.warehouseId);
+    if (
+      ctx.isBranchScoped &&
+      ctx.branchId &&
+      warehouseBranchId &&
+      warehouseBranchId !== ctx.branchId &&
+      !hasWarehouseAssignment
+    ) {
+      return badRequest('Warehouse not found or out of scope.');
     }
 
     // Generate GRN number

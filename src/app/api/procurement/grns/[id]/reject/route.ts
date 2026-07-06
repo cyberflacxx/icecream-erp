@@ -3,11 +3,6 @@ import { NextRequest, NextResponse } from 'next/server';
 import { badRequest, can, forbidden, getAuthContext, notFound, serverError, unauthorized } from '@/lib/api-auth';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
-function isSubmittedGrnStatus(status: unknown) {
-  const normalized = String(status ?? '').toUpperCase();
-  return normalized === 'SUBMITTED' || normalized === 'PENDING_APPROVAL' || normalized === 'RECEIVED';
-}
-
 export async function POST(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
@@ -22,7 +17,7 @@ export async function POST(
   try {
     const { data: existing, error: fetchErr } = await service
       .from('goods_received_notes')
-      .select('id, status, warehouse_id')
+      .select('id, status, quality_status, warehouse_id')
       .is('deleted_at', null)
       .eq('organization_id', ctx.organizationId)
       .eq('id', id)
@@ -31,7 +26,10 @@ export async function POST(
     if (fetchErr || !existing) return notFound('Goods received note not found.');
 
     const grn = existing as Record<string, unknown>;
-    if (!isSubmittedGrnStatus(grn.status)) {
+    if (grn.status === 'REJECTED' || grn.status === 'POSTED') {
+      return badRequest('Only submitted GRNs can be rejected.');
+    }
+    if (grn.quality_status !== 'PENDING_APPROVAL') {
       return badRequest('Only submitted GRNs can be rejected.');
     }
 
