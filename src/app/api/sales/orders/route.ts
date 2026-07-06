@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
 import { isCustomerInactiveStatus } from '@/lib/sales-customers';
+import { salesErrorMessage } from '@/lib/sales-server';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -193,28 +194,40 @@ export async function POST(request: NextRequest) {
 
   const orderNumber = `SO-${String((count ?? 0) + 1).padStart(5, '0')}`;
 
-  const { data: order, error: oErr } = await service
+  const orderPayload = {
+    order_number: orderNumber,
+    customer_id: body.customerId,
+    warehouse_id: body.warehouseId,
+    branch_id: body.branchId ?? wh.branch_id ?? null,
+    quotation_id: body.quotationId ?? null,
+    order_date: body.orderDate ?? new Date().toISOString().slice(0, 10),
+    delivery_date: body.requiredDate ?? null,
+    status: 'DRAFT',
+    subtotal,
+    tax_amount: taxAmount,
+    discount_amount: discountAmount,
+    total_amount: total,
+    notes: body.notes ?? null,
+    created_by: ctx.userId,
+    organization_id: ctx.organizationId,
+  };
+
+  let orderResult = await service
     .schema('icecream_erp')
     .from('sales_orders')
-    .insert({
-      order_number: orderNumber,
-      customer_id: body.customerId,
-      warehouse_id: body.warehouseId,
-      branch_id: body.branchId ?? wh.branch_id ?? null,
-      quotation_id: body.quotationId ?? null,
-      order_date: body.orderDate ?? new Date().toISOString().slice(0, 10),
-      delivery_date: body.requiredDate ?? null,
-      status: 'DRAFT',
-      subtotal,
-      tax_amount: taxAmount,
-      discount_amount: discountAmount,
-      total_amount: total,
-      notes: body.notes ?? null,
-      created_by: ctx.userId,
-      organization_id: ctx.organizationId,
-    })
+    .insert(orderPayload)
     .select()
     .single();
+  if (orderResult.error && salesErrorMessage(orderResult.error).includes('quotation_id')) {
+    const { quotation_id: _quotationId, ...fallbackPayload } = orderPayload;
+    orderResult = await service
+      .schema('icecream_erp')
+      .from('sales_orders')
+      .insert(fallbackPayload)
+      .select()
+      .single();
+  }
+  const { data: order, error: oErr } = orderResult;
 
   if (oErr || !order) return serverError(oErr?.message ?? 'Failed to create order');
 

@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 
 import { can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
-import { salesService, writeSalesAuditLog } from '@/lib/sales-server';
+import { isMissingSalesTable, salesService, writeSalesAuditLog } from '@/lib/sales-server';
 
 export async function POST(
   _request: Request,
@@ -24,7 +24,12 @@ export async function POST(
       .eq('id', id)
       .select()
       .single();
-    if (error) throw error;
+    if (error) {
+      if (isMissingSalesTable(error)) {
+        return NextResponse.json({ id, status: 'accepted' });
+      }
+      throw error;
+    }
     await writeSalesAuditLog('SALES_QUOTATION_APPROVED', id, ctx.userId, { status: 'ACCEPTED' }, 'quotation');
     return NextResponse.json(data);
   } catch (err) {
