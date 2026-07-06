@@ -6,7 +6,11 @@ import { isMissingSalesTable, salesErrorMessage } from '@/lib/sales-server';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
 function isMissingColumnError(error: unknown, table: string, columnName: string) {
-  return salesErrorMessage(error).includes(`column ${table}.${columnName} does not exist`);
+  const message = salesErrorMessage(error);
+  return (
+    message.includes(`column ${table}.${columnName} does not exist`) ||
+    (message.includes(columnName) && message.includes('schema cache'))
+  );
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -164,13 +168,21 @@ export async function POST(request: NextRequest) {
   }
 
   // Verify customer
-  const { data: customer } = await service
+  let customerResult = await service
     .schema('icecream_erp')
     .from('customers')
     .select('id, current_balance, status')
     .eq('id', body.customerId)
-    .is('deleted_at', null)
     .single();
+  if (customerResult.error && isMissingColumnError(customerResult.error, 'customers', 'current_balance')) {
+    customerResult = await service
+      .schema('icecream_erp')
+      .from('customers')
+      .select('id, outstanding_balance, status')
+      .eq('id', body.customerId)
+      .single();
+  }
+  const { data: customer } = customerResult;
 
   if (!customer) return NextResponse.json({ error: 'Customer not found.' }, { status: 404 });
   if (isCustomerInactiveStatus(customer.status)) {
@@ -364,8 +376,8 @@ export async function POST(request: NextRequest) {
   }
 
   // Update customer balance
-  const currentBalance = Number(cust.current_balance ?? 0);
-  await service
+  const currentBalance = Number(cust.current_balance ?? cust.outstanding_balance ?? 0);
+  const customerUpdate = await service
     .schema('icecream_erp')
     .from('customers')
     .update({
@@ -373,6 +385,16 @@ export async function POST(request: NextRequest) {
       updated_at: new Date().toISOString(),
     })
     .eq('id', body.customerId);
+  if (customerUpdate.error && isMissingColumnError(customerUpdate.error, 'customers', 'current_balance')) {
+    await service
+      .schema('icecream_erp')
+      .from('customers')
+      .update({
+        outstanding_balance: currentBalance + total,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', body.customerId);
+  }
 
   // If tied to a sales order, mark it invoiced
   if (body.salesOrderId) {

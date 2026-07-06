@@ -130,7 +130,6 @@ export async function POST(request: NextRequest) {
     .from('customers')
     .select('id, status')
     .eq('id', body.customerId)
-    .is('deleted_at', null)
     .single();
 
   if (!customer) return NextResponse.json({ error: 'Customer not found.' }, { status: 404 });

@@ -19,7 +19,7 @@ export async function POST(
   const { data: order, error: fetchErr } = await service
     .schema('icecream_erp')
     .from('sales_orders')
-    .select(`*, customers(id, name, payment_terms, credit_limit, current_balance)`)
+    .select('*, customers(*)')
     .eq('id', params.id)
     .is('deleted_at', null)
     .single();

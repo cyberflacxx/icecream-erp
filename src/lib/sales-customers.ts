@@ -24,6 +24,7 @@ export type SalesCustomerRecord = {
   name?: string | null;
   payment_terms?: string | null;
   phone?: string | null;
+  outstanding_balance?: number | string | null;
   status?: string | null;
   updated_at?: string | null;
 };
@@ -57,11 +58,17 @@ export async function loadCustomerBalanceSnapshot(
   fallbackCreditLimit?: unknown,
   fallbackPaymentTerms?: unknown,
 ): Promise<CustomerBalanceSnapshot> {
-  const invoiceResult = await service
+  let invoiceResult = await service
     .from('invoices')
     .select('status, balance_due, total, total_amount, amount_paid, paid_amount')
     .eq('customer_id', customerId)
     .is('deleted_at', null);
+  if (invoiceResult.error && salesErrorMessage(invoiceResult.error).includes('deleted_at')) {
+    invoiceResult = await service
+      .from('invoices')
+      .select('status, balance_due, total, total_amount, amount_paid, paid_amount')
+      .eq('customer_id', customerId);
+  }
   if (invoiceResult.error) {
     throw new Error(invoiceResult.error.message);
   }

@@ -8,7 +8,21 @@ import {
   normalizeCustomerStatus,
 } from '@/lib/sales-customers';
 import { validateCustomerCodeUniqueness } from '@/lib/sales';
-import { salesService, writeSalesAuditLog } from '@/lib/sales-server';
+import { salesErrorMessage, salesService, writeSalesAuditLog } from '@/lib/sales-server';
+
+const CUSTOMER_SELECT = 'id, organization_id, code, name, customer_type, email, phone, address, payment_terms, credit_limit, current_balance, status, created_at, updated_at';
+const LEGACY_CUSTOMER_SELECT = 'id, organization_id, code, name, email, phone, address, credit_limit, outstanding_balance, status, created_at, updated_at';
+
+function isMissingCustomerColumn(error: unknown) {
+  const message = salesErrorMessage(error);
+  return (
+    message.includes('current_balance') ||
+    message.includes('customer_type') ||
+    message.includes('payment_terms') ||
+    message.includes('deleted_at') ||
+    message.includes('schema cache')
+  );
+}
 
 function parsePagination(searchParams: URLSearchParams) {
   const page = Math.max(1, parseInt(searchParams.get('page') ?? '1', 10));
@@ -39,7 +53,7 @@ export async function GET(request: NextRequest) {
 
     let query = service
       .from('customers')
-      .select('id, organization_id, code, name, customer_type, email, phone, address, payment_terms, credit_limit, current_balance, status, created_at, updated_at')
+      .select(CUSTOMER_SELECT)
       .eq('organization_id', ctx.organizationId)
       .is('deleted_at', null)
       .order('name', { ascending: true });
@@ -52,14 +66,33 @@ export async function GET(request: NextRequest) {
       query = query.or(`code.ilike.%${search}%,name.ilike.%${search}%,email.ilike.%${search}%,phone.ilike.%${search}%`);
     }
 
-    const { data, error } = await query;
+    let { data, error } = await query;
+    if (error && isMissingCustomerColumn(error)) {
+      let fallback = service
+        .from('customers')
+        .select(LEGACY_CUSTOMER_SELECT)
+        .eq('organization_id', ctx.organizationId)
+        .order('name', { ascending: true });
+
+      if (status) {
+        fallback = fallback.eq('status', normalizeCustomerStatus(status));
+      }
+
+      if (search) {
+        fallback = fallback.or(`code.ilike.%${search}%,name.ilike.%${search}%,email.ilike.%${search}%,phone.ilike.%${search}%`);
+      }
+
+      const fallbackResult = await fallback;
+      data = fallbackResult.data;
+      error = fallbackResult.error;
+    }
     if (error) throw error;
 
     const rows = await Promise.all((data ?? []).map(async (row) => {
       const balance = await loadCustomerBalanceSnapshot(
         service,
         String(row.id),
-        row.current_balance,
+        row.current_balance ?? row.outstanding_balance,
         row.credit_limit,
         row.payment_terms,
       );
@@ -114,32 +147,54 @@ export async function POST(request: NextRequest) {
     const { data: existingCodes, error: codesError } = await service
       .from('customers')
       .select('code')
-      .eq('organization_id', ctx.organizationId)
-      .is('deleted_at', null);
+      .eq('organization_id', ctx.organizationId);
     if (codesError) throw codesError;
 
     if (!validateCustomerCodeUniqueness((existingCodes ?? []).map((row) => String(row.code ?? '')), code)) {
       return NextResponse.json({ error: 'Customer code already exists.' }, { status: 409 });
     }
 
-    const { data, error } = await service
+    const insertPayload = {
+      address: body.address?.trim() || null,
+      code,
+      created_by: ctx.userId,
+      credit_limit: creditLimit,
+      current_balance: 0,
+      customer_type: String(body.customerType ?? 'DIRECT_CUSTOMER').trim().toUpperCase(),
+      email: body.email?.trim() || null,
+      name,
+      organization_id: ctx.organizationId,
+      payment_terms: body.paymentTerms?.trim() || null,
+      phone: body.phone?.trim() || null,
+      status: normalizeCustomerStatus(body.status),
+    };
+
+    let insertResult = await service
       .from('customers')
-      .insert({
-        address: body.address?.trim() || null,
-        code,
-        created_by: ctx.userId,
-        credit_limit: creditLimit,
-        current_balance: 0,
-        customer_type: String(body.customerType ?? 'DIRECT_CUSTOMER').trim().toUpperCase(),
-        email: body.email?.trim() || null,
-        name,
-        organization_id: ctx.organizationId,
-        payment_terms: body.paymentTerms?.trim() || null,
-        phone: body.phone?.trim() || null,
-        status: normalizeCustomerStatus(body.status),
-      })
-      .select('id, organization_id, code, name, customer_type, email, phone, address, payment_terms, credit_limit, current_balance, status, created_at, updated_at')
+      .insert(insertPayload)
+      .select(CUSTOMER_SELECT)
       .single();
+
+    if (insertResult.error && isMissingCustomerColumn(insertResult.error)) {
+      insertResult = await service
+        .from('customers')
+        .insert({
+          address: body.address?.trim() || null,
+          code,
+          created_by: ctx.userId,
+          credit_limit: creditLimit,
+          email: body.email?.trim() || null,
+          name,
+          organization_id: ctx.organizationId,
+          phone: body.phone?.trim() || null,
+          outstanding_balance: 0,
+          status: normalizeCustomerStatus(body.status),
+        })
+        .select(LEGACY_CUSTOMER_SELECT)
+        .single();
+    }
+
+    const { data, error } = insertResult;
     if (error || !data) {
       throw error ?? new Error('Failed to create customer.');
     }
@@ -147,9 +202,9 @@ export async function POST(request: NextRequest) {
     const balance = await loadCustomerBalanceSnapshot(
       service,
       String(data.id),
-      data.current_balance,
+      data.current_balance ?? data.outstanding_balance,
       data.credit_limit,
-      data.payment_terms,
+      data.payment_terms ?? body.paymentTerms,
     );
 
     await writeSalesAuditLog(

@@ -112,7 +112,6 @@ export async function POST(request: NextRequest) {
     .from('customers')
     .select('id, status')
     .eq('id', body.customerId)
-    .is('deleted_at', null)
     .single();
 
   if (custErr || !customer) {
