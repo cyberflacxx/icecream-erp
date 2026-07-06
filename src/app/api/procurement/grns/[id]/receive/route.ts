@@ -63,27 +63,30 @@ export async function POST(
     const g = grn as Record<string, unknown>;
 
     // Branch scope check via warehouse.
-    // A user may be allowed through their primary branch, branch assignments, or warehouse assignments.
+    // Only enforce this when the GRN has a warehouse ID. Some live GRNs are created before warehouse assignment.
     if (ctx.isBranchScoped && ctx.branchId) {
       const warehouseId = String(g.warehouse_id ?? '');
-      const { data: wh } = await service
-        .from('warehouses')
-        .select('branch_id')
-        .eq('id', warehouseId)
-        .single();
 
-      const warehouseBranchId = (wh as Record<string, unknown> | null)?.branch_id
-        ? String((wh as Record<string, unknown>).branch_id)
-        : null;
+      if (warehouseId) {
+        const { data: wh } = await service
+          .from('warehouses')
+          .select('branch_id')
+          .eq('id', warehouseId)
+          .single();
 
-      const allowedBranchIds = new Set([ctx.branchId, ...ctx.branchAssignments].filter(Boolean));
-      const allowedWarehouseIds = new Set(ctx.warehouseAssignments.filter(Boolean));
+        const warehouseBranchId = (wh as Record<string, unknown> | null)?.branch_id
+          ? String((wh as Record<string, unknown>).branch_id)
+          : null;
 
-      if (
-        !wh ||
-        (warehouseBranchId && !allowedBranchIds.has(warehouseBranchId) && !allowedWarehouseIds.has(warehouseId))
-      ) {
-        return forbidden();
+        const allowedBranchIds = new Set([ctx.branchId, ...ctx.branchAssignments].filter(Boolean));
+        const allowedWarehouseIds = new Set(ctx.warehouseAssignments.filter(Boolean));
+
+        if (
+          !wh ||
+          (warehouseBranchId && !allowedBranchIds.has(warehouseBranchId) && !allowedWarehouseIds.has(warehouseId))
+        ) {
+          return forbidden();
+        }
       }
     }
 
