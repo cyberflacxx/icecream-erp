@@ -41,7 +41,7 @@ export async function PATCH(
 
     if (ctx.isBranchScoped && ctx.branchId) {
       const warehouse = firstRelation(batch.warehouses as { branch_id: string } | Array<{ branch_id: string }> | null);
-      if (warehouse?.branch_id !== ctx.branchId) return forbidden();
+      if (warehouse?.branch_id && warehouse.branch_id !== ctx.branchId) return forbidden();
     }
 
     if (batch.status !== 'QUALITY_CHECK') {

@@ -136,7 +136,7 @@ export async function GET(
     if (outputsResult.error) throw outputsResult.error;
     if (workersResult.error) throw workersResult.error;
 
-    if (ctx.isBranchScoped && ctx.branchId && warehouseResult.data?.branch_id !== ctx.branchId) return forbidden();
+    if (ctx.isBranchScoped && ctx.branchId && warehouseResult.data?.branch_id && warehouseResult.data.branch_id !== ctx.branchId) return forbidden();
 
     const recipe = recipeResult.data
       ? {
@@ -218,7 +218,7 @@ export async function PATCH(
 
     if (ctx.isBranchScoped && ctx.branchId) {
       const warehouse = Array.isArray(existing.warehouses) ? existing.warehouses[0] : existing.warehouses as { branch_id: string } | undefined;
-      if (warehouse?.branch_id !== ctx.branchId) return forbidden();
+      if (warehouse?.branch_id && warehouse.branch_id !== ctx.branchId) return forbidden();
     }
 
     if (['COMPLETED', 'CANCELLED'].includes(String(existing.status))) {

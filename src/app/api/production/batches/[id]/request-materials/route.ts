@@ -33,7 +33,7 @@ export async function POST(
     const warehouse = firstRelation(batch.warehouses as { branch_id?: string } | Array<{ branch_id?: string }> | null);
 
     if (ctx.isBranchScoped && ctx.branchId) {
-      if (warehouse?.branch_id !== ctx.branchId) return forbidden();
+      if (warehouse?.branch_id && warehouse.branch_id !== ctx.branchId) return forbidden();
     }
 
     if (batch.status !== VALID_FROM) {
