@@ -41,12 +41,15 @@ export async function loadSalesOrderById(
   organizationId: string,
   selectClause: string,
 ) {
-  const buildQuery = (includeDeletedAt: boolean) => {
+  const buildQuery = (includeDeletedAt: boolean, includeOrganization: boolean) => {
     let query = service
       .from('sales_orders')
       .select(selectClause)
-      .eq('id', orderId)
-      .eq('organization_id', organizationId);
+      .eq('id', orderId);
+
+    if (includeOrganization) {
+      query = query.eq('organization_id', organizationId);
+    }
 
     if (includeDeletedAt) {
       query = query.is('deleted_at', null);
@@ -55,20 +58,45 @@ export async function loadSalesOrderById(
     return query.maybeSingle();
   };
 
-  const primary = await buildQuery(true);
-  if (!primary.error) {
-    return (primary.data ?? null) as Record<string, unknown> | null;
+  const primary = await buildQuery(true, true);
+
+  if (!primary.error && primary.data) {
+    return primary.data as Record<string, unknown>;
   }
-  if (!isMissingSalesColumn(primary.error, 'sales_orders', 'deleted_at')) {
+
+  if (primary.error && !isMissingSalesColumn(primary.error, 'sales_orders', 'deleted_at')) {
     throw primary.error;
   }
 
-  const fallback = await buildQuery(false);
-  if (fallback.error) {
-    throw fallback.error;
+  const organizationFallback = await buildQuery(false, true);
+
+  if (!organizationFallback.error && organizationFallback.data) {
+    return organizationFallback.data as Record<string, unknown>;
   }
 
-  return (fallback.data ?? null) as Record<string, unknown> | null;
+  if (organizationFallback.error) {
+    throw organizationFallback.error;
+  }
+
+  const directFallback = await buildQuery(false, false);
+
+  if (directFallback.error) {
+    throw directFallback.error;
+  }
+
+  const directOrder = (directFallback.data ?? null) as Record<string, unknown> | null;
+
+  if (!directOrder) {
+    return null;
+  }
+
+  const directOrganizationId = String(directOrder.organization_id ?? organizationId);
+
+  if (directOrganizationId && organizationId && directOrganizationId !== organizationId) {
+    return null;
+  }
+
+  return directOrder;
 }
 
 export async function loadSalesOrderItems(service: SalesService, orderId: string) {
