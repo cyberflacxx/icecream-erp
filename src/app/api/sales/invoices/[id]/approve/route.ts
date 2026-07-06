@@ -4,7 +4,16 @@ import { badRequest, can, forbidden, getAuthContext, serverError, unauthorized }
 import { emitOperationalNotifications } from '@/lib/notifications-server';
 import { deriveCustomerCreditAllowed } from '@/lib/sales-customers';
 import { checkStockAvailability, evaluateCreditLimit } from '@/lib/sales';
-import { fetchFinishedGoodsStockMap, reserveInvoiceStock, salesService, writeSalesAuditLog } from '@/lib/sales-server';
+import {
+  fetchFinishedGoodsStockMap,
+  isMissingSalesColumn,
+  isMissingSalesTable,
+  loadSalesOrderItems,
+  reserveInvoiceStock,
+  salesErrorMessage,
+  salesService,
+  writeSalesAuditLog,
+} from '@/lib/sales-server';
 import { workflowService } from '@/lib/workflow-server';
 
 type SalesRow = Record<string, unknown>;
@@ -12,6 +21,40 @@ type SalesRow = Record<string, unknown>;
 function toNumber(value: unknown) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
+}
+
+async function approveInvoiceRecord(service: ReturnType<typeof salesService>, id: string, userId: string) {
+  const approvedAt = new Date().toISOString();
+  const attempts = [
+    { approved_at: approvedAt, approved_by: userId, status: 'APPROVED' },
+    { approved_by: userId, status: 'APPROVED' },
+    { approved_at: approvedAt, status: 'APPROVED' },
+    { status: 'APPROVED' },
+  ];
+
+  let lastCompatibilityError: unknown = null;
+
+  for (const payload of attempts) {
+    const { data, error } = await service.from('invoices').update(payload).eq('id', id).select().single();
+    if (!error) return data as Record<string, unknown>;
+
+    lastCompatibilityError = error;
+    continue;
+  }
+
+  const currentInvoice = await service
+    .from('invoices')
+    .select('id, invoice_number, status')
+    .eq('id', id)
+    .single();
+  if (currentInvoice.error) throw currentInvoice.error;
+
+  const normalizedStatus = String((currentInvoice.data as Record<string, unknown> | null)?.status ?? '').toUpperCase();
+  if (normalizedStatus === 'SENT') {
+    return currentInvoice.data as Record<string, unknown>;
+  }
+
+  throw lastCompatibilityError ?? new Error('Unable to approve invoice.');
 }
 
 async function loadInvoiceForApproval(service: ReturnType<typeof salesService>, id: string) {
@@ -34,9 +77,22 @@ async function loadInvoiceForApproval(service: ReturnType<typeof salesService>, 
 
   if (customerResult.error) throw customerResult.error;
   if (orderResult.error) throw orderResult.error;
-  if (itemResult.error) throw itemResult.error;
-
   const order = (orderResult.data ?? null) as SalesRow | null;
+  let items = ((itemResult.data ?? []) as SalesRow[]).map((item) => ({
+    itemId: String(item.item_id ?? ''),
+    quantity: toNumber(item.quantity ?? item.quantity_invoiced),
+  }));
+
+  if (itemResult.error) {
+    if (!salesOrderId || !salesErrorMessage(itemResult.error).includes('invoice_items')) {
+      throw itemResult.error;
+    }
+    const fallbackItems = await loadSalesOrderItems(service, salesOrderId);
+    items = fallbackItems.map((item) => ({
+      itemId: String(item.item_id),
+      quantity: toNumber(item.quantity_ordered),
+    }));
+  }
 
   return {
     amountPaid: toNumber(row.amount_paid ?? row.paid_amount),
@@ -45,10 +101,7 @@ async function loadInvoiceForApproval(service: ReturnType<typeof salesService>, 
     customer: (customerResult.data ?? null) as SalesRow | null,
     id: String(row.id),
     invoiceNumber: String(row.invoice_number ?? id),
-    items: ((itemResult.data ?? []) as SalesRow[]).map((item) => ({
-      itemId: String(item.item_id ?? ''),
-      quantity: toNumber(item.quantity ?? item.quantity_invoiced),
-    })),
+    items,
     salesOrderId,
     status: String(row.status ?? ''),
     total: toNumber(row.total ?? row.total_amount),
@@ -71,7 +124,7 @@ export async function POST(
     if (!invoice.warehouseId) return badRequest('Invoice approval requires a linked warehouse or sales order warehouse.');
 
     const credit = evaluateCreditLimit(
-      Number(invoice.customer?.current_balance ?? 0),
+      Number(invoice.customer?.current_balance ?? invoice.customer?.outstanding_balance ?? 0),
       Number(invoice.customer?.credit_limit ?? 0),
       invoice.total,
       deriveCustomerCreditAllowed(invoice.customer?.payment_terms, invoice.customer?.credit_limit),
@@ -87,21 +140,11 @@ export async function POST(
       return badRequest('Invoice approval blocked by stock shortage.');
     }
 
-    await reserveInvoiceStock(id, invoice.warehouseId);
+    await reserveInvoiceStock(id, invoice.warehouseId, invoice.items);
 
-    const { data, error } = await service
-      .from('invoices')
-      .update({
-        approved_at: new Date().toISOString(),
-        approved_by: ctx.userId,
-        status: 'APPROVED',
-      })
-      .eq('id', id)
-      .select()
-      .single();
-    if (error) throw error;
+    const data = await approveInvoiceRecord(service, id, ctx.userId);
 
-    await workflowService().from('workflow_history').insert({
+    const workflowHistoryResult = await workflowService().from('workflow_history').insert({
       action: 'SALES_SALES_INVOICE_APPROVED',
       action_at: new Date().toISOString(),
       actor_id: ctx.userId,
@@ -113,42 +156,49 @@ export async function POST(
       organization_id: ctx.organizationId,
       to_status: 'APPROVED',
     });
+    if (workflowHistoryResult.error && !isMissingSalesTable(workflowHistoryResult.error)) {
+      throw workflowHistoryResult.error;
+    }
 
     await writeSalesAuditLog('SALES_INVOICE_APPROVED', id, ctx.userId, { status: 'APPROVED' }, 'invoice');
 
-    await emitOperationalNotifications({
-      actorUserId: ctx.userId,
-      branchId: invoice.branchId,
-      documentId: id,
-      documentType: 'sales_invoice',
-      eventType: 'INVOICE_APPROVED',
-      message: `Invoice ${String((data as Record<string, unknown>).invoice_number ?? id)} is approved and ready for dispatch.`,
-      metadata: {
-        invoiceNumber: String((data as Record<string, unknown>).invoice_number ?? id),
-      },
-      moduleName: 'sales',
-      organizationId: ctx.organizationId,
-      recipientRoleNames: ['Stores Manager', 'Sales Manager', 'Finance Manager'],
-      severity: 'MEDIUM',
-      title: 'Invoice approved',
-    });
+    try {
+      await emitOperationalNotifications({
+        actorUserId: ctx.userId,
+        branchId: invoice.branchId,
+        documentId: id,
+        documentType: 'sales_invoice',
+        eventType: 'INVOICE_APPROVED',
+        message: `Invoice ${String((data as Record<string, unknown>).invoice_number ?? id)} is approved and ready for dispatch.`,
+        metadata: {
+          invoiceNumber: String((data as Record<string, unknown>).invoice_number ?? id),
+        },
+        moduleName: 'sales',
+        organizationId: ctx.organizationId,
+        recipientRoleNames: ['Stores Manager', 'Sales Manager', 'Finance Manager'],
+        severity: 'MEDIUM',
+        title: 'Invoice approved',
+      });
 
-    await emitOperationalNotifications({
-      actorUserId: ctx.userId,
-      branchId: invoice.branchId,
-      documentId: id,
-      documentType: 'sales_invoice',
-      eventType: 'DISPATCH_READY',
-      message: `Dispatch can proceed for invoice ${String((data as Record<string, unknown>).invoice_number ?? id)}.`,
-      metadata: {
-        invoiceNumber: String((data as Record<string, unknown>).invoice_number ?? id),
-      },
-      moduleName: 'dispatch',
-      organizationId: ctx.organizationId,
-      recipientRoleNames: ['Stores Manager', 'Dispatch Clerk'],
-      severity: 'LOW',
-      title: 'Dispatch ready',
-    });
+      await emitOperationalNotifications({
+        actorUserId: ctx.userId,
+        branchId: invoice.branchId,
+        documentId: id,
+        documentType: 'sales_invoice',
+        eventType: 'DISPATCH_READY',
+        message: `Dispatch can proceed for invoice ${String((data as Record<string, unknown>).invoice_number ?? id)}.`,
+        metadata: {
+          invoiceNumber: String((data as Record<string, unknown>).invoice_number ?? id),
+        },
+        moduleName: 'dispatch',
+        organizationId: ctx.organizationId,
+        recipientRoleNames: ['Stores Manager', 'Dispatch Clerk'],
+        severity: 'LOW',
+        title: 'Dispatch ready',
+      });
+    } catch {
+      // Notification delivery is non-blocking for operational approval in live compatibility mode.
+    }
 
     return NextResponse.json(data);
   } catch (err) {

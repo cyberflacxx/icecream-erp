@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { badRequest, can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
+import { buildFinanceSourceReference } from '@/lib/finance';
+import { createLinkedFinanceTransaction, financeErrorMessage, isMissingFinanceTable, postFinanceDocument } from '@/lib/finance-server';
 import { canRecordPayment } from '@/lib/sales';
 import { generateSalesReferenceNumber, isMissingSalesTable, salesErrorMessage, salesService, writeSalesAuditLog } from '@/lib/sales-server';
 
@@ -72,7 +74,7 @@ export async function POST(request: NextRequest) {
       paymentNumber = `PAY-${Date.now()}`;
     }
 
-    let paymentResult = await service
+    let paymentResult: { data: Record<string, unknown> | null; error: unknown } = await service
       .from('payments')
       .insert({
         amount: body.amount,
@@ -89,9 +91,10 @@ export async function POST(request: NextRequest) {
       .select()
       .single();
     if (paymentResult.error && isMissingSalesTable(paymentResult.error)) {
+      const compatPaymentId = crypto.randomUUID();
       paymentResult = {
         data: {
-          id: paymentNumber,
+          id: compatPaymentId,
           amount: body.amount,
           customer_id: body.customerId,
           invoice_id: body.invoiceId,
@@ -106,27 +109,51 @@ export async function POST(request: NextRequest) {
     }
     const { data, error } = paymentResult;
     if (error) throw error;
+    const payment = (data ?? {}) as Record<string, unknown>;
 
-    const nextAmountPaid = Number(invoice.amount_paid ?? invoice.paid_amount ?? 0) + body.amount;
-    const nextBalance = Math.max(0, Number(invoice.balance_due ?? 0) - body.amount);
+    const invoiceRow = invoice as Record<string, unknown>;
+    const nextAmountPaid = Number(invoiceRow.amount_paid ?? invoiceRow.paid_amount ?? 0) + body.amount;
+    const nextBalance = Math.max(0, Number(invoiceRow.balance_due ?? 0) - body.amount);
+    const nextInvoiceStatus = nextBalance === 0 ? 'PAID' : 'PARTIAL_PAID';
     const invoiceUpdate = await service.from('invoices').update({
       amount_paid: nextAmountPaid,
       balance_due: nextBalance,
-      status: nextBalance === 0 ? 'PAID' : 'PARTIAL_PAID',
+      status: nextInvoiceStatus,
     }).eq('id', body.invoiceId);
     if (invoiceUpdate.error && salesErrorMessage(invoiceUpdate.error).includes('amount_paid')) {
-      await service.from('invoices').update({
+      const legacyInvoiceUpdate = await service.from('invoices').update({
         paid_amount: nextAmountPaid,
         balance_due: nextBalance,
-        status: nextBalance === 0 ? 'PAID' : 'PARTIAL_PAID',
+        status: nextInvoiceStatus,
       }).eq('id', body.invoiceId);
+      if (legacyInvoiceUpdate.error) {
+        const fallbackWithoutStatus = await service.from('invoices').update({
+          paid_amount: nextAmountPaid,
+          balance_due: nextBalance,
+        }).eq('id', body.invoiceId);
+        if (fallbackWithoutStatus.error) throw fallbackWithoutStatus.error;
+      }
+    } else if (invoiceUpdate.error) {
+      const fallbackWithoutStatus = await service.from('invoices').update({
+        amount_paid: nextAmountPaid,
+        balance_due: nextBalance,
+      }).eq('id', body.invoiceId);
+      if (fallbackWithoutStatus.error && salesErrorMessage(fallbackWithoutStatus.error).includes('amount_paid')) {
+        const legacyFallbackWithoutStatus = await service.from('invoices').update({
+          paid_amount: nextAmountPaid,
+          balance_due: nextBalance,
+        }).eq('id', body.invoiceId);
+        if (legacyFallbackWithoutStatus.error) throw legacyFallbackWithoutStatus.error;
+      } else if (fallbackWithoutStatus.error) {
+        throw fallbackWithoutStatus.error;
+      }
     }
 
     let customerResult = await service.from('customers').select('current_balance').eq('id', body.customerId).single();
     if (customerResult.error && salesErrorMessage(customerResult.error).includes('current_balance')) {
       customerResult = await service.from('customers').select('outstanding_balance').eq('id', body.customerId).single();
     }
-    const { data: customer } = customerResult;
+    const customer = (customerResult.data ?? null) as Record<string, unknown> | null;
     const customerUpdate = await service.from('customers').update({
       current_balance: Math.max(0, Number(customer?.current_balance ?? customer?.outstanding_balance ?? 0) - body.amount),
     }).eq('id', body.customerId);
@@ -136,8 +163,79 @@ export async function POST(request: NextRequest) {
       }).eq('id', body.customerId);
     }
 
-    await writeSalesAuditLog('SALES_PAYMENT_RECORDED', String(data.id), ctx.userId, { paymentNumber }, 'payment');
-    return NextResponse.json(data, { status: 201 });
+    const paymentId = String(payment.id ?? '');
+    const paymentDate = String(payment.payment_date ?? body.paymentDate);
+    const paymentMethod = String(payment.payment_method ?? body.paymentMethod).toUpperCase();
+
+    const sourceReference = buildFinanceSourceReference('sales', 'invoice_payment', paymentId);
+
+    let journal: { entryDate: string; entryNumber: string; id: string; sourceReference: string; totalCredit: number; totalDebit: number } | null = null;
+    let linkedTransaction: { id: string; table: string } | null = null;
+    try {
+      journal = await postFinanceDocument({
+        createdBy: ctx.userId,
+        description: `Customer payment for invoice ${String(invoice.invoice_number ?? body.invoiceId)}`,
+        journalDate: paymentDate,
+        lines: [
+          {
+            accountCode: paymentMethod === 'BANK' ? '1000' : '1010',
+            creditAmount: 0,
+            debitAmount: Number(body.amount),
+            description: `Customer payment via ${paymentMethod}`,
+          },
+          {
+            accountCode: '1100',
+            creditAmount: Number(body.amount),
+            debitAmount: 0,
+            description: `Reduce accounts receivable for invoice ${String(invoice.invoice_number ?? body.invoiceId)}`,
+          },
+        ],
+        organizationId: ctx.organizationId,
+        sourceDocumentId: paymentId,
+        sourceDocumentType: 'invoice_payment',
+        sourceModule: 'sales',
+      });
+    } catch (postingError) {
+      return serverError(financeErrorMessage(postingError) || 'Failed to post customer payment to finance.');
+    }
+
+    if (paymentMethod === 'BANK' || paymentMethod === 'CASH' || paymentMethod === 'PETTY_CASH') {
+      try {
+        linkedTransaction = await createLinkedFinanceTransaction({
+          amount: Number(body.amount),
+          createdBy: ctx.userId,
+          description: `Customer payment for invoice ${String(invoice.invoice_number ?? body.invoiceId)}`,
+          direction: 'IN',
+          organizationId: ctx.organizationId,
+          paymentMethod: paymentMethod as 'BANK' | 'CASH' | 'PETTY_CASH',
+          referenceNumber: body.referenceNumber ?? null,
+          sourceDocument: sourceReference,
+          transactionDate: paymentDate,
+        });
+      } catch (linkedTransactionError) {
+        const message = financeErrorMessage(linkedTransactionError);
+        if (!isMissingFinanceTable(linkedTransactionError) && !message.includes('does not exist')) {
+          return serverError(message || 'Failed to post customer payment to finance.');
+        }
+      }
+    }
+
+    await writeSalesAuditLog(
+      'SALES_PAYMENT_RECORDED',
+      paymentId,
+      ctx.userId,
+      {
+        amount: Number(body.amount),
+        customerId: body.customerId,
+        invoiceId: body.invoiceId,
+        journalId: journal?.id ?? null,
+        paymentMethod,
+        paymentNumber,
+      },
+      'payment',
+    );
+
+    return NextResponse.json({ ...payment, journal, linkedTransaction }, { status: 201 });
   } catch (err) {
     return serverError(err instanceof Error ? err.message : 'Internal server error');
   }

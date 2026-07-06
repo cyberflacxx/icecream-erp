@@ -201,26 +201,44 @@ export async function writeSalesAuditLog(
   });
 }
 
-export async function reserveInvoiceStock(invoiceId: string, warehouseId: string) {
+export async function reserveInvoiceStock(
+  invoiceId: string,
+  warehouseId: string,
+  fallbackItems?: Array<{ itemId: string; quantity: number }>,
+) {
   const service = salesService();
   const { data: items, error } = await service
     .from('invoice_items')
     .select('item_id, quantity')
     .eq('invoice_id', invoiceId);
-  if (error) throw error;
 
-  for (const item of items ?? []) {
+  let normalizedItems =
+    ((items ?? []) as Array<Record<string, unknown>>).map((item) => ({
+      itemId: String(item.item_id ?? ''),
+      quantity: Number(item.quantity ?? 0),
+    }));
+
+  if (error) {
+    if (!fallbackItems || (!isMissingSalesTable(error) && !isMissingSalesColumn(error, 'invoice_items', 'quantity'))) {
+      throw error;
+    }
+    normalizedItems = fallbackItems;
+  } else if ((!normalizedItems.length || normalizedItems.every((item) => item.quantity <= 0)) && fallbackItems?.length) {
+    normalizedItems = fallbackItems;
+  }
+
+  for (const item of normalizedItems) {
     const { data: balance, error: balanceError } = await service
       .from('stock_balances')
       .select('id, quantity_reserved, quantity_available')
-      .eq('item_id', item.item_id)
+      .eq('item_id', item.itemId)
       .eq('warehouse_id', warehouseId)
       .single();
     if (balanceError) throw balanceError;
 
     const quantity = Number(item.quantity ?? 0);
     if (Number(balance.quantity_available ?? 0) < quantity) {
-      throw new Error(`Insufficient stock for item ${item.item_id}.`);
+      throw new Error(`Insufficient stock for item ${item.itemId}.`);
     }
 
     await service

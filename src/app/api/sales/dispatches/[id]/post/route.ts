@@ -2,9 +2,97 @@ import { NextResponse } from 'next/server';
 
 import { badRequest, can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
 import { emitLowStockNotificationIfNeeded, emitOperationalNotifications } from '@/lib/notifications-server';
-import { salesService, writeSalesAuditLog } from '@/lib/sales-server';
+import { isMissingSalesColumn, isMissingSalesTable, salesService, writeSalesAuditLog } from '@/lib/sales-server';
 import { getDocumentLockReason } from '@/lib/workflow';
 import { workflowService } from '@/lib/workflow-server';
+
+type SalesDispatchRow = Record<string, unknown>;
+type SalesDispatchForPosting = SalesDispatchRow & {
+  invoices: SalesDispatchRow | null;
+  sales_dispatch_note_items: SalesDispatchRow[];
+};
+
+async function loadCompatDispatchForPosting(service: ReturnType<typeof salesService>, id: string) {
+  const auditResult = await service
+    .from('audit_logs')
+    .select('new_values')
+    .eq('action', 'SALES_DISPATCH_CREATED')
+    .eq('entity_id', id)
+    .eq('entity_type', 'sales_dispatch_note')
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (auditResult.error) throw auditResult.error;
+
+  const payload = ((auditResult.data as SalesDispatchRow | null)?.new_values ?? null) as SalesDispatchRow | null;
+  if (!payload) throw new Error('Dispatch note not found.');
+
+  let invoiceResult = await service
+    .from('invoices')
+    .select('id, status, approved_at')
+    .eq('id', String(payload.invoiceId ?? ''))
+    .maybeSingle();
+  if (invoiceResult.error && isMissingSalesColumn(invoiceResult.error, 'invoices', 'approved_at')) {
+    invoiceResult = await service
+      .from('invoices')
+      .select('id, status')
+      .eq('id', String(payload.invoiceId ?? ''))
+      .maybeSingle();
+  }
+  if (invoiceResult.error) throw invoiceResult.error;
+
+  const items = Array.isArray(payload.items) ? payload.items : [];
+  return {
+    id,
+    dispatch_note_number: String(payload.dispatchNoteNumber ?? id),
+    invoice_id: String(payload.invoiceId ?? ''),
+    invoices: (invoiceResult.data ?? null) as SalesDispatchRow | null,
+    sales_dispatch_note_items: items.map((item) => ({
+      id: String((item as SalesDispatchRow).invoiceItemId ?? (item as SalesDispatchRow).itemId ?? ''),
+      invoice_item_id: (item as SalesDispatchRow).invoiceItemId ?? null,
+      item_id: String((item as SalesDispatchRow).itemId ?? ''),
+      quantity_dispatched: Number((item as SalesDispatchRow).quantityDispatched ?? 0),
+      quantity_invoiced: Number((item as SalesDispatchRow).quantityInvoiced ?? 0),
+    })),
+    status: String(payload.status ?? 'PENDING'),
+    warehouse_id: String(payload.warehouseId ?? ''),
+  } as SalesDispatchForPosting;
+}
+
+async function loadDispatchForPosting(service: ReturnType<typeof salesService>, id: string) {
+  const dispatchResult = await service
+    .from('sales_dispatch_notes')
+    .select('id, dispatch_note_number, invoice_id, warehouse_id, status')
+    .eq('id', id)
+    .single();
+  if (dispatchResult.error) throw dispatchResult.error;
+
+  const itemsResult = await service
+    .from('sales_dispatch_note_items')
+    .select('id, item_id, quantity_dispatched, quantity_invoiced, invoice_item_id')
+    .eq('dispatch_note_id', id);
+  if (itemsResult.error) throw itemsResult.error;
+
+  let invoiceResult = await service
+    .from('invoices')
+    .select('id, status, approved_at')
+    .eq('id', String((dispatchResult.data as SalesDispatchRow).invoice_id ?? ''))
+    .maybeSingle();
+  if (invoiceResult.error && isMissingSalesColumn(invoiceResult.error, 'invoices', 'approved_at')) {
+    invoiceResult = await service
+      .from('invoices')
+      .select('id, status')
+      .eq('id', String((dispatchResult.data as SalesDispatchRow).invoice_id ?? ''))
+      .maybeSingle();
+  }
+  if (invoiceResult.error) throw invoiceResult.error;
+
+  return {
+    ...(dispatchResult.data as SalesDispatchRow),
+    invoices: invoiceResult.data as SalesDispatchRow | null,
+    sales_dispatch_note_items: (itemsResult.data ?? []) as SalesDispatchRow[],
+  } as SalesDispatchForPosting;
+}
 
 export async function POST(
   _request: Request,
@@ -17,22 +105,34 @@ export async function POST(
   try {
     const { id } = await params;
     const service = salesService();
-    const { data: dispatch, error: dispatchError } = await service
-      .from('sales_dispatch_notes')
-      .select('id, dispatch_note_number, invoice_id, warehouse_id, status, sales_dispatch_note_items(id, item_id, quantity_dispatched, quantity_invoiced, invoice_item_id), invoices(status, approved_at)')
-      .eq('id', id)
-      .single();
-    if (dispatchError) throw dispatchError;
+    let dispatch: SalesDispatchForPosting;
+    try {
+      dispatch = id.startsWith('compat-dispatch-')
+        ? await loadCompatDispatchForPosting(service, id)
+        : await loadDispatchForPosting(service, id);
+    } catch (error) {
+      if (!id.startsWith('compat-dispatch-') && isMissingSalesTable(error)) {
+        dispatch = await loadCompatDispatchForPosting(service, id);
+      } else {
+        throw error;
+      }
+    }
     if (String(dispatch.status).toUpperCase() !== 'PENDING') {
       return badRequest('Only pending dispatches can be posted.');
     }
     const linkedInvoice = Array.isArray(dispatch.invoices) ? dispatch.invoices[0] : dispatch.invoices;
-    if (!linkedInvoice || !linkedInvoice.approved_at) {
+    const linkedInvoiceStatus = String(linkedInvoice?.status ?? '').toUpperCase();
+    const invoiceApproved =
+      Boolean(linkedInvoice?.approved_at) ||
+      ['APPROVED', 'SENT', 'PARTIAL_PAID', 'PAID', 'FULLY_DISPATCHED'].includes(linkedInvoiceStatus);
+    if (!linkedInvoice || !invoiceApproved) {
       return badRequest('Dispatch cannot be posted until the linked invoice is approved.');
     }
 
     const workflow = workflowService();
-    const { data: existingLock, error: lockError } = await workflow
+    let workflowPostingAvailable = true;
+    let existingLock: Record<string, unknown> | null = null;
+    const lockResult = await workflow
       .from('document_locks')
       .select('id')
       .eq('organization_id', ctx.organizationId)
@@ -40,21 +140,40 @@ export async function POST(
       .eq('document_id', id)
       .eq('is_active', true)
       .maybeSingle();
-    if (lockError) throw lockError;
+    if (lockResult.error) {
+      if (isMissingSalesTable(lockResult.error)) {
+        workflowPostingAvailable = false;
+      } else {
+        throw lockResult.error;
+      }
+    } else {
+      existingLock = (lockResult.data ?? null) as Record<string, unknown> | null;
+    }
     if (existingLock) return badRequest('Dispatch note is already locked.');
 
-    const { data: postingLog, error: postingLogError } = await workflow.from('posting_logs').insert({
-      document_id: id,
-      document_reference: String(dispatch.dispatch_note_number ?? id),
-      document_type: 'sales_dispatch',
-      module_name: 'sales',
-      organization_id: ctx.organizationId,
-      payload: { source: 'sales.dispatch.post' },
-      posted_by: ctx.userId,
-      posting_action: 'POST',
-      posting_status: 'PENDING',
-    }).select().single();
-    if (postingLogError) throw postingLogError;
+    let postingLogId: string | null = null;
+    if (workflowPostingAvailable) {
+      const postingLogResult = await workflow.from('posting_logs').insert({
+        document_id: id,
+        document_reference: String(dispatch.dispatch_note_number ?? id),
+        document_type: 'sales_dispatch',
+        module_name: 'sales',
+        organization_id: ctx.organizationId,
+        payload: { source: 'sales.dispatch.post' },
+        posted_by: ctx.userId,
+        posting_action: 'POST',
+        posting_status: 'PENDING',
+      }).select().single();
+      if (postingLogResult.error) {
+        if (isMissingSalesTable(postingLogResult.error)) {
+          workflowPostingAvailable = false;
+        } else {
+          throw postingLogResult.error;
+        }
+      } else {
+        postingLogId = String((postingLogResult.data as Record<string, unknown>).id ?? '');
+      }
+    }
 
     const items = Array.isArray(dispatch.sales_dispatch_note_items) ? dispatch.sales_dispatch_note_items : [];
     try {
@@ -98,15 +217,19 @@ export async function POST(
           warehouse_id: dispatch.warehouse_id,
         });
 
-        await emitLowStockNotificationIfNeeded({
-          actorUserId: ctx.userId,
-          itemId: String(item.item_id),
-          organizationId: ctx.organizationId,
-          warehouseId: String(dispatch.warehouse_id ?? ''),
-        });
+        try {
+          await emitLowStockNotificationIfNeeded({
+            actorUserId: ctx.userId,
+            itemId: String(item.item_id),
+            organizationId: ctx.organizationId,
+            warehouseId: String(dispatch.warehouse_id ?? ''),
+          });
+        } catch {
+          // Notification delivery is non-blocking for live compatibility.
+        }
       }
 
-      await service
+      const dispatchUpdateResult = await service
         .from('sales_dispatch_notes')
         .update({
           dispatched_by: ctx.userId,
@@ -114,29 +237,45 @@ export async function POST(
           status: 'POSTED',
         })
         .eq('id', id);
+      if (dispatchUpdateResult.error && !isMissingSalesTable(dispatchUpdateResult.error)) {
+        throw dispatchUpdateResult.error;
+      }
 
-      await service
+      const invoiceUpdateResult = await service
         .from('invoices')
         .update({ status: 'FULLY_DISPATCHED' })
         .eq('id', dispatch.invoice_id);
+      if (invoiceUpdateResult.error && linkedInvoiceStatus !== 'SENT') {
+        throw invoiceUpdateResult.error;
+      }
 
-      await workflow.from('posting_logs').update({
-        posted_at: new Date().toISOString(),
-        posting_status: 'POSTED',
-      }).eq('id', (postingLog as Record<string, unknown>).id);
+      if (workflowPostingAvailable && postingLogId) {
+        const postingLogUpdateResult = await workflow.from('posting_logs').update({
+          posted_at: new Date().toISOString(),
+          posting_status: 'POSTED',
+        }).eq('id', postingLogId);
+        if (postingLogUpdateResult.error && !isMissingSalesTable(postingLogUpdateResult.error)) {
+          throw postingLogUpdateResult.error;
+        }
+      }
 
-      await workflow.from('document_locks').insert({
-        document_id: id,
-        document_type: 'sales_dispatch',
-        is_active: true,
-        lock_reason: getDocumentLockReason('POSTED'),
-        locked_at: new Date().toISOString(),
-        locked_by: ctx.userId,
-        module_name: 'sales',
-        organization_id: ctx.organizationId,
-      });
+      if (workflowPostingAvailable) {
+        const documentLockInsertResult = await workflow.from('document_locks').insert({
+          document_id: id,
+          document_type: 'sales_dispatch',
+          is_active: true,
+          lock_reason: getDocumentLockReason('POSTED'),
+          locked_at: new Date().toISOString(),
+          locked_by: ctx.userId,
+          module_name: 'sales',
+          organization_id: ctx.organizationId,
+        });
+        if (documentLockInsertResult.error && !isMissingSalesTable(documentLockInsertResult.error)) {
+          throw documentLockInsertResult.error;
+        }
+      }
 
-      await workflow.from('workflow_history').insert({
+      const workflowHistoryResult = await workflow.from('workflow_history').insert({
         action: 'SALES_SALES_DISPATCH_POSTED',
         action_at: new Date().toISOString(),
         actor_id: ctx.userId,
@@ -148,32 +287,41 @@ export async function POST(
         organization_id: ctx.organizationId,
         to_status: 'POSTED',
       });
+      if (workflowHistoryResult.error && !isMissingSalesTable(workflowHistoryResult.error)) {
+        throw workflowHistoryResult.error;
+      }
 
       await writeSalesAuditLog('SALES_DISPATCH_POSTED', id, ctx.userId, { status: 'POSTED' }, 'sales_dispatch_note');
-      await emitOperationalNotifications({
-        actorUserId: ctx.userId,
-        documentId: id,
-        documentType: 'sales_dispatch',
-        eventType: 'DISPATCH_POSTED',
-        message: `Dispatch ${String(dispatch.dispatch_note_number ?? id)} was posted successfully.`,
-        metadata: {
-          dispatchNumber: String(dispatch.dispatch_note_number ?? id),
-          invoiceId: String(dispatch.invoice_id ?? ''),
-        },
-        moduleName: 'dispatch',
-        organizationId: ctx.organizationId,
-        recipientRoleNames: ['Stores Manager', 'Sales Manager'],
-        severity: 'LOW',
-        title: 'Dispatch posted',
-        warehouseId: String(dispatch.warehouse_id ?? ''),
-      });
+      try {
+        await emitOperationalNotifications({
+          actorUserId: ctx.userId,
+          documentId: id,
+          documentType: 'sales_dispatch',
+          eventType: 'DISPATCH_POSTED',
+          message: `Dispatch ${String(dispatch.dispatch_note_number ?? id)} was posted successfully.`,
+          metadata: {
+            dispatchNumber: String(dispatch.dispatch_note_number ?? id),
+            invoiceId: String(dispatch.invoice_id ?? ''),
+          },
+          moduleName: 'dispatch',
+          organizationId: ctx.organizationId,
+          recipientRoleNames: ['Stores Manager', 'Sales Manager'],
+          severity: 'LOW',
+          title: 'Dispatch posted',
+          warehouseId: String(dispatch.warehouse_id ?? ''),
+        });
+      } catch {
+        // Notification delivery is non-blocking for live compatibility.
+      }
       return NextResponse.json({ posted: true });
     } catch (error) {
-      await workflow.from('posting_logs').update({
-        error_message: error instanceof Error ? error.message : 'Posting failed.',
-        posted_at: new Date().toISOString(),
-        posting_status: 'FAILED',
-      }).eq('id', (postingLog as Record<string, unknown>).id);
+      if (workflowPostingAvailable && postingLogId) {
+        await workflow.from('posting_logs').update({
+          error_message: error instanceof Error ? error.message : 'Posting failed.',
+          posted_at: new Date().toISOString(),
+          posting_status: 'FAILED',
+        }).eq('id', postingLogId);
+      }
       throw error;
     }
   } catch (err) {

@@ -1,4 +1,5 @@
 import { createServiceRoleClient } from '@/lib/supabase/server';
+import { isMissingColumnError } from '@/lib/postgrest-compat';
 import {
   buildFinanceSourceReference,
   isPostedJournalStatus,
@@ -93,7 +94,7 @@ export function isMissingFinanceTable(error: unknown) {
 }
 
 export function isMissingFinanceColumn(error: unknown, table: string, columnName: string) {
-  return financeErrorMessage(error).includes(`column ${table}.${columnName} does not exist`);
+  return isMissingColumnError(error, table, columnName);
 }
 
 export async function loadLedgerLines(organizationId: string, postedOnly = true) {
