@@ -77,7 +77,19 @@ export async function POST(
     can(ctx, 'stores.grn.submit', 'stores.grn.edit', 'procurement.write', 'inventory.write') ||
     isStoreKeeper;
 
-  if (!canReceiveGrn) return forbidden();
+  if (!canReceiveGrn) {
+    return NextResponse.json(
+      {
+        error: 'Forbidden',
+        reason: 'permission_check',
+        workId: ctx.workId,
+        role: ctx.role,
+        roles: ctx.roles.map((role) => role.name),
+        permissions: ctx.permissions,
+      },
+      { status: 403 },
+    );
+  }
 
   let body: {
     notes?: string | null;
@@ -153,7 +165,21 @@ export async function POST(
           !wh ||
           (warehouseBranchId && !allowedBranchIds.has(warehouseBranchId) && !hasWarehouseAssignment)
         ) {
-          return forbidden();
+          return NextResponse.json(
+            {
+              error: 'Forbidden',
+              reason: 'warehouse_branch_scope',
+              workId: ctx.workId,
+              role: ctx.role,
+              warehouseId,
+              warehouseBranchId,
+              branchId: ctx.branchId,
+              branchAssignments: ctx.branchAssignments,
+              warehouseAssignments: ctx.warehouseAssignments,
+              isStoreKeeper,
+            },
+            { status: 403 },
+          );
         }
       }
     }
