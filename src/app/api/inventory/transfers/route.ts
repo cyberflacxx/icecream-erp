@@ -141,8 +141,8 @@ export async function POST(request: NextRequest) {
     }
 
     const [fromWarehouse, toWarehouse] = await Promise.all([
-      requireWarehouseAccess(service, fromWarehouseId, ctx.branchId, ctx.isBranchScoped),
-      requireWarehouseAccess(service, toWarehouseId, ctx.branchId, ctx.isBranchScoped),
+      requireWarehouseAccess(service, fromWarehouseId, ctx.branchId, ctx.isBranchScoped, ctx.warehouseAssignments),
+      requireWarehouseAccess(service, toWarehouseId, ctx.branchId, ctx.isBranchScoped, ctx.warehouseAssignments),
     ]);
 
     const requiresAvailableStock = normalizedStatus === 'COMPLETED';

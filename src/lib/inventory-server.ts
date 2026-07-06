@@ -38,6 +38,7 @@ export async function requireWarehouseAccess(
   warehouseId: string,
   branchId: string | null,
   isBranchScoped: boolean,
+  warehouseAssignments: string[] = [],
 ) {
   const { data, error } = await service
     .from('warehouses')
@@ -49,8 +50,17 @@ export async function requireWarehouseAccess(
     throw new Error('Warehouse not found or inactive.');
   }
 
-  if (isBranchScoped && branchId && data.branch_id !== branchId) {
-    throw new Error('This action is outside the current branch scope.');
+  if (isBranchScoped && branchId) {
+    const warehouseBranchId = data.branch_id ? String(data.branch_id) : null;
+    const hasWarehouseAssignment = warehouseAssignments.includes(warehouseId);
+
+    if (warehouseBranchId) {
+      if (warehouseBranchId !== branchId && !hasWarehouseAssignment) {
+        throw new Error('This action is outside the current branch scope.');
+      }
+    } else if (warehouseAssignments.length > 0 && !hasWarehouseAssignment) {
+      throw new Error('This action is outside the current branch scope.');
+    }
   }
 
   return data;
