@@ -18,7 +18,11 @@ export async function POST(
 ) {
   const ctx = await getAuthContext();
   if (!ctx) return unauthorized();
-  if (!can(ctx, 'stores.grn.submit', 'stores.grn.edit', 'procurement.write', 'inventory.write')) return forbidden();
+  const canReceiveGrn =
+    can(ctx, 'stores.grn.submit', 'stores.grn.edit', 'procurement.write', 'inventory.write') ||
+    ctx.roles.some((role) => role.name.toLowerCase() === 'store keeper');
+
+  if (!canReceiveGrn) return forbidden();
 
   const { id } = await params;
   const service = createServiceRoleClient();
@@ -238,6 +242,21 @@ export async function POST(
 
     await recordAuditLog({
       action: 'GRN_SUBMITTED',
+      entityId: id,
+      entityType: 'goods_received_note',
+      newValues: {
+        itemCount: body.items.length,
+        status: 'RECEIVED',
+        warnings,
+      },
+      organizationId: ctx.organizationId,
+      userProfileId: ctx.userId,
+      ipAddress: request.headers.get('x-forwarded-for'),
+      userAgent: request.headers.get('user-agent'),
+    });
+
+    await recordAuditLog({
+      action: 'GRN_POSTED',
       entityId: id,
       entityType: 'goods_received_note',
       newValues: {
