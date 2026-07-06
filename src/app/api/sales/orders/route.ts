@@ -242,7 +242,7 @@ export async function POST(request: NextRequest) {
         item_id: item.itemId,
         quantity: item.quantity,
         unit_price: item.unitPrice,
-        discount_pct: item.discountPercent ?? null,
+        discount_pct: item.discountPercent ?? 0,
         line_total: item.quantity * item.unitPrice * (1 - (item.discountPercent ?? 0) / 100),
       })),
     );
