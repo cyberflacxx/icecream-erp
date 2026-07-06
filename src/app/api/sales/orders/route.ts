@@ -168,8 +168,7 @@ export async function POST(request: NextRequest) {
     .schema('icecream_erp')
     .from('items')
     .select('id')
-    .in('id', itemIds)
-    .is('deleted_at', null);
+    .in('id', itemIds);
 
   if ((validItems?.length ?? 0) !== itemIds.length) {
     return NextResponse.json({ error: 'One or more sales order items are invalid.' }, { status: 400 });
