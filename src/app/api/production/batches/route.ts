@@ -201,7 +201,7 @@ export async function POST(request: NextRequest) {
       .single();
     if (!warehouse) return badRequest('Warehouse not found.');
 
-    if (ctx.isBranchScoped && ctx.branchId && warehouse.branch_id !== ctx.branchId) {
+    if (ctx.isBranchScoped && ctx.branchId && warehouse.branch_id && warehouse.branch_id !== ctx.branchId) {
       return forbidden();
     }
 

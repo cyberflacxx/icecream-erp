@@ -1,8 +1,8 @@
 import { NextResponse } from 'next/server';
 
 import { badRequest, can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
-import { calculateRequiredMaterials, summarizePlanShortages } from '@/lib/production';
-import { fetchStockBalanceMap, productionService, writeProductionAuditLog } from '@/lib/production-server';
+import { calculateRequiredMaterials, summarizePlanShortages, type MaterialRequirementInput } from '@/lib/production';
+import { fetchStockBalanceMap, productionErrorMessage, productionService, writeProductionAuditLog } from '@/lib/production-server';
 
 export async function POST(
   _request: Request,
@@ -17,20 +17,47 @@ export async function POST(
     const service = productionService();
     const { data: items, error: itemsError } = await service
       .from('production_plan_items')
-      .select(`
-        id, planned_quantity, expected_output,
-        recipes(id, expected_output_quantity, recipe_items(item_id, quantity_required, unit_id, wastage_allowance_percent, items(code, name), units_of_measure(abbreviation)))
-      `)
+      .select('id, planned_quantity, expected_output, recipe_id')
       .eq('production_plan_id', id);
     if (itemsError) throw itemsError;
+
+    const recipeIds = [...new Set((items ?? []).map((row) => String(row.recipe_id ?? '')).filter(Boolean))];
+    const [recipesResult, recipeItemsResult, itemsResult, unitsResult] = await Promise.all([
+      recipeIds.length
+        ? service.from('recipes').select('id, expected_output_quantity').in('id', recipeIds)
+        : Promise.resolve({ data: [], error: null }),
+      recipeIds.length
+        ? service.from('recipe_items').select('recipe_id, item_id, quantity_required, unit_id, wastage_allowance_percent').in('recipe_id', recipeIds)
+        : Promise.resolve({ data: [], error: null }),
+      service.from('items').select('id, code, name, unit_cost'),
+      service.from('units_of_measure').select('id, abbreviation'),
+    ]);
+    if (recipesResult.error) throw recipesResult.error;
+    if (recipeItemsResult.error) throw recipeItemsResult.error;
+    if (itemsResult.error) throw itemsResult.error;
+    if (unitsResult.error) throw unitsResult.error;
+
+    const recipesById = new Map((recipesResult.data ?? []).map((recipe) => [String(recipe.id), recipe]));
+    const itemsById = new Map((itemsResult.data ?? []).map((item) => [String(item.id), item]));
+    const unitsById = new Map((unitsResult.data ?? []).map((unit) => [String(unit.id), unit]));
+    const recipeItemsByRecipeId = new Map<string, MaterialRequirementInput[]>();
+    for (const item of recipeItemsResult.data ?? []) {
+      const recipeId = String(item.recipe_id ?? '');
+      recipeItemsByRecipeId.set(recipeId, [...(recipeItemsByRecipeId.get(recipeId) ?? []), {
+        ...item,
+        items: itemsById.get(String(item.item_id ?? '')) ?? null,
+        units_of_measure: unitsById.get(String(item.unit_id ?? '')) ?? null,
+      } as MaterialRequirementInput]);
+    }
 
     const stockMap = await fetchStockBalanceMap();
     const shortages = [];
 
     for (const row of items ?? []) {
-      const recipe = Array.isArray(row.recipes) ? row.recipes[0] : row.recipes;
+      const recipeId = String(row.recipe_id ?? '');
+      const recipe = recipesById.get(recipeId);
       const requirements = calculateRequiredMaterials(
-        Array.isArray(recipe?.recipe_items) ? recipe.recipe_items : [],
+        recipeItemsByRecipeId.get(recipeId) ?? [],
         Number(row.planned_quantity ?? 0),
         Number(row.expected_output ?? recipe?.expected_output_quantity ?? 0),
         stockMap,
@@ -53,6 +80,6 @@ export async function POST(
     await writeProductionAuditLog('PRODUCTION_PLAN_APPROVED', id, ctx.userId, { status: 'APPROVED' }, 'production_plan');
     return NextResponse.json(data);
   } catch (err) {
-    return serverError(err instanceof Error ? err.message : 'Internal server error');
+    return serverError(productionErrorMessage(err) || 'Internal server error');
   }
 }
