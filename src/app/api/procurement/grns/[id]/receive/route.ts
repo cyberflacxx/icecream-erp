@@ -22,27 +22,54 @@ export async function POST(
   const { id } = await params;
   const service = createServiceRoleClient();
 
-  let isStoreKeeper = ctx.roles.some((role) => role.name.toLowerCase() === 'store keeper');
+  let securityUserId = ctx.userId;
+  let isStoreKeeper =
+    ctx.roles.some((role) => role.name.toLowerCase() === 'store keeper') ||
+    ctx.role.toLowerCase() === 'store keeper' ||
+    ctx.role.toLowerCase() === 'store_keeper';
 
-  if (!isStoreKeeper) {
+  const hasStoreKeeperRole = async (userProfileId: string) => {
     const { data: roleLinks } = await service
       .from('user_roles')
       .select('role_id')
-      .eq('user_profile_id', ctx.userId);
+      .eq('user_profile_id', userProfileId);
 
     const roleIds = Array.from(
-      new Set((roleLinks ?? []).map((row) => String((row as Record<string, unknown>).role_id ?? '')).filter(Boolean)),
+      new Set(
+        (roleLinks ?? [])
+          .map((row) => String((row as Record<string, unknown>).role_id ?? ''))
+          .filter((roleId): roleId is string => Boolean(roleId)),
+      ),
     );
 
-    if (roleIds.length > 0) {
-      const { data: roleRows } = await service
-        .from('roles')
-        .select('name')
-        .in('id', roleIds);
+    if (roleIds.length === 0) return false;
 
-      isStoreKeeper = (roleRows ?? []).some(
-        (role) => String((role as Record<string, unknown>).name ?? '').toLowerCase() === 'store keeper',
-      );
+    const { data: roleRows } = await service
+      .from('roles')
+      .select('name')
+      .in('id', roleIds);
+
+    return (roleRows ?? []).some(
+      (role) => String((role as Record<string, unknown>).name ?? '').toLowerCase() === 'store keeper',
+    );
+  };
+
+  if (!isStoreKeeper) {
+    isStoreKeeper = await hasStoreKeeperRole(ctx.userId);
+  }
+
+  if (!isStoreKeeper && ctx.workId) {
+    const { data: userRow } = await service
+      .from('users')
+      .select('id')
+      .eq('work_id', ctx.workId)
+      .maybeSingle();
+
+    const userIdFromWorkId = String((userRow as Record<string, unknown> | null)?.id ?? '');
+
+    if (userIdFromWorkId) {
+      securityUserId = userIdFromWorkId;
+      isStoreKeeper = await hasStoreKeeperRole(userIdFromWorkId);
     }
   }
 
@@ -114,7 +141,7 @@ export async function POST(
           const { data: warehouseAssignment } = await service
             .from('user_warehouse_assignments')
             .select('id')
-            .eq('user_profile_id', ctx.userId)
+            .eq('user_profile_id', securityUserId)
             .eq('warehouse_id', warehouseId)
             .eq('is_active', true)
             .maybeSingle();
