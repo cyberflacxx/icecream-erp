@@ -246,15 +246,30 @@ function getFallbackResolvedRoles(legacyRole: string) {
 async function resolveRolesForUser(userProfileId: string) {
   const service = securityService();
 
-  const { data: userRoles } = await service
+  const { data: userRoleRows, error: userRoleError } = await service
     .from('user_roles')
-    .select('role_id, roles(id, name, description, is_system_role)')
+    .select('role_id')
     .eq('user_profile_id', userProfileId);
 
-  const roles = (userRoles ?? [])
-    .map((row) => {
-      const roleValue = (row as { roles?: Array<Record<string, unknown>> | Record<string, unknown> | null }).roles;
-      const role = Array.isArray(roleValue) ? roleValue[0] : roleValue;
+  if (userRoleError) throw userRoleError;
+
+  const roleIds = Array.from(new Set(
+    (userRoleRows ?? [])
+      .map((row) => (row as { role_id?: unknown }).role_id)
+      .filter((value): value is string => typeof value === 'string' && value.length > 0),
+  ));
+
+  if (roleIds.length === 0) return [] as ResolvedRole[];
+
+  const { data: roleRows, error: roleError } = await service
+    .from('roles')
+    .select('id, name, description, is_system_role')
+    .in('id', roleIds);
+
+  if (roleError) throw roleError;
+
+  return (roleRows ?? [])
+    .map((role) => {
       if (!role?.id || !role?.name) return null;
       return {
         id: String(role.id),
@@ -264,23 +279,37 @@ async function resolveRolesForUser(userProfileId: string) {
       } satisfies ResolvedRole;
     })
     .filter((role): role is ResolvedRole => Boolean(role));
-
-  return roles;
 }
 
 async function resolvePermissionsForRoles(roleIds: string[]) {
   if (roleIds.length === 0) return [] as ResolvedPermission[];
 
   const service = securityService();
-  const { data: rolePermissions } = await service
+
+  const { data: rolePermissionRows, error: rolePermissionError } = await service
     .from('role_permissions')
-    .select('permission_id, permissions(id, code, name, module)')
+    .select('permission_id')
     .in('role_id', roleIds);
 
-  return (rolePermissions ?? [])
-    .map((row) => {
-      const permissionValue = (row as { permissions?: Array<Record<string, unknown>> | Record<string, unknown> | null }).permissions;
-      const permission = Array.isArray(permissionValue) ? permissionValue[0] : permissionValue;
+  if (rolePermissionError) throw rolePermissionError;
+
+  const permissionIds = Array.from(new Set(
+    (rolePermissionRows ?? [])
+      .map((row) => (row as { permission_id?: unknown }).permission_id)
+      .filter((value): value is string => typeof value === 'string' && value.length > 0),
+  ));
+
+  if (permissionIds.length === 0) return [] as ResolvedPermission[];
+
+  const { data: permissionRows, error: permissionError } = await service
+    .from('permissions')
+    .select('id, code, name, module')
+    .in('id', permissionIds);
+
+  if (permissionError) throw permissionError;
+
+  return (permissionRows ?? [])
+    .map((permission) => {
       if (!permission?.id || !permission?.code || !permission?.module) return null;
       return {
         id: String(permission.id),
