@@ -45,14 +45,28 @@ export async function GET() {
         : dispatchQuery.in('warehouse_id', ['00000000-0000-0000-0000-000000000000']);
     }
 
+    let customerQuery = service.from('customers').select('credit_limit, current_balance').eq('organization_id', ctx.organizationId);
+
     const [dispatchResult, customerResult, finishedGoodsResult] = await Promise.all([
       dispatchQuery,
-      service.from('customers').select('credit_limit, current_balance').eq('organization_id', ctx.organizationId),
+      customerQuery,
       service.from('items').select('id').eq('organization_id', ctx.organizationId).eq('item_type', 'FINISHED_GOOD'),
     ]);
 
     if (dispatchResult.error && !dispatchResult.error.message.includes("Could not find the table 'icecream_erp.sales_dispatch_notes'")) throw dispatchResult.error;
-    if (customerResult.error) throw customerResult.error;
+    let customerRows = (customerResult.data ?? []) as Array<Record<string, unknown>>;
+    if (customerResult.error) {
+      if (isMissingColumnError(customerResult.error, 'customers', 'current_balance')) {
+        const fallbackCustomerResult = await service
+          .from('customers')
+          .select('credit_limit, outstanding_balance')
+          .eq('organization_id', ctx.organizationId);
+        if (fallbackCustomerResult.error) throw fallbackCustomerResult.error;
+        customerRows = (fallbackCustomerResult.data ?? []) as Array<Record<string, unknown>>;
+      } else {
+        throw customerResult.error;
+      }
+    }
     let finishedGoodsData = finishedGoodsResult.data ?? [];
     if (finishedGoodsResult.error) {
       if (isMissingColumnError(finishedGoodsResult.error, 'items', 'item_type')) {
@@ -167,7 +181,7 @@ export async function GET() {
       }
     }
 
-    const customers = (customerResult.data ?? []) as Array<Record<string, unknown>>;
+    const customers = customerRows;
     const dispatches = (dispatchResult.data ?? []) as Array<Record<string, unknown>>;
 
     const todaySales = invoices
@@ -182,7 +196,7 @@ export async function GET() {
 
     const creditAlerts = customers.filter((row) => {
       const creditLimit = Number(row.credit_limit ?? 0);
-      const currentBalance = Number(row.current_balance ?? 0);
+      const currentBalance = Number(row.current_balance ?? row.outstanding_balance ?? 0);
       return creditLimit > 0 && currentBalance > creditLimit;
     }).length;
 

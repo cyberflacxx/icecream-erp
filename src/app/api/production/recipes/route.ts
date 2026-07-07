@@ -24,7 +24,42 @@ export async function GET() {
       .order('updated_at', { ascending: false });
 
     if (error) throw error;
-    return NextResponse.json(data ?? []);
+
+    const recipes = (data ?? []) as Array<Record<string, unknown>>;
+    const recipeIds = recipes.map((recipe) => String(recipe.id));
+    if (!recipeIds.length) {
+      return NextResponse.json([]);
+    }
+
+    const [ingredientsResult, packagingResult] = await Promise.all([
+      service.from('recipe_items').select('*').in('recipe_id', recipeIds).order('sort_order', { ascending: true }),
+      service.from('recipe_packaging_items').select('*').in('recipe_id', recipeIds).order('sort_order', { ascending: true }),
+    ]);
+
+    if (ingredientsResult.error) throw ingredientsResult.error;
+    if (packagingResult.error) throw packagingResult.error;
+
+    const ingredientsByRecipeId = new Map<string, Array<Record<string, unknown>>>();
+    for (const row of (ingredientsResult.data ?? []) as Array<Record<string, unknown>>) {
+      const recipeId = String(row.recipe_id ?? '');
+      if (!recipeId) continue;
+      ingredientsByRecipeId.set(recipeId, [...(ingredientsByRecipeId.get(recipeId) ?? []), row]);
+    }
+
+    const packagingByRecipeId = new Map<string, Array<Record<string, unknown>>>();
+    for (const row of (packagingResult.data ?? []) as Array<Record<string, unknown>>) {
+      const recipeId = String(row.recipe_id ?? '');
+      if (!recipeId) continue;
+      packagingByRecipeId.set(recipeId, [...(packagingByRecipeId.get(recipeId) ?? []), row]);
+    }
+
+    return NextResponse.json(
+      recipes.map((recipe) => ({
+        ...recipe,
+        ingredients: ingredientsByRecipeId.get(String(recipe.id)) ?? [],
+        packagingItems: packagingByRecipeId.get(String(recipe.id)) ?? [],
+      })),
+    );
   } catch (err) {
     if (isMissingProductionTable(err)) return NextResponse.json([]);
     return serverError(productionErrorMessage(err) || 'Internal server error');

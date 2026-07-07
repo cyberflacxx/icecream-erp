@@ -5,6 +5,7 @@ import type { ReactNode } from 'react';
 
 import { PageHeader } from '@/components/dashboard/page-header';
 import { ProductionNav } from '@/components/production/production-nav';
+import { Button } from '@/components/ui/button';
 import { useProductionReport } from '@/hooks/production/useProductionReport';
 import { API_ROUTES } from '@/lib/shared';
 import { DataTable, EmptyState, LoadingState } from '@/components/ui-library';
@@ -55,6 +56,22 @@ export default function ProductionReportsPage() {
       <PageHeader
         title="Production Reports"
         description="Review material usage, output variance, yield, and costing together so production decisions are grounded in one place."
+        actions={
+          <div className="flex flex-wrap gap-2">
+            <a href={API_ROUTES.PRODUCTION.EXPORT('variance')}>
+              <Button type="button" size="sm" variant="outline">Variance CSV</Button>
+            </a>
+            <a href={API_ROUTES.PRODUCTION.EXPORT('material-consumption')}>
+              <Button type="button" size="sm" variant="outline">Materials CSV</Button>
+            </a>
+            <a href={API_ROUTES.PRODUCTION.EXPORT('yield')}>
+              <Button type="button" size="sm" variant="outline">Yield CSV</Button>
+            </a>
+            <a href={API_ROUTES.PRODUCTION.EXPORT('costing')}>
+              <Button type="button" size="sm" variant="outline">Costing CSV</Button>
+            </a>
+          </div>
+        }
       />
       <ProductionNav />
 

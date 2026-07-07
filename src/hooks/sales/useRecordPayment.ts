@@ -12,7 +12,7 @@ interface RecordPaymentPayload {
   invoiceId: string;
   notes?: string;
   paymentDate: string;
-  paymentMethod: 'CASH' | 'ECOCASH' | 'CARD' | 'BANK_TRANSFER' | 'CREDIT' | 'PETTY_CASH';
+  paymentMethod: 'CASH' | 'BANK' | 'BANK_TRANSFER' | 'PETTY_CASH';
   referenceNumber?: string;
 }
 

@@ -39,7 +39,7 @@ const initialReceiptForm = {
   invoiceId: '',
   notes: '',
   paymentDate: new Date().toISOString().slice(0, 10),
-  paymentMethod: 'CASH' as 'CASH' | 'BANK_TRANSFER' | 'PETTY_CASH',
+  paymentMethod: 'CASH' as 'CASH' | 'BANK' | 'PETTY_CASH',
   referenceNumber: '',
 };
 
@@ -368,7 +368,7 @@ export default function InvoicesPage() {
                 setReceiptForm((current) => ({ ...current, paymentMethod: event.target.value as typeof current.paymentMethod }));
               }}>
                 <option value="CASH">Cash</option>
-                <option value="BANK_TRANSFER">Bank</option>
+                <option value="BANK">Bank</option>
                 <option value="PETTY_CASH">Petty cash</option>
               </select>
             </label>

@@ -16,6 +16,12 @@ function isMissingInvoiceColumnError(error: unknown, columnName: string) {
   return String((error as { message?: unknown }).message ?? '').includes(`column invoices.${columnName} does not exist`);
 }
 
+function normalizePaymentMethod(value: string) {
+  const normalized = String(value ?? '').trim().toUpperCase();
+  if (normalized === 'BANK_TRANSFER') return 'BANK';
+  return normalized;
+}
+
 // ─── POST /api/sales/invoices/[id]/payment ────────────────────────────────────
 
 export async function POST(
@@ -87,6 +93,7 @@ export async function POST(
   if (body.amount <= 0) {
     return NextResponse.json({ error: 'Payment amount must be positive' }, { status: 400 });
   }
+  const paymentMethod = normalizePaymentMethod(body.paymentMethod);
 
   const balanceDue = Number(inv.balance_due ?? 0);
   if (body.amount > balanceDue) {
@@ -100,12 +107,21 @@ export async function POST(
   }
 
   // Fetch customer balance
-  const { data: customer } = await service
+  let customerResult = await service
     .schema('icecream_erp')
     .from('customers')
     .select('id, current_balance')
     .eq('id', inv.customer_id as string)
     .single();
+  if (customerResult.error && String(customerResult.error.message ?? '').includes('current_balance')) {
+    customerResult = await service
+      .schema('icecream_erp')
+      .from('customers')
+      .select('id, outstanding_balance')
+      .eq('id', inv.customer_id as string)
+      .single();
+  }
+  const customer = customerResult.data;
 
   if (!customer) return notFound('Customer not found.');
 
@@ -136,7 +152,7 @@ export async function POST(
       customer_id: inv.customer_id,
       amount: body.amount,
       payment_date: body.paymentDate,
-      payment_method: body.paymentMethod,
+      payment_method: paymentMethod,
       reference_number: body.referenceNumber ?? null,
       notes: body.notes ?? `Invoice payment for ${inv.invoice_number}`,
       created_by: ctx.userId,
@@ -188,12 +204,19 @@ export async function POST(
   if (invoiceUpdateError) return serverError(invoiceUpdateError.message);
 
   // Reduce customer balance
-  const nextCustomerBalance = Math.max(0, Number(cust.current_balance ?? 0) - body.amount);
-  await service
+  const nextCustomerBalance = Math.max(0, Number(cust.current_balance ?? cust.outstanding_balance ?? 0) - body.amount);
+  const customerUpdate = await service
     .schema('icecream_erp')
     .from('customers')
     .update({ current_balance: nextCustomerBalance, updated_at: new Date().toISOString() })
     .eq('id', cust.id as string);
+  if (customerUpdate.error && String(customerUpdate.error.message ?? '').includes('current_balance')) {
+    await service
+      .schema('icecream_erp')
+      .from('customers')
+      .update({ outstanding_balance: nextCustomerBalance, updated_at: new Date().toISOString() })
+      .eq('id', cust.id as string);
+  }
 
   let journal: { entryNumber: string; id: string } | null = null;
   let linkedTransaction: { id: string; table: string } | null = null;
@@ -205,10 +228,10 @@ export async function POST(
       journalDate: body.paymentDate,
       lines: [
         {
-          accountCode: body.paymentMethod === 'BANK' ? '1000' : '1010',
+          accountCode: paymentMethod === 'BANK' ? '1000' : '1010',
           creditAmount: 0,
           debitAmount: Number(body.amount),
-          description: `Customer payment via ${body.paymentMethod}`,
+          description: `Customer payment via ${paymentMethod}`,
         },
         {
           accountCode: '1100',
@@ -223,14 +246,14 @@ export async function POST(
       sourceModule: 'sales',
     });
 
-    if (body.paymentMethod === 'BANK' || body.paymentMethod === 'CASH') {
+    if (paymentMethod === 'BANK' || paymentMethod === 'CASH' || paymentMethod === 'PETTY_CASH') {
       linkedTransaction = await createLinkedFinanceTransaction({
         amount: Number(body.amount),
         createdBy: ctx.userId,
         description: `Customer payment for invoice ${String(inv.invoice_number ?? params.id)}`,
         direction: 'IN',
         organizationId: ctx.organizationId,
-        paymentMethod: body.paymentMethod === 'BANK' ? 'BANK' : 'CASH',
+        paymentMethod: paymentMethod as 'BANK' | 'CASH' | 'PETTY_CASH',
         referenceNumber: body.referenceNumber ?? null,
         sourceDocument: sourceReference,
         transactionDate: body.paymentDate,

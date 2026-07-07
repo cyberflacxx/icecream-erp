@@ -1,6 +1,7 @@
 'use client';
 
 import { AlertCircle } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 
 import { PageHeader } from '@/components/dashboard/page-header';
 import { SalesNav } from '@/components/sales/sales-nav';
@@ -17,7 +18,16 @@ export default function SalesReportsPage() {
 
   return (
     <div className="space-y-8">
-      <PageHeader title="Sales Reports" description="Review sales, ageing, credit, dispatch, returns, and journals from one reporting hub." status="partial" />
+      <PageHeader
+        title="Sales Reports"
+        description="Review sales, ageing, credit, dispatch, returns, and journals from one reporting hub."
+        status="partial"
+        actions={
+          <a href={API_ROUTES.SALES.EXPORT('invoice-ageing')}>
+            <Button type="button" size="sm" variant="outline">Export CSV</Button>
+          </a>
+        }
+      />
       <SalesNav />
       <DataTable
         columns={[

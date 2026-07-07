@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
 import { isCustomerInactiveStatus } from '@/lib/sales-customers';
-import { salesErrorMessage } from '@/lib/sales-server';
+import { isMissingSalesColumn, salesErrorMessage } from '@/lib/sales-server';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -46,11 +46,7 @@ export async function GET(request: NextRequest) {
   let query = service
     .schema('icecream_erp')
     .from('sales_orders')
-    .select(`
-      id, order_number, order_date, delivery_date, status, total_amount, branch_id,
-      customers!inner(id, name),
-      sales_order_items(id)
-    `)
+    .select('id, order_number, order_date, delivery_date, required_date, status, total_amount, total, branch_id, customer_id')
     .order('order_date', { ascending: false });
 
   // Branch scoping
@@ -65,21 +61,76 @@ export async function GET(request: NextRequest) {
   if (startDate) query = query.gte('order_date', startDate);
   if (endDate) query = query.lte('order_date', endDate);
 
-  const { data, error } = await query;
-  if (error) return serverError(error.message);
+  let result = await query;
+  if (
+    result.error &&
+    (
+      isMissingSalesColumn(result.error, 'sales_orders', 'total_amount') ||
+      isMissingSalesColumn(result.error, 'sales_orders', 'delivery_date')
+    )
+  ) {
+    let fallbackQuery = service
+      .schema('icecream_erp')
+      .from('sales_orders')
+      .select('id, order_number, order_date, delivery_date, required_date, status, total, branch_id, customer_id')
+      .order('order_date', { ascending: false });
 
-  const mapped = (data ?? []).map((row: Record<string, unknown>) => {
-    const customer = row.customers as { id: string; name: string } | null;
-    const items = (row.sales_order_items as unknown[]) ?? [];
+    if (ctx.isBranchScoped && ctx.branchId) {
+      fallbackQuery = fallbackQuery.eq('branch_id', ctx.branchId);
+    } else if (branchId) {
+      fallbackQuery = fallbackQuery.eq('branch_id', branchId);
+    }
+
+    if (status) fallbackQuery = fallbackQuery.eq('status', status);
+    if (customerId) fallbackQuery = fallbackQuery.eq('customer_id', customerId);
+    if (startDate) fallbackQuery = fallbackQuery.gte('order_date', startDate);
+    if (endDate) fallbackQuery = fallbackQuery.lte('order_date', endDate);
+
+    result = await fallbackQuery;
+  }
+
+  if (result.error) return serverError(result.error.message);
+
+  const rows = (result.data ?? []) as Array<Record<string, unknown>>;
+  const customerIds = [...new Set(rows.map((row) => String(row.customer_id ?? '')).filter(Boolean))];
+  const orderIds = rows.map((row) => String(row.id));
+
+  const [customersResult, itemsResult] = await Promise.all([
+    customerIds.length
+      ? service.schema('icecream_erp').from('customers').select('id, name').in('id', customerIds)
+      : Promise.resolve({ data: [], error: null }),
+    orderIds.length
+      ? service.schema('icecream_erp').from('sales_order_items').select('order_id').in('order_id', orderIds)
+      : Promise.resolve({ data: [], error: null }),
+  ]);
+
+  if (customersResult.error) return serverError(customersResult.error.message);
+  if (itemsResult.error) return serverError(itemsResult.error.message);
+
+  const customersById = new Map(
+    ((customersResult.data ?? []) as Array<Record<string, unknown>>).map((row) => [
+      String(row.id),
+      { id: String(row.id), name: String(row.name ?? 'Unknown customer') },
+    ]),
+  );
+  const itemCountByOrderId = new Map<string, number>();
+  for (const item of (itemsResult.data ?? []) as Array<Record<string, unknown>>) {
+    const orderId = String(item.order_id ?? '');
+    if (!orderId) continue;
+    itemCountByOrderId.set(orderId, (itemCountByOrderId.get(orderId) ?? 0) + 1);
+  }
+
+  const mapped = rows.map((row) => {
+    const orderId = String(row.id);
     return {
-      id: row.id,
+      id: orderId,
       orderNumber: row.order_number,
-      customer: customer ? { id: customer.id, name: customer.name } : null,
+      customer: customersById.get(String(row.customer_id ?? '')) ?? null,
       orderDate: row.order_date,
-      requiredDate: row.delivery_date,
+      requiredDate: row.delivery_date ?? row.required_date ?? null,
       status: row.status,
-      itemsCount: items.length,
-      total: row.total_amount ? Number(row.total_amount) : 0,
+      itemsCount: itemCountByOrderId.get(orderId) ?? 0,
+      total: row.total_amount ? Number(row.total_amount) : Number(row.total ?? 0),
     };
   });
 

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
 import { isCustomerInactiveStatus } from '@/lib/sales-customers';
-import { isMissingSalesTable } from '@/lib/sales-server';
+import { isMissingSalesColumn, isMissingSalesTable } from '@/lib/sales-server';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -45,11 +45,7 @@ export async function GET(request: NextRequest) {
   let query = service
     .schema('icecream_erp')
     .from('quotations')
-    .select(`
-      id, quotation_number, quotation_date, valid_until, status, total,
-      customers!inner(id, name),
-      quotation_items(id)
-    `)
+    .select('id, quotation_number, quotation_date, valid_until, status, total, total_amount, customer_id')
     .is('deleted_at', null)
     .order('quotation_date', { ascending: false });
 
@@ -58,21 +54,70 @@ export async function GET(request: NextRequest) {
   if (startDate) query = query.gte('quotation_date', startDate);
   if (endDate) query = query.lte('quotation_date', endDate);
 
-  const { data, error } = await query;
-  if (error) return serverError(error.message);
+  let result = await query;
+  if (
+    result.error &&
+    (
+      isMissingSalesColumn(result.error, 'quotations', 'deleted_at') ||
+      isMissingSalesColumn(result.error, 'quotations', 'total')
+    )
+  ) {
+    let fallbackQuery = service
+      .schema('icecream_erp')
+      .from('quotations')
+      .select('id, quotation_number, quotation_date, valid_until, status, total_amount, customer_id')
+      .order('quotation_date', { ascending: false });
 
-  const mapped = (data ?? []).map((row: Record<string, unknown>) => {
-    const customer = row.customers as { id: string; name: string } | null;
-    const items = (row.quotation_items as unknown[]) ?? [];
+    if (status) fallbackQuery = fallbackQuery.eq('status', status);
+    if (customerId) fallbackQuery = fallbackQuery.eq('customer_id', customerId);
+    if (startDate) fallbackQuery = fallbackQuery.gte('quotation_date', startDate);
+    if (endDate) fallbackQuery = fallbackQuery.lte('quotation_date', endDate);
+
+    result = await fallbackQuery;
+  }
+
+  if (result.error) return serverError(result.error.message);
+
+  const rows = (result.data ?? []) as Array<Record<string, unknown>>;
+  const customerIds = [...new Set(rows.map((row) => String(row.customer_id ?? '')).filter(Boolean))];
+  const quotationIds = rows.map((row) => String(row.id));
+
+  const [customersResult, itemsResult] = await Promise.all([
+    customerIds.length
+      ? service.schema('icecream_erp').from('customers').select('id, name').in('id', customerIds)
+      : Promise.resolve({ data: [], error: null }),
+    quotationIds.length
+      ? service.schema('icecream_erp').from('quotation_items').select('quotation_id').in('quotation_id', quotationIds)
+      : Promise.resolve({ data: [], error: null }),
+  ]);
+
+  if (customersResult.error) return serverError(customersResult.error.message);
+  if (itemsResult.error) return serverError(itemsResult.error.message);
+
+  const customersById = new Map(
+    ((customersResult.data ?? []) as Array<Record<string, unknown>>).map((row) => [
+      String(row.id),
+      { id: String(row.id), name: String(row.name ?? 'Unknown customer') },
+    ]),
+  );
+  const itemCountByQuotationId = new Map<string, number>();
+  for (const item of (itemsResult.data ?? []) as Array<Record<string, unknown>>) {
+    const quotationId = String(item.quotation_id ?? '');
+    if (!quotationId) continue;
+    itemCountByQuotationId.set(quotationId, (itemCountByQuotationId.get(quotationId) ?? 0) + 1);
+  }
+
+  const mapped = rows.map((row) => {
+    const quotationId = String(row.id);
     return {
-      id: row.id,
+      id: quotationId,
       quotationNumber: row.quotation_number,
-      customer: customer ? { id: customer.id, name: customer.name } : null,
+      customer: customersById.get(String(row.customer_id ?? '')) ?? null,
       quotationDate: row.quotation_date,
       validUntil: row.valid_until,
       status: row.status,
-      itemsCount: items.length,
-      total: row.total ? Number(row.total) : 0,
+      itemsCount: itemCountByQuotationId.get(quotationId) ?? 0,
+      total: row.total ? Number(row.total) : Number(row.total_amount ?? 0),
     };
   });
 

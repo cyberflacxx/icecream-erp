@@ -6,6 +6,12 @@ import { createLinkedFinanceTransaction, financeErrorMessage, isMissingFinanceTa
 import { canRecordPayment } from '@/lib/sales';
 import { generateSalesReferenceNumber, isMissingSalesTable, salesErrorMessage, salesService, writeSalesAuditLog } from '@/lib/sales-server';
 
+function normalizeSalesPaymentMethod(value: string) {
+  const normalized = String(value ?? '').trim().toUpperCase();
+  if (normalized === 'BANK_TRANSFER') return 'BANK';
+  return normalized;
+}
+
 export async function GET() {
   const ctx = await getAuthContext();
   if (!ctx) return unauthorized();
@@ -43,6 +49,7 @@ export async function POST(request: NextRequest) {
     if (!body.customerId || !body.invoiceId || !body.paymentDate || !body.paymentMethod) {
       return badRequest('customerId, invoiceId, paymentDate, and paymentMethod are required.');
     }
+    const normalizedPaymentMethod = normalizeSalesPaymentMethod(body.paymentMethod);
 
     const service = salesService();
     let invoiceResult = await service
@@ -83,7 +90,7 @@ export async function POST(request: NextRequest) {
         invoice_id: body.invoiceId,
         notes: body.remarks ?? null,
         payment_date: body.paymentDate,
-        payment_method: body.paymentMethod,
+        payment_method: normalizedPaymentMethod,
         payment_number: paymentNumber,
         reference_number: body.referenceNumber ?? null,
         status: 'PAID',
@@ -99,7 +106,7 @@ export async function POST(request: NextRequest) {
           customer_id: body.customerId,
           invoice_id: body.invoiceId,
           payment_date: body.paymentDate,
-          payment_method: body.paymentMethod,
+          payment_method: normalizedPaymentMethod,
           payment_number: paymentNumber,
           reference_number: body.referenceNumber ?? null,
           status: 'PAID',
@@ -165,7 +172,7 @@ export async function POST(request: NextRequest) {
 
     const paymentId = String(payment.id ?? '');
     const paymentDate = String(payment.payment_date ?? body.paymentDate);
-    const paymentMethod = String(payment.payment_method ?? body.paymentMethod).toUpperCase();
+    const paymentMethod = normalizeSalesPaymentMethod(String(payment.payment_method ?? normalizedPaymentMethod));
 
     const sourceReference = buildFinanceSourceReference('sales', 'invoice_payment', paymentId);
 
