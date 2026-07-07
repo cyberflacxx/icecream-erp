@@ -64,7 +64,7 @@ export async function GET(request: NextRequest) {
     let batchQuery = service
       .schema('icecream_erp')
       .from('production_batches')
-      .select('id, batch_number, status, quality_status, production_date, production_line, shift, actual_output, efficiency_percentage, wastage_quantity, planned_quantity, warehouse_id')
+      .select('id, batch_number, status, quality_status, production_date, production_line, shift, actual_output, efficiency_percentage, wastage_quantity, planned_quantity, warehouse_id, start_time, end_time')
       .is('deleted_at', null)
       .gte('production_date', `${resolvedStart}T00:00:00.000Z`)
       .lte('production_date', `${resolvedEnd}T23:59:59.999Z`)
@@ -91,7 +91,7 @@ export async function GET(request: NextRequest) {
       let fallbackQuery = service
         .schema('icecream_erp')
         .from('production_batches')
-        .select('id, batch_number, status, planned_date, shift, actual_qty, yield_percent, wastage_qty, planned_qty, warehouse_id')
+        .select('id, batch_number, status, planned_date, shift, actual_qty, yield_percent, wastage_qty, planned_qty, warehouse_id, start_time, end_time')
         .gte('planned_date', resolvedStart)
         .lte('planned_date', resolvedEnd)
         .order('planned_date', { ascending: true });
@@ -109,7 +109,7 @@ export async function GET(request: NextRequest) {
     let openBatchQuery = service
       .schema('icecream_erp')
       .from('production_batches')
-      .select('id, batch_number, status, production_date, production_line, shift, actual_output, warehouse_id')
+      .select('id, batch_number, status, production_date, production_line, shift, actual_output, warehouse_id, start_time, end_time')
       .is('deleted_at', null)
       .in('status', ['PLANNED', 'MATERIALS_RESERVED', 'IN_PROGRESS', 'QUALITY_CHECK'])
       .order('production_date', { ascending: false })
@@ -133,7 +133,7 @@ export async function GET(request: NextRequest) {
       let fallbackOpenBatchQuery = service
         .schema('icecream_erp')
         .from('production_batches')
-        .select('id, batch_number, status, planned_date, shift, actual_qty, warehouse_id')
+        .select('id, batch_number, status, planned_date, shift, actual_qty, warehouse_id, start_time, end_time')
         .in('status', ['PLANNED', 'IN_PROGRESS', 'QUALITY_CHECK'])
         .order('planned_date', { ascending: false })
         .limit(8);
@@ -193,6 +193,61 @@ export async function GET(request: NextRequest) {
     }
     if (stockResult.error) throw stockResult.error;
     const stockBalances = stockResult.data ?? [];
+    const batchIds = batches.map((batch) => String(batch.id ?? '')).filter(Boolean);
+
+    const [materialResult, movementResult, salesResult, finishedGoodsStockResult] = await Promise.all([
+      batchIds.length
+        ? service
+            .schema('icecream_erp')
+            .from('production_batch_materials')
+            .select('batch_id, item_id, quantity_required, quantity_issued, quantity_actual, quantity_remaining')
+            .in('batch_id', batchIds)
+        : Promise.resolve({ data: [], error: null }),
+      (() => {
+        let query = service
+          .schema('icecream_erp')
+          .from('stock_movements')
+          .select('movement_type, quantity, created_at, item_id, warehouse_id')
+          .gte('created_at', `${todayKey}T00:00:00.000Z`)
+          .lt('created_at', new Date(today.getTime() + 24 * 60 * 60 * 1000).toISOString());
+
+        if (warehouseIds && warehouseIds.length > 0) {
+          query = query.in('warehouse_id', warehouseIds);
+        }
+
+        return query;
+      })(),
+      (() => {
+        let query = service
+          .schema('icecream_erp')
+          .from('branch_sales')
+          .select('sale_date, item_id, quantity, branch_id, items(id, code, name)')
+          .gte('sale_date', `${resolvedStart}T00:00:00.000Z`)
+          .lte('sale_date', `${resolvedEnd}T23:59:59.999Z`);
+
+        if (effectiveBranchId) {
+          query = query.eq('branch_id', effectiveBranchId);
+        }
+
+        return query;
+      })(),
+      (() => {
+        let query = service
+          .schema('icecream_erp')
+          .from('stock_balances')
+          .select('item_id, quantity_available, quantity_on_hand, warehouse_id, items!inner(id, code, name, type, item_type)');
+
+        if (warehouseIds && warehouseIds.length > 0) {
+          query = query.in('warehouse_id', warehouseIds);
+        }
+
+        return query;
+      })()
+    ]);
+    if (materialResult.error) throw materialResult.error;
+    if (movementResult.error) throw movementResult.error;
+    if (salesResult.error) throw salesResult.error;
+    if (finishedGoodsStockResult.error) throw finishedGoodsStockResult.error;
 
     // Aggregate from batches
     const statusMap = new Map<string, number>();
@@ -218,6 +273,99 @@ export async function GET(request: NextRequest) {
     }
 
     const total = batches.length;
+    const materials = (materialResult.data ?? []) as Array<Record<string, unknown>>;
+    let totalIssued = 0;
+    let totalConsumed = 0;
+    let totalSurplus = 0;
+
+    for (const material of materials) {
+      const issued = Number(material.quantity_issued ?? 0);
+      const consumed = Number(material.quantity_actual ?? material.quantity_required ?? 0);
+      const remaining = Number(material.quantity_remaining ?? Math.max(0, issued - consumed));
+      totalIssued += issued;
+      totalConsumed += consumed;
+      totalSurplus += Math.max(0, remaining);
+    }
+
+    const movementSummary = {
+      damagedToday: 0,
+      receivedIntoProductionToday: 0,
+      returnedToStoresToday: 0,
+    };
+    for (const movement of (movementResult.data ?? []) as Array<Record<string, unknown>>) {
+      const movementType = String(movement.movement_type ?? '');
+      const quantity = Number(movement.quantity ?? 0);
+
+      if (movementType === 'WAREHOUSE_TRANSFER_IN') {
+        movementSummary.receivedIntoProductionToday += quantity;
+      }
+      if (movementType === 'PRODUCTION_RETURN') {
+        movementSummary.returnedToStoresToday += quantity;
+      }
+      if (movementType === 'DAMAGE' || movementType === 'WASTAGE') {
+        movementSummary.damagedToday += quantity;
+      }
+    }
+
+    const salesByProduct = new Map<string, { code: string | null; name: string; quantity: number; todayQuantity: number }>();
+    for (const sale of (salesResult.data ?? []) as Array<Record<string, unknown>>) {
+      const item = firstRelation(sale.items as { code?: string; name?: string } | Array<{ code?: string; name?: string }> | null);
+      const key = String(sale.item_id ?? '');
+      if (!key) continue;
+      const quantity = Number(sale.quantity ?? 0);
+      const date = String(sale.sale_date ?? '').slice(0, 10);
+      const current = salesByProduct.get(key) ?? {
+        code: item?.code ? String(item.code) : null,
+        name: item?.name ? String(item.name) : 'Unknown product',
+        quantity: 0,
+        todayQuantity: 0,
+      };
+      current.quantity += quantity;
+      if (date === todayKey) current.todayQuantity += quantity;
+      salesByProduct.set(key, current);
+    }
+
+    const finishedGoodsStockByItem = new Map<string, number>();
+    for (const row of (finishedGoodsStockResult.data ?? []) as Array<Record<string, unknown>>) {
+      const item = firstRelation(row.items as { type?: string; item_type?: string } | Array<{ type?: string; item_type?: string }> | null);
+      const itemType = String(item?.item_type ?? item?.type ?? '');
+      if (itemType !== 'FINISHED_GOOD') continue;
+      const itemId = String(row.item_id ?? '');
+      finishedGoodsStockByItem.set(
+        itemId,
+        (finishedGoodsStockByItem.get(itemId) ?? 0) + Number(row.quantity_available ?? row.quantity_on_hand ?? 0),
+      );
+    }
+
+    const rankedSales = Array.from(salesByProduct.entries())
+      .map(([itemId, row]) => {
+        const currentStock = finishedGoodsStockByItem.get(itemId) ?? 0;
+        const avgDailySales = row.quantity / 7;
+        const suggestedProductionQuantity = Math.max(0, Math.ceil((avgDailySales * 3) - currentStock));
+        return {
+          currentStock,
+          itemId,
+          productCode: row.code,
+          productName: row.name,
+          quantitySoldLast7Days: row.quantity,
+          quantitySoldToday: row.todayQuantity,
+          suggestedProductionQuantity,
+        };
+      })
+      .sort((left, right) => right.quantitySoldLast7Days - left.quantitySoldLast7Days);
+
+    const shiftSummaryMap = new Map<string, { batches: number; date: string; output: number; shift: string; wastage: number }>();
+    for (const batch of batches as Array<Record<string, unknown>>) {
+      const date = String(batch.production_date ?? batch.planned_date ?? '').slice(0, 10);
+      const shift = String(batch.shift ?? 'UNSPECIFIED');
+      const key = `${date}:${shift}`;
+      const current = shiftSummaryMap.get(key) ?? { batches: 0, date, output: 0, shift, wastage: 0 };
+      current.batches += 1;
+      current.output += Number(batch.actual_output ?? batch.actual_qty ?? 0);
+      current.wastage += Number(batch.wastage_quantity ?? batch.wastage_qty ?? 0);
+      shiftSummaryMap.set(key, current);
+    }
+
     const materialsAtRisk = stockBalances
       .filter((row) => {
         const item = firstRelation(row.items as { reorder_level: number } | Array<{ reorder_level: number }> | null);
@@ -256,17 +404,57 @@ export async function GET(request: NextRequest) {
       },
       openBatches: openBatches.map((b: Record<string, unknown>) => ({
         batchNumber: String(b.batch_number ?? ''),
+        finishedAt: b.end_time ? String(b.end_time) : null,
         output: Number(b.actual_output ?? b.actual_qty ?? 0),
         productionDate: String(b.production_date ?? b.planned_date ?? '').slice(0, 10),
         productionLine: String(b.production_line ?? 'N/A'),
+        runHours:
+          b.start_time && b.end_time
+            ? Number(((new Date(String(b.end_time)).getTime() - new Date(String(b.start_time)).getTime()) / (1000 * 60 * 60)).toFixed(2))
+            : null,
         shift: String(b.shift ?? ''),
+        startedAt: b.start_time ? String(b.start_time) : null,
         status: String(b.status ?? ''),
       })),
+      materialFlow: {
+        damagedToday: movementSummary.damagedToday,
+        issued: totalIssued,
+        consumed: totalConsumed,
+        receivedIntoProductionToday: movementSummary.receivedIntoProductionToday,
+        returnedToStoresToday: movementSummary.returnedToStoresToday,
+        surplus: totalSurplus,
+      },
       materialsAtRisk,
       qualityAlerts: {
         failed: qualityFailed ?? 0,
         pending: qualityPending ?? 0,
       },
+      salesPlanning: {
+        bestSellingProducts: rankedSales.slice(0, 5),
+        demandSignals: rankedSales.slice(0, 8).map((row) => ({
+          currentStock: row.currentStock,
+          productCode: row.productCode,
+          productName: row.productName,
+          quantitySoldLast7Days: row.quantitySoldLast7Days,
+          suggestedProductionQuantity: row.suggestedProductionQuantity,
+        })),
+        last7DaysSalesByProduct: rankedSales.slice(0, 8).map((row) => ({
+          productCode: row.productCode,
+          productName: row.productName,
+          quantity: row.quantitySoldLast7Days,
+        })),
+        todaySalesByProduct: rankedSales
+          .filter((row) => row.quantitySoldToday > 0)
+          .slice(0, 8)
+          .map((row) => ({
+            productCode: row.productCode,
+            productName: row.productName,
+            quantity: row.quantitySoldToday,
+          })),
+      },
+      shiftSummary: Array.from(shiftSummaryMap.values())
+        .sort((left, right) => `${right.date}:${right.shift}`.localeCompare(`${left.date}:${left.shift}`))
+        .slice(0, 8),
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Internal server error';

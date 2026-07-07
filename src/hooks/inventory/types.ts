@@ -53,22 +53,41 @@ export interface InventoryMetaResponse {
 }
 
 export interface InventoryDashboardMetrics {
+  currentStockQuantity: number;
+  damagedTodayQuantity: number;
   expiringSoonCount: number;
   finishedGoodsValue: number;
   lowStockCount: number;
+  movedToProductionTodayQuantity: number;
   nonConsumablesValue: number;
   packagingMaterialValue: number;
   pendingApprovalsCount: number;
   rawMaterialValue: number;
+  receivedTodayQuantity: number;
+  returnedFromProductionTodayQuantity: number;
   supplierShortageCount: number;
+  stockBalanceByWarehouse: Array<{
+    availableQuantity: number;
+    isLowStock: boolean;
+    itemCode: string;
+    itemId: string;
+    itemName: string;
+    quantityOnHand: number;
+    reorderLevel: number;
+    warehouseCode: string;
+    warehouseId: string;
+    warehouseName: string;
+  }>;
   todaysMovements: Array<{
     createdAt: string;
     id: string;
     itemName: string;
     movementType: string;
+    notes: string | null;
     quantity: number;
     referenceId: string | null;
     referenceType: string | null;
+    warehouseCode: string | null;
     warehouseName: string;
   }>;
   totalStockValue: number;

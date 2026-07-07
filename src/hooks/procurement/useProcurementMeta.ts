@@ -18,6 +18,21 @@ export interface ProcurementMetaResponse {
     code: string;
     description: string | null;
     itemType: string | null;
+    inventory: {
+      currentStock: number;
+      isLowStock: boolean;
+      lastReceivedDate: string | null;
+      primaryWarehouseName: string | null;
+      quantityOnOrder: number;
+      quantityReceivedToday: number;
+      reorderLevel: number;
+      warehouses: Array<{
+        code: string;
+        id: string;
+        name: string;
+        quantity: number;
+      }>;
+    };
     name: string;
     unitOfMeasureId: string | null;
   }>;

@@ -647,6 +647,24 @@ export default function RequisitionsPage() {
                         ? `${selectedItems[index]?.itemType?.replace(/_/g, ' ') ?? 'Item'}${selectedItems[index]?.description ? ` • ${selectedItems[index]?.description}` : ''}`
                         : 'Select an item to show its type and description.'}
                     </div>
+                    <div className="rounded-xl border border-border/60 bg-white/90 px-3 py-2 text-xs text-muted">
+                      {selectedItems[index] ? (
+                        <div className="grid gap-1 sm:grid-cols-2">
+                          <span>Current: {selectedItems[index].inventory.currentStock.toFixed(3)}</span>
+                          <span>Reorder: {selectedItems[index].inventory.reorderLevel.toFixed(3)}</span>
+                          <span>On Order: {selectedItems[index].inventory.quantityOnOrder.toFixed(3)}</span>
+                          <span>Received Today: {selectedItems[index].inventory.quantityReceivedToday.toFixed(3)}</span>
+                          <span>
+                            Last Receipt: {selectedItems[index].inventory.lastReceivedDate ? new Date(selectedItems[index].inventory.lastReceivedDate).toLocaleDateString() : 'None'}
+                          </span>
+                          <span className={selectedItems[index].inventory.isLowStock ? 'font-semibold text-rose-700' : ''}>
+                            Store: {selectedItems[index].inventory.primaryWarehouseName ?? 'No balance'}
+                          </span>
+                        </div>
+                      ) : (
+                        'Live stock, reorder, and receipt context appears here after item selection.'
+                      )}
+                    </div>
                   </div>
                   <input
                     min="0.001"

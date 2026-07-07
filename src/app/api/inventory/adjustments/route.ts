@@ -8,6 +8,14 @@ import {
   serverError,
   unauthorized,
 } from '@/lib/api-auth';
+import {
+  applyInventoryDelta,
+  createInventoryAdjustmentRecord,
+  recordStockMovement,
+  requireItem,
+  requireWarehouseAccess,
+  writeInventoryAuditLog,
+} from '@/lib/inventory-server';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
 export async function POST(request: NextRequest) {
@@ -21,14 +29,15 @@ export async function POST(request: NextRequest) {
     itemId?: string;
     warehouseId?: string;
     quantity?: number;
+    transactionAt?: string;
     type?: 'ADJUSTMENT_IN' | 'ADJUSTMENT_OUT';
     reason?: string;
   };
 
-  const { itemId, warehouseId, quantity, type, reason } = body;
+  const { itemId, warehouseId, quantity, transactionAt, type, reason } = body;
 
-  if (!itemId || !warehouseId || quantity === undefined || !type || !reason) {
-    return badRequest('itemId, warehouseId, quantity, type, and reason are required.');
+  if (!itemId || !warehouseId || quantity === undefined || !type || !reason || !transactionAt) {
+    return badRequest('itemId, warehouseId, quantity, type, reason, and transactionAt are required.');
   }
 
   if (type !== 'ADJUSTMENT_IN' && type !== 'ADJUSTMENT_OUT') {
@@ -40,134 +49,84 @@ export async function POST(request: NextRequest) {
     return badRequest('quantity must be a positive number.');
   }
 
-  // Verify item exists
-  const { data: item, error: itemErr } = await service
-    .from('items')
-    .select('id, name, unit_cost')
-    .eq('id', itemId)
-    .is('deleted_at', null)
-    .single();
-  if (itemErr || !item) return badRequest('Inventory item not found.');
-
-  // Verify warehouse exists and is active
-  const { data: warehouse, error: warehouseErr } = await service
-    .from('warehouses')
-    .select('id, name')
-    .eq('id', warehouseId)
-    .eq('is_active', true)
-    .single();
-  if (warehouseErr || !warehouse) return badRequest('Warehouse not found or not active.');
-
-  // Branch scope check
-  if (ctx.isBranchScoped && ctx.branchId) {
-    const { data: wh } = await service
-      .from('warehouses')
-      .select('branch_id')
-      .eq('id', warehouseId)
-      .single();
-    if (!wh || wh.branch_id !== ctx.branchId) {
-      return forbidden();
+  try {
+    const parsedTransactionAt = new Date(transactionAt);
+    if (Number.isNaN(parsedTransactionAt.getTime())) {
+      return badRequest('transactionAt must be a valid ISO date-time.');
     }
-  }
 
-  // Get or create stock balance
-  const { data: balance, error: balErr } = await service
-    .from('stock_balances')
-    .select('id, quantity_on_hand, quantity_available, quantity_reserved')
-    .eq('item_id', itemId)
-    .eq('warehouse_id', warehouseId)
-    .maybeSingle();
-  if (balErr) return serverError(balErr.message);
+    const [item, warehouse] = await Promise.all([
+      requireItem(service, itemId),
+      requireWarehouseAccess(service, warehouseId, ctx.branchId, ctx.isBranchScoped, ctx.warehouseAssignments),
+    ]);
 
-  const currentOnHand = Number(balance?.quantity_on_hand ?? 0);
-  const currentReserved = Number(balance?.quantity_reserved ?? 0);
+    const { data: balance, error: balanceError } = await service
+      .from('stock_balances')
+      .select('id, quantity_on_hand, quantity_available, quantity_reserved')
+      .eq('item_id', itemId)
+      .eq('warehouse_id', warehouseId)
+      .maybeSingle();
+    if (balanceError) return serverError(balanceError.message);
 
-  if (type === 'ADJUSTMENT_OUT') {
-    const available = currentOnHand - currentReserved;
-    if (available < qty) {
+    const currentOnHand = Number(balance?.quantity_on_hand ?? 0);
+    const currentReserved = Number(balance?.quantity_reserved ?? 0);
+    const currentAvailable = Number(balance?.quantity_available ?? (currentOnHand - currentReserved));
+
+    if (type === 'ADJUSTMENT_OUT' && currentAvailable < qty) {
       return badRequest(
-        `Insufficient stock for ${item.name}. Available: ${available.toFixed(3)}, Required: ${qty.toFixed(3)}`,
+        `Insufficient stock for ${item.name}. Available: ${currentAvailable.toFixed(3)}, Required: ${qty.toFixed(3)}`,
       );
     }
-  }
 
-  const newOnHand =
-    type === 'ADJUSTMENT_IN' ? currentOnHand + qty : currentOnHand - qty;
-  const newAvailable = newOnHand - currentReserved;
-
-  let balanceId: string;
-
-  if (balance) {
-    const { data: updated, error: updateErr } = await service
-      .from('stock_balances')
-      .update({
-        quantity_on_hand: newOnHand,
-        quantity_available: newAvailable,
-        quantity_reserved: currentReserved,
-        last_updated: new Date().toISOString(),
-      })
-      .eq('id', balance.id)
-      .select(
-        `id, quantity_on_hand, quantity_available, quantity_reserved, last_updated,
-         items!item_id(id, code, name, item_type, reorder_level,
-           units_of_measure!unit_of_measure_id(id, name, abbreviation)),
-         warehouses!warehouse_id(id, code, name,
-           branches!branch_id(id, name))`,
-      )
-      .single();
-    if (updateErr) return serverError(updateErr.message);
-    balanceId = balance.id;
-
-    // Record the movement
-    const { error: movErr } = await service.from('stock_movements').insert({
-      item_id: itemId,
-      warehouse_id: warehouseId,
-      movement_type: type === 'ADJUSTMENT_IN' ? 'ADJUSTMENT_IN' : 'ADJUSTMENT_OUT',
+    const adjustment = await createInventoryAdjustmentRecord(service, {
+      adjustmentDate: parsedTransactionAt.toISOString(),
+      createdBy: ctx.userId,
+      itemId,
+      movementType: type,
+      organizationId: ctx.organizationId,
       quantity: qty,
-      unit_cost: item.unit_cost ?? null,
-      total_cost: item.unit_cost ? Number(item.unit_cost) * qty : null,
-      reference_id: balanceId,
-      reference_type: 'stock_adjustment',
-      notes: reason,
-      created_by: ctx.userId,
+      reason,
+      warehouseId,
     });
-    if (movErr) return serverError(movErr.message);
 
-    return NextResponse.json(updated, { status: 201 });
-  } else {
-    // Create new balance
-    const { data: created, error: createErr } = await service
-      .from('stock_balances')
-      .insert({
-        item_id: itemId,
-        warehouse_id: warehouseId,
-        quantity_on_hand: newOnHand,
-        quantity_available: newAvailable,
-        quantity_reserved: 0,
-        last_updated: new Date().toISOString(),
-      })
-      .select('id')
-      .single();
-    if (createErr) return serverError(createErr.message);
-    balanceId = created.id;
+    await applyInventoryDelta(service, {
+      itemId,
+      organizationId: ctx.organizationId,
+      quantityDelta: type === 'ADJUSTMENT_IN' ? qty : -qty,
+      warehouseId,
+    });
 
-    // Record the movement
-    const { error: movErr } = await service.from('stock_movements').insert({
-      item_id: itemId,
-      warehouse_id: warehouseId,
-      movement_type: type === 'ADJUSTMENT_IN' ? 'ADJUSTMENT_IN' : 'ADJUSTMENT_OUT',
+    await recordStockMovement(service, {
+      createdAt: parsedTransactionAt.toISOString(),
+      createdBy: ctx.userId,
+      itemId,
+      movementType: type,
+      notes: reason,
+      organizationId: ctx.organizationId,
       quantity: qty,
-      unit_cost: item.unit_cost ?? null,
-      total_cost: item.unit_cost ? Number(item.unit_cost) * qty : null,
-      reference_id: balanceId,
-      reference_type: 'stock_adjustment',
-      notes: reason,
-      created_by: ctx.userId,
+      referenceId: String(adjustment.id),
+      referenceType: 'stock_adjustment',
+      warehouseId,
     });
-    if (movErr) return serverError(movErr.message);
 
-    // Fetch full balance for response
-    const { data: fullBalance, error: fetchErr } = await service
+    await writeInventoryAuditLog(service, {
+      action: 'STOCK_ADJUSTMENT_POSTED',
+      details: {
+        itemCode: item.code,
+        itemName: item.name,
+        quantity: qty,
+        reason,
+        transactionAt: parsedTransactionAt.toISOString(),
+        type,
+        warehouseCode: warehouse.code ?? null,
+        warehouseName: warehouse.name,
+      },
+      entityId: String(adjustment.id),
+      entityType: 'stock_adjustment',
+      userProfileId: ctx.userId,
+    });
+
+    const { data: updatedBalance, error: fetchErr } = await service
       .from('stock_balances')
       .select(
         `id, quantity_on_hand, quantity_available, quantity_reserved, last_updated,
@@ -176,10 +135,13 @@ export async function POST(request: NextRequest) {
          warehouses!warehouse_id(id, code, name,
            branches!branch_id(id, name))`,
       )
-      .eq('id', balanceId)
+      .eq('item_id', itemId)
+      .eq('warehouse_id', warehouseId)
       .single();
     if (fetchErr) return serverError(fetchErr.message);
 
-    return NextResponse.json(fullBalance, { status: 201 });
+    return NextResponse.json(updatedBalance, { status: 201 });
+  } catch (error) {
+    return serverError(error instanceof Error ? error.message : 'Failed to post stock adjustment.');
   }
 }

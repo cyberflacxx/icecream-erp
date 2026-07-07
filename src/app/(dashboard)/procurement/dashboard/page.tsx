@@ -5,7 +5,7 @@ import { FileClock, ShieldAlert, Truck, Wallet } from 'lucide-react';
 import { PageHeader } from '@/components/dashboard/page-header';
 import { ProcurementNav } from '@/components/procurement/procurement-nav';
 import { EmptyState } from '@/components/ui-library';
-import { useProcurementDashboard } from '@/hooks/procurement';
+import { useProcurementDashboard, useProcurementMeta } from '@/hooks/procurement';
 
 const currencyFormatter = new Intl.NumberFormat('en-US', {
   currency: 'USD',
@@ -14,7 +14,17 @@ const currencyFormatter = new Intl.NumberFormat('en-US', {
 
 export default function ProcurementDashboardPage() {
   const query = useProcurementDashboard();
+  const metaQuery = useProcurementMeta();
   const metrics = query.data;
+  const stockWatch = [...(metaQuery.data?.items ?? [])]
+    .sort((left, right) => {
+      if (left.inventory.isLowStock !== right.inventory.isLowStock) {
+        return left.inventory.isLowStock ? -1 : 1;
+      }
+
+      return right.inventory.quantityOnOrder - left.inventory.quantityOnOrder;
+    })
+    .slice(0, 8);
 
   return (
     <div className="space-y-6">
@@ -63,8 +73,65 @@ export default function ProcurementDashboardPage() {
           </div>
         </div>
       </div>
+
+      <div className="surface-card">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h2 className="text-lg font-semibold text-brown">Procurement Stock Watch</h2>
+            <p className="mt-1 text-sm text-muted">
+              Read-only stock context for buying decisions: current stock, reorder point, on-order quantity, warehouse location, and the latest receipt trail.
+            </p>
+          </div>
+        </div>
+        <div className="mt-4 overflow-x-auto">
+          {stockWatch.length ? (
+            <table className="min-w-full text-sm">
+              <thead>
+                <tr className="border-b border-border text-left text-xs uppercase tracking-[0.18em] text-muted">
+                  <th className="px-2 py-3 font-semibold">Item</th>
+                  <th className="px-2 py-3 font-semibold">Current</th>
+                  <th className="px-2 py-3 font-semibold">Reorder</th>
+                  <th className="px-2 py-3 font-semibold">On Order</th>
+                  <th className="px-2 py-3 font-semibold">Received Today</th>
+                  <th className="px-2 py-3 font-semibold">Last Receipt</th>
+                  <th className="px-2 py-3 font-semibold">Primary Store</th>
+                </tr>
+              </thead>
+              <tbody>
+                {stockWatch.map((item) => (
+                  <tr key={item.id} className="border-b border-border/60 last:border-b-0">
+                    <td className="px-2 py-3">
+                      <p className="font-medium text-brown">{item.code} - {item.name}</p>
+                      <p className="text-xs text-muted">
+                        {item.inventory.isLowStock ? 'Low stock' : 'Within stock range'}
+                        {item.description ? ` • ${item.description}` : ''}
+                      </p>
+                    </td>
+                    <td className="px-2 py-3 font-medium text-brown">{formatQuantity(item.inventory.currentStock)}</td>
+                    <td className="px-2 py-3">{formatQuantity(item.inventory.reorderLevel)}</td>
+                    <td className="px-2 py-3">{formatQuantity(item.inventory.quantityOnOrder)}</td>
+                    <td className="px-2 py-3">{formatQuantity(item.inventory.quantityReceivedToday)}</td>
+                    <td className="px-2 py-3">{item.inventory.lastReceivedDate ? new Date(item.inventory.lastReceivedDate).toLocaleDateString() : 'No receipt yet'}</td>
+                    <td className="px-2 py-3">{item.inventory.primaryWarehouseName ?? 'No warehouse balance'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <EmptyState
+              icon={<Truck className="h-6 w-6" />}
+              title="No stock visibility yet"
+              description="Stock balances and receipts will appear here once stores activity starts posting."
+            />
+          )}
+        </div>
+      </div>
     </div>
   );
+}
+
+function formatQuantity(value: number) {
+  return value.toLocaleString(undefined, { maximumFractionDigits: 3 });
 }
 
 function MetricCard({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {

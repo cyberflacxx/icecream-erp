@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { AlertCircle, ArrowRight, Boxes, Factory, FileSpreadsheet, Gauge, PackageOpen, Scale, ShieldAlert, TriangleAlert } from 'lucide-react';
+import { AlertCircle, ArrowRight, Boxes, Factory, FileSpreadsheet, Gauge, PackageOpen, Scale, ShieldAlert, TriangleAlert, TrendingUp, Undo2 } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { Bar, BarChart, CartesianGrid, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 
@@ -29,7 +29,7 @@ export function ProductionDashboard() {
     );
   }
 
-  const { stats, charts, openBatches, materialsAtRisk, qualityAlerts } = dashboardQuery.data;
+  const { stats, charts, openBatches, materialFlow, materialsAtRisk, qualityAlerts, salesPlanning, shiftSummary } = dashboardQuery.data;
 
   return (
     <div className="space-y-8">
@@ -89,6 +89,15 @@ export function ProductionDashboard() {
         <StatCard title="Total Wastage" value={formatNumber(stats.totalWastage)} icon={<TriangleAlert className="h-5 w-5" />} color="warning" />
       </div>
 
+      <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-6">
+        <StatCard title="Received Today" value={formatNumber(materialFlow.receivedIntoProductionToday)} icon={<Boxes className="h-5 w-5" />} />
+        <StatCard title="Issued" value={formatNumber(materialFlow.issued)} icon={<Scale className="h-5 w-5" />} color="brown" />
+        <StatCard title="Consumed" value={formatNumber(materialFlow.consumed)} icon={<Factory className="h-5 w-5" />} color="brown" />
+        <StatCard title="Surplus" value={formatNumber(materialFlow.surplus)} icon={<Undo2 className="h-5 w-5" />} color="success" />
+        <StatCard title="Returned Today" value={formatNumber(materialFlow.returnedToStoresToday)} icon={<Undo2 className="h-5 w-5" />} color="success" />
+        <StatCard title="Damaged Today" value={formatNumber(materialFlow.damagedToday)} icon={<TriangleAlert className="h-5 w-5" />} color="warning" />
+      </div>
+
       <div className="grid gap-6 xl:grid-cols-2">
         <ChartCard title="Output Last 7 Days">
           <div className="h-72">
@@ -124,6 +133,7 @@ export function ProductionDashboard() {
             { key: 'shift', header: 'Shift' },
             { key: 'productionLine', header: 'Line' },
             { key: 'status', header: 'Status' },
+            { key: 'runHours', header: 'Run Hrs' },
             { key: 'output', header: 'Output' },
           ]}
           data={openBatches}
@@ -146,6 +156,53 @@ export function ProductionDashboard() {
       <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
         <StatCard title="Quality Pending" value={formatNumber(qualityAlerts.pending)} icon={<ShieldAlert className="h-5 w-5" />} color="brown" />
         <StatCard title="Quality Failed" value={formatNumber(qualityAlerts.failed)} icon={<TriangleAlert className="h-5 w-5" />} color="warning" />
+      </div>
+
+      <div className="grid gap-6 xl:grid-cols-2">
+        <DataTable
+          columns={[
+            { key: 'productName', header: 'Today Sales' },
+            { key: 'quantity', header: 'Qty' },
+          ]}
+          data={salesPlanning.todaySalesByProduct}
+          emptyState={<EmptyState icon={<TrendingUp className="h-6 w-6" />} title="No product sales posted today" description="Today&apos;s product sales will appear here for production demand tracking." />}
+        />
+
+        <DataTable
+          columns={[
+            { key: 'productName', header: 'Best Seller' },
+            { key: 'quantitySoldLast7Days', header: 'Last 7 Days' },
+            { key: 'currentStock', header: 'FG Stock' },
+            { key: 'suggestedProductionQuantity', header: 'Suggested Qty' },
+          ]}
+          data={salesPlanning.bestSellingProducts}
+          emptyState={<EmptyState icon={<TrendingUp className="h-6 w-6" />} title="No sales demand yet" description="Best-selling products appear once branch sales start posting." />}
+        />
+      </div>
+
+      <div className="grid gap-6 xl:grid-cols-2">
+        <DataTable
+          columns={[
+            { key: 'productName', header: 'Demand Signal' },
+            { key: 'quantitySoldLast7Days', header: '7 Day Sales' },
+            { key: 'currentStock', header: 'Current Stock' },
+            { key: 'suggestedProductionQuantity', header: 'Suggested Production' },
+          ]}
+          data={salesPlanning.demandSignals}
+          emptyState={<EmptyState icon={<Boxes className="h-6 w-6" />} title="No demand signals" description="Demand planning appears once production and sales history exist together." />}
+        />
+
+        <DataTable
+          columns={[
+            { key: 'date', header: 'Date' },
+            { key: 'shift', header: 'Shift' },
+            { key: 'batches', header: 'Batches' },
+            { key: 'output', header: 'Output' },
+            { key: 'wastage', header: 'Wastage' },
+          ]}
+          data={shiftSummary}
+          emptyState={<EmptyState icon={<Factory className="h-6 w-6" />} title="No shift summary" description="Shift-level output and wastage appear here across the selected period." />}
+        />
       </div>
     </div>
   );

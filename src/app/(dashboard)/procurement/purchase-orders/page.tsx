@@ -750,7 +750,10 @@ export default function PurchaseOrdersPage() {
             </div>
 
             <div className="mt-3 space-y-3">
-              {formState.items.map((item) => (
+              {formState.items.map((item) => {
+                const selectedMetaItem = (metaQuery.data?.items ?? []).find((candidate) => candidate.id === item.itemId);
+
+                return (
                 <div
                   key={item.rowId}
                   className="rounded-3xl border border-border/70 bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(255,247,232,0.82))] p-4"
@@ -831,8 +834,24 @@ export default function PurchaseOrdersPage() {
                       </Button>
                     </div>
                   </div>
+                  <div className="mt-3 rounded-2xl border border-border/60 bg-white/90 px-3 py-2 text-xs text-muted">
+                    {selectedMetaItem ? (
+                      <div className="grid gap-1 sm:grid-cols-2 xl:grid-cols-3">
+                        <span>Current: {selectedMetaItem.inventory.currentStock.toFixed(3)}</span>
+                        <span>Reorder: {selectedMetaItem.inventory.reorderLevel.toFixed(3)}</span>
+                        <span>On Order: {selectedMetaItem.inventory.quantityOnOrder.toFixed(3)}</span>
+                        <span>Received Today: {selectedMetaItem.inventory.quantityReceivedToday.toFixed(3)}</span>
+                        <span>Last Receipt: {selectedMetaItem.inventory.lastReceivedDate ? new Date(selectedMetaItem.inventory.lastReceivedDate).toLocaleDateString() : 'None'}</span>
+                        <span className={selectedMetaItem.inventory.isLowStock ? 'font-semibold text-rose-700' : ''}>
+                          Store: {selectedMetaItem.inventory.primaryWarehouseName ?? 'No balance'}
+                        </span>
+                      </div>
+                    ) : (
+                      'Live stock, reorder, and receipt context appears here after item selection.'
+                    )}
+                  </div>
                 </div>
-              ))}
+              )})}
             </div>
           </section>
 

@@ -37,7 +37,6 @@ import {
   type ReportFilters,
   type ReportType,
   buildReportQuery,
-  requestWithToken,
   useCreateSavedReportFilter,
   useDeleteSavedReportFilter,
   useReports,
@@ -357,19 +356,19 @@ export default function ReportsPage() {
     }
   };
 
-  const queuePdfExport = async () => {
+  const exportPdf = async () => {
     setIsQueueingPdf(true);
 
     try {
-      const result = await requestWithToken<{ message: string }>(
+      await downloadFromUrl(
         `/api/reports/export/pdf${buildReportQuery({
           ...filters,
           reportType: activeReportType
         })}`,
-        null,
+        {
+          filename: `${activeReportType}-${new Date().toISOString().slice(0, 10)}.pdf`,
+        },
       );
-
-      setToastMessage(result.message || 'PDF export queued. You will be notified when it is ready.');
     } catch (error) {
       setToastMessage(error instanceof Error ? error.message : 'PDF export failed.');
     } finally {
@@ -411,8 +410,8 @@ export default function ReportsPage() {
             <Button size="sm" variant="outline" onClick={exportCsv} disabled={isExportingCsv}>
               {isExportingCsv ? 'Exporting CSV...' : 'Export CSV'}
             </Button>
-            <Button size="sm" onClick={queuePdfExport} disabled={isQueueingPdf}>
-              {isQueueingPdf ? 'Queueing PDF...' : 'Export PDF'}
+            <Button size="sm" onClick={exportPdf} disabled={isQueueingPdf}>
+              {isQueueingPdf ? 'Exporting PDF...' : 'Export PDF'}
             </Button>
           </>
         }

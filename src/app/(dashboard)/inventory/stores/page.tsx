@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { AlertTriangle, Boxes, ClipboardCheck, Factory, PackagePlus, RotateCcw, Scale, SlidersHorizontal } from 'lucide-react';
+import { AlertTriangle, Boxes, ClipboardCheck, Factory, PackagePlus, RotateCcw, Scale, SlidersHorizontal, TriangleAlert, Undo2 } from 'lucide-react';
 import { type FormEvent, type ReactNode, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 
@@ -28,6 +28,7 @@ const initialAdjustmentState = {
   itemId: '',
   quantity: '',
   reason: '',
+  transactionAt: new Date().toISOString().slice(0, 16),
   type: 'ADJUSTMENT_IN',
   warehouseId: '',
 };
@@ -138,13 +139,14 @@ export default function InventoryStoresPage() {
     await runAction('adjustment', 'Stock adjustment posted.', async () => {
       await request('/api/inventory/adjustments', {
         method: 'POST',
-        body: JSON.stringify({
-          itemId: adjustmentState.itemId,
-          quantity: Number(adjustmentState.quantity),
-          reason: adjustmentState.reason,
-          type: adjustmentState.type,
-          warehouseId: adjustmentState.warehouseId,
-        }),
+          body: JSON.stringify({
+            itemId: adjustmentState.itemId,
+            quantity: Number(adjustmentState.quantity),
+            reason: adjustmentState.reason,
+            transactionAt: new Date(adjustmentState.transactionAt).toISOString(),
+            type: adjustmentState.type,
+            warehouseId: adjustmentState.warehouseId,
+          }),
       });
       setAdjustmentState(initialAdjustmentState);
     });
@@ -274,10 +276,17 @@ export default function InventoryStoresPage() {
       ) : null}
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <MetricTile icon={<Boxes className="h-5 w-5 text-orange" />} label="Current stock" value={String(metrics?.currentStockQuantity?.toFixed(3) ?? '0.000')} helper="Live on-hand quantity across stores" />
+        <MetricTile icon={<PackagePlus className="h-5 w-5 text-orange" />} label="Received today" value={String(metrics?.receivedTodayQuantity?.toFixed(3) ?? '0.000')} helper="Inbound stores receipts posted today" />
+        <MetricTile icon={<Factory className="h-5 w-5 text-orange" />} label="Moved to production" value={String(metrics?.movedToProductionTodayQuantity?.toFixed(3) ?? '0.000')} helper="Stock issued out of stores today" />
+        <MetricTile icon={<Undo2 className="h-5 w-5 text-orange" />} label="Returned from production" value={String(metrics?.returnedFromProductionTodayQuantity?.toFixed(3) ?? '0.000')} helper="Surplus posted back into stores today" />
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <MetricTile icon={<TriangleAlert className="h-5 w-5 text-warning" />} label="Damaged today" value={String(metrics?.damagedTodayQuantity?.toFixed(3) ?? '0.000')} helper="Stock deducted as damaged or waste" />
         <MetricTile icon={<ClipboardCheck className="h-5 w-5 text-orange" />} label="Pending approvals" value={String(metrics?.pendingApprovalsCount ?? 0)} helper="Transfers, returns, and adjustments waiting" />
         <MetricTile icon={<AlertTriangle className="h-5 w-5 text-warning" />} label="Low stock" value={String(metrics?.lowStockCount ?? 0)} helper="Immediate reorder watch" />
         <MetricTile icon={<Scale className="h-5 w-5 text-orange" />} label="Expiring soon" value={String(metrics?.expiringSoonCount ?? 0)} helper="Batch attention needed" />
-        <MetricTile icon={<Boxes className="h-5 w-5 text-orange" />} label="Supplier shortages" value={String(metrics?.supplierShortageCount ?? 0)} helper="Inbound gaps affecting stores" />
       </div>
 
       <div className="rounded-3xl border border-border bg-white p-5">
@@ -328,6 +337,12 @@ export default function InventoryStoresPage() {
               type="number"
               value={adjustmentState.quantity}
               onChange={(value) => setAdjustmentState((current) => ({ ...current, quantity: value }))}
+            />
+            <InputField
+              label="Date / Time"
+              type="datetime-local"
+              value={adjustmentState.transactionAt}
+              onChange={(value) => setAdjustmentState((current) => ({ ...current, transactionAt: value }))}
             />
             <TextAreaField
               label="Reason"
@@ -546,6 +561,102 @@ export default function InventoryStoresPage() {
           </form>
         </section>
       </div>
+
+      <section className="rounded-3xl border border-border bg-white p-5">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h2 className="text-lg font-semibold text-brown">Stock Balance By Item / Warehouse</h2>
+            <p className="mt-1 text-sm text-muted">
+              Focused stores view of the current balance, reorder point, and warehouse holding location.
+            </p>
+          </div>
+        </div>
+        <div className="mt-4 overflow-x-auto">
+          {metrics?.stockBalanceByWarehouse?.length ? (
+            <table className="min-w-full text-sm">
+              <thead>
+                <tr className="border-b border-border text-left text-xs uppercase tracking-[0.18em] text-muted">
+                  <th className="px-2 py-3 font-semibold">Item</th>
+                  <th className="px-2 py-3 font-semibold">Warehouse</th>
+                  <th className="px-2 py-3 font-semibold">On Hand</th>
+                  <th className="px-2 py-3 font-semibold">Available</th>
+                  <th className="px-2 py-3 font-semibold">Reorder</th>
+                  <th className="px-2 py-3 font-semibold">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {metrics.stockBalanceByWarehouse.map((row) => (
+                  <tr key={`${row.itemId}:${row.warehouseId}`} className="border-b border-border/60 last:border-b-0">
+                    <td className="px-2 py-3">
+                      <p className="font-medium text-brown">{row.itemCode} - {row.itemName}</p>
+                    </td>
+                    <td className="px-2 py-3">{row.warehouseName}</td>
+                    <td className="px-2 py-3">{row.quantityOnHand.toFixed(3)}</td>
+                    <td className="px-2 py-3">{row.availableQuantity.toFixed(3)}</td>
+                    <td className="px-2 py-3">{row.reorderLevel.toFixed(3)}</td>
+                    <td className={`px-2 py-3 font-medium ${row.isLowStock ? 'text-rose-700' : 'text-emerald-700'}`}>
+                      {row.isLowStock ? 'Low stock' : 'Healthy'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <EmptyState
+              icon={<Boxes className="h-6 w-6" />}
+              title="No store balances loaded"
+              description="Stock balances appear here once receiving, adjustments, or production postings are recorded."
+            />
+          )}
+        </div>
+      </section>
+
+      <section className="rounded-3xl border border-border bg-white p-5">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h2 className="text-lg font-semibold text-brown">Today&apos;s Stores Movement Trail</h2>
+            <p className="mt-1 text-sm text-muted">
+              Stores highlights inbound receipts, production issues, production returns, and damaged stock from the live movement ledger.
+            </p>
+          </div>
+        </div>
+        <div className="mt-4 space-y-3">
+          {metrics?.todaysMovements?.length ? (
+            metrics.todaysMovements.map((movement) => {
+              const tone =
+                movement.movementType === 'PRODUCTION_ISSUE'
+                  ? 'text-sky-700'
+                  : movement.movementType === 'PRODUCTION_RETURN'
+                    ? 'text-emerald-700'
+                    : ['DAMAGE', 'WASTAGE', 'DAMAGED_GOODS_TRANSFER', 'EXPIRY_WRITE_OFF'].includes(movement.movementType)
+                      ? 'text-rose-700'
+                      : 'text-brown';
+
+              return (
+                <div key={movement.id} className="surface-tile flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                  <div>
+                    <p className="font-medium text-brown">{movement.itemName}</p>
+                    <p className="text-sm text-muted">
+                      {movement.warehouseName}
+                      {movement.notes ? ` • ${movement.notes}` : ''}
+                    </p>
+                  </div>
+                  <div className={`flex items-center gap-3 text-sm font-semibold ${tone}`}>
+                    <span>{movement.movementType}</span>
+                    <span>{movement.quantity.toFixed(3)}</span>
+                  </div>
+                </div>
+              );
+            })
+          ) : (
+            <EmptyState
+              icon={<ClipboardCheck className="h-6 w-6" />}
+              title="No stores movements yet today"
+              description="Posted receipts, production issues, returns, and damages will appear here."
+            />
+          )}
+        </div>
+      </section>
     </div>
   );
 }

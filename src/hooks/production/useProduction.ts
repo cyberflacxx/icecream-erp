@@ -26,12 +26,23 @@ export interface ProductionDashboardResponse {
   };
   openBatches: Array<{
     batchNumber: string;
+    finishedAt: string | null;
     output: number;
     productionDate: string;
     productionLine: string;
+    runHours: number | null;
     shift: string;
+    startedAt: string | null;
     status: string;
   }>;
+  materialFlow: {
+    damagedToday: number;
+    consumed: number;
+    issued: number;
+    receivedIntoProductionToday: number;
+    returnedToStoresToday: number;
+    surplus: number;
+  };
   materialsAtRisk: Array<{
     item: string;
     warehouse: string;
@@ -43,6 +54,41 @@ export interface ProductionDashboardResponse {
     failed: number;
     pending: number;
   };
+  salesPlanning: {
+    bestSellingProducts: Array<{
+      currentStock: number;
+      itemId: string;
+      productCode: string | null;
+      productName: string;
+      quantitySoldLast7Days: number;
+      quantitySoldToday: number;
+      suggestedProductionQuantity: number;
+    }>;
+    demandSignals: Array<{
+      currentStock: number;
+      productCode: string | null;
+      productName: string;
+      quantitySoldLast7Days: number;
+      suggestedProductionQuantity: number;
+    }>;
+    last7DaysSalesByProduct: Array<{
+      productCode: string | null;
+      productName: string;
+      quantity: number;
+    }>;
+    todaySalesByProduct: Array<{
+      productCode: string | null;
+      productName: string;
+      quantity: number;
+    }>;
+  };
+  shiftSummary: Array<{
+    batches: number;
+    date: string;
+    output: number;
+    shift: string;
+    wastage: number;
+  }>;
 }
 
 export function useProductionDashboard() {

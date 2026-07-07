@@ -187,6 +187,7 @@ export async function recordStockMovement(
   service: ServiceClient,
   params: {
     batchNumber?: string | null;
+    createdAt?: string | null;
     createdBy: string;
     destinationWarehouseId?: string | null;
     itemId: string;
@@ -232,7 +233,11 @@ export async function recordStockMovement(
     destination_warehouse_id: params.destinationWarehouseId ?? null,
     notes: params.notes ?? null,
     created_by: params.createdBy,
+    created_at: params.createdAt ?? undefined,
   };
+  if (!params.createdAt) {
+    delete payload.created_at;
+  }
 
   for (let attempt = 0; attempt < OPTIONAL_STOCK_MOVEMENT_COLUMNS.size + 1; attempt += 1) {
     const { data, error } = await service
@@ -254,6 +259,31 @@ export async function recordStockMovement(
   }
 
   throw new Error('Failed to record stock movement.');
+}
+
+export async function writeInventoryAuditLog(
+  service: ServiceClient,
+  params: {
+    action: string;
+    details: Record<string, unknown>;
+    entityId: string;
+    entityType?: string;
+    userProfileId: string;
+  },
+) {
+  const { error } = await service
+    .from('audit_logs')
+    .insert({
+      action: params.action,
+      entity_id: params.entityId,
+      entity_type: params.entityType ?? 'inventory',
+      new_values: params.details,
+      user_profile_id: params.userProfileId,
+    });
+
+  if (error) {
+    throw new Error(error.message);
+  }
 }
 
 export async function verifyApprovedInvoice(
@@ -281,6 +311,7 @@ export async function verifyApprovedInvoice(
 export async function createInventoryAdjustmentRecord(
   service: ServiceClient,
   params: {
+    adjustmentDate?: string | null;
     createdBy: string;
     itemId: string;
     movementType: string;
@@ -317,7 +348,7 @@ export async function createInventoryAdjustmentRecord(
     .insert({
       adjustment_number: adjustmentNumber,
       warehouse_id: params.warehouseId,
-      adjustment_date: new Date().toISOString().slice(0, 10),
+      adjustment_date: (params.adjustmentDate ?? new Date().toISOString()).slice(0, 10),
       reason: params.reason,
       status: 'POSTED',
       created_by: params.createdBy,

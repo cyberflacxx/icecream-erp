@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
-import { deriveSupplierShortages, summarizeInventoryByType, toNumber } from '@/lib/inventory';
+import { deriveSupplierShortages, normalizeStockMovementType, summarizeInventoryByType, toNumber } from '@/lib/inventory';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
 function isMissingColumnError(error: unknown, table: string, columnName: string) {
@@ -25,6 +25,22 @@ function isMissingRelationError(error: unknown, relationName: string) {
     message.includes(`relation "${relationName}" does not exist`) ||
     message.includes(`Could not find the table 'icecream_erp.${relationName}'`)
   );
+}
+
+function isStoresInboundMovement(type: string) {
+  return ['PURCHASE_RECEIVE', 'PURCHASE_RECEIPT', 'TRANSFER_IN', 'WAREHOUSE_TRANSFER_IN', 'FINISHED_GOODS_RECEIPT'].includes(type);
+}
+
+function isProductionIssueMovement(type: string) {
+  return type === 'PRODUCTION_ISSUE';
+}
+
+function isProductionReturnMovement(type: string) {
+  return type === 'PRODUCTION_RETURN';
+}
+
+function isDamageMovement(type: string) {
+  return ['DAMAGE', 'WASTAGE', 'DAMAGED_GOODS_TRANSFER', 'EXPIRY_WRITE_OFF'].includes(type);
 }
 
 export async function GET(request: NextRequest) {
@@ -51,10 +67,14 @@ export async function GET(request: NextRequest) {
     ] = await Promise.all([
       service
         .from('stock_balances')
-        .select('quantity, items!item_id(type, standard_cost)'),
+        .select(
+          `item_id, warehouse_id, quantity, quantity_on_hand, quantity_available,
+           items!item_id(id, code, name, type, item_type, standard_cost, unit_cost, reorder_level),
+           warehouses!warehouse_id(id, code, name)`,
+        ),
       service
         .from('stock_balances')
-        .select('quantity_available, items!item_id(reorder_level)')
+        .select('quantity_available, quantity_on_hand, quantity, items!item_id(reorder_level)')
         .not('items.reorder_level', 'is', null),
       service
         .from('inventory_batches')
@@ -66,8 +86,8 @@ export async function GET(request: NextRequest) {
         .from('stock_movements')
         .select(
           `id, movement_type, quantity, created_at, reference_type, reference_id,
-           items!item_id(id, code, name),
-           warehouses!warehouse_id(id, name)`,
+           notes, items!item_id(id, code, name),
+           warehouses!warehouse_id(id, code, name)`,
         )
         .gte('created_at', today.toISOString())
         .lt('created_at', tomorrow.toISOString())
@@ -89,10 +109,16 @@ export async function GET(request: NextRequest) {
 
     const balancesFallbackNeeded = balancesResult.error && isMissingColumnError(balancesResult.error, 'items', 'item_type');
     const effectiveBalancesData = balancesFallbackNeeded
-      ? (await service.from('stock_balances').select('quantity, items!item_id(type, standard_cost)')).data
+      ? (await service
+          .from('stock_balances')
+          .select(
+            `item_id, warehouse_id, quantity, quantity_on_hand, quantity_available,
+             items!item_id(id, code, name, type, standard_cost, unit_cost, reorder_level),
+             warehouses!warehouse_id(id, code, name)`,
+          )).data
       : balancesResult.data;
     const lowStockData = lowStockResult.error && isMissingColumnError(lowStockResult.error, 'stock_balances', 'quantity_available')
-      ? (await service.from('stock_balances').select('quantity, items!item_id(reorder_level)').not('items.reorder_level', 'is', null)).data
+      ? (await service.from('stock_balances').select('quantity, quantity_on_hand, items!item_id(reorder_level)').not('items.reorder_level', 'is', null)).data
       : lowStockResult.data;
     if (
       balancesResult.error &&
@@ -126,24 +152,87 @@ export async function GET(request: NextRequest) {
     const todaysMovements = (movementsResult.data ?? []).map((movement) => {
       const item = Array.isArray(movement.items) ? movement.items[0] : movement.items;
       const warehouse = Array.isArray(movement.warehouses) ? movement.warehouses[0] : movement.warehouses;
+      const normalizedMovementType = normalizeStockMovementType(String(movement.movement_type ?? ''));
 
       return {
         id: movement.id,
         createdAt: movement.created_at,
         itemName: item?.name ?? 'Unknown item',
-        movementType: movement.movement_type,
+        movementType: normalizedMovementType,
+        notes: movement.notes ? String(movement.notes) : null,
         quantity: toNumber(movement.quantity),
         referenceId: movement.reference_id,
         referenceType: movement.reference_type,
+        warehouseCode: warehouse?.code ?? null,
         warehouseName: warehouse?.name ?? 'Unknown warehouse',
       };
     });
 
+    const storesSummary = todaysMovements.reduce(
+      (accumulator, movement) => {
+        if (isStoresInboundMovement(movement.movementType)) {
+          accumulator.receivedTodayQuantity += movement.quantity;
+        }
+        if (isProductionIssueMovement(movement.movementType)) {
+          accumulator.movedToProductionTodayQuantity += movement.quantity;
+        }
+        if (isProductionReturnMovement(movement.movementType)) {
+          accumulator.returnedFromProductionTodayQuantity += movement.quantity;
+        }
+        if (isDamageMovement(movement.movementType)) {
+          accumulator.damagedTodayQuantity += movement.quantity;
+        }
+        return accumulator;
+      },
+      {
+        damagedTodayQuantity: 0,
+        movedToProductionTodayQuantity: 0,
+        receivedTodayQuantity: 0,
+        returnedFromProductionTodayQuantity: 0,
+      },
+    );
+
+    const stockBalanceByWarehouse = ((effectiveBalancesData ?? []) as Array<Record<string, unknown>>)
+      .map((row) => {
+        const item = Array.isArray(row.items) ? row.items[0] : row.items;
+        const warehouse = Array.isArray(row.warehouses) ? row.warehouses[0] : row.warehouses;
+        const quantityOnHand = toNumber(row.quantity_on_hand ?? row.quantity);
+        const quantityAvailable = toNumber(row.quantity_available ?? quantityOnHand);
+        const reorderLevel = toNumber(item?.reorder_level);
+
+        return {
+          availableQuantity: quantityAvailable,
+          isLowStock: reorderLevel > 0 && quantityAvailable <= reorderLevel,
+          itemCode: item?.code ?? '',
+          itemId: row.item_id ? String(row.item_id) : '',
+          itemName: item?.name ?? 'Unknown item',
+          quantityOnHand,
+          reorderLevel,
+          warehouseCode: warehouse?.code ?? '',
+          warehouseId: row.warehouse_id ? String(row.warehouse_id) : '',
+          warehouseName: warehouse?.name ?? 'Unknown warehouse',
+        };
+      })
+      .sort((left, right) => {
+        if (left.isLowStock !== right.isLowStock) {
+          return left.isLowStock ? -1 : 1;
+        }
+        return right.quantityOnHand - left.quantityOnHand;
+      })
+      .slice(0, 12);
+
     return NextResponse.json({
       ...stockValueSummary,
+      currentStockQuantity: ((effectiveBalancesData ?? []) as Array<Record<string, unknown>>)
+        .reduce((sum, row) => sum + toNumber(row.quantity_on_hand ?? row.quantity), 0),
+      damagedTodayQuantity: storesSummary.damagedTodayQuantity,
       expiringSoonCount: expiringCount,
       lowStockCount,
+      movedToProductionTodayQuantity: storesSummary.movedToProductionTodayQuantity,
       pendingApprovalsCount: approvalsResult.count ?? 0,
+      receivedTodayQuantity: storesSummary.receivedTodayQuantity,
+      returnedFromProductionTodayQuantity: storesSummary.returnedFromProductionTodayQuantity,
+      stockBalanceByWarehouse,
       supplierShortageCount: shortages.length,
       todaysMovements,
     });

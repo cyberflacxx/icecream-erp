@@ -455,6 +455,7 @@ export const API_ROUTES = {
     SHIFT_TARGETS: '/api/production/shift-targets',
     TRANSFERS: '/api/production/transfers',
     RAW_MATERIAL_TRANSFERS: '/api/production/raw-material-transfers',
+    RETURNS_TO_STORES: '/api/production/returns-to-stores',
     WASTAGE: '/api/production/wastage',
     REPORT_PERFORMANCE: '/api/production/reports/performance',
     REPORT_BATCH_PERFORMANCE: '/api/production/reports/batch-performance',
