@@ -5,8 +5,10 @@ import { useMemo, useState } from 'react';
 
 import { PageHeader } from '@/components/dashboard/page-header';
 import { ProcurementNav } from '@/components/procurement/procurement-nav';
+import { Button } from '@/components/ui/button';
 import { DataTable, EmptyState, FilterBar } from '@/components/ui-library';
 import { useProcurementReport } from '@/hooks/procurement';
+import { downloadFromUrl } from '@/lib/export';
 import { API_ROUTES } from '@/lib/shared';
 
 const reportOptions = [
@@ -27,6 +29,7 @@ const reportPathByType: Record<string, string> = {
 
 export default function ProcurementReportsPage() {
   const [reportType, setReportType] = useState('purchase-orders');
+  const [isExporting, setIsExporting] = useState(false);
   const query = useProcurementReport<Record<string, unknown>>(reportPathByType[reportType]);
 
   const columns = useMemo(() => {
@@ -38,6 +41,18 @@ export default function ProcurementReportsPage() {
       render: (row: Record<string, unknown>) => String(row[key] ?? ''),
     }));
   }, [query.data?.data]);
+
+  async function handleExport() {
+    setIsExporting(true);
+
+    try {
+      await downloadFromUrl(API_ROUTES.PROCUREMENT.EXPORT(reportType), {
+        filename: `${reportType}-${new Date().toISOString().slice(0, 10)}.csv`,
+      });
+    } finally {
+      setIsExporting(false);
+    }
+  }
 
   return (
     <div className="space-y-6">
@@ -52,12 +67,9 @@ export default function ProcurementReportsPage() {
           filters={[{ key: 'reportType', label: 'Report', type: 'select', value: reportType, options: reportOptions }]}
           onFilterChange={(_, value) => setReportType(value)}
         />
-        <a
-          href={API_ROUTES.PROCUREMENT.EXPORT(reportType)}
-          className="inline-flex items-center justify-center rounded-2xl bg-brown px-4 py-3 text-sm font-medium text-white shadow-sm transition hover:bg-brown/90"
-        >
-          Export CSV
-        </a>
+        <Button type="button" onClick={handleExport} disabled={isExporting}>
+          {isExporting ? 'Exporting CSV...' : 'Export CSV'}
+        </Button>
       </div>
 
       <DataTable

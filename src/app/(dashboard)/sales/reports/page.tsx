@@ -1,19 +1,34 @@
 'use client';
 
 import { AlertCircle } from 'lucide-react';
+import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 
 import { PageHeader } from '@/components/dashboard/page-header';
 import { SalesNav } from '@/components/sales/sales-nav';
 import { useSalesReport } from '@/hooks/sales/useSalesReport';
+import { downloadFromUrl } from '@/lib/export';
 import { API_ROUTES } from '@/lib/shared';
 import { DataTable, EmptyState, LoadingState } from '@/components/ui-library';
 
 export default function SalesReportsPage() {
+  const [isExporting, setIsExporting] = useState(false);
   const query = useSalesReport(API_ROUTES.SALES.REPORT_INVOICE_AGEING);
   if (query.isLoading) return <LoadingState />;
   if (query.isError || !query.data) {
     return <EmptyState icon={<AlertCircle className="h-6 w-6" />} title="Reports unavailable" description={query.error?.message ?? 'No report data returned.'} />;
+  }
+
+  async function handleExport() {
+    setIsExporting(true);
+
+    try {
+      await downloadFromUrl(API_ROUTES.SALES.EXPORT('invoice-ageing'), {
+        filename: `sales-invoice-ageing-${new Date().toISOString().slice(0, 10)}.csv`,
+      });
+    } finally {
+      setIsExporting(false);
+    }
   }
 
   return (
@@ -23,9 +38,9 @@ export default function SalesReportsPage() {
         description="Review sales, ageing, credit, dispatch, returns, and journals from one reporting hub."
         status="partial"
         actions={
-          <a href={API_ROUTES.SALES.EXPORT('invoice-ageing')}>
-            <Button type="button" size="sm" variant="outline">Export CSV</Button>
-          </a>
+          <Button type="button" size="sm" variant="outline" onClick={handleExport} disabled={isExporting}>
+            {isExporting ? 'Exporting CSV...' : 'Export CSV'}
+          </Button>
         }
       />
       <SalesNav />

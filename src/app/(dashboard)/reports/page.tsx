@@ -44,6 +44,7 @@ import {
   useSavedReportFilters
 } from '@/hooks/reports/useReports';
 import { useUserContext } from '@/contexts/UserContext';
+import { downloadFromUrl } from '@/lib/export';
 
 const reportLabels: Record<ReportType, string> = {
   branch_sales: 'Branch Sales Report',
@@ -340,25 +341,15 @@ export default function ReportsPage() {
     setIsExportingCsv(true);
 
     try {
-      const response = await fetch(
+      await downloadFromUrl(
         `/api/reports/export/csv${buildReportQuery({
           ...filters,
           reportType: activeReportType
         })}`,
-        { credentials: 'include' },
+        {
+          filename: `${activeReportType}-${new Date().toISOString().slice(0, 10)}.csv`,
+        },
       );
-
-      if (!response.ok) {
-        throw new Error('Failed to export CSV.');
-      }
-
-      const blob = await response.blob();
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `${activeReportType}.csv`;
-      link.click();
-      URL.revokeObjectURL(url);
     } catch (error) {
       setToastMessage(error instanceof Error ? error.message : 'CSV export failed.');
     } finally {

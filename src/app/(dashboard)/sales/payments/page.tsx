@@ -11,6 +11,7 @@ import { type RecordPaymentResponse, useRecordPayment } from '@/hooks/sales/useR
 import { useSalesMeta } from '@/hooks/sales/useSalesMeta';
 import { useSalesPayments } from '@/hooks/sales/useSalesPayments';
 import { DataTable, EmptyState, FormDrawer, LoadingState } from '@/components/ui-library';
+import { downloadFromUrl } from '@/lib/export';
 import { buildSalesReceiptPrintUrl } from '@/lib/sales-payments';
 
 const initialPaymentForm = {
@@ -55,7 +56,7 @@ export default function SalesPaymentsPage() {
         referenceNumber: formState.referenceNumber || undefined,
       });
 
-      maybePrintReceipt(response);
+      await maybePrintReceipt(response);
       setFormState(initialPaymentForm);
       setFormError(null);
       setIsDrawerOpen(false);
@@ -66,7 +67,7 @@ export default function SalesPaymentsPage() {
     }
   }
 
-  function maybePrintReceipt(response: RecordPaymentResponse) {
+  async function maybePrintReceipt(response: RecordPaymentResponse) {
     if (submitMode !== 'print') return;
 
     const payment = response.payment;
@@ -83,8 +84,9 @@ export default function SalesPaymentsPage() {
       },
       { autoPrint: true },
     );
-
-    window.open(printUrl, '_blank', 'noopener,noreferrer');
+    await downloadFromUrl(printUrl, {
+      filename: `receipt-${String(payment.payment_number ?? 'pending')}.html`,
+    });
   }
 
   if (query.isLoading) return <LoadingState />;
@@ -247,7 +249,7 @@ export default function SalesPaymentsPage() {
               {recordPayment.isPending && submitMode === 'save' ? 'Saving...' : 'Save'}
             </Button>
             <Button type="submit" variant="secondary" disabled={recordPayment.isPending} onClick={() => setSubmitMode('print')}>
-              {recordPayment.isPending && submitMode === 'print' ? 'Saving & opening...' : 'Save & Print'}
+              {recordPayment.isPending && submitMode === 'print' ? 'Saving & downloading...' : 'Save & Download Receipt'}
             </Button>
           </div>
         </form>

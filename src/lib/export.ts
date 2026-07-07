@@ -5,6 +5,11 @@
 
 type Row = Record<string, string | number | boolean | null | undefined>;
 
+interface DownloadFromUrlOptions {
+  filename?: string;
+  init?: RequestInit;
+}
+
 function escapeCsv(value: string | number | boolean | null | undefined): string {
   if (value === null || value === undefined) return '';
   const str = String(value);
@@ -12,6 +17,82 @@ function escapeCsv(value: string | number | boolean | null | undefined): string 
     return `"${str.replace(/"/g, '""')}"`;
   }
   return str;
+}
+
+function sanitizeDownloadFilename(filename: string, fallback = 'download'): string {
+  const trimmed = filename.trim();
+  const cleaned = trimmed.replace(/[<>:"/\\|?*\u0000-\u001f]+/g, '-').replace(/\s+/g, ' ');
+  return cleaned || fallback;
+}
+
+function fallbackFilenameFromUrl(url: string): string {
+  try {
+    const parsed = new URL(url, window.location.origin);
+    const lastSegment = parsed.pathname.split('/').filter(Boolean).pop();
+    return sanitizeDownloadFilename(lastSegment ?? 'download');
+  } catch {
+    return 'download';
+  }
+}
+
+export function getFilenameFromContentDisposition(
+  contentDisposition: string | null | undefined,
+  fallback = 'download',
+): string {
+  if (!contentDisposition) return sanitizeDownloadFilename(fallback);
+
+  const utf8Match = contentDisposition.match(/filename\*=UTF-8''([^;]+)/i);
+  if (utf8Match?.[1]) {
+    try {
+      return sanitizeDownloadFilename(decodeURIComponent(utf8Match[1]));
+    } catch {
+      return sanitizeDownloadFilename(utf8Match[1], fallback);
+    }
+  }
+
+  const quotedMatch = contentDisposition.match(/filename="([^"]+)"/i);
+  if (quotedMatch?.[1]) {
+    return sanitizeDownloadFilename(quotedMatch[1], fallback);
+  }
+
+  const plainMatch = contentDisposition.match(/filename=([^;]+)/i);
+  if (plainMatch?.[1]) {
+    return sanitizeDownloadFilename(plainMatch[1].trim(), fallback);
+  }
+
+  return sanitizeDownloadFilename(fallback);
+}
+
+export function downloadBlob(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = sanitizeDownloadFilename(filename);
+  link.style.display = 'none';
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  window.setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
+export async function downloadFromUrl(url: string, options?: DownloadFromUrlOptions): Promise<string> {
+  const response = await fetch(url, {
+    credentials: 'include',
+    ...options?.init,
+  });
+
+  if (!response.ok) {
+    throw new Error(`Download failed with status ${response.status}.`);
+  }
+
+  const blob = await response.blob();
+  const filename = getFilenameFromContentDisposition(
+    response.headers.get('content-disposition'),
+    options?.filename ?? fallbackFilenameFromUrl(url),
+  );
+
+  downloadBlob(blob, filename);
+  return filename;
 }
 
 /**
@@ -30,15 +111,7 @@ export function exportToCsv(filename: string, rows: Row[], columns?: { key: stri
 
   const csvContent = csvLines.join('\n');
   const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-  const url = URL.createObjectURL(blob);
-
-  const link = document.createElement('a');
-  link.setAttribute('href', url);
-  link.setAttribute('download', `${filename}.csv`);
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(url);
+  downloadBlob(blob, `${filename}.csv`);
 }
 
 /**
@@ -47,15 +120,7 @@ export function exportToCsv(filename: string, rows: Row[], columns?: { key: stri
 export function exportToJson(filename: string, data: unknown): void {
   const json = JSON.stringify(data, null, 2);
   const blob = new Blob([json], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
-
-  const link = document.createElement('a');
-  link.setAttribute('href', url);
-  link.setAttribute('download', `${filename}.json`);
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(url);
+  downloadBlob(blob, `${filename}.json`);
 }
 
 /**

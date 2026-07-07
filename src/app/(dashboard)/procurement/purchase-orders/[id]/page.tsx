@@ -10,6 +10,7 @@ import { PageHeader } from '@/components/dashboard/page-header';
 import { ProcurementNav } from '@/components/procurement/procurement-nav';
 import { Button } from '@/components/ui/button';
 import { useProcurementMeta, useProcurementRequest, usePurchaseOrder } from '@/hooks/procurement';
+import { downloadFromUrl } from '@/lib/export';
 import { API_ROUTES, PERMISSIONS } from '@/lib/shared';
 import {
   formatPurchaseOrderStatusLabel,
@@ -173,6 +174,7 @@ export default function PurchaseOrderDetailPage({ params }: PurchaseOrderDetailP
   const order = orderQuery.data as PurchaseOrderDetail | undefined;
   const [feedback, setFeedback] = useState<FeedbackState | null>(null);
   const [pendingAction, setPendingAction] = useState<string | null>(null);
+  const [isDownloadingDocument, setIsDownloadingDocument] = useState(false);
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [formState, setFormState] = useState<EditFormState | null>(null);
@@ -290,6 +292,25 @@ export default function PurchaseOrderDetailPage({ params }: PurchaseOrderDetailP
       await refresh();
     } catch (error) {
       setFormError(error instanceof Error ? error.message : 'Failed to update purchase order draft.');
+    }
+  }
+
+  async function downloadPurchaseOrderDocument() {
+    setIsDownloadingDocument(true);
+    setFeedback(null);
+
+    try {
+      await downloadFromUrl(`/api/procurement/purchase-orders/${params.id}/pdf`, {
+        filename: `purchase-order-${order?.poNumber ?? params.id}.pdf`,
+      });
+      setFeedback({ message: 'Purchase order PDF downloaded.', tone: 'success' });
+    } catch (error) {
+      setFeedback({
+        message: error instanceof Error ? error.message : 'Failed to download purchase order PDF.',
+        tone: 'error',
+      });
+    } finally {
+      setIsDownloadingDocument(false);
     }
   }
 
@@ -422,11 +443,9 @@ export default function PurchaseOrderDetailPage({ params }: PurchaseOrderDetailP
             ) : null}
 
             {order ? (
-              <Button asChild size="sm" variant="outline">
-                <a href={`/api/procurement/purchase-orders/${params.id}/pdf`} target="_blank" rel="noreferrer">
-                  <Download className="mr-2 h-4 w-4" />
-                  Print / Save PO
-                </a>
+              <Button size="sm" variant="outline" disabled={isDownloadingDocument} onClick={downloadPurchaseOrderDocument}>
+                <Download className="mr-2 h-4 w-4" />
+                {isDownloadingDocument ? 'Downloading PO...' : 'Print / Save PO'}
               </Button>
             ) : null}
           </div>

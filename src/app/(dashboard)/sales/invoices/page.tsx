@@ -13,6 +13,7 @@ import { type InvoiceListItem, useInvoices } from '@/hooks/sales/useInvoices';
 import { type RecordPaymentResponse, useRecordPayment } from '@/hooks/sales/useRecordPayment';
 import { useSalesMeta } from '@/hooks/sales/useSalesMeta';
 import { useSalesRequest } from '@/hooks/sales/useSalesRequest';
+import { downloadFromUrl } from '@/lib/export';
 import { buildSalesReceiptPrintUrl } from '@/lib/sales-payments';
 import { API_ROUTES } from '@/lib/shared';
 
@@ -131,7 +132,7 @@ export default function InvoicesPage() {
         paymentMethod: receiptForm.paymentMethod,
         referenceNumber: receiptForm.referenceNumber || undefined,
       });
-      maybePrintReceipt(response);
+      await maybePrintReceipt(response);
       setReceiptForm(initialReceiptForm);
       setReceiptContext(null);
       setFormError(null);
@@ -154,7 +155,7 @@ export default function InvoicesPage() {
     .reduce((sum, row) => sum + row.balanceDue, 0);
   const collected = rows.reduce((sum, row) => sum + row.amountPaid, 0);
 
-  function maybePrintReceipt(response: RecordPaymentResponse) {
+  async function maybePrintReceipt(response: RecordPaymentResponse) {
     if (receiptSubmitMode !== 'print') return;
 
     const payment = response.payment;
@@ -171,8 +172,9 @@ export default function InvoicesPage() {
       },
       { autoPrint: true },
     );
-
-    window.open(printUrl, '_blank', 'noopener,noreferrer');
+    await downloadFromUrl(printUrl, {
+      filename: `receipt-${String(payment.payment_number ?? 'pending')}.html`,
+    });
   }
 
   return (
@@ -395,7 +397,7 @@ export default function InvoicesPage() {
               {recordPayment.isPending && receiptSubmitMode === 'save' ? 'Saving...' : 'Save'}
             </Button>
             <Button type="submit" variant="secondary" disabled={recordPayment.isPending} onClick={() => setReceiptSubmitMode('print')}>
-              {recordPayment.isPending && receiptSubmitMode === 'print' ? 'Saving & opening...' : 'Save & Print'}
+              {recordPayment.isPending && receiptSubmitMode === 'print' ? 'Saving & downloading...' : 'Save & Download Receipt'}
             </Button>
           </div>
         </form>

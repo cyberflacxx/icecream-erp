@@ -28,10 +28,11 @@ export async function GET(
     const { reportType } = await params;
     const rows = await fetchReport(request, reportType);
     const csv = buildReportCsv(rows);
+    const dateStamp = new Date().toISOString().slice(0, 10);
 
     return new NextResponse(csv, {
       headers: {
-        'Content-Disposition': `attachment; filename="production-${reportType}.csv"`,
+        'Content-Disposition': `attachment; filename="production-${reportType}-${dateStamp}.csv"`,
         'Content-Type': 'text/csv; charset=utf-8',
       },
     });

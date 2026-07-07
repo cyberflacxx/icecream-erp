@@ -54,9 +54,11 @@ export async function GET(
     return badRequest('Unsupported procurement export report.');
   }
 
+  const dateStamp = new Date().toISOString().slice(0, 10);
+
   return new NextResponse(toCsv(rows), {
     headers: {
-      'Content-Disposition': `attachment; filename="${reportType}.csv"`,
+      'Content-Disposition': `attachment; filename="${reportType}-${dateStamp}.csv"`,
       'Content-Type': 'text/csv; charset=utf-8',
     },
   });

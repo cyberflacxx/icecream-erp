@@ -1,12 +1,13 @@
 'use client';
 
 import { AlertCircle, BarChart3, Boxes, Factory, Percent } from 'lucide-react';
-import type { ReactNode } from 'react';
+import { type ReactNode, useState } from 'react';
 
 import { PageHeader } from '@/components/dashboard/page-header';
 import { ProductionNav } from '@/components/production/production-nav';
 import { Button } from '@/components/ui/button';
 import { useProductionReport } from '@/hooks/production/useProductionReport';
+import { downloadFromUrl } from '@/lib/export';
 import { API_ROUTES } from '@/lib/shared';
 import { DataTable, EmptyState, LoadingState } from '@/components/ui-library';
 
@@ -26,6 +27,7 @@ function formatCurrency(value: unknown) {
 }
 
 export default function ProductionReportsPage() {
+  const [exportingReport, setExportingReport] = useState<string | null>(null);
   const varianceQuery = useProductionReport(API_ROUTES.PRODUCTION.REPORT_VARIANCE);
   const consumptionQuery = useProductionReport(API_ROUTES.PRODUCTION.REPORT_MATERIAL_CONSUMPTION);
   const yieldQuery = useProductionReport(API_ROUTES.PRODUCTION.REPORT_YIELD);
@@ -51,6 +53,18 @@ export default function ProductionReportsPage() {
   const yieldRows = asRows(yieldQuery.data);
   const costingRows = asRows(costingQuery.data);
 
+  async function handleExport(reportType: string) {
+    setExportingReport(reportType);
+
+    try {
+      await downloadFromUrl(API_ROUTES.PRODUCTION.EXPORT(reportType), {
+        filename: `production-${reportType}-${new Date().toISOString().slice(0, 10)}.csv`,
+      });
+    } finally {
+      setExportingReport(null);
+    }
+  }
+
   return (
     <div className="space-y-8">
       <PageHeader
@@ -58,18 +72,24 @@ export default function ProductionReportsPage() {
         description="Review material usage, output variance, yield, and costing together so production decisions are grounded in one place."
         actions={
           <div className="flex flex-wrap gap-2">
-            <a href={API_ROUTES.PRODUCTION.EXPORT('variance')}>
-              <Button type="button" size="sm" variant="outline">Variance CSV</Button>
-            </a>
-            <a href={API_ROUTES.PRODUCTION.EXPORT('material-consumption')}>
-              <Button type="button" size="sm" variant="outline">Materials CSV</Button>
-            </a>
-            <a href={API_ROUTES.PRODUCTION.EXPORT('yield')}>
-              <Button type="button" size="sm" variant="outline">Yield CSV</Button>
-            </a>
-            <a href={API_ROUTES.PRODUCTION.EXPORT('costing')}>
-              <Button type="button" size="sm" variant="outline">Costing CSV</Button>
-            </a>
+            <Button type="button" size="sm" variant="outline" onClick={() => handleExport('variance')} disabled={exportingReport === 'variance'}>
+              {exportingReport === 'variance' ? 'Exporting...' : 'Variance CSV'}
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => handleExport('material-consumption')}
+              disabled={exportingReport === 'material-consumption'}
+            >
+              {exportingReport === 'material-consumption' ? 'Exporting...' : 'Materials CSV'}
+            </Button>
+            <Button type="button" size="sm" variant="outline" onClick={() => handleExport('yield')} disabled={exportingReport === 'yield'}>
+              {exportingReport === 'yield' ? 'Exporting...' : 'Yield CSV'}
+            </Button>
+            <Button type="button" size="sm" variant="outline" onClick={() => handleExport('costing')} disabled={exportingReport === 'costing'}>
+              {exportingReport === 'costing' ? 'Exporting...' : 'Costing CSV'}
+            </Button>
           </div>
         }
       />

@@ -5,8 +5,10 @@ import { useMemo, useState } from 'react';
 
 import { PageHeader } from '@/components/dashboard/page-header';
 import { InventoryNav } from '@/components/inventory/inventory-nav';
+import { Button } from '@/components/ui/button';
 import { DataTable, EmptyState, FilterBar } from '@/components/ui-library';
 import { useInventoryReport } from '@/hooks/inventory';
+import { downloadFromUrl } from '@/lib/export';
 import { API_ROUTES } from '@/lib/shared';
 
 const reportOptions = [
@@ -29,6 +31,7 @@ export default function InventoryReportsPage() {
   const [reportType, setReportType] = useState('stock-movement');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
+  const [isExporting, setIsExporting] = useState(false);
 
   const query = useInventoryReport<Record<string, unknown>>(reportPathByType[reportType], {
     endDate: endDate || undefined,
@@ -45,6 +48,27 @@ export default function InventoryReportsPage() {
       render: (row: Record<string, unknown>) => String(row[key] ?? ''),
     }));
   }, [query.data?.data]);
+
+  const exportUrl = `${API_ROUTES.INVENTORY.EXPORT(reportType)}${
+    startDate || endDate
+      ? `?${new URLSearchParams({
+          ...(startDate ? { startDate } : {}),
+          ...(endDate ? { endDate } : {}),
+        }).toString()}`
+      : ''
+  }`;
+
+  async function handleExport() {
+    setIsExporting(true);
+
+    try {
+      await downloadFromUrl(exportUrl, {
+        filename: `inventory-${reportType}-${new Date().toISOString().slice(0, 10)}.csv`,
+      });
+    } finally {
+      setIsExporting(false);
+    }
+  }
 
   return (
     <div className="space-y-6">
@@ -87,12 +111,9 @@ export default function InventoryReportsPage() {
           />
         </div>
 
-        <a
-          href={`${API_ROUTES.INVENTORY.EXPORT(reportType)}${startDate || endDate ? `?${new URLSearchParams({ ...(startDate ? { startDate } : {}), ...(endDate ? { endDate } : {}) }).toString()}` : ''}`}
-          className="inline-flex items-center justify-center rounded-2xl bg-brown px-4 py-3 text-sm font-medium text-white shadow-sm transition hover:bg-brown/90"
-        >
-          Export CSV
-        </a>
+        <Button type="button" onClick={handleExport} disabled={isExporting}>
+          {isExporting ? 'Exporting CSV...' : 'Export CSV'}
+        </Button>
       </div>
 
       <DataTable
