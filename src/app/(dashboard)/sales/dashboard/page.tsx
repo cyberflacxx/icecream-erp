@@ -5,12 +5,23 @@ import { AlertCircle, ReceiptText, ShieldAlert, Truck, WalletCards, Warehouse } 
 import { PageHeader } from '@/components/dashboard/page-header';
 import { SalesNav } from '@/components/sales/sales-nav';
 import { useSalesDashboard } from '@/hooks/sales/useSalesDashboard';
+import { useAppAuth } from '@/hooks/useAppAuth';
 import { EmptyState, LoadingState, StatCard } from '@/components/ui-library';
 
 export default function SalesDashboardPage() {
+  const { isLoaded, isSignedIn } = useAppAuth();
   const query = useSalesDashboard();
 
-  if (query.isLoading) return <LoadingState />;
+  if (!isLoaded || (isSignedIn && query.isPending && !query.data)) return <LoadingState />;
+  if (!isSignedIn) {
+    return (
+      <EmptyState
+        icon={<AlertCircle className="h-6 w-6" />}
+        title="Sign in required"
+        description="Sign in to view the sales dashboard."
+      />
+    );
+  }
   if (query.isError || !query.data) {
     return <EmptyState icon={<AlertCircle className="h-6 w-6" />} title="Sales dashboard unavailable" description={query.error?.message ?? 'No sales dashboard data returned.'} />;
   }

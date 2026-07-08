@@ -28,6 +28,7 @@ import { ChartCard, DataTable, EmptyState, LoadingState, StatCard } from '@/comp
 import { PageHeader } from '@/components/dashboard/page-header';
 import { FinanceNav } from '@/components/finance/finance-nav';
 import { useFinanceDashboard } from '@/hooks/finance/useFinance';
+import { useAppAuth } from '@/hooks/useAppAuth';
 
 function formatCurrency(value: number) {
   return value.toLocaleString(undefined, {
@@ -36,10 +37,21 @@ function formatCurrency(value: number) {
 }
 
 export default function FinancePage() {
+  const { isLoaded, isSignedIn } = useAppAuth();
   const dashboardQuery = useFinanceDashboard();
 
-  if (dashboardQuery.isLoading) {
+  if (!isLoaded || (isSignedIn && dashboardQuery.isPending && !dashboardQuery.data)) {
     return <LoadingState />;
+  }
+
+  if (!isSignedIn) {
+    return (
+      <EmptyState
+        icon={<AlertCircle className="h-6 w-6" />}
+        title="Sign in required"
+        description="Sign in to view the finance dashboard."
+      />
+    );
   }
 
   if (dashboardQuery.isError || !dashboardQuery.data) {

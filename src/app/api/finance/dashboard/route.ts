@@ -8,17 +8,12 @@ import {
   calculateProductionCostSummary,
   summarizeProfitAndLossFromLedger,
 } from '@/lib/finance';
-import { financeErrorMessage, isMissingFinanceTable, loadLedgerLines } from '@/lib/finance-server';
-
-function isMissingColumnError(error: unknown, table: string, columnName: string) {
-  const message =
-    error instanceof Error
-      ? error.message
-      : typeof error === 'object' && error !== null && 'message' in error
-        ? String((error as { message?: unknown }).message ?? '')
-        : '';
-  return message.includes(`column ${table}.${columnName} does not exist`);
-}
+import {
+  financeErrorMessage,
+  isMissingFinanceColumn,
+  isMissingFinanceTable,
+  loadLedgerLines,
+} from '@/lib/finance-server';
 
 async function queryWithoutDeletedAt<T>(primary: PromiseLike<{ data: T[] | null; error: { message: string } | null }>, fallback: () => PromiseLike<{ data: T[] | null; error: { message: string } | null }>) {
   const result = await primary;
@@ -179,17 +174,47 @@ export async function GET(request: NextRequest) {
           .is('deleted_at', null),
           () => service.schema('icecream_erp').from('branch_sales').select('sale_date, total_amount'),
         )),
-        optionalQuery(queryWithoutDeletedAt(
-          service
-          .schema('icecream_erp')
-          .from('production_batches')
-          .select('material_cost, labour_cost, overhead_cost, actual_output_quantity, total_material_cost, total_labour_cost, total_overhead_cost, actual_qty')
-          .is('deleted_at', null),
-          () => service
+        (async () => {
+          const primary = await service
             .schema('icecream_erp')
             .from('production_batches')
-            .select('total_material_cost, total_labour_cost, total_overhead_cost, actual_qty'),
-        )),
+            .select('material_cost, labour_cost, overhead_cost, actual_output_quantity, total_material_cost, total_labour_cost, total_overhead_cost, actual_qty')
+            .is('deleted_at', null);
+
+          if (!primary.error) {
+            return primary.data ?? [];
+          }
+
+          const compatibleLegacy =
+            isMissingFinanceTable(primary.error) ||
+            isMissingFinanceColumn(primary.error, 'production_batches', 'deleted_at') ||
+            isMissingFinanceColumn(primary.error, 'production_batches', 'material_cost') ||
+            isMissingFinanceColumn(primary.error, 'production_batches', 'labour_cost') ||
+            isMissingFinanceColumn(primary.error, 'production_batches', 'overhead_cost') ||
+            isMissingFinanceColumn(primary.error, 'production_batches', 'actual_output_quantity') ||
+            isMissingFinanceColumn(primary.error, 'production_batches', 'total_material_cost') ||
+            isMissingFinanceColumn(primary.error, 'production_batches', 'total_labour_cost') ||
+            isMissingFinanceColumn(primary.error, 'production_batches', 'total_overhead_cost') ||
+            isMissingFinanceColumn(primary.error, 'production_batches', 'actual_qty');
+
+          if (!compatibleLegacy) {
+            throw primary.error;
+          }
+
+          const fallback = await service
+            .schema('icecream_erp')
+            .from('production_batches')
+            .select('material_cost, labour_cost, overhead_cost, total_material_cost, total_labour_cost, total_overhead_cost, actual_qty');
+
+          if (fallback.error) {
+            if (isMissingFinanceTable(fallback.error)) {
+              return [] as Array<Record<string, unknown>>;
+            }
+            throw fallback.error;
+          }
+
+          return fallback.data ?? [];
+        })(),
         loadLedgerLines(ctx.organizationId),
       ]);
 
