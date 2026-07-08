@@ -33,6 +33,9 @@ type NotificationContext = {
 
 type NotificationRecord = Record<string, unknown>;
 
+const NOTIFICATION_SETTINGS_CHANNELS = ['IN_APP', 'EMAIL', 'SMS', 'WHATSAPP'] as const;
+const NOTIFICATION_SETTINGS_SEVERITIES = ['INFO', 'LOW', 'MEDIUM', 'HIGH', 'CRITICAL'] as const;
+
 export function notificationService() {
   return createServiceRoleClient().schema('icecream_erp');
 }
@@ -41,6 +44,68 @@ function isMissingNotificationSchema(error: unknown, table: string, columns: str
   return (
     isMissingTableError(error, table) ||
     columns.some((column) => isMissingColumnError(error, table, column))
+  );
+}
+
+function buildNotificationSettingsFallback() {
+  return {
+    channels: [...NOTIFICATION_SETTINGS_CHANNELS],
+    severities: [...NOTIFICATION_SETTINGS_SEVERITIES],
+    rules: [] as NotificationRecord[],
+    templates: [] as NotificationRecord[],
+    preferences: [] as NotificationRecord[],
+    escalationRules: [] as NotificationRecord[],
+    reminderRules: [] as NotificationRecord[],
+  };
+}
+
+function buildNotificationAlertDashboardFallback() {
+  return {
+    stats: {
+      criticalAlerts: 0,
+      highAlerts: 0,
+      pendingApprovals: 0,
+      lowStockAlerts: 0,
+      overdueInvoices: 0,
+      supplierShortages: 0,
+      qcFailures: 0,
+      branchVariances: 0,
+      securityAlerts: 0,
+    },
+    criticalAlerts: [] as NotificationRecord[],
+    lowStockAlerts: [] as NotificationRecord[],
+    pendingApprovals: [] as NotificationRecord[],
+    overdueInvoices: [] as NotificationRecord[],
+    supplierShortages: [] as NotificationRecord[],
+    qcFailures: [] as NotificationRecord[],
+    branchVariances: [] as NotificationRecord[],
+    securityAlerts: [] as NotificationRecord[],
+  };
+}
+
+function isNotificationSettingsCompatibilityError(error: unknown) {
+  return (
+    isMissingNotificationSchema(error, 'notification_rules') ||
+    isMissingNotificationSchema(error, 'notification_templates') ||
+    isMissingNotificationSchema(error, 'notification_preferences') ||
+    isMissingNotificationSchema(error, 'escalation_rules') ||
+    isMissingNotificationSchema(error, 'reminder_rules')
+  );
+}
+
+function isNotificationAlertDashboardCompatibilityError(error: unknown) {
+  return (
+    isNotificationSettingsCompatibilityError(error) ||
+    isMissingNotificationSchema(error, 'notifications') ||
+    isMissingNotificationSchema(error, 'stock_balances', ['quantity_on_hand']) ||
+    isMissingRelationshipError(error, 'stock_balances', 'items') ||
+    isMissingNotificationSchema(error, 'supplier_shortages') ||
+    isMissingNotificationSchema(error, 'approval_requests') ||
+    isMissingNotificationSchema(error, 'invoices', ['balance_due']) ||
+    isMissingRelationshipError(error, 'invoices', 'customers') ||
+    isMissingNotificationSchema(error, 'quality_inspections') ||
+    isMissingNotificationSchema(error, 'branch_shift_closes', ['cash_variance', 'stock_variance']) ||
+    isMissingNotificationSchema(error, 'security_events')
   );
 }
 
@@ -662,22 +727,29 @@ export async function listNotificationDeliveryLogs(organizationId: string) {
 }
 
 export async function getNotificationSettings(ctx: NotificationContext) {
-  const [rules, templates, preferences, escalationRules, reminderRules] = await Promise.all([
-    listNotificationRules(ctx.organizationId),
-    listNotificationTemplates(ctx.organizationId),
-    listNotificationPreferences(ctx),
-    listEscalationRules(ctx.organizationId),
-    listReminderRules(ctx.organizationId),
-  ]);
-  return {
-    channels: ['IN_APP', 'EMAIL', 'SMS', 'WHATSAPP'],
-    severities: ['INFO', 'LOW', 'MEDIUM', 'HIGH', 'CRITICAL'],
-    rules,
-    templates,
-    preferences,
-    escalationRules,
-    reminderRules,
-  };
+  try {
+    const [rules, templates, preferences, escalationRules, reminderRules] = await Promise.all([
+      listNotificationRules(ctx.organizationId),
+      listNotificationTemplates(ctx.organizationId),
+      listNotificationPreferences(ctx),
+      listEscalationRules(ctx.organizationId),
+      listReminderRules(ctx.organizationId),
+    ]);
+    return {
+      channels: [...NOTIFICATION_SETTINGS_CHANNELS],
+      severities: [...NOTIFICATION_SETTINGS_SEVERITIES],
+      rules,
+      templates,
+      preferences,
+      escalationRules,
+      reminderRules,
+    };
+  } catch (error) {
+    if (isNotificationSettingsCompatibilityError(error)) {
+      return buildNotificationSettingsFallback();
+    }
+    throw error;
+  }
 }
 
 export async function emitNotificationEvent(input: {
@@ -709,9 +781,11 @@ export async function emitNotificationEvent(input: {
     .eq('module_name', moduleName)
     .eq('event_type', eventType)
     .eq('is_active', true);
-  if (ruleError) throw ruleError;
+  if (ruleError && !isMissingNotificationSchema(ruleError, 'notification_rules')) {
+    throw ruleError;
+  }
 
-  const activeRules = (rules ?? []) as NotificationRecord[];
+  const activeRules = (isMissingNotificationSchema(ruleError, 'notification_rules') ? [] : (rules ?? [])) as NotificationRecord[];
   const roleNames = [
     ...new Set([
       ...(input.recipientRoleNames ?? []),
@@ -788,10 +862,15 @@ export async function emitNotificationEvent(input: {
       sent_by: input.actorUserId ?? null,
     };
     const { data: notification, error: notificationError } = await service.from('notifications').insert(notificationPayload).select('*').single();
-    if (notificationError) throw notificationError;
+    if (notificationError) {
+      if (isMissingNotificationSchema(notificationError, 'notifications')) {
+        return { created: 0, notificationIds: [] as string[] };
+      }
+      throw notificationError;
+    }
     createdIds.push(String((notification as NotificationRecord).id));
 
-    await service.from('notification_delivery_logs').insert({
+    const deliveryLogResult = await service.from('notification_delivery_logs').insert({
       organization_id: input.organizationId,
       notification_id: (notification as NotificationRecord).id,
       recipient_user_id: userId,
@@ -801,8 +880,11 @@ export async function emitNotificationEvent(input: {
       failure_reason: fallbackChannel === 'IN_APP' ? null : `${fallbackChannel} delivery is not configured in this environment.`,
       payload: input.metadata ?? {},
     });
+    if (deliveryLogResult.error && !isMissingNotificationSchema(deliveryLogResult.error, 'notification_delivery_logs')) {
+      throw deliveryLogResult.error;
+    }
 
-    await service.from('communication_audit_logs').insert({
+    const communicationAuditResult = await service.from('communication_audit_logs').insert({
       organization_id: input.organizationId,
       notification_id: (notification as NotificationRecord).id,
       channel: fallbackChannel,
@@ -811,6 +893,9 @@ export async function emitNotificationEvent(input: {
       payload: input.metadata ?? {},
       created_by: input.actorUserId ?? null,
     });
+    if (communicationAuditResult.error && !isMissingNotificationSchema(communicationAuditResult.error, 'communication_audit_logs')) {
+      throw communicationAuditResult.error;
+    }
   }
 
   const escalationRules = await listEscalationRules(input.organizationId);
@@ -825,7 +910,7 @@ export async function emitNotificationEvent(input: {
     });
     for (const notificationId of createdIds) {
       for (const userId of recipients) {
-        await service.from('escalation_logs').insert({
+        const escalationLogResult = await service.from('escalation_logs').insert({
           organization_id: input.organizationId,
           notification_id: notificationId,
           escalation_rule_id: (rule as NotificationRecord).id,
@@ -835,6 +920,9 @@ export async function emitNotificationEvent(input: {
             delayMinutes: Number((rule as NotificationRecord).escalation_delay_minutes ?? 0),
           },
         });
+        if (escalationLogResult.error && !isMissingNotificationSchema(escalationLogResult.error, 'escalation_logs')) {
+          throw escalationLogResult.error;
+        }
       }
     }
   }
@@ -843,145 +931,152 @@ export async function emitNotificationEvent(input: {
 }
 
 export async function getNotificationAlertDashboard(ctx: NotificationContext) {
-  const service = notificationService();
-  const today = new Date().toISOString().slice(0, 10);
-  const [stockBalances, shortages, approvals, invoices, inspections, shifts, securityEvents] = await Promise.all([
-    optionalNotificationRows(
-      async () =>
-        service
-          .from('stock_balances')
-          .select('id, quantity_on_hand, warehouse_id, items(name, code, reorder_level)')
-          .eq('organization_id', ctx.organizationId),
-      {
-        table: 'stock_balances',
-        columns: ['quantity_on_hand'],
-        relationshipTargets: ['items'],
-      },
-    ),
-    optionalNotificationRows(
-      async () =>
-        service
-          .from('supplier_shortages')
-          .select('*')
-          .eq('organization_id', ctx.organizationId)
-          .order('created_at', { ascending: false })
-          .limit(20),
-      { table: 'supplier_shortages' },
-    ),
-    optionalNotificationRows(
-      async () =>
-        service
-          .from('approval_requests')
-          .select('id, module_name, document_type, document_reference, status, requested_at')
-          .eq('organization_id', ctx.organizationId)
-          .eq('status', 'PENDING'),
-      { table: 'approval_requests' },
-    ),
-    optionalNotificationRows(
-      async () =>
-        service
-          .from('invoices')
-          .select('id, invoice_number, due_date, balance_due, status, customers(name)')
-          .eq('organization_id', ctx.organizationId)
-          .gt('balance_due', 0)
-          .order('due_date', { ascending: true })
-          .limit(20),
-      {
-        table: 'invoices',
-        columns: ['balance_due'],
-        relationshipTargets: ['customers'],
-      },
-    ),
-    optionalNotificationRows(
-      async () =>
-        service
-          .from('quality_inspections')
-          .select('id, inspection_number, qc_status, inspection_type, inspection_date')
-          .eq('organization_id', ctx.organizationId)
-          .order('inspection_date', { ascending: false })
-          .limit(20),
-      { table: 'quality_inspections' },
-    ),
-    optionalNotificationRows(
-      async () =>
-        service
-          .from('branch_shift_closes')
-          .select('id, branch_id, shift_date, cash_variance, stock_variance, status')
-          .eq('organization_id', ctx.organizationId)
-          .order('shift_date', { ascending: false })
-          .limit(20),
-      {
-        table: 'branch_shift_closes',
-        columns: ['cash_variance', 'stock_variance'],
-      },
-    ),
-    optionalNotificationRows(
-      async () =>
-        service
-          .from('security_events')
-          .select('id, event_type, status, details, created_at')
-          .eq('organization_id', ctx.organizationId)
-          .order('created_at', { ascending: false })
-          .limit(20),
-      { table: 'security_events' },
-    ),
-  ]);
+  try {
+    const service = notificationService();
+    const today = new Date().toISOString().slice(0, 10);
+    const [stockBalances, shortages, approvals, invoices, inspections, shifts, securityEvents] = await Promise.all([
+      optionalNotificationRows(
+        async () =>
+          service
+            .from('stock_balances')
+            .select('id, quantity_on_hand, warehouse_id, items(name, code, reorder_level)')
+            .eq('organization_id', ctx.organizationId),
+        {
+          table: 'stock_balances',
+          columns: ['quantity_on_hand'],
+          relationshipTargets: ['items'],
+        },
+      ),
+      optionalNotificationRows(
+        async () =>
+          service
+            .from('supplier_shortages')
+            .select('*')
+            .eq('organization_id', ctx.organizationId)
+            .order('created_at', { ascending: false })
+            .limit(20),
+        { table: 'supplier_shortages' },
+      ),
+      optionalNotificationRows(
+        async () =>
+          service
+            .from('approval_requests')
+            .select('id, module_name, document_type, document_reference, status, requested_at')
+            .eq('organization_id', ctx.organizationId)
+            .eq('status', 'PENDING'),
+        { table: 'approval_requests' },
+      ),
+      optionalNotificationRows(
+        async () =>
+          service
+            .from('invoices')
+            .select('id, invoice_number, due_date, balance_due, status, customers(name)')
+            .eq('organization_id', ctx.organizationId)
+            .gt('balance_due', 0)
+            .order('due_date', { ascending: true })
+            .limit(20),
+        {
+          table: 'invoices',
+          columns: ['balance_due'],
+          relationshipTargets: ['customers'],
+        },
+      ),
+      optionalNotificationRows(
+        async () =>
+          service
+            .from('quality_inspections')
+            .select('id, inspection_number, qc_status, inspection_type, inspection_date')
+            .eq('organization_id', ctx.organizationId)
+            .order('inspection_date', { ascending: false })
+            .limit(20),
+        { table: 'quality_inspections' },
+      ),
+      optionalNotificationRows(
+        async () =>
+          service
+            .from('branch_shift_closes')
+            .select('id, branch_id, shift_date, cash_variance, stock_variance, status')
+            .eq('organization_id', ctx.organizationId)
+            .order('shift_date', { ascending: false })
+            .limit(20),
+        {
+          table: 'branch_shift_closes',
+          columns: ['cash_variance', 'stock_variance'],
+        },
+      ),
+      optionalNotificationRows(
+        async () =>
+          service
+            .from('security_events')
+            .select('id, event_type, status, details, created_at')
+            .eq('organization_id', ctx.organizationId)
+            .order('created_at', { ascending: false })
+            .limit(20),
+        { table: 'security_events' },
+      ),
+    ]);
 
-  const lowStockAlerts = stockBalances.filter((row) => {
-    const itemValue = (row as NotificationRecord).items;
-    const item = Array.isArray(itemValue) ? itemValue[0] : itemValue;
-    return Number((item as NotificationRecord | null)?.reorder_level ?? 0) > 0 && Number((row as NotificationRecord).quantity_on_hand ?? 0) <= Number((item as NotificationRecord | null)?.reorder_level ?? 0);
-  });
-  const overdueInvoices = invoices.filter((row) => String((row as NotificationRecord).due_date ?? '').slice(0, 10) < today);
-  const qcFailures = inspections.filter((row) => ['FAILED', 'REJECTED'].includes(String((row as NotificationRecord).qc_status ?? '').toUpperCase()));
-  const branchVariances = shifts.filter((row) => Math.abs(Number((row as NotificationRecord).cash_variance ?? 0)) > 0.01 || Math.abs(Number((row as NotificationRecord).stock_variance ?? 0)) > 0.01);
-  const criticalNotifications = await listNotifications({
-    ctx,
-    filters: {
-      limit: 10,
-      page: 1,
-      pageSize: 10,
-      severity: 'CRITICAL',
-    },
-  });
-
-  return {
-    stats: {
-      criticalAlerts: criticalNotifications.data.length,
-      highAlerts: (await listNotifications({ ctx, filters: { limit: 20, severity: 'HIGH' } })).data.length,
-      pendingApprovals: approvals.length,
-      lowStockAlerts: lowStockAlerts.length,
-      overdueInvoices: overdueInvoices.length,
-      supplierShortages: shortages.length,
-      qcFailures: qcFailures.length,
-      branchVariances: branchVariances.length,
-      securityAlerts: securityEvents.filter((row) => ['LOGIN_FAILED', 'ACCOUNT_LOCKED', 'UNAUTHORIZED_ACCESS_ATTEMPT'].includes(String((row as NotificationRecord).event_type ?? ''))).length,
-    },
-    criticalAlerts: criticalNotifications.data,
-    lowStockAlerts: lowStockAlerts.slice(0, 10).map((row) => {
+    const lowStockAlerts = stockBalances.filter((row) => {
       const itemValue = (row as NotificationRecord).items;
       const item = Array.isArray(itemValue) ? itemValue[0] : itemValue;
-      return {
+      return Number((item as NotificationRecord | null)?.reorder_level ?? 0) > 0 && Number((row as NotificationRecord).quantity_on_hand ?? 0) <= Number((item as NotificationRecord | null)?.reorder_level ?? 0);
+    });
+    const overdueInvoices = invoices.filter((row) => String((row as NotificationRecord).due_date ?? '').slice(0, 10) < today);
+    const qcFailures = inspections.filter((row) => ['FAILED', 'REJECTED'].includes(String((row as NotificationRecord).qc_status ?? '').toUpperCase()));
+    const branchVariances = shifts.filter((row) => Math.abs(Number((row as NotificationRecord).cash_variance ?? 0)) > 0.01 || Math.abs(Number((row as NotificationRecord).stock_variance ?? 0)) > 0.01);
+    const criticalNotifications = await listNotifications({
+      ctx,
+      filters: {
+        limit: 10,
+        page: 1,
+        pageSize: 10,
+        severity: 'CRITICAL',
+      },
+    });
+
+    return {
+      stats: {
+        criticalAlerts: criticalNotifications.data.length,
+        highAlerts: (await listNotifications({ ctx, filters: { limit: 20, severity: 'HIGH' } })).data.length,
+        pendingApprovals: approvals.length,
+        lowStockAlerts: lowStockAlerts.length,
+        overdueInvoices: overdueInvoices.length,
+        supplierShortages: shortages.length,
+        qcFailures: qcFailures.length,
+        branchVariances: branchVariances.length,
+        securityAlerts: securityEvents.filter((row) => ['LOGIN_FAILED', 'ACCOUNT_LOCKED', 'UNAUTHORIZED_ACCESS_ATTEMPT'].includes(String((row as NotificationRecord).event_type ?? ''))).length,
+      },
+      criticalAlerts: criticalNotifications.data,
+      lowStockAlerts: lowStockAlerts.slice(0, 10).map((row) => {
+        const itemValue = (row as NotificationRecord).items;
+        const item = Array.isArray(itemValue) ? itemValue[0] : itemValue;
+        return {
+          id: String((row as NotificationRecord).id ?? ''),
+          code: String((item as NotificationRecord | null)?.code ?? ''),
+          itemName: String((item as NotificationRecord | null)?.name ?? ''),
+          quantityOnHand: Number((row as NotificationRecord).quantity_on_hand ?? 0),
+          reorderLevel: Number((item as NotificationRecord | null)?.reorder_level ?? 0),
+        };
+      }),
+      pendingApprovals: approvals,
+      overdueInvoices: overdueInvoices.map((row) => ({
         id: String((row as NotificationRecord).id ?? ''),
-        code: String((item as NotificationRecord | null)?.code ?? ''),
-        itemName: String((item as NotificationRecord | null)?.name ?? ''),
-        quantityOnHand: Number((row as NotificationRecord).quantity_on_hand ?? 0),
-        reorderLevel: Number((item as NotificationRecord | null)?.reorder_level ?? 0),
-      };
-    }),
-    pendingApprovals: approvals,
-    overdueInvoices: overdueInvoices.map((row) => ({
-      id: String((row as NotificationRecord).id ?? ''),
-      invoiceNumber: String((row as NotificationRecord).invoice_number ?? ''),
-      dueDate: String((row as NotificationRecord).due_date ?? '').slice(0, 10),
-      balanceDue: Number((row as NotificationRecord).balance_due ?? 0),
-      customerName: String((((row as NotificationRecord).customers as NotificationRecord | NotificationRecord[] | null) instanceof Array ? (((row as NotificationRecord).customers as NotificationRecord[])[0]?.name) : (((row as NotificationRecord).customers as NotificationRecord | null)?.name)) ?? 'Walk-in'),
-    })),
-    supplierShortages: shortages,
-    qcFailures: qcFailures,
-    branchVariances: branchVariances,
-    securityAlerts: securityEvents,
-  };
+        invoiceNumber: String((row as NotificationRecord).invoice_number ?? ''),
+        dueDate: String((row as NotificationRecord).due_date ?? '').slice(0, 10),
+        balanceDue: Number((row as NotificationRecord).balance_due ?? 0),
+        customerName: String((((row as NotificationRecord).customers as NotificationRecord | NotificationRecord[] | null) instanceof Array ? (((row as NotificationRecord).customers as NotificationRecord[])[0]?.name) : (((row as NotificationRecord).customers as NotificationRecord | null)?.name)) ?? 'Walk-in'),
+      })),
+      supplierShortages: shortages,
+      qcFailures: qcFailures,
+      branchVariances: branchVariances,
+      securityAlerts: securityEvents,
+    };
+  } catch (error) {
+    if (isNotificationAlertDashboardCompatibilityError(error)) {
+      return buildNotificationAlertDashboardFallback();
+    }
+    throw error;
+  }
 }
 
 export async function emitOperationalNotifications(input: {

@@ -196,14 +196,19 @@ export default function NotificationSettingsPage() {
             <Button
               onClick={async () => {
                 try {
-                  await sendTest.mutateAsync({
+                  const result = await sendTest.mutateAsync({
                     module: 'system',
                     eventType: 'SYSTEM_TEST',
                     severity: 'INFO',
                     title: 'Notification test',
                     message: 'Test notification generated from the settings page.',
                   });
-                  setMessage('Test notification sent.');
+                  const created = Number((result as { created?: unknown } | null)?.created ?? 0);
+                  setMessage(
+                    created > 0
+                      ? 'Test notification sent.'
+                      : 'Notification storage is not available in this environment, so no test alert was saved.',
+                  );
                 } catch (error) {
                   setMessage(error instanceof Error ? error.message : 'Failed to send test notification.');
                 }

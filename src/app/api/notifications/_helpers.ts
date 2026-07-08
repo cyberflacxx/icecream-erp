@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import { can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
+import { forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
+
+export function hasNotificationAdminAccess(ctx: { permissions: string[] }) {
+  return ctx.permissions.includes('settings.manage') || ctx.permissions.includes('audit_log.read') || ctx.permissions.includes('view_audit_logs');
+}
 
 export async function requireNotificationAuth(request?: NextRequest) {
   const ctx = await getAuthContext(request);
@@ -11,7 +15,7 @@ export async function requireNotificationAuth(request?: NextRequest) {
 export async function requireNotificationAdmin(request?: NextRequest) {
   const ctx = await getAuthContext(request);
   if (!ctx) return { error: unauthorized() } as const;
-  if (!can(ctx, 'settings.manage', 'audit_log.read', 'view_audit_logs')) return { error: forbidden() } as const;
+  if (!hasNotificationAdminAccess(ctx)) return { error: forbidden() } as const;
   return { ctx } as const;
 }
 

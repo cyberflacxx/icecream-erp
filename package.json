@@ -26,6 +26,8 @@
     "test:notifications": "tsc --outDir .tmp-tests tests/notifications-helpers.test.ts src/lib/notifications.ts --module commonjs --target es2020 --esModuleInterop --skipLibCheck && node --test .tmp-tests/tests/notifications-helpers.test.js",
     "test:admin": "tsc --outDir .tmp-tests tests/admin-readiness-helpers.test.ts src/lib/admin-readiness.ts src/lib/settings.ts --module commonjs --target es2020 --esModuleInterop --skipLibCheck && node --test .tmp-tests/tests/admin-readiness-helpers.test.js",
     "test:testing": "tsc --outDir .tmp-tests tests/testing-helpers.test.ts src/lib/testing.ts --module commonjs --target es2020 --esModuleInterop --skipLibCheck && node --test .tmp-tests/tests/testing-helpers.test.js",
+    "smoke:live-pages": "node scripts/smoke-live-pages.mjs",
+    "smoke:frontend-agent": "node scripts/frontend-agent-smoke.mjs --mode=pages",
     "verify:production-workflow": "node scripts/verify-production-workflow.mjs",
     "verify:live-e2e": "node scripts/verify-live-e2e-transactions.mjs"
   },
