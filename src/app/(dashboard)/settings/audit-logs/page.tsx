@@ -9,6 +9,7 @@ import { PageHeader } from '@/components/dashboard/page-header';
 import { SettingsNav } from '@/components/settings/settings-nav';
 import { Button } from '@/components/ui/button';
 import { useAuditLogs } from '@/hooks/settings/useSettings';
+import { downloadFromUrl } from '@/lib/export';
 
 function toQueryString(params: Record<string, string | number | undefined>) {
   const searchParams = new URLSearchParams();
@@ -46,6 +47,11 @@ export default function SettingsAuditLogsPage() {
     userProfileId: ''
   });
   const logsQuery = useAuditLogs(filters);
+  const catFormatter = new Intl.DateTimeFormat('en-ZW', {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+    timeZone: 'Africa/Harare',
+  });
 
   if (logsQuery.isLoading) {
     return <LoadingState />;
@@ -60,22 +66,10 @@ export default function SettingsAuditLogsPage() {
           <Button
             variant="outline"
             onClick={async () => {
-              const response = await fetch(
-                `/api/settings/audit-logs/export/csv${toQueryString(filters)}`,
-                { credentials: 'include' },
+              await downloadFromUrl(
+                `/api/security/export/audit-logs${toQueryString(filters)}`,
+                { filename: 'audit-logs.csv' },
               );
-
-              if (!response.ok) {
-                return;
-              }
-
-              const blob = await response.blob();
-              const url = URL.createObjectURL(blob);
-              const link = document.createElement('a');
-              link.href = url;
-              link.download = 'audit-logs.csv';
-              link.click();
-              URL.revokeObjectURL(url);
             }}
           >
             <FileDown className="mr-2 h-4 w-4" />
@@ -117,7 +111,7 @@ export default function SettingsAuditLogsPage() {
 
       <DataTable
         columns={[
-          { key: 'createdAt', header: 'Date', render: (row: AuditLogRow) => new Date(row.createdAt).toLocaleString() },
+          { key: 'createdAt', header: 'Date', render: (row: AuditLogRow) => `${catFormatter.format(new Date(row.createdAt))} CAT` },
           { key: 'user', header: 'User' },
           { key: 'action', header: 'Action' },
           { key: 'entityType', header: 'Entity' },

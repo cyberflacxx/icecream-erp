@@ -27,6 +27,9 @@ export default function NotificationCenterPage() {
     return <EmptyState icon={<BellRing className="h-6 w-6" />} title="Notifications unavailable" description={query.error?.message ?? 'Failed to load notifications.'} />;
   }
 
+  const notifications = query.data?.data ?? [];
+  const pagination = query.data?.pagination;
+
   return (
     <div className="space-y-8">
       <PageHeader
@@ -54,8 +57,8 @@ export default function NotificationCenterPage() {
         </label>
       </section>
       <DataTable
-        data={query.data.data}
-        pagination={query.data.pagination}
+        data={notifications}
+        pagination={pagination}
         columns={[
           { key: 'title', header: 'Alert', render: (row) => <div><div className="font-semibold">{row.title}</div><div className="text-xs text-muted dark:text-darkMuted">{row.message}</div></div> },
           { key: 'severity', header: 'Severity', render: (row) => <StatusBadge status={row.severity} /> },

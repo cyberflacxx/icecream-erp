@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 
 import { can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
+import { isMissingColumnError, isMissingTableError } from '@/lib/postgrest-compat';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 import { recordAuditLog, recordSecurityEvent } from '@/lib/security-server';
 
@@ -21,12 +22,36 @@ export async function GET(request: Request) {
 
   try {
     const service = createServiceRoleClient().schema('icecream_erp');
-    const { data, error } = await service
+    const primary = await service
       .from('audit_logs')
-      .select('created_at, action, entity_type, entity_id, user_profile_id, ip_address')
+      .select('created_at, action, entity_type, entity_id, user_profile_id, ip_address, organization_id')
+      .eq('organization_id', ctx.organizationId)
       .order('created_at', { ascending: false })
       .limit(1000);
-    if (error) throw error;
+    let data = (primary.data ?? null) as Record<string, unknown>[] | null;
+    let error = primary.error;
+
+    if (error && isMissingColumnError(error, 'audit_logs', 'organization_id')) {
+      const fallback = await service
+        .from('audit_logs')
+        .select('created_at, action, entity_type, entity_id, user_profile_id, ip_address')
+        .order('created_at', { ascending: false })
+        .limit(1000);
+      data = (fallback.data ?? null) as Record<string, unknown>[] | null;
+      error = fallback.error;
+    }
+
+    if (error) {
+      if (isMissingTableError(error, 'audit_logs')) {
+        return new NextResponse('', {
+          headers: {
+            'Content-Type': 'text/csv; charset=utf-8',
+            'Content-Disposition': 'attachment; filename=\"audit-logs.csv\"',
+          },
+        });
+      }
+      throw error;
+    }
 
     await Promise.all([
       recordAuditLog({

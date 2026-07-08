@@ -19,12 +19,14 @@ export default function NotificationDeliveryLogsPage() {
     return <EmptyState icon={<Send className="h-6 w-6" />} title="Delivery logs unavailable" description={query.error?.message ?? 'Failed to load delivery logs.'} />;
   }
 
+  const deliveryLogs = query.data ?? [];
+
   return (
     <div className="space-y-8">
       <PageHeader title="Notification Delivery Logs" description="Review in-app delivery attempts, statuses, and failed downstream channels." status="partial" />
       <NotificationNav />
       <DataTable
-        data={query.data}
+        data={deliveryLogs}
         columns={[
           { key: 'notification_id', header: 'Notification' },
           { key: 'recipient_user_id', header: 'Recipient' },

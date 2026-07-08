@@ -1,12 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
+import {
+  isMissingColumnError,
+  isMissingRelationshipError,
+  isMissingTableError,
+} from '@/lib/postgrest-compat';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
 export async function GET(request: NextRequest) {
   const ctx = await getAuthContext();
   if (!ctx) return unauthorized();
-  if (!can(ctx, 'settings.read')) return forbidden();
+  if (!can(ctx, 'settings.read', 'settings.manage', 'view_audit_logs')) return forbidden();
 
   const service = createServiceRoleClient();
   const { searchParams } = new URL(request.url);
@@ -19,20 +24,58 @@ export async function GET(request: NextRequest) {
   const endDate = searchParams.get('endDate') ?? undefined;
 
   try {
-    let query = service
-      .schema('icecream_erp')
-      .from('audit_logs')
-      .select('id, action, entity_id, entity_type, created_at, user_profile_id, users(full_name, first_name, last_name)', { count: 'exact' })
-      .order('created_at', { ascending: false });
+    const applyFilters = (query: any) => {
+      if (action) query = query.ilike('action', `%${action}%`);
+      if (entityType) query = query.ilike('entity_type', `%${entityType}%`);
+      if (userProfileId) query = query.eq('user_profile_id', userProfileId);
+      if (startDate) query = query.gte('created_at', `${startDate}T00:00:00.000Z`);
+      if (endDate) query = query.lte('created_at', `${endDate}T23:59:59.999Z`);
+      return query;
+    };
 
-    if (action) query = query.ilike('action', `%${action}%`);
-    if (entityType) query = query.ilike('entity_type', `%${entityType}%`);
-    if (userProfileId) query = query.eq('user_profile_id', userProfileId);
-    if (startDate) query = query.gte('created_at', `${startDate}T00:00:00.000Z`);
-    if (endDate) query = query.lte('created_at', `${endDate}T23:59:59.999Z`);
+    const buildPrimaryQuery = () =>
+      applyFilters(
+        service
+          .schema('icecream_erp')
+          .from('audit_logs')
+          .select('id, action, entity_id, entity_type, created_at, user_profile_id, organization_id, users(full_name, first_name, last_name)', { count: 'exact' })
+          .eq('organization_id', ctx.organizationId)
+          .order('created_at', { ascending: false }),
+      );
+
+    const buildFallbackQuery = (withOrganizationFilter: boolean) =>
+      applyFilters(
+        (withOrganizationFilter
+          ? service
+              .schema('icecream_erp')
+              .from('audit_logs')
+              .select('id, action, entity_id, entity_type, created_at, user_profile_id, organization_id', { count: 'exact' })
+              .eq('organization_id', ctx.organizationId)
+          : service
+              .schema('icecream_erp')
+              .from('audit_logs')
+              .select('id, action, entity_id, entity_type, created_at, user_profile_id', { count: 'exact' })
+        ).order('created_at', { ascending: false }),
+      );
 
     const from = (page - 1) * pageSize;
-    const { data, count, error } = await query.range(from, from + pageSize - 1);
+    let { data, count, error } = await buildPrimaryQuery().range(from, from + pageSize - 1);
+
+    if (error && isMissingTableError(error, 'audit_logs')) {
+      return NextResponse.json({ data: [], pagination: { page, pageSize, total: 0 } });
+    }
+
+    if (
+      error &&
+      (
+        isMissingRelationshipError(error, 'audit_logs', 'users') ||
+        isMissingColumnError(error, 'audit_logs', 'organization_id')
+      )
+    ) {
+      ({ data, count, error } = await buildFallbackQuery(!isMissingColumnError(error, 'audit_logs', 'organization_id'))
+        .range(from, from + pageSize - 1));
+    }
+
     if (error) throw error;
 
     return NextResponse.json({

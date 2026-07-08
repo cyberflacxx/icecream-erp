@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { badRequest, can, forbidden, getAuthContext, notFound, serverError, unauthorized } from '@/lib/api-auth';
+import { isMissingColumnError, isMissingTableError } from '@/lib/postgrest-compat';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
 export async function POST(
@@ -23,14 +24,25 @@ export async function POST(
 
     if (!body.resolvedAt) return badRequest('resolvedAt is required');
 
-    const { data: existing, error: fetchErr } = await service
+    let existingResult = await service
       .schema('icecream_erp')
       .from('machine_breakdowns')
       .select('id')
       .is('deleted_at', null)
       .eq('id', id)
-      .single();
-    if (fetchErr || !existing) return notFound('Breakdown not found');
+      .maybeSingle();
+    if (existingResult.error && isMissingColumnError(existingResult.error, 'machine_breakdowns', 'deleted_at')) {
+      existingResult = await service
+        .schema('icecream_erp')
+        .from('machine_breakdowns')
+        .select('id')
+        .eq('id', id)
+        .maybeSingle();
+    }
+    if (existingResult.error && isMissingTableError(existingResult.error, 'machine_breakdowns')) {
+      return notFound('Breakdown not found');
+    }
+    if (existingResult.error || !existingResult.data) return notFound('Breakdown not found');
 
     const { data: updated, error } = await service
       .schema('icecream_erp')
@@ -45,6 +57,9 @@ export async function POST(
       .select()
       .single();
 
+    if (error && isMissingTableError(error, 'machine_breakdowns')) {
+      return notFound('Breakdown not found');
+    }
     if (error) throw error;
     return NextResponse.json(updated);
   } catch (err) {

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { badRequest, can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
+import { isMissingTableError } from '@/lib/postgrest-compat';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
 export async function GET(request: NextRequest) {
@@ -33,7 +34,18 @@ export async function GET(request: NextRequest) {
 
     const from = (page - 1) * limit;
     const { data, count, error } = await query.range(from, from + limit - 1);
-    if (error) throw error;
+    if (error) {
+      if (isMissingTableError(error, 'machines')) {
+        return NextResponse.json({
+          data: [],
+          total: 0,
+          page,
+          limit,
+          totalPages: 0,
+        });
+      }
+      throw error;
+    }
 
     return NextResponse.json({
       data: (data ?? []).map((machine) => ({
@@ -102,6 +114,12 @@ export async function POST(request: NextRequest) {
       .select()
       .single();
 
+    if (error && isMissingTableError(error, 'machines')) {
+      return NextResponse.json(
+        { error: 'Machine maintenance is not available in this environment.' },
+        { status: 503 },
+      );
+    }
     if (error) throw error;
     return NextResponse.json(machine, { status: 201 });
   } catch (err) {

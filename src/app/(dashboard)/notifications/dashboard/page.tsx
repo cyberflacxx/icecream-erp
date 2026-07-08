@@ -19,9 +19,10 @@ export default function NotificationAlertDashboardPage() {
     return <EmptyState icon={<AlertTriangle className="h-6 w-6" />} title="Alert dashboard unavailable" description={query.error?.message ?? 'Failed to load the alert dashboard.'} />;
   }
 
-  const stats = (query.data.stats ?? {}) as Record<string, number>;
-  const lowStockAlerts = Array.isArray(query.data.lowStockAlerts) ? query.data.lowStockAlerts as Array<Record<string, unknown>> : [];
-  const overdueInvoices = Array.isArray(query.data.overdueInvoices) ? query.data.overdueInvoices as Array<Record<string, unknown>> : [];
+  const dashboardData = query.data ?? {};
+  const stats = (dashboardData.stats ?? {}) as Record<string, number>;
+  const lowStockAlerts = Array.isArray(dashboardData.lowStockAlerts) ? dashboardData.lowStockAlerts as Array<Record<string, unknown>> : [];
+  const overdueInvoices = Array.isArray(dashboardData.overdueInvoices) ? dashboardData.overdueInvoices as Array<Record<string, unknown>> : [];
 
   return (
     <div className="space-y-8">

@@ -47,11 +47,12 @@ export default function NotificationSettingsPage() {
     return <EmptyState icon={<Settings2 className="h-6 w-6" />} title="Notification settings unavailable" description={query.error?.message ?? 'Failed to load notification settings.'} />;
   }
 
-  const rules = Array.isArray(query.data.rules) ? query.data.rules as Array<Record<string, unknown>> : [];
-  const templates = Array.isArray(query.data.templates) ? query.data.templates as Array<Record<string, unknown>> : [];
-  const preferences = Array.isArray(query.data.preferences) ? query.data.preferences as Array<Record<string, unknown>> : [];
-  const escalationRules = Array.isArray(query.data.escalationRules) ? query.data.escalationRules as Array<Record<string, unknown>> : [];
-  const reminderRules = Array.isArray(query.data.reminderRules) ? query.data.reminderRules as Array<Record<string, unknown>> : [];
+  const settingsData = query.data ?? {};
+  const rules = Array.isArray(settingsData.rules) ? settingsData.rules as Array<Record<string, unknown>> : [];
+  const templates = Array.isArray(settingsData.templates) ? settingsData.templates as Array<Record<string, unknown>> : [];
+  const preferences = Array.isArray(settingsData.preferences) ? settingsData.preferences as Array<Record<string, unknown>> : [];
+  const escalationRules = Array.isArray(settingsData.escalationRules) ? settingsData.escalationRules as Array<Record<string, unknown>> : [];
+  const reminderRules = Array.isArray(settingsData.reminderRules) ? settingsData.reminderRules as Array<Record<string, unknown>> : [];
 
   return (
     <div className="space-y-8">
