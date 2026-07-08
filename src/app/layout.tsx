@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 
 import { InstallPwaPrompt } from '@/components/pwa/install-pwa-prompt';
 import { PwaLaunchSplash } from '@/components/pwa/launch-splash';
+import { resolvePublicAppUrl } from '@/lib/app-url';
 import { Providers } from '@/providers';
 
 import './globals.css';
@@ -11,6 +12,7 @@ export const metadata: Metadata = {
   title: 'Absolute Ice Cream ERP',
   description:
     "Manufacturing ERP for Zimbabwe's ice cream industry, from procurement to production, branches, and sales.",
+  metadataBase: new URL(resolvePublicAppUrl()),
   manifest: '/manifest.webmanifest',
   appleWebApp: {
     capable: true,

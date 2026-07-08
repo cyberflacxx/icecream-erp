@@ -3,7 +3,7 @@
 import { useMemo, useState } from 'react';
 import { Trash2, UserPlus } from 'lucide-react';
 
-import { DataTable, EmptyState, FilterBar, FormDrawer, LoadingState, StatusBadge } from '@/components/ui-library';
+import { ConfirmActionModal, DataTable, EmptyState, FilterBar, FormDrawer, LoadingState, StatusBadge } from '@/components/ui-library';
 
 import { PageHeader } from '@/components/dashboard/page-header';
 import { SettingsNav } from '@/components/settings/settings-nav';
@@ -368,20 +368,46 @@ function StatusToggleButton({ userId, status }: { userId: string; status: string
 
 function DeleteUserButton({ userId, fullName }: { userId: string; fullName: string }) {
   const deleteUser = useDeleteUser(userId);
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   return (
-    <Button
-      size="sm"
-      variant="outline"
-      onClick={async () => {
-        const confirmed = window.confirm(`Delete ${fullName}?`);
-        if (!confirmed) return;
-        await deleteUser.mutateAsync();
-      }}
-      disabled={deleteUser.isPending}
-    >
-      <Trash2 className="mr-1 h-3.5 w-3.5" />
-      Delete
-    </Button>
+    <>
+      <Button
+        size="sm"
+        variant="destructive"
+        onClick={() => {
+          setErrorMessage(null);
+          setDialogOpen(true);
+        }}
+        disabled={deleteUser.isPending}
+      >
+        <Trash2 className="mr-1 h-3.5 w-3.5" />
+        Delete
+      </Button>
+      <ConfirmActionModal
+        open={dialogOpen}
+        title="Delete user"
+        description="Are you sure you want to delete this record?"
+        details={<span>User: <strong>{fullName}</strong></span>}
+        confirmLabel="Delete Record"
+        confirmVariant="destructive"
+        loading={deleteUser.isPending}
+        errorMessage={errorMessage}
+        onCancel={() => {
+          setDialogOpen(false);
+          setErrorMessage(null);
+        }}
+        onConfirm={async (adminKey) => {
+          try {
+            await deleteUser.mutateAsync({ adminKey });
+            setDialogOpen(false);
+            setErrorMessage(null);
+          } catch (error) {
+            setErrorMessage(error instanceof Error ? error.message : 'Failed to delete user.');
+          }
+        }}
+      />
+    </>
   );
 }

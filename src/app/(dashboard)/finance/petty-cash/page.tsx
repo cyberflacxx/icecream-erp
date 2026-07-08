@@ -85,7 +85,7 @@ export default function FinancePettyCashPage() {
                 <Button
                   type="button"
                   size="sm"
-                  variant="outline"
+                  variant="success"
                   disabled={approvePettyCash.isPending}
                   onClick={() => approvePettyCash.mutate({ id: String(row.id) })}
                 >

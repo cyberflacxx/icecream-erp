@@ -119,7 +119,7 @@ function MigrationBatchActions({
       <Button size="sm" variant="outline" disabled={isPending} onClick={() => { void runAction('validate'); }}>
         Validate
       </Button>
-      <Button size="sm" variant="outline" disabled={isPending} onClick={() => { void runAction('approve'); }}>
+      <Button size="sm" variant="success" disabled={isPending} onClick={() => { void runAction('approve'); }}>
         Approve
       </Button>
       <Button size="sm" disabled={isPending} onClick={() => { void runAction('import'); }}>

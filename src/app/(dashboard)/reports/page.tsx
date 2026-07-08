@@ -20,6 +20,7 @@ import {
 
 import {
   ChartCard,
+  ConfirmActionModal,
   DataTable,
   EmptyState,
   type FilterConfig,
@@ -587,6 +588,8 @@ function SavedFilterChip({
   savedFilterId: string;
 }) {
   const removeFilter = useDeleteSavedReportFilter(savedFilterId);
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   return (
     <div className="inline-flex items-center gap-2 rounded-full border border-border bg-cream px-3 py-2 text-sm">
@@ -594,15 +597,41 @@ function SavedFilterChip({
         <BookmarkPlus className="mr-2 inline h-4 w-4" />
         {filterName}
       </button>
-      <button
+      <Button
         type="button"
-        onClick={async () => {
-          await removeFilter.mutateAsync();
+        size="sm"
+        variant="destructive"
+        className="h-8 rounded-full px-3 text-xs"
+        onClick={() => {
+          setErrorMessage(null);
+          setDialogOpen(true);
         }}
-        className="text-xs text-muted"
       >
-        Remove
-      </button>
+        Delete
+      </Button>
+      <ConfirmActionModal
+        open={dialogOpen}
+        title="Delete saved filter"
+        description="Are you sure you want to delete this record?"
+        details={<span>Saved filter: <strong>{filterName}</strong></span>}
+        confirmLabel="Delete Record"
+        confirmVariant="destructive"
+        loading={removeFilter.isPending}
+        errorMessage={errorMessage}
+        onCancel={() => {
+          setDialogOpen(false);
+          setErrorMessage(null);
+        }}
+        onConfirm={async (adminKey) => {
+          try {
+            await removeFilter.mutateAsync({ adminKey });
+            setDialogOpen(false);
+            setErrorMessage(null);
+          } catch (error) {
+            setErrorMessage(error instanceof Error ? error.message : 'Failed to delete saved filter.');
+          }
+        }}
+      />
     </div>
   );
 }

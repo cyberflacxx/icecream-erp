@@ -8,7 +8,7 @@ const JSON_OUTPUT_PATH = path.join(OUTPUT_DIR, 'live-e2e-transactions.json');
 const MD_OUTPUT_PATH = path.join(OUTPUT_DIR, 'live-e2e-transactions.md');
 const SCHEMA = 'icecream_erp';
 const FETCH_TIMEOUT_MS = Number(process.env.VERIFY_TIMEOUT_MS || 30000);
-const BASE_URL = process.env.ABSOLUTE_ERP_BASE_URL || 'https://icecream-erp-frontend.vercel.app';
+const BASE_URL = process.env.ABSOLUTE_ERP_BASE_URL || 'https://www.absolute-erp.com';
 const TEST_PASSWORD = process.env.ABSOLUTE_TEST_PASSWORD;
 const PREFIX = 'E2E-VERIFY';
 

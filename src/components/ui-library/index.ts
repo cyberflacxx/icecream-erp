@@ -1,4 +1,5 @@
 export * from './chart-card';
+export * from './confirm-action-modal';
 export * from './confirm-dialog';
 export * from './data-table';
 export * from './empty-state';

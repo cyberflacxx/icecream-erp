@@ -149,8 +149,9 @@ export function useDeleteSavedReportFilter(id: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async () =>
+    mutationFn: async (body: { adminKey: string }) =>
       apiFetch(`/api/reports/saved-filters/${id}`, {
+        body: JSON.stringify(body),
         method: 'DELETE',
       }),
     onSuccess: async () => {

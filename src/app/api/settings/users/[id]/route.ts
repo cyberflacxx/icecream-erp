@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { badRequest, can, forbidden, getAuthContext, notFound, serverError, unauthorized } from '@/lib/api-auth';
+import { recordProtectedActionAudit, requireAdminDeleteKey } from '@/lib/admin-delete-server';
 import { resolveRegistrationRole, syncUserBranchAssignment, toStoredUserRole } from '@/lib/registration';
 import { recordAuditLog } from '@/lib/security-server';
 import { createServiceRoleClient } from '@/lib/supabase/server';
@@ -203,6 +204,7 @@ export async function DELETE(
   const schemaService = service.schema('icecream_erp');
 
   try {
+    const body = (await request.json().catch(() => ({}))) as { adminKey?: string | null };
     const { data: existingUser, error: existingError } = await schemaService
       .from('users')
       .select('id, auth_id, full_name, deleted_at')
@@ -212,6 +214,16 @@ export async function DELETE(
     if (existingError || !existingUser || existingUser.deleted_at) {
       return notFound('User not found.');
     }
+
+    const adminKeyError = await requireAdminDeleteKey({
+      action: 'USER_DELETED',
+      body,
+      ctx,
+      entityId: id,
+      entityType: 'user',
+      request,
+    });
+    if (adminKeyError) return adminKeyError;
 
     const deletedAt = new Date().toISOString();
 
@@ -234,16 +246,14 @@ export async function DELETE(
       await service.auth.admin.deleteUser(String(existingUser.auth_id)).catch(() => null);
     }
 
-    await recordAuditLog({
+    await recordProtectedActionAudit({
       action: 'USER_DELETED',
       entityId: id,
       entityType: 'user',
       newValues: { deleted_at: deletedAt, status: 'inactive' },
       oldValues: existingUser as Record<string, unknown>,
-      organizationId: ctx.organizationId,
-      userProfileId: ctx.userId,
-      ipAddress: request.headers.get('x-forwarded-for'),
-      userAgent: request.headers.get('user-agent'),
+      ctx,
+      request,
     });
 
     return NextResponse.json({ success: true });

@@ -5,6 +5,7 @@ import { AlertCircle, History } from 'lucide-react';
 import { DataTable, EmptyState, LoadingState } from '@/components/ui-library';
 import { PageHeader } from '@/components/dashboard/page-header';
 import { useReportExportHistory } from '@/hooks/reports/useReports';
+import { formatCatDateTime } from '@/lib/date-time';
 
 export default function ReportExportHistoryPage() {
   const query = useReportExportHistory('mine');
@@ -40,7 +41,7 @@ export default function ReportExportHistoryPage() {
             key: 'exported_at',
             header: 'Exported At',
             render: (row: Record<string, unknown>) =>
-              row.exported_at ? new Date(String(row.exported_at)).toLocaleString() : 'N/A',
+              row.exported_at ? formatCatDateTime(String(row.exported_at)) : 'N/A',
           },
         ]}
         data={(query.data ?? []) as unknown as Array<Record<string, unknown>>}

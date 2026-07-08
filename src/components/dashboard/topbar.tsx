@@ -223,7 +223,7 @@ export function Topbar({ onOpenSidebar }: TopbarProps) {
                   <button
                     type="button"
                     onClick={async () => { setDropdownOpen(false); await logoutAndRedirect(router); }}
-                    className="flex w-full items-center gap-3 px-4 py-2.5 text-sm text-red-600 transition hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-500/10"
+                    className="mx-2 flex w-[calc(100%-1rem)] items-center gap-3 rounded-lg bg-red-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-red-700"
                   >
                     <LogOut className="h-4 w-4" />
                     Sign out

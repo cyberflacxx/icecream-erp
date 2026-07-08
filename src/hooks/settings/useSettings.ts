@@ -298,8 +298,9 @@ export function useCreateUser() {
 export function useDeleteUser(userId: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async () =>
+    mutationFn: async (body: { adminKey: string }) =>
       apiFetch(`/api/settings/users/${userId}`, {
+        body: JSON.stringify(body),
         method: 'DELETE',
       }),
     onSuccess: async () => {

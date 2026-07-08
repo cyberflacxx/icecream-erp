@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+import { recordProtectedActionAudit, requireAdminDeleteKey } from '@/lib/admin-delete-server';
 import {
   badRequest,
   can,
@@ -104,13 +105,14 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
   return NextResponse.json(data);
 }
 
-export async function DELETE(_request: NextRequest, { params }: RouteContext) {
+export async function DELETE(request: NextRequest, { params }: RouteContext) {
   const ctx = await getAuthContext();
   if (!ctx) return unauthorized();
   if (!can(ctx, 'hr.write')) return forbidden();
 
   const { id } = await params;
   const service = hrService();
+  const body = (await request.json().catch(() => ({}))) as { adminKey?: string | null };
 
   const { data: existing, error: fetchErr } = await service
     .from('employees')
@@ -122,6 +124,16 @@ export async function DELETE(_request: NextRequest, { params }: RouteContext) {
   if (fetchErr) return serverError(fetchErr.message);
   if (!existing) return notFound('Employee not found');
   if (ctx.isBranchScoped && existing.branch_id !== ctx.branchId) return forbidden();
+
+  const adminKeyError = await requireAdminDeleteKey({
+    action: 'HR_EMPLOYEE_TERMINATED',
+    body,
+    ctx,
+    entityId: id,
+    entityType: 'employee',
+    request,
+  });
+  if (adminKeyError) return adminKeyError;
 
   const { data, error } = await service
     .from('employees')
@@ -139,7 +151,15 @@ export async function DELETE(_request: NextRequest, { params }: RouteContext) {
 
   if (error) return serverError(error.message);
 
-  await writeHrAuditLog('HR_EMPLOYEE_DEACTIVATED', id, ctx.userId, { status: 'TERMINATED' }, 'employee');
+  await recordProtectedActionAudit({
+    action: 'HR_EMPLOYEE_TERMINATED',
+    entityId: id,
+    entityType: 'employee',
+    oldValues: existing as Record<string, unknown>,
+    newValues: { status: 'TERMINATED' },
+    ctx,
+    request,
+  });
 
   return NextResponse.json(data);
 }

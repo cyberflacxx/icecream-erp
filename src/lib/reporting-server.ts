@@ -195,12 +195,22 @@ export async function updateSavedReportFilter(id: string, userProfileId: string,
 
 export async function deleteSavedReportFilter(id: string, userProfileId: string) {
   const service = reportingService();
+  const { data: existing, error: existingError } = await service
+    .from('saved_report_filters')
+    .select('*')
+    .eq('id', id)
+    .eq('user_profile_id', userProfileId)
+    .maybeSingle();
+  if (existingError) throw existingError;
+
   const { error } = await service
     .from('saved_report_filters')
     .delete()
     .eq('id', id)
     .eq('user_profile_id', userProfileId);
   if (error) throw error;
+
+  return (existing ?? null) as Record<string, unknown> | null;
 }
 
 export function flattenRows(payload: unknown) {

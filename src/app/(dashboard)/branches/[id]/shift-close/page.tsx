@@ -256,6 +256,7 @@ export default function BranchShiftClosePage() {
                   {canApprove ? (
                     <Button
                       size="sm"
+                      variant="success"
                       disabled={approveShiftClose.isPending}
                       onClick={() => approveShiftClose.mutate({})}
                     >

@@ -11,6 +11,17 @@ import { useUserContext } from '@/contexts/UserContext';
 import { canAccessDashboardPath, resolveDashboardPersona } from '@/lib/dashboard-access';
 import { AlertCircle } from 'lucide-react';
 
+function DashboardFooter() {
+  return (
+    <footer className="border-t border-[color:var(--app-border-muted)] px-3 py-3 text-xs text-[color:var(--app-muted)] sm:px-4 lg:px-5">
+      <div className="mx-auto flex max-w-[1440px] items-center justify-between gap-3">
+        <span>© {new Date().getFullYear()} Absolute Icecreams</span>
+        <span>cyberflacx_productions</span>
+      </div>
+    </footer>
+  );
+}
+
 export function DashboardShell({ children }: { children: ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const pathname = usePathname();
@@ -55,6 +66,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
                 />
               </div>
             </main>
+            <DashboardFooter />
           </div>
         </div>
       );
@@ -81,6 +93,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
         <main className="px-3 py-4 sm:px-4 sm:py-5 lg:px-5">
           <div className="mx-auto max-w-[1440px]">{children}</div>
         </main>
+        <DashboardFooter />
       </div>
     </div>
   );

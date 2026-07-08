@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+import { toAbsoluteAppUrl } from '@/lib/app-url';
 import { badRequest, can, forbidden, getAuthContext, notFound, serverError, unauthorized } from '@/lib/api-auth';
 import { sendTransactionalEmail } from '@/lib/email';
 import {
@@ -52,10 +53,7 @@ export async function POST(
       return badRequest('Supplier email is required before sending this purchase order.');
     }
 
-    const appUrl =
-      process.env.NEXT_PUBLIC_APP_URL?.trim() ||
-      `${request.nextUrl.protocol}//${request.nextUrl.host}`;
-    const documentUrl = `${appUrl}/api/procurement/purchase-orders/${id}/pdf`;
+    const documentUrl = toAbsoluteAppUrl(`/api/procurement/purchase-orders/${id}/pdf`, request);
     const company = await getCompanyProfile().catch(() => null);
     const companyName = company?.name?.trim() || 'Absolute Ice Cream';
 

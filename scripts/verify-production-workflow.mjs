@@ -10,7 +10,7 @@ function getEnv(key) {
 const SUPABASE_URL = getEnv('NEXT_PUBLIC_SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = getEnv('SUPABASE_SERVICE_ROLE_KEY');
 const DEMO_PASSWORD = process.env.DEMO_PASSWORD || 'Absolute@2026!';
-const BASE_URL = process.env.SMOKE_BASE_URL || 'https://icecream-erp-frontend.vercel.app';
+const BASE_URL = process.env.SMOKE_BASE_URL || 'https://www.absolute-erp.com';
 const SCHEMA = 'icecream_erp';
 const FETCH_TIMEOUT_MS = Number(process.env.VERIFY_TIMEOUT_MS || 30000);
 

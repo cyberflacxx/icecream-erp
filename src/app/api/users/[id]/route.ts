@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+import { recordProtectedActionAudit, requireAdminDeleteKey } from '@/lib/admin-delete-server';
 import { createClient, createServiceRoleClient } from '@/lib/supabase/server';
 
 export async function PATCH(request: NextRequest, { params }: { params: { id: string } }) {
@@ -37,7 +38,7 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
   return NextResponse.json(data);
 }
 
-export async function DELETE(_request: NextRequest, { params }: { params: { id: string } }) {
+export async function DELETE(request: NextRequest, { params }: { params: { id: string } }) {
   const supabase = await createClient();
   const {
     data: { user },
@@ -46,7 +47,7 @@ export async function DELETE(_request: NextRequest, { params }: { params: { id: 
 
   const service = createServiceRoleClient();
 
-  const { data: caller } = await service.from('users').select('id, role').eq('auth_id', user.id).single();
+  const { data: caller } = await service.from('users').select('id, role, organization_id').eq('auth_id', user.id).single();
   if (!caller || caller.role !== 'super_admin') {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
@@ -55,8 +56,37 @@ export async function DELETE(_request: NextRequest, { params }: { params: { id: 
     return NextResponse.json({ error: 'Cannot delete your own account' }, { status: 400 });
   }
 
+  const body = (await request.json().catch(() => ({}))) as { adminKey?: string | null };
+
   // Get auth_id so we can delete from Supabase Auth too
-  const { data: target } = await service.from('users').select('auth_id').eq('id', params.id).single();
+  const { data: target } = await service.from('users').select('id, auth_id, role, status').eq('id', params.id).single();
+
+  if (!target) {
+    return NextResponse.json({ error: 'User not found' }, { status: 404 });
+  }
+
+  const adminKeyError = await requireAdminDeleteKey({
+    action: 'USER_DELETED',
+    body,
+    ctx: {
+      branchAssignments: [],
+      branchId: null,
+      isBranchScoped: false,
+      organizationId: String(caller.organization_id ?? 'absolute-ice-cream'),
+      permissions: ['manage_roles'],
+      role: String(caller.role ?? 'super_admin'),
+      roles: [],
+      sessionTimeoutMinutes: 0,
+      userAccountId: user.id,
+      userId: String(caller.id),
+      warehouseAssignments: [],
+      workId: String(user.email ?? user.id),
+    },
+    entityId: params.id,
+    entityType: 'user',
+    request,
+  });
+  if (adminKeyError) return adminKeyError;
 
   const { error } = await service.from('users').delete().eq('id', params.id);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
@@ -64,6 +94,29 @@ export async function DELETE(_request: NextRequest, { params }: { params: { id: 
   if (target?.auth_id) {
     await service.auth.admin.deleteUser(String(target.auth_id));
   }
+
+  await recordProtectedActionAudit({
+    action: 'USER_DELETED',
+    entityId: params.id,
+    entityType: 'user',
+    oldValues: target as Record<string, unknown>,
+    newValues: { deleted: true },
+    ctx: {
+      branchAssignments: [],
+      branchId: null,
+      isBranchScoped: false,
+      organizationId: String(caller.organization_id ?? 'absolute-ice-cream'),
+      permissions: ['manage_roles'],
+      role: String(caller.role ?? 'super_admin'),
+      roles: [],
+      sessionTimeoutMinutes: 0,
+      userAccountId: user.id,
+      userId: String(caller.id),
+      warehouseAssignments: [],
+      workId: String(user.email ?? user.id),
+    },
+    request,
+  });
 
   return NextResponse.json({ success: true });
 }

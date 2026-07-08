@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button';
 import { DataTable, EmptyState, LoadingState, StatusBadge } from '@/components/ui-library';
 import { useAppAuth } from '@/hooks/useAppAuth';
 import { useDismissNotification, useMarkAllNotificationsRead, useMarkNotificationRead, useNotificationsList } from '@/hooks/useNotifications';
+import { formatCatDateTime } from '@/lib/date-time';
 
 export default function NotificationCenterPage() {
   const [severity, setSeverity] = useState('');
@@ -64,7 +65,7 @@ export default function NotificationCenterPage() {
           { key: 'severity', header: 'Severity', render: (row) => <StatusBadge status={row.severity} /> },
           { key: 'module', header: 'Module', render: (row) => row.module || 'SYSTEM' },
           { key: 'status', header: 'Status', render: (row) => <StatusBadge status={row.status} /> },
-          { key: 'createdAt', header: 'Date', render: (row) => new Date(row.createdAt).toLocaleString() },
+          { key: 'createdAt', header: 'Date', render: (row) => formatCatDateTime(row.createdAt) },
           {
             key: 'actions',
             header: 'Actions',

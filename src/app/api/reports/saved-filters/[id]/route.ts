@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 
+import { recordProtectedActionAudit, requireAdminDeleteKey } from '@/lib/admin-delete-server';
 import { can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
 import { deleteSavedReportFilter, updateSavedReportFilter } from '@/lib/reporting-server';
 
@@ -27,7 +28,28 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
 
   const { id } = await params;
   try {
-    await deleteSavedReportFilter(id, ctx.userId);
+    const body = (await request.json().catch(() => ({}))) as { adminKey?: string | null };
+    const adminKeyError = await requireAdminDeleteKey({
+      action: 'REPORT_FILTER_DELETED',
+      body,
+      ctx,
+      entityId: id,
+      entityType: 'saved_report_filter',
+      request,
+    });
+    if (adminKeyError) return adminKeyError;
+
+    const deleted = await deleteSavedReportFilter(id, ctx.userId);
+    await recordProtectedActionAudit({
+      action: 'REPORT_FILTER_DELETED',
+      entityId: id,
+      entityType: 'saved_report_filter',
+      oldValues: deleted,
+      newValues: { deleted: true },
+      ctx,
+      request,
+    });
+
     return NextResponse.json({ success: true });
   } catch (error) {
     return serverError(error instanceof Error ? error.message : 'Failed to delete saved filter.');

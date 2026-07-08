@@ -7,6 +7,7 @@ import { NotificationNav } from '@/components/notifications/notification-nav';
 import { DataTable, EmptyState, LoadingState, StatusBadge } from '@/components/ui-library';
 import { useAppAuth } from '@/hooks/useAppAuth';
 import { useNotificationDeliveryLogs } from '@/hooks/useNotifications';
+import { formatCatDateTime } from '@/lib/date-time';
 
 export default function NotificationDeliveryLogsPage() {
   const { isLoaded, isSignedIn } = useAppAuth();
@@ -32,7 +33,7 @@ export default function NotificationDeliveryLogsPage() {
           { key: 'recipient_user_id', header: 'Recipient' },
           { key: 'channel', header: 'Channel' },
           { key: 'delivery_status', header: 'Status', render: (row) => <StatusBadge status={String(row.delivery_status ?? '')} /> },
-          { key: 'sent_at', header: 'Sent At', render: (row) => row.sent_at ? new Date(String(row.sent_at)).toLocaleString() : 'Pending' },
+          { key: 'sent_at', header: 'Sent At', render: (row) => row.sent_at ? formatCatDateTime(String(row.sent_at)) : 'Pending' },
           { key: 'failure_reason', header: 'Failure Reason' },
         ]}
         emptyState={<EmptyState icon={<Send className="h-6 w-6" />} title="No delivery logs" description="Delivery attempts will appear here after alerts are generated." />}

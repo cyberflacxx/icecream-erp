@@ -42,6 +42,7 @@ import { useUserContext } from '@/contexts/UserContext';
 import { useBranchRealtime } from '@/hooks/branch-operations/useBranchRealtime';
 import { useDashboardMetrics } from '@/hooks/reports/useReports';
 import { getDashboardRoleLabel, resolveDashboardPersona } from '@/lib/dashboard-access';
+import { formatCatDateTime } from '@/lib/date-time';
 
 function formatNumber(value: unknown) {
   const numeric = typeof value === 'number' ? value : Number(value ?? 0);
@@ -217,7 +218,7 @@ export function DashboardOverview() {
                 key: 'createdAt',
                 header: 'Timestamp',
                 render: (row: Record<string, unknown>) =>
-                  row.createdAt ? new Date(String(row.createdAt)).toLocaleString() : 'N/A'
+                  row.createdAt ? formatCatDateTime(String(row.createdAt)) : 'N/A'
               }
             ]}
             data={recentAuditLogs}
@@ -512,7 +513,7 @@ export function DashboardOverview() {
                 key: 'createdAt',
                 header: 'Timestamp',
                 render: (row: Record<string, unknown>) =>
-                  row.createdAt ? new Date(String(row.createdAt)).toLocaleString() : 'N/A'
+                  row.createdAt ? formatCatDateTime(String(row.createdAt)) : 'N/A'
               }
             ]}
             data={recentAuditLogs}

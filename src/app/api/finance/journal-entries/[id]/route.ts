@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+import { recordProtectedActionAudit, requireAdminDeleteKey } from '@/lib/admin-delete-server';
 import { badRequest, can, forbidden, getAuthContext, notFound, serverError, unauthorized } from '@/lib/api-auth';
 import { isPostedJournalStatus } from '@/lib/finance';
 import { financeErrorMessage, financeService, isMissingFinanceColumn } from '@/lib/finance-server';
@@ -287,7 +288,7 @@ export async function PATCH(
 }
 
 export async function DELETE(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
   const ctx = await getAuthContext();
@@ -298,11 +299,22 @@ export async function DELETE(
   const service = financeService();
 
   try {
+    const body = (await request.json().catch(() => ({}))) as { adminKey?: string | null };
     const loaded = await loadJournalEntry(id);
     if (!loaded) return notFound('Journal entry not found');
     if (loaded.entry.isPosted) {
       return badRequest(`Journal entry ${loaded.entry.entryNumber} has been posted and cannot be deleted. Create a reversal entry instead.`);
     }
+
+    const adminKeyError = await requireAdminDeleteKey({
+      action: 'JOURNAL_ENTRY_DELETED',
+      body,
+      ctx,
+      entityId: id,
+      entityType: 'journal_entry',
+      request,
+    });
+    if (adminKeyError) return adminKeyError;
 
     const lineDelete = loaded.storage === 'modern'
       ? await service.from('journal_entry_lines').delete().eq('journal_entry_id', id)
@@ -312,11 +324,14 @@ export async function DELETE(
     const { error: deleteErr } = await service.from('journal_entries').delete().eq('id', id);
     if (deleteErr) throw deleteErr;
 
-    await service.from('audit_logs').insert({
+    await recordProtectedActionAudit({
       action: 'JOURNAL_ENTRY_DELETED',
-      entity_id: id,
-      entity_type: 'journal_entry',
-      user_profile_id: ctx.userId,
+      entityType: 'journal_entry',
+      entityId: id,
+      oldValues: loaded.entry as unknown as Record<string, unknown>,
+      newValues: { deleted: true, storage: loaded.storage },
+      ctx,
+      request,
     });
 
     return NextResponse.json({ id, success: true });

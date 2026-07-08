@@ -1,6 +1,7 @@
 'use client';
 
 import { WorkflowStatusBadge } from '@/components/workflows/workflow-status-badge';
+import { formatCatDateTime } from '@/lib/date-time';
 
 export function WorkflowTimeline({ items }: { items: Array<Record<string, unknown>> }) {
   return (
@@ -25,8 +26,8 @@ export function WorkflowTimeline({ items }: { items: Array<Record<string, unknow
               </div>
               <div className="mt-1 text-[color:var(--app-muted)]">
                 {String(item.document_reference ?? item.document_id ?? '')}
-                {' • '}
-                {String(item.action_at ?? item.created_at ?? '')}
+                {' | '}
+                {formatCatDateTime(String(item.action_at ?? item.created_at ?? ''))}
               </div>
               {item.action_comment ? (
                 <div className="mt-2 text-[color:var(--app-text)]">

@@ -54,7 +54,7 @@ function HandoverApproveAction({ row }: { row: Record<string, unknown> }) {
   return (
     <div className="flex items-center gap-2">
       <StatusBadge status={String(row.approval_status ?? '')} />
-      <Button size="sm" variant="outline" onClick={() => { void approve.mutateAsync({ decision: 'APPROVED' }); }}>Approve</Button>
+      <Button size="sm" variant="success" onClick={() => { void approve.mutateAsync({ decision: 'APPROVED' }); }}>Approve</Button>
     </div>
   );
 }
