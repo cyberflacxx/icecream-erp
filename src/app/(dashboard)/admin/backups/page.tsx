@@ -1,32 +1,72 @@
-'use client';
-
-import { HardDriveDownload } from 'lucide-react';
-
-import { AdminNav } from '@/components/admin/admin-nav';
-import { PageHeader } from '@/components/dashboard/page-header';
-import { Button } from '@/components/ui/button';
-import { DataTable, EmptyState, LoadingState, StatCard, StatusBadge } from '@/components/ui-library';
-import { useBackups, useCreateRestoreTest, useRunBackup } from '@/hooks/admin/useAdminReadiness';
-
-export default function AdminBackupsPage() {
-  const query = useBackups();
-  const runBackup = useRunBackup();
-  const restoreTest = useCreateRestoreTest();
-  if (query.isLoading) return <LoadingState />;
-  if (query.isError || !query.data) return <EmptyState icon={<HardDriveDownload className="h-6 w-6" />} title="Backup management unavailable" description={query.error?.message ?? 'Failed to load backup data.'} />;
-
-  const logs = Array.isArray(query.data.logs) ? query.data.logs as Array<Record<string, unknown>> : [];
-  const restoreTests = Array.isArray(query.data.restoreTests) ? query.data.restoreTests as Array<Record<string, unknown>> : [];
+﻿export default function AdminBackupsPage() {
   return (
-    <div className="space-y-8">
-      <PageHeader title="Backup Management" description="Track manual backup runs, view backup history, and record restore test readiness." status="partial" actions={<div className="flex gap-2"><Button variant="outline" onClick={() => restoreTest.mutate({ result: 'SUCCESS', remarks: 'Manual restore test recorded.' })}>Record Restore Test</Button><Button onClick={() => runBackup.mutate({ backupType: 'MANUAL', backupLocation: 'manual://backup' })}>Run Backup</Button></div>} />
-      <AdminNav />
-      <div className="grid gap-4 sm:grid-cols-3">
-        <StatCard title="Backup Logs" value={String(logs.length)} icon={<HardDriveDownload className="h-5 w-5" />} />
-        <StatCard title="Restore Tests" value={String(restoreTests.length)} icon={<HardDriveDownload className="h-5 w-5" />} color="warning" />
-        <StatCard title="Last Status" value={String(logs[0]?.status ?? 'NONE')} icon={<HardDriveDownload className="h-5 w-5" />} color="success" />
+    <main className="min-h-screen bg-slate-50 p-6">
+      <div className="mx-auto max-w-6xl space-y-6">
+        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+          <p className="text-sm font-semibold uppercase tracking-wide text-slate-500">
+            Administration
+          </p>
+          <h1 className="mt-2 text-3xl font-bold text-slate-900">
+            Backup Management
+          </h1>
+          <p className="mt-2 max-w-3xl text-sm text-slate-600">
+            Manage backup readiness, manual backup actions, and restore controls for Absolute Ice Cream ERP.
+          </p>
+        </section>
+
+        <section className="grid gap-4 md:grid-cols-3">
+          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <p className="text-sm font-medium text-slate-500">Backup Status</p>
+            <h2 className="mt-2 text-xl font-semibold text-slate-900">Not configured</h2>
+            <p className="mt-2 text-sm text-slate-600">Backup controls are not configured yet.</p>
+          </div>
+
+          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <p className="text-sm font-medium text-slate-500">Last Backup</p>
+            <h2 className="mt-2 text-xl font-semibold text-slate-900">No record</h2>
+            <p className="mt-2 text-sm text-slate-600">No backup history is available yet.</p>
+          </div>
+
+          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <p className="text-sm font-medium text-slate-500">Restore Status</p>
+            <h2 className="mt-2 text-xl font-semibold text-slate-900">Manual only</h2>
+            <p className="mt-2 text-sm text-slate-600">Restore actions should be handled by the system administrator.</p>
+          </div>
+        </section>
+
+        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+          <h2 className="text-xl font-semibold text-slate-900">Backup Controls</h2>
+          <p className="mt-1 text-sm text-slate-600">
+            These controls are placeholders until automated backup APIs are configured.
+          </p>
+
+          <div className="mt-4 flex flex-wrap gap-3">
+            <button
+              type="button"
+              disabled
+              className="rounded-xl bg-slate-300 px-4 py-2 text-sm font-semibold text-slate-600"
+            >
+              Create Backup
+            </button>
+            <button
+              type="button"
+              disabled
+              className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-500"
+            >
+              Download Latest
+            </button>
+          </div>
+
+          <div className="mt-6 rounded-xl border border-dashed border-slate-300 bg-slate-50 p-4">
+            <p className="text-sm font-medium text-slate-800">
+              Backup controls are not configured yet.
+            </p>
+            <p className="mt-1 text-xs text-slate-500">
+              Configure server-side backup scripts before enabling these actions.
+            </p>
+          </div>
+        </section>
       </div>
-      <DataTable data={logs} columns={[{ key: 'backup_type', header: 'Type' }, { key: 'started_at', header: 'Started' }, { key: 'completed_at', header: 'Completed' }, { key: 'status', header: 'Status', render: (row) => <StatusBadge status={String(row.status ?? '')} /> }, { key: 'file_reference', header: 'Reference' }]} emptyState={<EmptyState icon={<HardDriveDownload className="h-6 w-6" />} title="No backup logs" description="Manual backup requests and backup automation logs will appear here." />} />
-    </div>
+    </main>
   );
 }
