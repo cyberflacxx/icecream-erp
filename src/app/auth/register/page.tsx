@@ -162,7 +162,7 @@ export default function RegisterPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          admin_key: adminKey.trim(),
+          adminKey: adminKey.trim(),
           confirm_password: confirmPassword,
           email: email.trim().toLowerCase(),
           first_name: firstName.trim(),
@@ -259,6 +259,7 @@ export default function RegisterPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          adminKey: adminKey.trim(),
           otp: otp.trim(),
           requestId: otpRequestId,
         }),
@@ -507,7 +508,7 @@ export default function RegisterPage() {
               disabled={registrationLocked}
               error={fieldErrors.admin_key}
               isValid={Boolean(adminKey.trim())}
-              label="Admin Registration Key"
+              label="Admin Key"
               onChange={(value) => {
                 setAdminKey(value);
                 setFieldErrors((current) => ({ ...current, admin_key: '' }));

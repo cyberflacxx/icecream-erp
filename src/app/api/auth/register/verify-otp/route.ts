@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { workIdToEmail } from '@/lib/auth-roles';
+import { resolveAdminActionKeyValidation } from '@/lib/admin-delete-server';
 import { sendTransactionalEmail } from '@/lib/email';
 import {
   assignUserRole,
@@ -19,12 +20,33 @@ import { createServiceRoleClient } from '@/lib/supabase/server';
 import { serializeUserPhoneValue } from '@/lib/user-access-profile';
 
 export async function POST(request: NextRequest) {
-  const body = (await request.json()) as { otp?: string; requestId?: string };
+  const body = (await request.json().catch(() => ({}))) as { adminKey?: string; admin_key?: string; otp?: string; requestId?: string };
   const requestId = String(body.requestId ?? '').trim();
   const otp = String(body.otp ?? '').trim();
+  const adminKeyInput = String(body.adminKey ?? body.admin_key ?? '').trim();
 
   if (!requestId || !otp) {
     return NextResponse.json({ error: 'Request ID and OTP are required.' }, { status: 400 });
+  }
+
+  const adminKeyValidation = resolveAdminActionKeyValidation({
+    body: { adminKey: adminKeyInput },
+    messages: {
+      invalid: 'Invalid admin key.',
+      notConfigured: 'Admin action key is not configured.',
+      required: 'Admin key is required.',
+    },
+    request,
+  });
+
+  if (adminKeyValidation.error === 'Admin action key is not configured.') {
+    return NextResponse.json({ error: adminKeyValidation.error }, { status: 500 });
+  }
+  if (adminKeyValidation.error === 'Admin key is required.') {
+    return NextResponse.json({ error: adminKeyValidation.error }, { status: 400 });
+  }
+  if (adminKeyValidation.error === 'Invalid admin key.') {
+    return NextResponse.json({ error: adminKeyValidation.error }, { status: 403 });
   }
 
   let registrationRequest: ReturnType<typeof verifyRegistrationRequestToken>;
@@ -162,6 +184,15 @@ export async function POST(request: NextRequest) {
     ipAddress: request.headers.get('x-forwarded-for'),
     userAgent: request.headers.get('user-agent'),
   });
+
+  try {
+    await service.from('audit_logs').insert({
+      action: 'ACCOUNT_REGISTERED',
+      entity_id: String(profile.id),
+      entity_type: 'user',
+      user_profile_id: String(profile.id),
+    });
+  } catch {}
 
   return NextResponse.json({
     message: 'Account created successfully.',

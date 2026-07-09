@@ -1,9 +1,9 @@
 import { createHash, createHmac, randomBytes } from 'crypto';
 
-import { ROLE_PERMISSIONS, ROLES } from '@/lib/auth-roles';
-import { deriveLegacyRole } from '@/lib/registration';
-import { createServiceRoleClient } from '@/lib/supabase/server';
-import { parseUserPhoneValue } from '@/lib/user-access-profile';
+import { ROLE_PERMISSIONS, ROLES } from './auth-roles';
+import { deriveLegacyRole } from './registration';
+import { createServiceRoleClient } from './supabase/server';
+import { parseUserPhoneValue } from './user-access-profile';
 import {
   getLockoutExpiry,
   isLoginAllowed,
@@ -15,7 +15,7 @@ import {
   type LoginAttemptStatus,
   type SecurityPolicySettings,
   type UserAccountStatus,
-} from '@/lib/security';
+} from './security';
 
 export interface ResolvedRole {
   id: string;

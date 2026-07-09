@@ -23,7 +23,7 @@ export function isSupabaseNetworkTimeout(error: unknown) {
 }
 
 export function createSupabaseFetch(timeoutMs = readTimeoutMs()): typeof fetch {
-  return async (input, init = {}) => {
+  return async (input: RequestInfo | URL, init: RequestInit = {}) => {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => {
       controller.abort(new DOMException(`Supabase request timed out after ${timeoutMs}ms.`, 'TimeoutError'));
@@ -45,7 +45,7 @@ export function createSupabaseFetch(timeoutMs = readTimeoutMs()): typeof fetch {
       return await fetch(input, { ...init, signal: controller.signal });
     } catch (error) {
       if (isSupabaseNetworkTimeout(error)) {
-        throw new Error(`Supabase request timed out after ${timeoutMs}ms.`, { cause: error });
+        throw new Error(`Supabase request timed out after ${timeoutMs}ms.`);
       }
       throw error;
     } finally {

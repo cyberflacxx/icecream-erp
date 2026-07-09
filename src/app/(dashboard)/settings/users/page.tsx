@@ -49,6 +49,7 @@ export default function SettingsUsersPage() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const [form, setForm] = useState({
+    adminKey: '',
     firstName: '',
     lastName: '',
     email: '',
@@ -78,7 +79,7 @@ export default function SettingsUsersPage() {
   );
 
   function resetForm() {
-    setForm({ firstName: '', lastName: '', email: '', idNumber: '', roleId: '', branchId: '' });
+    setForm({ adminKey: '', firstName: '', lastName: '', email: '', idNumber: '', roleId: '', branchId: '' });
     setCreatedWorkId(null);
     setErrorMessage(null);
   }
@@ -90,18 +91,19 @@ export default function SettingsUsersPage() {
 
   async function handleCreate() {
     setErrorMessage(null);
-    if (!form.firstName || !form.lastName || !form.email || !form.idNumber || !form.roleId) {
-      setErrorMessage('All required fields must be completed.');
+    if (!form.firstName || !form.lastName || !form.email || !form.idNumber || !form.roleId || !form.adminKey.trim()) {
+      setErrorMessage('All required fields must be completed, including the admin key.');
       return;
     }
 
     try {
       const result = (await createUser.mutateAsync({
         ...form,
+        adminKey: form.adminKey.trim(),
         branchId: form.branchId || null,
       })) as { workId?: string };
       setCreatedWorkId(result?.workId ?? null);
-      setForm({ firstName: '', lastName: '', email: '', idNumber: '', roleId: '', branchId: '' });
+      setForm({ adminKey: '', firstName: '', lastName: '', email: '', idNumber: '', roleId: '', branchId: '' });
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : 'Failed to create user.');
     }
@@ -257,6 +259,18 @@ export default function SettingsUsersPage() {
             </label>
 
             <label className="block space-y-1.5 text-sm text-muted dark:text-darkMuted">
+              <span>Admin Key</span>
+              <input
+                type="password"
+                required
+                value={form.adminKey}
+                onChange={(event) => setForm((current) => ({ ...current, adminKey: event.target.value }))}
+                placeholder="Enter the admin key"
+                className={inputClass}
+              />
+            </label>
+
+            <label className="block space-y-1.5 text-sm text-muted dark:text-darkMuted">
               <span>Role</span>
               <select
                 value={form.roleId}
@@ -325,6 +339,7 @@ function RoleAssignButton({
       <FormDrawer title="Change Role" open={editing} onClose={() => setEditing(false)}>
         <div className="space-y-3">
           <select
+            aria-label="Select role"
             value={selected}
             onChange={(event) => setSelected(event.target.value)}
             className={inputClass}

@@ -11,6 +11,7 @@ import {
   resolveSecurityPolicy,
   shouldLockAccount,
 } from '../src/lib/security';
+import { resolveAdminActionKeyValidation } from '../src/lib/admin-delete-server';
 
 test('normalizeUserStatus maps unknown values to INACTIVE', () => {
   assert.equal(normalizeUserStatus('unknown'), 'INACTIVE');
@@ -68,4 +69,39 @@ test('hasPermissionAccess resolves sales customer aliases to legacy sales permis
   assert.equal(hasPermissionAccess(permissions, 'sales.customer.edit'), true);
   assert.equal(hasPermissionAccess(permissions, 'sales.customer.view'), true);
   assert.equal(hasPermissionAccess(permissions, 'sales.customer.deactivate'), true);
+});
+
+test('resolveAdminActionKeyValidation returns the expected messages for missing, missing-env, and invalid keys', () => {
+  const originalEnv = process.env;
+  process.env = { ...originalEnv };
+
+  try {
+    delete process.env.SYSTEM_ADMIN_DELETE_KEY;
+    delete process.env.ADMIN_DELETE_KEY;
+    delete process.env.ADMIN_KEY;
+
+    assert.deepEqual(resolveAdminActionKeyValidation({ body: {}, request: new Request('https://example.test') }), {
+      configuredKey: null,
+      error: 'Admin action key is not configured.',
+      suppliedKey: '',
+    });
+
+    process.env.ADMIN_KEY = 'shared-secret';
+    assert.deepEqual(resolveAdminActionKeyValidation({ body: {}, request: new Request('https://example.test') }), {
+      configuredKey: 'shared-secret',
+      error: 'Admin key is required.',
+      suppliedKey: '',
+    });
+
+    assert.deepEqual(resolveAdminActionKeyValidation({
+      body: { adminKey: 'wrong-secret' },
+      request: new Request('https://example.test'),
+    }), {
+      configuredKey: 'shared-secret',
+      error: 'Invalid admin key.',
+      suppliedKey: 'wrong-secret',
+    });
+  } finally {
+    process.env = originalEnv;
+  }
 });

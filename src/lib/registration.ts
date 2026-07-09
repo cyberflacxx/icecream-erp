@@ -1,7 +1,7 @@
 import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes } from 'crypto';
 
-import { ROLES, generateWorkId } from '@/lib/auth-roles';
-import { createServiceRoleClient } from '@/lib/supabase/server';
+import { ROLES, generateWorkId } from './auth-roles';
+import { createServiceRoleClient } from './supabase/server';
 
 export interface RegistrationPayload {
   branchId?: string | null;

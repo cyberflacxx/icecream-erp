@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { randomUUID } from 'crypto';
 
+import { resolveAdminActionKeyValidation } from '@/lib/admin-delete-server';
 import { sendTransactionalEmail } from '@/lib/email';
 import {
   createRegistrationRequestToken,
@@ -18,7 +19,8 @@ import { recordSecurityEvent } from '@/lib/security-server';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
 export async function POST(request: NextRequest) {
-  const body = (await request.json()) as {
+  const body = (await request.json().catch(() => ({}))) as {
+    adminKey?: string;
     admin_key?: string;
     branch_id?: string | null;
     confirm_password?: string;
@@ -30,8 +32,9 @@ export async function POST(request: NextRequest) {
     role?: string;
   };
 
+  const adminKeyInput = String(body.adminKey ?? body.admin_key ?? '').trim();
   const { fieldErrors, normalized } = validateRegistrationPayload({
-    adminKey: body.admin_key,
+    adminKey: adminKeyInput,
     branchId: body.branch_id,
     confirmPassword: body.confirm_password,
     email: body.email,
@@ -42,9 +45,30 @@ export async function POST(request: NextRequest) {
     role: body.role,
   });
 
-  const validAdminKey = process.env.ADMIN_REGISTRATION_KEY ?? process.env.IMPERSONATE_KEY;
-  if (!validAdminKey || normalized.adminKey !== validAdminKey) {
-    fieldErrors.admin_key = 'Invalid admin registration key.';
+  const adminKeyValidation = resolveAdminActionKeyValidation({
+    body: { adminKey: adminKeyInput },
+    messages: {
+      invalid: 'Invalid admin key.',
+      notConfigured: 'Admin action key is not configured.',
+      required: 'Admin key is required.',
+    },
+    request,
+  });
+
+  if (adminKeyValidation.error === 'Admin key is required.') {
+    fieldErrors.admin_key = adminKeyValidation.error;
+  }
+  if (adminKeyValidation.error === 'Invalid admin key.') {
+    fieldErrors.admin_key = adminKeyValidation.error;
+  }
+  if (adminKeyValidation.error === 'Admin action key is not configured.') {
+    return NextResponse.json({ error: adminKeyValidation.error, fieldErrors: { admin_key: adminKeyValidation.error } }, { status: 500 });
+  }
+  if (adminKeyValidation.error === 'Invalid admin key.') {
+    return NextResponse.json({ error: adminKeyValidation.error, fieldErrors: { admin_key: adminKeyValidation.error } }, { status: 403 });
+  }
+  if (adminKeyValidation.error === 'Admin key is required.') {
+    return NextResponse.json({ error: adminKeyValidation.error, fieldErrors: { admin_key: adminKeyValidation.error } }, { status: 400 });
   }
 
   if (Object.keys(fieldErrors).length > 0) {
