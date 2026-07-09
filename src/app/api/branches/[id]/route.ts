@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { can, forbidden, getAuthContext, notFound, serverError, unauthorized } from '@/lib/api-auth';
+import { isMissingColumnError } from '@/lib/postgrest-compat';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
 export async function PATCH(
@@ -18,14 +19,22 @@ export async function PATCH(
     // Branch scoped access check
     if (ctx.isBranchScoped && ctx.branchId && ctx.branchId !== id) return forbidden();
 
-    const { data: existing, error: fetchErr } = await service
+    let existingResult = await service
       .schema('icecream_erp')
       .from('branches')
       .select('id')
       .is('deleted_at', null)
       .eq('id', id)
       .single();
-    if (fetchErr || !existing) return notFound('Branch not found');
+    if (existingResult.error && isMissingColumnError(existingResult.error, 'branches', 'deleted_at')) {
+      existingResult = await service
+        .schema('icecream_erp')
+        .from('branches')
+        .select('id')
+        .eq('id', id)
+        .single();
+    }
+    if (existingResult.error || !existingResult.data) return notFound('Branch not found');
 
     const body = await request.json() as {
       name?: string;

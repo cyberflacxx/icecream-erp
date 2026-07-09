@@ -1,4 +1,5 @@
 import { badRequest, canAccessBranchScope } from '@/lib/api-auth';
+import { isMissingColumnError } from '@/lib/postgrest-compat';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 import type { AuthContext } from '@/lib/api-auth';
 
@@ -14,17 +15,40 @@ export function ensureBranchScope(ctx: AuthContext, branchId: string) {
 
 export async function getActiveBranchWarehouse(branchId: string) {
   const service = branchService();
-  const { data, error } = await service
+  let result = await service
     .from('warehouses')
-    .select('id, branch_id, code, name')
+    .select('id, branch_id, code, name, type, warehouse_type')
     .eq('branch_id', branchId)
     .eq('is_active', true)
     .eq('type', 'BRANCH')
     .maybeSingle();
 
-  if (error) throw error;
-  if (!data) throw new Error('No active branch warehouse found');
-  return data;
+  if (
+    result.error &&
+    (
+      isMissingColumnError(result.error, 'warehouses', 'type') ||
+      isMissingColumnError(result.error, 'warehouses', 'warehouse_type')
+    )
+  ) {
+    result = await service
+      .from('warehouses')
+      .select('id, branch_id, code, name, type, warehouse_type')
+      .eq('branch_id', branchId)
+      .eq('is_active', true)
+      .maybeSingle();
+  } else if (!result.error && !result.data) {
+    result = await service
+      .from('warehouses')
+      .select('id, branch_id, code, name, type, warehouse_type')
+      .eq('branch_id', branchId)
+      .eq('is_active', true)
+      .eq('warehouse_type', 'BRANCH')
+      .maybeSingle();
+  }
+
+  if (result.error) throw result.error;
+  if (!result.data) throw new Error('No warehouse linked to this branch.');
+  return result.data;
 }
 
 export async function generateBranchReferenceNumber(table: string, prefix: string) {

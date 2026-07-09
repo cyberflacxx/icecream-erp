@@ -102,16 +102,27 @@ export interface BranchShiftCloseDetail {
 export interface BranchStockRow {
   id: string;
   item: {
+    category?: string;
     id: string;
+    lastMovementDate?: string | null;
     code: string;
     name: string;
     itemType: string;
+    unit?: {
+      abbreviation: string;
+      name: string;
+    };
   };
   quantityOnHand: number;
   quantityAvailable: number;
   sellingPrice: number;
   unitCost: number;
   totalValue: number;
+  warehouse?: {
+    code: string;
+    id: string;
+    name: string;
+  };
 }
 
 export interface BranchShiftRow {

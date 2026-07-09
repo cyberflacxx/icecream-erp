@@ -385,6 +385,18 @@ export default function BranchSalesPage() {
               </Button>
             </div>
 
+            {stockQuery.isError ? (
+              <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+                {stockQuery.error?.message ?? 'Branch stock is unavailable for sale recording right now.'}
+              </div>
+            ) : null}
+
+            {!stockQuery.isLoading && !stockQuery.isError && stockOptions.length === 0 ? (
+              <div className="rounded-2xl border border-border bg-white/80 px-4 py-3 text-sm text-muted">
+                No items recorded for this branch yet.
+              </div>
+            ) : null}
+
             {saleItems.map((line, index) => (
               <div key={`${line.itemId}-${index}`} className="grid gap-3 rounded-2xl bg-white p-3 sm:grid-cols-4">
                 <select

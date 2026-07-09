@@ -19,6 +19,7 @@ export async function GET() {
       id: role.id,
       name: role.name,
       description: role.description,
+      requiresBranch: role.requiresBranch,
     })),
   });
 }

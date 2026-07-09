@@ -9,6 +9,10 @@ import { DataTable, EmptyState, LoadingState } from '@/components/ui-library';
 import { useBranchStock, useBranchStockLedger } from '@/hooks/branch-operations';
 
 const currencyFormatter = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
+function formatDate(value: string | null | undefined) {
+  if (!value) return 'No movement yet';
+  return new Date(value).toLocaleDateString();
+}
 
 export default function BranchStockPage() {
   const params = useParams<{ id: string }>();
@@ -27,14 +31,48 @@ export default function BranchStockPage() {
       <BranchOperationsNav branchId={branchId} />
       <DataTable
         columns={[
-          { key: 'item', header: 'Item', render: (row) => `${row.item.code} - ${row.item.name}` },
+          {
+            key: 'item',
+            header: 'Item',
+            render: (row) => `${row.item.code} - ${row.item.name}`,
+          },
+          {
+            key: 'category',
+            header: 'Category',
+            render: (row) => row.item.category ?? 'Uncategorized',
+          },
           { key: 'quantityOnHand', header: 'On Hand' },
           { key: 'quantityAvailable', header: 'Available' },
+          {
+            key: 'unit',
+            header: 'Unit',
+            render: (row) => row.item.unit?.abbreviation || row.item.unit?.name || 'Unit',
+          },
+          {
+            key: 'warehouse',
+            header: 'Warehouse',
+            render: (row) =>
+              row.warehouse?.code
+                ? `${row.warehouse.code} - ${row.warehouse.name}`
+                : row.warehouse?.name ?? 'No warehouse linked',
+          },
+          {
+            key: 'lastMovementDate',
+            header: 'Last Movement',
+            render: (row) => formatDate(row.item.lastMovementDate),
+          },
           { key: 'unitCost', header: 'Unit Cost', render: (row) => currencyFormatter.format(row.unitCost) },
           { key: 'totalValue', header: 'Stock Value', render: (row) => currencyFormatter.format(row.totalValue) },
         ]}
         data={stockQuery.data.data}
         pagination={stockQuery.data.pagination}
+        emptyState={
+          <EmptyState
+            icon={<AlertCircle className="h-6 w-6" />}
+            title="No branch items found"
+            description="No items recorded for this branch yet."
+          />
+        }
       />
       <DataTable
         columns={[

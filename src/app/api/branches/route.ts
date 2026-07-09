@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { badRequest, can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
+import { isMissingColumnError } from '@/lib/postgrest-compat';
 import { syncUserBranchAssignment } from '@/lib/registration';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
@@ -17,23 +18,37 @@ export async function GET(request: NextRequest) {
   const status = searchParams.get('status') ?? undefined;
 
   try {
-    let query = service
-      .schema('icecream_erp')
-      .from('branches')
-      .select('id, code, name, phone, status, address, manager_id', { count: 'exact' })
-      .is('deleted_at', null)
-      .order('name', { ascending: true });
+    const buildQuery = (includeDeletedAtFilter: boolean) => {
+      let query = service
+        .schema('icecream_erp')
+        .from('branches')
+        .select('id, code, name, phone, status, address, manager_id', { count: 'exact' })
+        .order('name', { ascending: true });
 
-    if (status) query = query.eq('status', status);
-    if (search) query = query.or(`code.ilike.%${search}%,name.ilike.%${search}%`);
+      if (includeDeletedAtFilter) {
+        query = query.is('deleted_at', null);
+      }
 
-    // Branch scoped: only show own branch
-    if (ctx.isBranchScoped && ctx.branchId) {
-      query = query.eq('id', ctx.branchId);
+      if (status) query = query.eq('status', status);
+      if (search) query = query.or(`code.ilike.%${search}%,name.ilike.%${search}%`);
+
+      if (ctx.isBranchScoped && ctx.branchId) {
+        query = query.eq('id', ctx.branchId);
+      }
+
+      return query;
+    };
+
+    let query = buildQuery(true);
+    const from = (page - 1) * pageSize;
+    let result = await query.range(from, from + pageSize - 1);
+
+    if (result.error && isMissingColumnError(result.error, 'branches', 'deleted_at')) {
+      query = buildQuery(false);
+      result = await query.range(from, from + pageSize - 1);
     }
 
-    const from = (page - 1) * pageSize;
-    const { data: branches, count, error } = await query.range(from, from + pageSize - 1);
+    const { data: branches, count, error } = result;
     if (error) throw error;
 
     const branchIds = (branches ?? []).map((b: { id: string }) => b.id);

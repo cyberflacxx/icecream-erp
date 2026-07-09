@@ -14,7 +14,7 @@ import {
 } from 'lucide-react';
 import { type FormEvent, useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { EmptyState, FilterBar, FormDrawer, StatusBadge } from '@/components/ui-library';
 import { PERMISSIONS } from '@/lib/shared';
@@ -43,6 +43,86 @@ const currencyFormatter = new Intl.NumberFormat('en-US', {
   minimumFractionDigits: 2,
   style: 'currency'
 });
+const purchasableItemTypes = new Set([
+  'RAW',
+  'RAW_MATERIAL',
+  'PACKAGING',
+  'PACKAGING_MATERIAL',
+  'INGREDIENT',
+  'CONSUMABLE',
+  'GENERAL',
+  'STOCK',
+]);
+
+interface PurchaseOrderItemOption {
+  code: string;
+  id: string;
+  inventory?: {
+    currentStock: number;
+    isLowStock: boolean;
+    lastReceivedDate: string | null;
+    primaryWarehouseName: string | null;
+    quantityOnOrder: number;
+    quantityReceivedToday: number;
+    reorderLevel: number;
+    warehouses: Array<{
+      code: string;
+      id: string;
+      name: string;
+      quantity: number;
+    }>;
+  };
+  itemType: string | null;
+  name: string;
+  unitOfMeasureId: string | null;
+}
+
+function normalizePurchaseOrderItemsResponse(payload: unknown): PurchaseOrderItemOption[] {
+  const container = payload && typeof payload === 'object' ? (payload as Record<string, unknown>) : null;
+  const source =
+    Array.isArray(payload)
+      ? payload
+      : Array.isArray(container?.data)
+        ? container.data
+        : Array.isArray(container?.items)
+          ? container.items
+          : [];
+
+  return source
+    .map((item) => {
+      if (!item || typeof item !== 'object') return null;
+
+      const row = item as Record<string, unknown>;
+      const unitOfMeasure =
+        row.unitOfMeasure && typeof row.unitOfMeasure === 'object'
+          ? (row.unitOfMeasure as Record<string, unknown>)
+          : null;
+      const itemType = String(row.itemType ?? row.item_type ?? row.type ?? '').trim().toUpperCase() || null;
+      const isActive = row.isActive !== false && row.is_active !== false;
+
+      if (!isActive) {
+        return null;
+      }
+
+      if (itemType && (itemType === 'FINISHED_GOOD' || itemType === 'FINISHED')) {
+        return null;
+      }
+
+      if (itemType && !purchasableItemTypes.has(itemType) && itemType.startsWith('FINISHED')) {
+        return null;
+      }
+
+      return {
+        code: String(row.code ?? ''),
+        id: String(row.id ?? ''),
+        itemType,
+        name: String(row.name ?? row.code ?? 'Unnamed item'),
+        unitOfMeasureId: String(row.unitOfMeasureId ?? unitOfMeasure?.id ?? row.unit_of_measure_id ?? row.unit_id ?? '') || null,
+      } satisfies PurchaseOrderItemOption;
+    })
+    .filter((item): item is PurchaseOrderItemOption => Boolean(item?.id))
+    .sort((left, right) => left.name.localeCompare(right.name));
+}
 
 function createLineItemDraft() {
   return {
@@ -130,6 +210,10 @@ export default function PurchaseOrdersPage() {
   const queryClient = useQueryClient();
   const request = useProcurementRequest();
   const metaQuery = useProcurementMeta();
+  const inventoryItemsQuery = useQuery({
+    queryKey: ['procurement', 'purchase-order-item-options'],
+    queryFn: () => request<unknown>('/api/inventory/items?page=1&pageSize=100&status=active'),
+  });
   const ordersQuery = usePurchaseOrders({
     page: filters.page,
     pageSize: filters.pageSize,
@@ -149,8 +233,40 @@ export default function PurchaseOrdersPage() {
     setIsDrawerOpen(true);
   }, [requisitionIdParam]);
 
+  useEffect(() => {
+    if (!isDrawerOpen) {
+      return;
+    }
+
+    void inventoryItemsQuery.refetch();
+  }, [inventoryItemsQuery, isDrawerOpen]);
+
   const orders = ordersQuery.data?.data ?? [];
   const pagination = ordersQuery.data?.pagination;
+  const purchaseOrderItems = (() => {
+    const merged = new Map<string, PurchaseOrderItemOption>();
+
+    for (const item of normalizePurchaseOrderItemsResponse(inventoryItemsQuery.data)) {
+      merged.set(item.id, item);
+    }
+
+    for (const item of metaQuery.data?.items ?? []) {
+      if (!item.id) continue;
+      const itemType = item.itemType ? String(item.itemType).trim().toUpperCase() : null;
+      if (itemType && (itemType === 'FINISHED_GOOD' || itemType === 'FINISHED')) continue;
+
+      merged.set(item.id, {
+        code: item.code,
+        id: item.id,
+        inventory: item.inventory,
+        itemType,
+        name: item.name,
+        unitOfMeasureId: item.unitOfMeasureId,
+      });
+    }
+
+    return Array.from(merged.values()).sort((left, right) => left.name.localeCompare(right.name));
+  })();
 
   const summary = orders.reduce(
     (accumulator, order) => {
@@ -301,7 +417,7 @@ export default function PurchaseOrdersPage() {
         }
 
         if (field === 'itemId') {
-          const matchedItem = (metaQuery.data?.items ?? []).find((item) => item.id === value);
+          const matchedItem = purchaseOrderItems.find((item) => item.id === value);
 
           return {
             ...row,
@@ -741,12 +857,11 @@ export default function PurchaseOrdersPage() {
               </Button>
             </div>
 
-            <div className="mt-4 hidden rounded-2xl bg-cream/70 px-4 py-3 text-xs font-semibold uppercase tracking-[0.18em] text-muted xl:grid xl:grid-cols-[minmax(0,2.2fr)_110px_120px_120px_110px] xl:gap-3">
+            <div className="mt-4 hidden rounded-2xl bg-cream/70 px-4 py-3 text-xs font-semibold uppercase tracking-[0.18em] text-muted xl:grid xl:grid-cols-[minmax(0,2.2fr)_110px_120px_120px] xl:gap-3">
               <span>Item</span>
               <span>Qty</span>
               <span>Unit Cost</span>
               <span>UOM</span>
-              <span>Action</span>
             </div>
 
             <div className="mt-3 space-y-3">
@@ -756,10 +871,10 @@ export default function PurchaseOrdersPage() {
                 return (
                 <div
                   key={item.rowId}
-                  className="rounded-3xl border border-border/70 bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(255,247,232,0.82))] p-4"
+                  className="relative z-10 overflow-visible rounded-3xl border border-border/70 bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(255,247,232,0.82))] p-4"
                 >
-                  <div className="grid gap-3 xl:grid-cols-[minmax(0,2.2fr)_110px_120px_120px_110px]">
-                    <div className="space-y-2">
+                  <div className="grid gap-3 xl:grid-cols-[minmax(0,2.2fr)_110px_120px_120px]">
+                    <div className="relative z-30 space-y-2">
                       <label className="text-xs font-semibold uppercase tracking-[0.18em] text-muted xl:hidden">
                         Item
                       </label>
@@ -769,7 +884,7 @@ export default function PurchaseOrdersPage() {
                         className="surface-input-soft"
                       >
                         <option value="">Select item</option>
-                        {(metaQuery.data?.items ?? []).map((row) => (
+                        {purchaseOrderItems.map((row) => (
                           <option key={row.id} value={row.id}>
                             {row.code} - {row.name}
                           </option>
@@ -823,7 +938,10 @@ export default function PurchaseOrdersPage() {
                       </select>
                     </div>
 
-                    <div className="flex items-end">
+                  </div>
+
+                  <div className="mt-2 flex justify-end">
+                    <div className="w-full sm:w-[140px]">
                       <Button
                         type="button"
                         variant="outline"

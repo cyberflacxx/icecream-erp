@@ -11,6 +11,7 @@ interface RoleOption {
   description?: string | null;
   id: string;
   name: string;
+  requiresBranch?: boolean;
 }
 
 interface BranchOption {
@@ -103,6 +104,11 @@ export default function RegisterPage() {
     }),
     [password],
   );
+  const selectedRole = useMemo(
+    () => roles.find((role) => role.id === roleId) ?? null,
+    [roleId, roles],
+  );
+  const branchIsRequired = selectedRole?.requiresBranch ?? (roleId ? roleId !== 'super_admin' : false);
 
   const registrationLocked = Boolean(otpRequestId);
 
@@ -130,7 +136,7 @@ export default function RegisterPage() {
     if (!roleId) {
       errors.role = 'Please select a role.';
     }
-    if (roleId !== 'super_admin' && !branchId) {
+    if (branchIsRequired && !branchId) {
       errors.branch_id = 'Please select a branch.';
     }
     if (!adminKey.trim()) {
@@ -186,6 +192,9 @@ export default function RegisterPage() {
           setFieldErrors((current) => ({ ...current, ...payload.fieldErrors }));
         }
         const message = String(payload.error ?? 'Failed to send OTP.');
+        if (/admin key/i.test(message)) {
+          setFieldErrors((current) => ({ ...current, admin_key: message }));
+        }
         setFormError(message);
         await Swal.fire({
           icon: 'error',
@@ -268,7 +277,11 @@ export default function RegisterPage() {
 
       if (!response.ok) {
         const message = String(payload.error ?? 'OTP verification failed.');
-        setFieldErrors((current) => ({ ...current, otp: message }));
+        setFieldErrors((current) => ({
+          ...current,
+          admin_key: /admin key/i.test(message) ? message : current.admin_key,
+          otp: /admin key/i.test(message) ? current.otp : message,
+        }));
         setFormError(message);
         await Swal.fire({
           icon: 'error',
@@ -331,7 +344,7 @@ export default function RegisterPage() {
     passwordChecks.special &&
     confirmPassword === password &&
     Boolean(roleId) &&
-    (roleId === 'super_admin' || Boolean(branchId)) &&
+    (!branchIsRequired || Boolean(branchId)) &&
     Boolean(adminKey.trim()) &&
     !isSubmitting;
 
@@ -465,7 +478,7 @@ export default function RegisterPage() {
                 disabled={isRolesLoading || registrationLocked}
                 onChange={(event) => {
                   setRoleId(event.target.value);
-                  setFieldErrors((current) => ({ ...current, role: '' }));
+                  setFieldErrors((current) => ({ ...current, role: '', branch_id: '' }));
                 }}
                 className={`h-11 w-full rounded-xl border bg-white px-3 outline-none ${
                   fieldErrors.role ? 'border-red-500' : roleId ? 'border-green-500' : 'border-border'
@@ -485,16 +498,16 @@ export default function RegisterPage() {
               <span className="text-sm font-medium text-brown">Select Branch</span>
               <select
                 value={branchId}
-                disabled={registrationLocked}
+                disabled={registrationLocked || !branchIsRequired}
                 onChange={(event) => {
                   setBranchId(event.target.value);
                   setFieldErrors((current) => ({ ...current, branch_id: '' }));
                 }}
                 className={`h-11 w-full rounded-xl border bg-white px-3 outline-none ${
                   fieldErrors.branch_id ? 'border-red-500' : branchId ? 'border-green-500' : 'border-border'
-                } ${registrationLocked ? 'bg-slate-50 text-slate-500' : ''}`}
+                } ${registrationLocked || !branchIsRequired ? 'bg-slate-50 text-slate-500' : ''}`}
               >
-                <option value="">Select branch</option>
+                <option value="">{branchIsRequired ? 'Select branch' : 'No branch required'}</option>
                 {branches.map((branch) => (
                   <option key={branch.id} value={branch.id}>
                     {branch.code ? `${branch.code} - ${branch.name}` : branch.name}

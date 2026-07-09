@@ -3,15 +3,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { badRequest, can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
 import { validateBranchSaleQuantity } from '@/lib/branches';
 import { ensureBranchScope, getActiveBranchWarehouse, requireOpenShift, writeBranchAuditLog } from '@/lib/branches-server';
+import { isMissingColumnError } from '@/lib/postgrest-compat';
 import { createServiceRoleClient } from '@/lib/supabase/server';
-
-function errorMessage(error: unknown) {
-  if (error instanceof Error) return error.message;
-  if (typeof error === 'object' && error !== null && 'message' in error) {
-    return String((error as { message?: unknown }).message ?? '');
-  }
-  return '';
-}
 
 export async function GET(
   request: NextRequest,
@@ -107,23 +100,34 @@ export async function POST(
 
     // Validate items
     const itemIds = [...new Set(body.items.map((i) => i.itemId))];
-    let itemsResult = await service
-      .schema('icecream_erp')
-      .from('items')
-      .select('id')
-      .is('deleted_at', null)
-      .eq('is_active', true)
-      .eq('item_type', 'FINISHED_GOOD')
-      .in('id', itemIds);
-    if (itemsResult.error && errorMessage(itemsResult.error).includes('items.item_type')) {
-      itemsResult = await service
+    const buildItemsQuery = (includeDeletedAtFilter: boolean, typeColumn: 'item_type' | 'type') => {
+      let query = service
         .schema('icecream_erp')
         .from('items')
         .select('id')
-        .is('deleted_at', null)
         .eq('is_active', true)
-        .eq('type', 'FINISHED_GOOD')
+        .eq(typeColumn, 'FINISHED_GOOD')
         .in('id', itemIds);
+
+      if (includeDeletedAtFilter) {
+        query = query.is('deleted_at', null);
+      }
+
+      return query;
+    };
+
+    let itemsResult = await buildItemsQuery(true, 'item_type');
+    if (itemsResult.error && isMissingColumnError(itemsResult.error, 'items', 'deleted_at')) {
+      itemsResult = await buildItemsQuery(false, 'item_type');
+    }
+    if (itemsResult.error && isMissingColumnError(itemsResult.error, 'items', 'item_type')) {
+      itemsResult = await buildItemsQuery(false, 'type');
+    }
+    if (
+      itemsResult.error &&
+      isMissingColumnError(itemsResult.error, 'items', 'deleted_at')
+    ) {
+      itemsResult = await buildItemsQuery(false, 'type');
     }
     if (itemsResult.error) throw itemsResult.error;
     const items = itemsResult.data;
