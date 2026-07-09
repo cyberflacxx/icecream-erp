@@ -1,131 +1,110 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import Link from 'next/link';
 import { ArrowDownToLine, DatabaseZap } from 'lucide-react';
 
-import { AdminNav } from '@/components/admin/admin-nav';
-import { PageHeader } from '@/components/dashboard/page-header';
-import { Button } from '@/components/ui/button';
-import { DataTable, EmptyState, LoadingState, StatCard, StatusBadge } from '@/components/ui-library';
-import { useApproveMigrationBatch, useImportMigrationBatch, useMigrationDashboard, useMigrationHistory, useMigrationTemplates, useUploadMigrationBatch, useValidateMigrationBatch } from '@/hooks/admin/useAdminReadiness';
+const migrationCards = [
+  { title: 'Migration Batches', value: 'Unavailable', detail: 'This admin utility is not configured yet.' },
+  { title: 'Validation Queue', value: 'Unavailable', detail: 'No migration validator is configured.' },
+  { title: 'Import Status', value: 'Unavailable', detail: 'No import runner is configured.' },
+];
+
+const migrationRows = [
+  { batch: 'Opening stock balances', action: 'Validate', status: 'Pending setup' },
+  { batch: 'Customer opening balances', action: 'Approve', status: 'Pending setup' },
+  { batch: 'Supplier opening balances', action: 'Import', status: 'Pending setup' },
+];
 
 export default function AdminMigrationPage() {
-  const dashboard = useMigrationDashboard();
-  const history = useMigrationHistory();
-  const templates = useMigrationTemplates();
-  const upload = useUploadMigrationBatch();
-  const [pendingBatchId, setPendingBatchId] = useState<string | null>(null);
-  const firstTemplate = useMemo(() => Array.isArray(templates.data) ? templates.data[0] : null, [templates.data]);
-
-  if (dashboard.isLoading || history.isLoading || templates.isLoading) return <LoadingState />;
-  if (dashboard.isError || history.isError) {
-    return <EmptyState icon={<DatabaseZap className="h-6 w-6" />} title="Migration center unavailable" description={dashboard.error?.message ?? history.error?.message ?? 'Failed to load migration data.'} />;
-  }
-
-  const stats = (dashboard.data ?? {}) as Record<string, unknown>;
-  const rows = Array.isArray(history.data) ? history.data : [];
-
   return (
-    <div className="space-y-8">
-      <PageHeader title="Migration Center" description="Upload migration batches, validate row-level issues, approve imports, and review import history for go-live." status="partial" />
-      <AdminNav />
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <StatCard title="Batches" value={String(stats.totalMigrationBatches ?? 0)} icon={<DatabaseZap className="h-5 w-5" />} />
-        <StatCard title="Pending Validation" value={String(stats.pendingValidations ?? 0)} icon={<DatabaseZap className="h-5 w-5" />} color="warning" />
-        <StatCard title="Failed" value={String(stats.failedMigrations ?? 0)} icon={<DatabaseZap className="h-5 w-5" />} color="brown" />
-        <StatCard title="Imported" value={String(stats.successfulMigrations ?? 0)} icon={<DatabaseZap className="h-5 w-5" />} color="success" />
-      </div>
-
-      <section className="surface-card-lg space-y-4">
-        <h3 className="text-lg font-semibold text-brown dark:text-darkText">Quick Upload</h3>
-        <div className="grid gap-4 md:grid-cols-[1fr_auto]">
-          <div className="text-sm text-muted dark:text-darkMuted">
-            {firstTemplate ? `First template available: ${String((firstTemplate as Record<string, unknown>).template_name ?? '')}` : 'No template metadata found.'}
+    <div className="space-y-6">
+      <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">
+              Administration
+            </p>
+            <h1 className="mt-2 text-3xl font-bold text-slate-900">Migration Center</h1>
+            <p className="mt-2 max-w-3xl text-sm text-slate-600">
+              Prepare import batches, validation, and approvals. This admin utility is not configured yet.
+            </p>
           </div>
-          <Button
-            onClick={() =>
-              upload.mutate({
-                migrationType: 'opening-stock-balances',
-                fileName: 'opening-stock.xlsx',
-                templateVersion: 'v1',
-                remarks: 'Seed opening stock balances',
-                rows: [],
-              })
-            }
-          >
-            Create Empty Batch
-          </Button>
+          <div className="flex flex-wrap gap-3">
+            <button type="button" disabled className="rounded-xl bg-slate-300 px-4 py-2 text-sm font-semibold text-slate-600">
+              Create Batch
+            </button>
+            <button type="button" disabled className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-500">
+              Upload Template
+            </button>
+            <Link
+              href="/admin/opening-balances"
+              className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+            >
+              Opening Balances
+            </Link>
+          </div>
         </div>
       </section>
 
-      <DataTable
-        data={rows}
-        columns={[
-          { key: 'batch_number', header: 'Batch' },
-          { key: 'data_type', header: 'Type' },
-          { key: 'file_name', header: 'File' },
-          { key: 'total_rows', header: 'Rows' },
-          { key: 'status', header: 'Status', render: (row) => <StatusBadge status={String(row.status ?? '')} /> },
-          {
-            key: 'actions',
-            header: 'Actions',
-            render: (row) => (
-              <MigrationBatchActions
-                batchId={String(row.id ?? '')}
-                pendingBatchId={pendingBatchId}
-                setPendingBatchId={setPendingBatchId}
-              />
-            ),
-          },
-        ]}
-        emptyState={<EmptyState icon={<DatabaseZap className="h-6 w-6" />} title="No migration batches" description="Upload the first approved migration file to begin deployment prep." />}
-      />
-    </div>
-  );
-}
+      <section className="grid gap-4 md:grid-cols-3">
+        {migrationCards.map((card) => (
+          <article key={card.title} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <p className="text-sm font-medium text-slate-500">{card.title}</p>
+            <p className="mt-2 text-xl font-semibold text-slate-900">{card.value}</p>
+            <p className="mt-2 text-sm text-slate-600">{card.detail}</p>
+          </article>
+        ))}
+      </section>
 
-function MigrationBatchActions({
-  batchId,
-  pendingBatchId,
-  setPendingBatchId,
-}: {
-  batchId: string;
-  pendingBatchId: string | null;
-  setPendingBatchId: (value: string | null) => void;
-}) {
-  const validate = useValidateMigrationBatch(batchId);
-  const approve = useApproveMigrationBatch(batchId);
-  const runImport = useImportMigrationBatch(batchId);
-  const isPending =
-    pendingBatchId === batchId && (validate.isPending || approve.isPending || runImport.isPending);
+      <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+        <div className="flex items-center gap-3">
+          <span className="rounded-2xl bg-violet-100 p-3 text-violet-700">
+            <DatabaseZap className="h-5 w-5" />
+          </span>
+          <div>
+            <h2 className="text-lg font-semibold text-slate-900">Migration Actions</h2>
+            <p className="text-sm text-slate-600">
+              Placeholder actions keep this route compiling until migration tooling is configured.
+            </p>
+          </div>
+        </div>
 
-  async function runAction(action: 'validate' | 'approve' | 'import') {
-    setPendingBatchId(batchId);
-    try {
-      if (action === 'validate') {
-        await validate.mutateAsync({});
-      } else if (action === 'approve') {
-        await approve.mutateAsync({});
-      } else {
-        await runImport.mutateAsync({});
-      }
-    } finally {
-      setPendingBatchId(null);
-    }
-  }
-
-  return (
-    <div className="flex gap-2">
-      <Button size="sm" variant="outline" disabled={isPending} onClick={() => { void runAction('validate'); }}>
-        Validate
-      </Button>
-      <Button size="sm" variant="success" disabled={isPending} onClick={() => { void runAction('approve'); }}>
-        Approve
-      </Button>
-      <Button size="sm" disabled={isPending} onClick={() => { void runAction('import'); }}>
-        <ArrowDownToLine className="mr-2 h-4 w-4" />
-        Import
-      </Button>
+        <div className="mt-6 overflow-hidden rounded-2xl border border-slate-200">
+          <table className="w-full text-left text-sm">
+            <thead className="bg-slate-50 text-slate-600">
+              <tr>
+                <th className="px-4 py-3 font-semibold">Batch</th>
+                <th className="px-4 py-3 font-semibold">Primary Action</th>
+                <th className="px-4 py-3 font-semibold">Status</th>
+                <th className="px-4 py-3 font-semibold">Run</th>
+              </tr>
+            </thead>
+            <tbody>
+              {migrationRows.map((row) => (
+                <tr key={row.batch} className="border-t border-slate-200">
+                  <td className="px-4 py-3 text-slate-900">{row.batch}</td>
+                  <td className="px-4 py-3 text-slate-600">{row.action}</td>
+                  <td className="px-4 py-3">
+                    <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-700">
+                      {row.status}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3">
+                    <button
+                      type="button"
+                      disabled
+                      className="inline-flex items-center gap-2 rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-500"
+                    >
+                      <ArrowDownToLine className="h-3.5 w-3.5" />
+                      Run
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
     </div>
   );
 }

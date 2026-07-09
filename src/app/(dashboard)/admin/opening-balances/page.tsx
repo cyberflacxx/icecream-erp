@@ -1,31 +1,77 @@
 'use client';
 
+import Link from 'next/link';
 import { Wallet } from 'lucide-react';
 
-import { AdminNav } from '@/components/admin/admin-nav';
-import { PageHeader } from '@/components/dashboard/page-header';
-import { Button } from '@/components/ui/button';
-import { DataTable, EmptyState, LoadingState } from '@/components/ui-library';
-import { useOpeningBalances, usePostOpeningBalances } from '@/hooks/admin/useAdminReadiness';
+const balanceGroups = [
+  {
+    title: 'Stock Opening Balances',
+    description: 'This admin utility is not configured yet.',
+  },
+  {
+    title: 'Customer Opening Balances',
+    description: 'No customer opening balance workflow is configured.',
+  },
+  {
+    title: 'Supplier Opening Balances',
+    description: 'No supplier opening balance workflow is configured.',
+  },
+  {
+    title: 'Account Opening Balances',
+    description: 'No journal opening balance workflow is configured.',
+  },
+];
 
 export default function AdminOpeningBalancesPage() {
-  const stock = useOpeningBalances('stock');
-  const customers = useOpeningBalances('customers');
-  const suppliers = useOpeningBalances('suppliers');
-  const accounts = useOpeningBalances('accounts');
-  const postAll = usePostOpeningBalances();
-
-  if (stock.isLoading || customers.isLoading || suppliers.isLoading || accounts.isLoading) return <LoadingState />;
-  if (stock.isError) return <EmptyState icon={<Wallet className="h-6 w-6" />} title="Opening balances unavailable" description={stock.error.message} />;
-
   return (
-    <div className="space-y-8">
-      <PageHeader title="Opening Balances" description="Review stock, customer, supplier, and account opening balances before posting them into the live ERP state." status="partial" actions={<Button onClick={() => postAll.mutate({})}>Post Opening Balances</Button>} />
-      <AdminNav />
-      <DataTable data={Array.isArray(stock.data) ? stock.data : []} columns={[{ key: 'warehouse_id', header: 'Warehouse' }, { key: 'item_id', header: 'Item' }, { key: 'opening_quantity', header: 'Qty' }, { key: 'unit_cost', header: 'Unit Cost' }, { key: 'posting_status', header: 'Status' }]} emptyState={<EmptyState icon={<Wallet className="h-6 w-6" />} title="No opening stock" description="Opening stock balances will appear here once migrated or entered manually." />} />
-      <DataTable data={Array.isArray(customers.data) ? customers.data : []} columns={[{ key: 'customer_id', header: 'Customer' }, { key: 'opening_invoice_reference', header: 'Reference' }, { key: 'opening_balance', header: 'Balance' }, { key: 'posting_status', header: 'Status' }]} emptyState={<EmptyState icon={<Wallet className="h-6 w-6" />} title="No customer openings" description="Customer opening balances will appear here." />} />
-      <DataTable data={Array.isArray(suppliers.data) ? suppliers.data : []} columns={[{ key: 'supplier_id', header: 'Supplier' }, { key: 'opening_invoice_reference', header: 'Reference' }, { key: 'opening_balance', header: 'Balance' }, { key: 'posting_status', header: 'Status' }]} emptyState={<EmptyState icon={<Wallet className="h-6 w-6" />} title="No supplier openings" description="Supplier opening balances will appear here." />} />
-      <DataTable data={Array.isArray(accounts.data) ? accounts.data : []} columns={[{ key: 'account_id', header: 'Account' }, { key: 'debit_amount', header: 'Debit' }, { key: 'credit_amount', header: 'Credit' }, { key: 'posting_status', header: 'Status' }]} emptyState={<EmptyState icon={<Wallet className="h-6 w-6" />} title="No account openings" description="Opening journal balances will appear here." />} />
+    <div className="space-y-6">
+      <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">
+              Administration
+            </p>
+            <h1 className="mt-2 text-3xl font-bold text-slate-900">Opening Balances</h1>
+            <p className="mt-2 max-w-3xl text-sm text-slate-600">
+              Review opening balances before posting them into the ERP. This admin utility is not configured yet.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-3">
+            <button type="button" disabled className="rounded-xl bg-slate-300 px-4 py-2 text-sm font-semibold text-slate-600">
+              Post Opening Balances
+            </button>
+            <Link
+              href="/admin/migration"
+              className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+            >
+              Migration Center
+            </Link>
+          </div>
+        </div>
+      </section>
+
+      <section className="grid gap-4 md:grid-cols-2">
+        {balanceGroups.map((group) => (
+          <article key={group.title} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="flex items-center gap-3">
+              <span className="rounded-2xl bg-emerald-100 p-3 text-emerald-700">
+                <Wallet className="h-5 w-5" />
+              </span>
+              <div>
+                <h2 className="text-lg font-semibold text-slate-900">{group.title}</h2>
+                <p className="mt-1 text-sm text-slate-600">{group.description}</p>
+              </div>
+            </div>
+
+            <div className="mt-5 rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-4">
+              <p className="text-sm font-semibold text-slate-900">No data available</p>
+              <p className="mt-1 text-sm text-slate-600">
+                Configure the relevant opening-balance workflow before enabling posting actions.
+              </p>
+            </div>
+          </article>
+        ))}
+      </section>
     </div>
   );
 }
