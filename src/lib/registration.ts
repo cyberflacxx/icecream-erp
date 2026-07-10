@@ -68,6 +68,10 @@ function isMissingRelation(error: unknown, table: string) {
   return message.includes(`Could not find the table 'icecream_erp.${table}'`) || message.toLowerCase().includes(`${table.toLowerCase()} does not exist`);
 }
 
+export function isMissingPendingRegistrationStorage(error: unknown) {
+  return isMissingRelation(error, 'registration_otps');
+}
+
 async function findAuthUserByEmail(email: string) {
   const client = createServiceRoleClient();
   let page = 1;

@@ -5,20 +5,30 @@ interface EmailMessage {
   to: string | string[];
 }
 
-function firstConfiguredEnv(keys: string[]) {
+type EmailDeliveryReadiness = {
+  ok: boolean;
+  reason: string | null;
+};
+
+function firstConfiguredEnv(keys: string[], normalizer?: (value: string) => string) {
   for (const key of keys) {
-    const value = String(process.env[key] ?? '').trim();
+    const rawValue = String(process.env[key] ?? '').trim();
+    const value = normalizer ? normalizer(rawValue) : rawValue;
     if (value) return value;
   }
 
   return '';
 }
 
-function getSmtpConfig() {
+function normalizeSecretValue(value: string) {
+  return value.replace(/\s+/g, '');
+}
+
+export function getSmtpConfig() {
   return {
     from: firstConfiguredEnv(['SMTP_FROM', 'EMAIL_FROM', 'MAIL_FROM']),
     host: firstConfiguredEnv(['SMTP_HOST', 'EMAIL_HOST']),
-    pass: firstConfiguredEnv(['SMTP_PASS', 'EMAIL_APP_PASSWORD']),
+    pass: firstConfiguredEnv(['SMTP_PASS', 'EMAIL_PASS', 'EMAIL_APP_PASSWORD'], normalizeSecretValue),
     port: firstConfiguredEnv(['SMTP_PORT', 'EMAIL_PORT']),
     secure: firstConfiguredEnv(['SMTP_SECURE', 'EMAIL_SECURE']),
     user: firstConfiguredEnv(['SMTP_USER', 'EMAIL_USER']),
@@ -29,14 +39,34 @@ function getEmailFromAddress() {
   return getSmtpConfig().from || 'Absolute Ice Cream ERP <no-reply@absoluteicecream.local>';
 }
 
-function canUseSmtp() {
+export function getSmtpReadiness() {
   const smtp = getSmtpConfig();
-  return Boolean(
-    smtp.host
-      && smtp.port
-      && smtp.user
-      && smtp.pass,
-  );
+  if (!smtp.host) {
+    return { ok: false, reason: 'SMTP host is not configured.' } satisfies EmailDeliveryReadiness;
+  }
+  if (!smtp.user) {
+    return { ok: false, reason: 'SMTP user is not configured.' } satisfies EmailDeliveryReadiness;
+  }
+  if (!smtp.pass) {
+    return { ok: false, reason: 'SMTP password is not configured.' } satisfies EmailDeliveryReadiness;
+  }
+  if (!smtp.port) {
+    return { ok: false, reason: 'SMTP port is not configured.' } satisfies EmailDeliveryReadiness;
+  }
+
+  return { ok: true, reason: null } satisfies EmailDeliveryReadiness;
+}
+
+function canUseSmtp() {
+  return getSmtpReadiness().ok;
+}
+
+function logEmailFailure(details: { code?: string | null; message?: string | null; reason?: string | null }) {
+  console.error('OTP email send failed', {
+    code: details.code ?? null,
+    message: details.message ?? null,
+    reason: details.reason ?? null,
+  });
 }
 
 async function sendViaSmtp(message: EmailMessage) {
@@ -86,13 +116,24 @@ export async function sendTransactionalEmail(message: EmailMessage) {
 
     const errorText = await response.text();
     if (!canUseSmtp()) {
-      throw new Error(`Email delivery failed: ${errorText || response.statusText}`);
+      logEmailFailure({ message: errorText || response.statusText, reason: 'Resend delivery failed and SMTP is not ready.' });
+      throw new Error('OTP could not be sent. Please check email configuration or contact the administrator.');
     }
   }
 
-  if (!canUseSmtp()) {
-    throw new Error('Email delivery is not configured.');
+  const readiness = getSmtpReadiness();
+  if (!readiness.ok) {
+    logEmailFailure({ reason: readiness.reason });
+    throw new Error('OTP could not be sent. Please check email configuration or contact the administrator.');
   }
 
-  return sendViaSmtp(message);
+  try {
+    return await sendViaSmtp(message);
+  } catch (error) {
+    logEmailFailure({
+      code: typeof error === 'object' && error !== null && 'code' in error ? String((error as { code?: unknown }).code ?? '') : null,
+      message: error instanceof Error ? error.message : 'Unknown SMTP error',
+    });
+    throw new Error('OTP could not be sent. Please check email configuration or contact the administrator.');
+  }
 }

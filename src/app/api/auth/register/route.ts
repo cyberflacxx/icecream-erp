@@ -2,11 +2,13 @@ import { NextRequest, NextResponse } from 'next/server';
 import { resolveAdminActionKeyValidation } from '@/lib/admin-delete-server';
 import { sendTransactionalEmail } from '@/lib/email';
 import {
+  createRegistrationRequestToken,
   deletePendingRegistration,
   encryptRegistrationPayload,
   findExistingRegistrationAccount,
   generateOtpCode,
   getPrimaryOrganizationId,
+  isMissingPendingRegistrationStorage,
   upsertPendingRegistration,
   hashOtpCode,
   maskEmailAddress,
@@ -124,14 +126,34 @@ export async function POST(request: NextRequest) {
     role: role.id,
   });
   const otpHash = hashOtpCode(normalized.email, otp);
-  const pendingRegistration = await upsertPendingRegistration(service, {
+  const fallbackRequestToken = createRegistrationRequestToken({
     email: normalized.email,
     expiresAt,
-    idNumber: normalized.idNumber,
     otpHash,
     payloadEncrypted: payload,
+    requestId: normalized.email,
     roleId: role.id,
   });
+
+  let pendingRegistrationId: string | null = null;
+  let requestId = fallbackRequestToken;
+  try {
+    const pendingRegistration = await upsertPendingRegistration(service, {
+      email: normalized.email,
+      expiresAt,
+      idNumber: normalized.idNumber,
+      otpHash,
+      payloadEncrypted: payload,
+      roleId: role.id,
+    });
+    pendingRegistrationId = pendingRegistration.id;
+    requestId = pendingRegistration.id;
+  } catch (error) {
+    if (!isMissingPendingRegistrationStorage(error)) {
+      throw error;
+    }
+    console.warn('Registration OTP storage unavailable, using signed fallback token.');
+  }
 
   try {
     await sendTransactionalEmail({
@@ -146,9 +168,12 @@ export async function POST(request: NextRequest) {
       text: `Your OTP for Absolute Ice Cream ERP registration is ${otp}. It expires in ${otpExpiryLabel()}.`,
       to: normalized.email,
     });
-  } catch {
-    await deletePendingRegistration(service, pendingRegistration.id).catch(() => null);
-    return NextResponse.json({ error: 'Failed to send OTP email. Please try again.' }, { status: 500 });
+  } catch (error) {
+    if (pendingRegistrationId) {
+      await deletePendingRegistration(service, pendingRegistrationId).catch(() => null);
+    }
+    const message = error instanceof Error ? error.message : 'OTP could not be sent. Please check email configuration or contact the administrator.';
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 
   await recordSecurityEvent({
@@ -157,7 +182,7 @@ export async function POST(request: NextRequest) {
     status: 'SUCCESS',
     details: {
       email: normalized.email,
-      requestId: pendingRegistration.id,
+      requestId,
       role: role.name,
     },
     ipAddress: request.headers.get('x-forwarded-for'),
@@ -168,6 +193,6 @@ export async function POST(request: NextRequest) {
     email: maskEmailAddress(normalized.email),
     expiresIn: otpExpiryLabel(),
     message: 'OTP sent successfully.',
-    requestId: pendingRegistration.id,
+    requestId,
   });
 }

@@ -12,6 +12,8 @@ import {
   shouldLockAccount,
 } from '../src/lib/security';
 import { resolveAdminActionKeyValidation } from '../src/lib/admin-delete-server';
+import { getSmtpConfig, getSmtpReadiness } from '../src/lib/email';
+import { getPublicRegistrationRoles } from '../src/lib/registration';
 
 test('normalizeUserStatus maps unknown values to INACTIVE', () => {
   assert.equal(normalizeUserStatus('unknown'), 'INACTIVE');
@@ -104,4 +106,96 @@ test('resolveAdminActionKeyValidation returns the expected messages for missing,
   } finally {
     process.env = originalEnv;
   }
+});
+
+test('getSmtpConfig prefers canonical SMTP vars and strips spaces from app passwords', () => {
+  const originalEnv = process.env;
+  process.env = {
+    ...originalEnv,
+    SMTP_HOST: 'smtp.primary.test',
+    SMTP_PORT: '587',
+    SMTP_SECURE: 'false',
+    SMTP_USER: 'primary-user',
+    SMTP_PASS: 'abcd efgh ijkl mnop',
+    SMTP_FROM: 'primary@test.local',
+    EMAIL_HOST: 'smtp.legacy.test',
+    EMAIL_PORT: '465',
+    EMAIL_SECURE: 'true',
+    EMAIL_USER: 'legacy-user',
+    EMAIL_PASS: 'legacy-pass',
+    EMAIL_APP_PASSWORD: 'legacy app password',
+    EMAIL_FROM: 'legacy@test.local',
+    MAIL_FROM: 'mailfrom@test.local',
+  };
+
+  try {
+    assert.deepEqual(getSmtpConfig(), {
+      from: 'primary@test.local',
+      host: 'smtp.primary.test',
+      pass: 'abcdefghijklmnop',
+      port: '587',
+      secure: 'false',
+      user: 'primary-user',
+    });
+  } finally {
+    process.env = originalEnv;
+  }
+});
+
+test('getSmtpReadiness reports missing SMTP requirements without exposing secrets', () => {
+  const originalEnv = process.env;
+  process.env = { ...originalEnv };
+
+  try {
+    delete process.env.SMTP_HOST;
+    delete process.env.EMAIL_HOST;
+    delete process.env.SMTP_USER;
+    delete process.env.EMAIL_USER;
+    delete process.env.SMTP_PASS;
+    delete process.env.EMAIL_PASS;
+    delete process.env.EMAIL_APP_PASSWORD;
+    process.env.SMTP_PORT = '587';
+
+    assert.deepEqual(getSmtpReadiness(), {
+      ok: false,
+      reason: 'SMTP host is not configured.',
+    });
+
+    process.env.SMTP_HOST = 'smtp.example.test';
+    assert.deepEqual(getSmtpReadiness(), {
+      ok: false,
+      reason: 'SMTP user is not configured.',
+    });
+
+    process.env.SMTP_USER = 'mailer@example.test';
+    assert.deepEqual(getSmtpReadiness(), {
+      ok: false,
+      reason: 'SMTP password is not configured.',
+    });
+  } finally {
+    process.env = originalEnv;
+  }
+});
+
+test('public registration role metadata keeps Super Admin branchless and branch roles branch-required', async () => {
+  const fakeService = {
+    from() {
+      return {
+        select() {
+          return {
+            order() {
+              return Promise.resolve({ data: null, error: new Error('offline') });
+            },
+          };
+        },
+      };
+    },
+  } as never;
+
+  const roles = await getPublicRegistrationRoles(fakeService);
+  const superAdmin = roles.find((role) => role.id === 'super_admin');
+  const branchManager = roles.find((role) => role.id === 'branch_manager');
+
+  assert.equal(superAdmin?.requiresBranch, false);
+  assert.equal(branchManager?.requiresBranch, true);
 });

@@ -12,9 +12,11 @@ import {
   getPendingRegistrationById,
   getPrimaryOrganizationId,
   hashOtpCode,
+  isMissingPendingRegistrationStorage,
   resolveRegistrationRole,
   syncUserBranchAssignment,
   toStoredUserRole,
+  verifyRegistrationRequestToken,
 } from '@/lib/registration';
 import { recordSecurityEvent } from '@/lib/security-server';
 import { createServiceRoleClient } from '@/lib/supabase/server';
@@ -53,27 +55,52 @@ export async function POST(request: NextRequest) {
 
   const client = createServiceRoleClient();
   const service = client.schema('icecream_erp');
-  const pendingRegistration = await getPendingRegistrationById(service, requestId);
+  let pendingRegistration: Awaited<ReturnType<typeof getPendingRegistrationById>> = null;
+  let fallbackTokenData: ReturnType<typeof verifyRegistrationRequestToken> | null = null;
 
-  if (!pendingRegistration || pendingRegistration.usedAt) {
+  if (requestId.includes('.')) {
+    try {
+      fallbackTokenData = verifyRegistrationRequestToken(requestId);
+    } catch {
+      return NextResponse.json({ error: 'Invalid or expired OTP.' }, { status: 400 });
+    }
+  } else {
+    try {
+      pendingRegistration = await getPendingRegistrationById(service, requestId);
+    } catch (error) {
+      if (!isMissingPendingRegistrationStorage(error)) {
+        throw error;
+      }
+
+      return NextResponse.json({ error: 'Invalid or expired OTP.' }, { status: 400 });
+    }
+  }
+
+  if (pendingRegistration && pendingRegistration.usedAt) {
     return NextResponse.json({ error: 'Invalid or expired OTP.' }, { status: 400 });
   }
 
-  if (new Date(pendingRegistration.expiresAt).getTime() < Date.now()) {
+  const expiresAt = pendingRegistration?.expiresAt ?? fallbackTokenData?.expiresAt ?? null;
+  const pendingEmail = pendingRegistration?.email ?? fallbackTokenData?.email ?? '';
+  const pendingOtpHash = pendingRegistration?.otpHash ?? fallbackTokenData?.otpHash ?? '';
+  const pendingPayload = pendingRegistration?.payloadEncrypted ?? fallbackTokenData?.payloadEncrypted ?? '';
+  const pendingRoleId = pendingRegistration?.roleId ?? fallbackTokenData?.roleId ?? '';
+
+  if (!expiresAt || new Date(expiresAt).getTime() < Date.now()) {
     return NextResponse.json({ error: 'Invalid or expired OTP.' }, { status: 400 });
   }
 
-  const expectedHash = hashOtpCode(pendingRegistration.email, otp);
-  if (expectedHash !== pendingRegistration.otpHash) {
+  const expectedHash = hashOtpCode(pendingEmail, otp);
+  if (expectedHash !== pendingOtpHash) {
     return NextResponse.json({ error: 'Invalid or expired OTP.' }, { status: 400 });
   }
 
-  const payload = decryptRegistrationPayload(pendingRegistration.payloadEncrypted);
+  const payload = decryptRegistrationPayload(pendingPayload);
   if (emailInput && emailInput !== String(payload.email ?? '').trim().toLowerCase()) {
     return NextResponse.json({ error: 'Invalid or expired OTP.' }, { status: 400 });
   }
 
-  const role = await resolveRegistrationRole(service, String(pendingRegistration.roleId ?? payload.role));
+  const role = await resolveRegistrationRole(service, String(pendingRoleId || payload.role));
   if (!role) {
     return NextResponse.json({ error: 'Selected role is no longer available.' }, { status: 400 });
   }
@@ -208,7 +235,9 @@ export async function POST(request: NextRequest) {
     });
   } catch {}
 
-  await deletePendingRegistration(service, pendingRegistration.id).catch(() => null);
+  if (pendingRegistration?.id) {
+    await deletePendingRegistration(service, pendingRegistration.id).catch(() => null);
+  }
 
   await recordSecurityEvent({
     eventType: 'REGISTRATION_COMPLETED',

@@ -110,6 +110,13 @@ export default function RegisterPage() {
   );
   const branchIsRequired = selectedRole?.requiresBranch ?? (roleId ? roleId !== 'super_admin' : false);
 
+  useEffect(() => {
+    if (!branchIsRequired && branchId) {
+      setBranchId('');
+      setFieldErrors((current) => ({ ...current, branch_id: '' }));
+    }
+  }, [branchId, branchIsRequired]);
+
   const registrationLocked = Boolean(otpRequestId);
 
   function validateRegistrationForm() {
@@ -172,7 +179,7 @@ export default function RegisterPage() {
           confirm_password: confirmPassword,
           email: email.trim().toLowerCase(),
           first_name: firstName.trim(),
-          branch_id: branchId || null,
+          ...(branchIsRequired ? { branch_id: branchId || null } : {}),
           id_number: idNumber,
           last_name: surname.trim(),
           password,
@@ -191,7 +198,7 @@ export default function RegisterPage() {
         if (payload.fieldErrors) {
           setFieldErrors((current) => ({ ...current, ...payload.fieldErrors }));
         }
-        const message = String(payload.error ?? 'Failed to send OTP.');
+        const message = String(payload.error ?? 'OTP could not be sent. Please check email configuration or contact the administrator.');
         if (/admin key/i.test(message)) {
           setFieldErrors((current) => ({ ...current, admin_key: message }));
         }
@@ -222,7 +229,7 @@ export default function RegisterPage() {
         color: '#3B1F12',
       });
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Failed to send OTP.';
+      const message = error instanceof Error ? error.message : 'OTP could not be sent. Please check email configuration or contact the administrator.';
       setFormError(message);
       await Swal.fire({
         icon: 'error',
