@@ -5,24 +5,26 @@ import { resolveAdminActionKeyValidation } from '@/lib/admin-delete-server';
 import { sendTransactionalEmail } from '@/lib/email';
 import {
   assignUserRole,
+  deletePendingRegistration,
   decryptRegistrationPayload,
+  findExistingRegistrationAccount,
   generateNextWorkId,
+  getPendingRegistrationById,
   getPrimaryOrganizationId,
   hashOtpCode,
-  otpExpiryLabel,
   resolveRegistrationRole,
   syncUserBranchAssignment,
   toStoredUserRole,
-  verifyRegistrationRequestToken,
 } from '@/lib/registration';
 import { recordSecurityEvent } from '@/lib/security-server';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 import { serializeUserPhoneValue } from '@/lib/user-access-profile';
 
 export async function POST(request: NextRequest) {
-  const body = (await request.json().catch(() => ({}))) as { adminKey?: string; admin_key?: string; otp?: string; requestId?: string };
+  const body = (await request.json().catch(() => ({}))) as { adminKey?: string; admin_key?: string; email?: string; otp?: string; requestId?: string };
   const requestId = String(body.requestId ?? '').trim();
   const otp = String(body.otp ?? '').trim();
+  const emailInput = String(body.email ?? '').trim().toLowerCase();
   const adminKeyInput = String(body.adminKey ?? body.admin_key ?? '').trim();
 
   if (!requestId || !otp) {
@@ -49,40 +51,44 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: adminKeyValidation.error }, { status: 403 });
   }
 
-  let registrationRequest: ReturnType<typeof verifyRegistrationRequestToken>;
-  try {
-    registrationRequest = verifyRegistrationRequestToken(requestId);
-  } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : 'Registration token is invalid.' }, { status: 400 });
+  const client = createServiceRoleClient();
+  const service = client.schema('icecream_erp');
+  const pendingRegistration = await getPendingRegistrationById(service, requestId);
+
+  if (!pendingRegistration || pendingRegistration.usedAt) {
+    return NextResponse.json({ error: 'Invalid or expired OTP.' }, { status: 400 });
   }
 
-  if (new Date(registrationRequest.expiresAt).getTime() < Date.now()) {
-    return NextResponse.json({ error: `OTP expired. Request a new code and try again. Codes remain valid for ${otpExpiryLabel()}.` }, { status: 410 });
+  if (new Date(pendingRegistration.expiresAt).getTime() < Date.now()) {
+    return NextResponse.json({ error: 'Invalid or expired OTP.' }, { status: 400 });
   }
 
-  const service = createServiceRoleClient().schema('icecream_erp');
-  const expectedHash = hashOtpCode(registrationRequest.requestId, otp);
-  if (expectedHash !== registrationRequest.otpHash) {
-    return NextResponse.json({ error: 'Invalid OTP code.' }, { status: 400 });
+  const expectedHash = hashOtpCode(pendingRegistration.email, otp);
+  if (expectedHash !== pendingRegistration.otpHash) {
+    return NextResponse.json({ error: 'Invalid or expired OTP.' }, { status: 400 });
   }
 
-  const payload = decryptRegistrationPayload(registrationRequest.payloadEncrypted);
-  const role = await resolveRegistrationRole(service, String(registrationRequest.roleId ?? payload.role));
+  const payload = decryptRegistrationPayload(pendingRegistration.payloadEncrypted);
+  if (emailInput && emailInput !== String(payload.email ?? '').trim().toLowerCase()) {
+    return NextResponse.json({ error: 'Invalid or expired OTP.' }, { status: 400 });
+  }
+
+  const role = await resolveRegistrationRole(service, String(pendingRegistration.roleId ?? payload.role));
   if (!role) {
     return NextResponse.json({ error: 'Selected role is no longer available.' }, { status: 400 });
   }
 
   const normalizedEmail = payload.email.trim().toLowerCase();
   const normalizedBranchId = payload.branchId ? String(payload.branchId) : null;
-  const [{ data: emailUser }, { data: idUser }] = await Promise.all([
-    service.from('users').select('id').ilike('email', normalizedEmail).maybeSingle(),
-    service.from('users').select('id').eq('id_number', payload.idNumber).maybeSingle(),
-  ]);
+  const existingAccount = await findExistingRegistrationAccount(service, {
+    email: normalizedEmail,
+    idNumber: payload.idNumber,
+  });
 
-  if (emailUser) {
-    return NextResponse.json({ error: 'An account with this email already exists.' }, { status: 409 });
+  if (existingAccount.emailRegistered) {
+    return NextResponse.json({ error: 'Email is already registered.' }, { status: 409 });
   }
-  if (idUser) {
+  if (existingAccount.idNumberRegistered) {
     return NextResponse.json({ error: 'An account with this ID number already exists.' }, { status: 409 });
   }
 
@@ -107,14 +113,14 @@ export async function POST(request: NextRequest) {
   ]);
 
   const authEmail = workIdToEmail(workId);
-  const { data: authData, error: authError } = await createServiceRoleClient().auth.admin.createUser({
+  const { data: authData, error: authError } = await client.auth.admin.createUser({
     email: authEmail,
     password: payload.password,
     email_confirm: true,
   });
 
   if (authError || !authData.user) {
-    return NextResponse.json({ error: authError?.message ?? 'Failed to create authentication account.' }, { status: 500 });
+    return NextResponse.json({ error: 'Account creation failed. Please try again.' }, { status: 500 });
   }
 
   const fullName = `${payload.firstName} ${payload.lastName}`.trim();
@@ -129,6 +135,7 @@ export async function POST(request: NextRequest) {
       last_name: payload.lastName,
       phone: serializeUserPhoneValue({ accessProfile: role.legacyRole }),
       branch_id: normalizedBranchId,
+      organization_id: organizationId,
       role: toStoredUserRole(role.legacyRole),
       status: 'active',
       work_id: workId,
@@ -137,12 +144,35 @@ export async function POST(request: NextRequest) {
     .single();
 
   if (profileError || !profile) {
-    await createServiceRoleClient().auth.admin.deleteUser(authData.user.id);
-    return NextResponse.json({ error: profileError?.message ?? 'Failed to create user profile.' }, { status: 500 });
+    await client.auth.admin.deleteUser(authData.user.id).catch(() => null);
+    return NextResponse.json({ error: 'Account creation failed. Please try again.' }, { status: 500 });
   }
 
-  let roleAssignmentWarning: string | null = null;
   try {
+    const { error: userAccountError } = await service.from('user_accounts').insert({
+      id: String(profile.id),
+      email: normalizedEmail,
+      first_name: payload.firstName,
+      id_number: payload.idNumber,
+      is_active: true,
+      last_name: payload.lastName,
+      organization_id: organizationId,
+      password_hash: 'SUPABASE_AUTH_MANAGED',
+      role_id: role.id,
+      updated_at: new Date().toISOString(),
+      user_profile_id: String(profile.id),
+      work_id: workId,
+    });
+
+    if (userAccountError) {
+      throw userAccountError;
+    }
+
+    await service
+      .from('users')
+      .update({ user_account_id: String(profile.id) })
+      .eq('id', String(profile.id));
+
     await assignUserRole({
       assignedBy: null,
       roleId: role.id,
@@ -156,8 +186,11 @@ export async function POST(request: NextRequest) {
       service,
       userProfileId: String(profile.id),
     });
-  } catch (roleError) {
-    roleAssignmentWarning = roleError instanceof Error ? roleError.message : 'Failed to assign role.';
+  } catch {
+    await service.from('user_accounts').delete().eq('id', String(profile.id)).catch(() => null);
+    await service.from('users').delete().eq('id', String(profile.id)).catch(() => null);
+    await client.auth.admin.deleteUser(authData.user.id).catch(() => null);
+    return NextResponse.json({ error: 'Account creation failed. Please try again.' }, { status: 500 });
   }
 
   try {
@@ -175,12 +208,14 @@ export async function POST(request: NextRequest) {
     });
   } catch {}
 
+  await deletePendingRegistration(service, pendingRegistration.id).catch(() => null);
+
   await recordSecurityEvent({
     eventType: 'REGISTRATION_COMPLETED',
     organizationId,
     userProfileId: String(profile.id),
-    status: roleAssignmentWarning ? 'WARNING' : 'SUCCESS',
-    details: roleAssignmentWarning ? { roleAssignmentWarning, selectedRole: role.id } : { selectedRole: role.id },
+    status: 'SUCCESS',
+    details: { selectedRole: role.id },
     ipAddress: request.headers.get('x-forwarded-for'),
     userAgent: request.headers.get('user-agent'),
   });
@@ -197,7 +232,6 @@ export async function POST(request: NextRequest) {
   return NextResponse.json({
     message: 'Account created successfully.',
     redirectTo: '/auth/login',
-    warning: roleAssignmentWarning,
     work_id: workId,
   }, { status: 201 });
 }

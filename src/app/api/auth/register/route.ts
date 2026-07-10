@@ -1,13 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { randomUUID } from 'crypto';
-
 import { resolveAdminActionKeyValidation } from '@/lib/admin-delete-server';
 import { sendTransactionalEmail } from '@/lib/email';
 import {
-  createRegistrationRequestToken,
+  deletePendingRegistration,
   encryptRegistrationPayload,
+  findExistingRegistrationAccount,
   generateOtpCode,
   getPrimaryOrganizationId,
+  upsertPendingRegistration,
   hashOtpCode,
   maskEmailAddress,
   otpExpiryLabel,
@@ -97,22 +97,23 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  const [{ data: existingUser }, { data: existingIdUser }, organizationId] = await Promise.all([
-    service.from('users').select('id').ilike('email', normalized.email).maybeSingle(),
-    service.from('users').select('id').eq('id_number', normalized.idNumber).maybeSingle(),
+  const [existingAccount, organizationId] = await Promise.all([
+    findExistingRegistrationAccount(service, {
+      email: normalized.email,
+      idNumber: normalized.idNumber,
+    }),
     getPrimaryOrganizationId(service),
   ]);
 
-  if (existingUser) {
-    return NextResponse.json({ error: 'An account with this email already exists.' }, { status: 409 });
+  if (existingAccount.emailRegistered) {
+    return NextResponse.json({ error: 'Email is already registered.' }, { status: 409 });
   }
-  if (existingIdUser) {
+  if (existingAccount.idNumberRegistered) {
     return NextResponse.json({ error: 'An account with this ID number already exists.' }, { status: 409 });
   }
 
   const otp = generateOtpCode();
   const expiresAt = registrationOtpExpiresAt();
-  const requestId = randomUUID();
   const payload = encryptRegistrationPayload({
     branchId: normalizedBranchId,
     email: normalized.email,
@@ -122,13 +123,13 @@ export async function POST(request: NextRequest) {
     password: normalized.password,
     role: role.id,
   });
-  const otpHash = hashOtpCode(requestId, otp);
-  const requestToken = createRegistrationRequestToken({
+  const otpHash = hashOtpCode(normalized.email, otp);
+  const pendingRegistration = await upsertPendingRegistration(service, {
     email: normalized.email,
     expiresAt,
+    idNumber: normalized.idNumber,
     otpHash,
     payloadEncrypted: payload,
-    requestId,
     roleId: role.id,
   });
 
@@ -145,8 +146,9 @@ export async function POST(request: NextRequest) {
       text: `Your OTP for Absolute Ice Cream ERP registration is ${otp}. It expires in ${otpExpiryLabel()}.`,
       to: normalized.email,
     });
-  } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : 'Failed to send OTP email.' }, { status: 500 });
+  } catch {
+    await deletePendingRegistration(service, pendingRegistration.id).catch(() => null);
+    return NextResponse.json({ error: 'Failed to send OTP email. Please try again.' }, { status: 500 });
   }
 
   await recordSecurityEvent({
@@ -155,7 +157,7 @@ export async function POST(request: NextRequest) {
     status: 'SUCCESS',
     details: {
       email: normalized.email,
-      requestId,
+      requestId: pendingRegistration.id,
       role: role.name,
     },
     ipAddress: request.headers.get('x-forwarded-for'),
@@ -166,6 +168,6 @@ export async function POST(request: NextRequest) {
     email: maskEmailAddress(normalized.email),
     expiresIn: otpExpiryLabel(),
     message: 'OTP sent successfully.',
-    requestId: requestToken,
+    requestId: pendingRegistration.id,
   });
 }

@@ -21,6 +21,17 @@ export interface RegistrationRoleRecord {
   requiresBranch: boolean;
 }
 
+export interface PendingRegistrationRecord {
+  email: string;
+  expiresAt: string;
+  id: string;
+  idNumber: string;
+  otpHash: string;
+  payloadEncrypted: string;
+  roleId: string;
+  usedAt: string | null;
+}
+
 type SupabaseSchemaClient = ReturnType<ReturnType<typeof createServiceRoleClient>['schema']>;
 
 export const registrationPasswordPolicy = {
@@ -55,6 +66,31 @@ function normalizeRoleName(roleName: string) {
 function isMissingRelation(error: unknown, table: string) {
   const message = error instanceof Error ? error.message : typeof error === 'object' && error !== null && 'message' in error ? String((error as { message?: unknown }).message ?? '') : '';
   return message.includes(`Could not find the table 'icecream_erp.${table}'`) || message.toLowerCase().includes(`${table.toLowerCase()} does not exist`);
+}
+
+async function findAuthUserByEmail(email: string) {
+  const client = createServiceRoleClient();
+  let page = 1;
+  const normalizedEmail = email.trim().toLowerCase();
+
+  while (true) {
+    const { data, error } = await client.auth.admin.listUsers({ page, perPage: 200 });
+    if (error) {
+      throw error;
+    }
+
+    const users = data?.users ?? [];
+    const match = users.find((user) => String(user.email ?? '').trim().toLowerCase() === normalizedEmail);
+    if (match) {
+      return match;
+    }
+
+    if (users.length < 200) {
+      return null;
+    }
+
+    page += 1;
+  }
 }
 
 export function sanitizeIdNumber(value: string) {
@@ -236,6 +272,126 @@ export function maskEmailAddress(email: string) {
   }
 
   return `${localPart.slice(0, 2)}***${localPart.slice(-1)}@${domain}`;
+}
+
+export async function findExistingRegistrationAccount(
+  service: SupabaseSchemaClient,
+  input: { email: string; idNumber?: string },
+) {
+  const normalizedEmail = input.email.trim().toLowerCase();
+  const normalizedIdNumber = input.idNumber ? sanitizeIdNumber(input.idNumber) : '';
+
+  const [{ data: existingUserByEmail }, { data: existingUserById }, userAccountResult, authUser] = await Promise.all([
+    service.from('users').select('id').ilike('email', normalizedEmail).maybeSingle(),
+    normalizedIdNumber ? service.from('users').select('id').eq('id_number', normalizedIdNumber).maybeSingle() : Promise.resolve({ data: null, error: null }),
+    (async () => {
+      try {
+        const [byEmail, byId] = await Promise.all([
+          service.from('user_accounts').select('id').ilike('email', normalizedEmail).maybeSingle(),
+          normalizedIdNumber ? service.from('user_accounts').select('id').eq('id_number', normalizedIdNumber).maybeSingle() : Promise.resolve({ data: null, error: null }),
+        ]);
+
+        return {
+          email: byEmail.data,
+          emailError: byEmail.error,
+          id: byId.data,
+          idError: byId.error,
+        };
+      } catch (error) {
+        return { email: null, emailError: error, id: null, idError: null };
+      }
+    })(),
+    findAuthUserByEmail(normalizedEmail),
+  ]);
+
+  if (userAccountResult.emailError && !isMissingRelation(userAccountResult.emailError, 'user_accounts')) {
+    throw userAccountResult.emailError;
+  }
+  if (userAccountResult.idError && !isMissingRelation(userAccountResult.idError, 'user_accounts')) {
+    throw userAccountResult.idError;
+  }
+
+  return {
+    authUserId: authUser?.id ? String(authUser.id) : null,
+    emailRegistered: Boolean(existingUserByEmail || userAccountResult.email || authUser),
+    idNumberRegistered: Boolean(existingUserById || userAccountResult.id),
+  };
+}
+
+export async function upsertPendingRegistration(
+  service: SupabaseSchemaClient,
+  input: {
+    email: string;
+    expiresAt: string;
+    idNumber: string;
+    otpHash: string;
+    payloadEncrypted: string;
+    roleId: string;
+  },
+) {
+  const { data, error } = await service
+    .from('registration_otps')
+    .upsert({
+      email: input.email.trim().toLowerCase(),
+      expires_at: input.expiresAt,
+      id_number: sanitizeIdNumber(input.idNumber),
+      otp_hash: input.otpHash,
+      payload_encrypted: input.payloadEncrypted,
+      role_id: input.roleId,
+      updated_at: new Date().toISOString(),
+      used_at: null,
+    }, { onConflict: 'email' })
+    .select('id, email, expires_at, id_number, otp_hash, payload_encrypted, role_id, used_at')
+    .single();
+
+  if (error) {
+    throw error;
+  }
+
+  return {
+    email: String(data.email),
+    expiresAt: String(data.expires_at),
+    id: String(data.id),
+    idNumber: String(data.id_number),
+    otpHash: String(data.otp_hash),
+    payloadEncrypted: String(data.payload_encrypted),
+    roleId: String(data.role_id),
+    usedAt: data.used_at ? String(data.used_at) : null,
+  } satisfies PendingRegistrationRecord;
+}
+
+export async function getPendingRegistrationById(service: SupabaseSchemaClient, id: string) {
+  const { data, error } = await service
+    .from('registration_otps')
+    .select('id, email, expires_at, id_number, otp_hash, payload_encrypted, role_id, used_at')
+    .eq('id', id)
+    .maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+
+  if (!data) {
+    return null;
+  }
+
+  return {
+    email: String(data.email),
+    expiresAt: String(data.expires_at),
+    id: String(data.id),
+    idNumber: String(data.id_number),
+    otpHash: String(data.otp_hash),
+    payloadEncrypted: String(data.payload_encrypted),
+    roleId: String(data.role_id),
+    usedAt: data.used_at ? String(data.used_at) : null,
+  } satisfies PendingRegistrationRecord;
+}
+
+export async function deletePendingRegistration(service: SupabaseSchemaClient, id: string) {
+  const { error } = await service.from('registration_otps').delete().eq('id', id);
+  if (error) {
+    throw error;
+  }
 }
 
 export function deriveLegacyRole(roleName: string, roleId?: string) {
