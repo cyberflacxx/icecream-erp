@@ -5,29 +5,51 @@ interface EmailMessage {
   to: string | string[];
 }
 
+function firstConfiguredEnv(keys: string[]) {
+  for (const key of keys) {
+    const value = String(process.env[key] ?? '').trim();
+    if (value) return value;
+  }
+
+  return '';
+}
+
+function getSmtpConfig() {
+  return {
+    from: firstConfiguredEnv(['SMTP_FROM', 'EMAIL_FROM', 'MAIL_FROM']),
+    host: firstConfiguredEnv(['SMTP_HOST', 'EMAIL_HOST']),
+    pass: firstConfiguredEnv(['SMTP_PASS', 'EMAIL_APP_PASSWORD']),
+    port: firstConfiguredEnv(['SMTP_PORT', 'EMAIL_PORT']),
+    secure: firstConfiguredEnv(['SMTP_SECURE', 'EMAIL_SECURE']),
+    user: firstConfiguredEnv(['SMTP_USER', 'EMAIL_USER']),
+  };
+}
+
 function getEmailFromAddress() {
-  return process.env.EMAIL_FROM || 'Absolute Ice Cream ERP <no-reply@absoluteicecream.local>';
+  return getSmtpConfig().from || 'Absolute Ice Cream ERP <no-reply@absoluteicecream.local>';
 }
 
 function canUseSmtp() {
+  const smtp = getSmtpConfig();
   return Boolean(
-    process.env.EMAIL_HOST
-      && process.env.EMAIL_PORT
-      && process.env.EMAIL_USER
-      && process.env.EMAIL_APP_PASSWORD,
+    smtp.host
+      && smtp.port
+      && smtp.user
+      && smtp.pass,
   );
 }
 
 async function sendViaSmtp(message: EmailMessage) {
+  const smtp = getSmtpConfig();
   const nodemailer = await import('nodemailer');
   const transporter = nodemailer.createTransport({
     auth: {
-      pass: process.env.EMAIL_APP_PASSWORD,
-      user: process.env.EMAIL_USER,
+      pass: smtp.pass,
+      user: smtp.user,
     },
-    host: process.env.EMAIL_HOST,
-    port: Number(process.env.EMAIL_PORT),
-    secure: String(process.env.EMAIL_SECURE).toLowerCase() === 'true',
+    host: smtp.host,
+    port: Number(smtp.port),
+    secure: String(smtp.secure).toLowerCase() === 'true',
   });
 
   return transporter.sendMail({

@@ -906,7 +906,7 @@ export async function runSystemHealthCheck(ctx: AdminContext) {
   metrics.push({ metric_name: 'supabase_url', metric_value: Boolean(process.env.NEXT_PUBLIC_SUPABASE_URL) ? 'configured' : 'missing', ...buildEnvironmentCheck('supabase_url', Boolean(process.env.NEXT_PUBLIC_SUPABASE_URL)) });
   metrics.push({ metric_name: 'supabase_anon_key', metric_value: Boolean(process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) ? 'configured' : 'missing', ...buildEnvironmentCheck('supabase_anon_key', Boolean(process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY)) });
   metrics.push({ metric_name: 'service_role_key', metric_value: Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY) ? 'configured' : 'missing', ...buildEnvironmentCheck('service_role_key', Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY)) });
-  metrics.push({ metric_name: 'email_service', metric_value: Boolean(process.env.RESEND_API_KEY || process.env.SMTP_HOST) ? 'configured' : 'missing', ...buildEnvironmentCheck('email_service', Boolean(process.env.RESEND_API_KEY || process.env.SMTP_HOST), { optional: true }) });
+  metrics.push({ metric_name: 'email_service', metric_value: Boolean(process.env.RESEND_API_KEY || process.env.SMTP_HOST || process.env.EMAIL_HOST) ? 'configured' : 'missing', ...buildEnvironmentCheck('email_service', Boolean(process.env.RESEND_API_KEY || process.env.SMTP_HOST || process.env.EMAIL_HOST), { optional: true }) });
 
   const status = computeHealthStatus(metrics.map((metric) => ({ status: metric.status })));
   const { data: check, error } = await service.from('system_health_checks').insert({
@@ -1152,7 +1152,7 @@ export async function runDeploymentReadinessCheck(ctx: AdminContext) {
     buildEnvironmentCheck('opening_accounts_posted', (openingAccounts.count ?? 0) > 0),
     buildEnvironmentCheck('backup_status_healthy', String((backups.data as Row | null)?.status ?? '') === 'SUCCESS'),
     buildEnvironmentCheck('restore_test_recorded', Boolean(restoreTests.data)),
-    buildEnvironmentCheck('email_service_configured', Boolean(process.env.RESEND_API_KEY || process.env.SMTP_HOST), { optional: true }),
+    buildEnvironmentCheck('email_service_configured', Boolean(process.env.RESEND_API_KEY || process.env.SMTP_HOST || process.env.EMAIL_HOST), { optional: true }),
   ];
 
   const unresolvedCriticalIssues = ((integrityIssues.data ?? []) as Row[]).filter((issue) => String(issue.severity ?? '') === 'CRITICAL' && String(issue.resolution_status ?? '') !== 'RESOLVED').length;
