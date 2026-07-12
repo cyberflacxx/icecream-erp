@@ -88,7 +88,7 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ error: 'No valid fields to update' }, { status: 400 });
   }
 
-  const service = (await import('@/lib/supabase/server')).createServiceRoleClient();
+  const service = (await import('@/lib/supabase/server')).createServiceRoleClient().schema('icecream_erp');
   const { error } = await service.from('users').update(updates).eq('id', ctx.userId);
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });

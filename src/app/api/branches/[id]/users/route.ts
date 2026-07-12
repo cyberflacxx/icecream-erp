@@ -44,7 +44,7 @@ export async function POST(
     const body = await request.json() as { effectiveDate?: string; isActive?: boolean; role: string; userId: string };
     if (!body.userId || !body.role) return badRequest('userId and role are required');
 
-    const { data: user, error: userError } = await service.from('users').select('id').eq('id', body.userId).maybeSingle();
+    const { data: user, error: userError } = await service.schema('icecream_erp').from('users').select('id').eq('id', body.userId).maybeSingle();
     if (userError) throw userError;
     if (!user) return badRequest('User not found');
 

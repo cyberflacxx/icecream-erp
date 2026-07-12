@@ -18,7 +18,9 @@ export function useBranchRealtime(
       return;
     }
 
-    const supabase = createClient(supabaseUrl, supabaseAnonKey);
+    const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+      db: { schema: 'icecream_erp' },
+    });
     const salesChannel = supabase
       .channel(`branch_sales_${branchId}`)
       .on(
@@ -26,7 +28,7 @@ export function useBranchRealtime(
         {
           event: 'INSERT',
           filter: `branch_id=eq.${branchId}`,
-          schema: 'public',
+          schema: 'icecream_erp',
           table: 'branch_sales'
         },
         () => {
@@ -41,7 +43,7 @@ export function useBranchRealtime(
         {
           event: '*',
           filter: `branch_id=eq.${branchId}`,
-          schema: 'public',
+          schema: 'icecream_erp',
           table: 'branch_shift_closes'
         },
         () => {

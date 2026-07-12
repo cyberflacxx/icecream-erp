@@ -13,7 +13,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   const { id } = await params;
   const settings = await getSystemSecuritySettings();
   const lockedUntil = getLockoutExpiry(new Date(), settings.lockoutDurationMinutes).toISOString();
-  const service = createServiceRoleClient();
+  const service = createServiceRoleClient().schema('icecream_erp');
   const { error } = await service.from('users').update({ status: 'locked', locked_until: lockedUntil }).eq('id', id);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 

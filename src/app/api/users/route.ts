@@ -15,7 +15,7 @@ export async function GET(request: NextRequest) {
   const schemaService = service.schema('icecream_erp');
 
   // Verify caller is admin
-  const { data: caller } = await service.from('users').select('role').eq('auth_id', user.id).single();
+  const { data: caller } = await schemaService.from('users').select('role').eq('auth_id', user.id).single();
   if (!caller || !['super_admin', 'branch_manager'].includes(caller.role)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
@@ -26,7 +26,7 @@ export async function GET(request: NextRequest) {
   const search = searchParams.get('search') ?? '';
   const status = searchParams.get('status') ?? '';
 
-  let query = service.from('users').select('*', { count: 'exact' });
+  let query = schemaService.from('users').select('*', { count: 'exact' });
 
   if (search) {
     query = query.or(`full_name.ilike.%${search}%,work_id.ilike.%${search}%,email.ilike.%${search}%`);

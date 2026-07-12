@@ -11,8 +11,9 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   const service = createServiceRoleClient();
+  const schemaService = service.schema('icecream_erp');
 
-  const { data: caller } = await service.from('users').select('role').eq('auth_id', user.id).single();
+  const { data: caller } = await schemaService.from('users').select('role').eq('auth_id', user.id).single();
   if (!caller || !['super_admin', 'branch_manager'].includes(caller.role)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
@@ -26,7 +27,7 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
     return NextResponse.json({ error: 'Nothing to update' }, { status: 400 });
   }
 
-  const { data, error } = await service
+  const { data, error } = await schemaService
     .from('users')
     .update({ ...updates, updated_at: new Date().toISOString() })
     .eq('id', params.id)
@@ -46,8 +47,9 @@ export async function DELETE(request: NextRequest, { params }: { params: { id: s
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   const service = createServiceRoleClient();
+  const schemaService = service.schema('icecream_erp');
 
-  const { data: caller } = await service.from('users').select('id, role, organization_id').eq('auth_id', user.id).single();
+  const { data: caller } = await schemaService.from('users').select('id, role, organization_id').eq('auth_id', user.id).single();
   if (!caller || caller.role !== 'super_admin') {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
@@ -59,7 +61,7 @@ export async function DELETE(request: NextRequest, { params }: { params: { id: s
   const body = (await request.json().catch(() => ({}))) as { adminKey?: string | null };
 
   // Get auth_id so we can delete from Supabase Auth too
-  const { data: target } = await service.from('users').select('id, auth_id, role, status').eq('id', params.id).single();
+  const { data: target } = await schemaService.from('users').select('id, auth_id, role, status').eq('id', params.id).single();
 
   if (!target) {
     return NextResponse.json({ error: 'User not found' }, { status: 404 });
@@ -88,7 +90,7 @@ export async function DELETE(request: NextRequest, { params }: { params: { id: s
   });
   if (adminKeyError) return adminKeyError;
 
-  const { error } = await service.from('users').delete().eq('id', params.id);
+  const { error } = await schemaService.from('users').delete().eq('id', params.id);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
   if (target?.auth_id) {

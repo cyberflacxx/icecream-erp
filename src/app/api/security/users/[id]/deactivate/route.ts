@@ -10,7 +10,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   if (!can(ctx, 'manage_users', 'users.write', 'user.manage')) return forbidden();
 
   const { id } = await params;
-  const service = createServiceRoleClient();
+  const service = createServiceRoleClient().schema('icecream_erp');
   const { error } = await service.from('users').update({ status: 'inactive' }).eq('id', id);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
