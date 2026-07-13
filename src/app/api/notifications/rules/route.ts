@@ -9,7 +9,10 @@ export async function GET(request: NextRequest) {
   try {
     return notificationResponse(await listNotificationRules(auth.ctx.organizationId));
   } catch (error) {
-    return notificationError(error);
+    return notificationError(error, {
+      fallbackData: [],
+      routeName: '/api/notifications/rules',
+    });
   }
 }
 
@@ -30,6 +33,8 @@ export async function POST(request: NextRequest) {
       201,
     );
   } catch (error) {
-    return notificationError(error);
+    return notificationError(error, {
+      routeName: '/api/notifications/rules',
+    });
   }
 }

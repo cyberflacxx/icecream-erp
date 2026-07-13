@@ -32,9 +32,16 @@ type NotificationContext = {
 };
 
 type NotificationRecord = Record<string, unknown>;
+type NotificationServerError = Error & {
+  notificationCode?: string;
+  notificationDetail?: string | null;
+  notificationStep?: string;
+  notificationTable?: string | null;
+};
 
 const NOTIFICATION_SETTINGS_CHANNELS = ['IN_APP', 'EMAIL', 'SMS', 'WHATSAPP'] as const;
 const NOTIFICATION_SETTINGS_SEVERITIES = ['INFO', 'LOW', 'MEDIUM', 'HIGH', 'CRITICAL'] as const;
+export const NOTIFICATION_API_FAILURE_MESSAGE = 'Notification data is temporarily unavailable. Please try again later.';
 
 export function notificationService() {
   return createServiceRoleClient().schema('icecream_erp');
@@ -47,7 +54,7 @@ function isMissingNotificationSchema(error: unknown, table: string, columns: str
   );
 }
 
-function buildNotificationSettingsFallback() {
+export function buildNotificationSettingsFallback() {
   return {
     channels: [...NOTIFICATION_SETTINGS_CHANNELS],
     severities: [...NOTIFICATION_SETTINGS_SEVERITIES],
@@ -59,7 +66,7 @@ function buildNotificationSettingsFallback() {
   };
 }
 
-function buildNotificationAlertDashboardFallback() {
+export function buildNotificationAlertDashboardFallback() {
   return {
     stats: {
       criticalAlerts: 0,
@@ -83,6 +90,69 @@ function buildNotificationAlertDashboardFallback() {
   };
 }
 
+function safeNotificationValue(value: unknown, fallback = '') {
+  if (typeof value !== 'string') {
+    return fallback;
+  }
+
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return fallback;
+  }
+
+  return trimmed.slice(0, 300);
+}
+
+function getNotificationErrorCode(error: unknown) {
+  if (typeof error === 'object' && error !== null && 'code' in error) {
+    return safeNotificationValue((error as Record<string, unknown>).code, 'UNKNOWN');
+  }
+
+  return 'UNKNOWN';
+}
+
+function getNotificationErrorDetail(error: unknown) {
+  if (typeof error === 'object' && error !== null && 'details' in error) {
+    return safeNotificationValue((error as Record<string, unknown>).details, '') || null;
+  }
+
+  return null;
+}
+
+function getNotificationErrorMessage(error: unknown) {
+  if (error instanceof Error) {
+    return safeNotificationValue(error.message, 'Unknown notification error');
+  }
+  if (typeof error === 'object' && error !== null && 'message' in error) {
+    return safeNotificationValue((error as Record<string, unknown>).message, 'Unknown notification error');
+  }
+  return 'Unknown notification error';
+}
+
+function wrapNotificationError(error: unknown, step: string, table?: string | null) {
+  const wrapped = (error instanceof Error ? error : new Error(getNotificationErrorMessage(error))) as NotificationServerError;
+  wrapped.notificationCode = wrapped.notificationCode ?? getNotificationErrorCode(error);
+  wrapped.notificationDetail = wrapped.notificationDetail ?? getNotificationErrorDetail(error);
+  wrapped.notificationStep = wrapped.notificationStep ?? step;
+  wrapped.notificationTable = wrapped.notificationTable ?? table ?? null;
+  return wrapped;
+}
+
+function throwNotificationError(error: unknown, step: string, table?: string | null): never {
+  throw wrapNotificationError(error, step, table);
+}
+
+export function getSafeNotificationErrorDetails(error: unknown) {
+  const wrapped = error as NotificationServerError;
+  return {
+    code: wrapped.notificationCode ?? getNotificationErrorCode(error),
+    detail: wrapped.notificationDetail ?? getNotificationErrorDetail(error),
+    message: getNotificationErrorMessage(error),
+    step: wrapped.notificationStep ?? 'notification_route_handler',
+    table: wrapped.notificationTable ?? null,
+  };
+}
+
 function isNotificationSettingsCompatibilityError(error: unknown) {
   return (
     isMissingNotificationSchema(error, 'notification_rules') ||
@@ -96,7 +166,26 @@ function isNotificationSettingsCompatibilityError(error: unknown) {
 function isNotificationAlertDashboardCompatibilityError(error: unknown) {
   return (
     isNotificationSettingsCompatibilityError(error) ||
-    isMissingNotificationSchema(error, 'notifications') ||
+    isMissingNotificationSchema(error, 'notifications', [
+      'user_profile_id',
+      'module_name',
+      'event_type',
+      'severity',
+      'status',
+      'channel',
+      'link',
+      'branch_id',
+      'warehouse_id',
+      'metadata',
+      'sent_at',
+      'sent_by',
+      'read_at',
+      'read_by',
+      'dismissed_at',
+      'dismissed_by',
+      'failed_at',
+      'failure_reason',
+    ]) ||
     isMissingNotificationSchema(error, 'stock_balances', ['quantity_on_hand']) ||
     isMissingRelationshipError(error, 'stock_balances', 'items') ||
     isMissingNotificationSchema(error, 'supplier_shortages') ||
@@ -127,7 +216,7 @@ async function optionalNotificationRows(
     ) {
       return [] as NotificationRecord[];
     }
-    throw result.error;
+    throwNotificationError(result.error, `read_${options.table}`, options.table);
   }
   return (result.data ?? []) as NotificationRecord[];
 }
@@ -156,7 +245,7 @@ function mapNotificationRow(row: NotificationRecord) {
     title: String(row.title ?? ''),
     message: String(row.message ?? ''),
     type: String(row.type ?? 'INFO'),
-    severity: String(row.severity ?? 'INFO'),
+    severity: String(row.severity ?? row.type ?? 'INFO'),
     status: String(row.status ?? (row.is_read ? 'READ' : 'SENT')),
     channel: String(row.channel ?? 'IN_APP'),
     isRead: Boolean(row.is_read),
@@ -182,6 +271,107 @@ function mapNotificationRow(row: NotificationRecord) {
         }),
     ),
     metadata: (row.metadata as Record<string, unknown> | null) ?? {},
+  };
+}
+
+function isLegacyNotificationsCompatibilityError(error: unknown) {
+  return isMissingNotificationSchema(error, 'notifications', [
+    'user_profile_id',
+    'module_name',
+    'event_type',
+    'severity',
+    'status',
+    'channel',
+    'link',
+    'branch_id',
+    'warehouse_id',
+    'metadata',
+    'read_at',
+    'dismissed_at',
+  ]);
+}
+
+function mapLegacyNotificationRow(row: NotificationRecord) {
+  return mapNotificationRow({
+    ...row,
+    channel: 'IN_APP',
+    event_type: row.reference_type ?? null,
+    link: resolveNotificationLink({
+      documentId: row.reference_id ? String(row.reference_id) : undefined,
+      documentType: row.reference_type ? String(row.reference_type) : undefined,
+      referenceId: row.reference_id ? String(row.reference_id) : undefined,
+    }),
+    metadata: {},
+    severity: row.type ?? 'INFO',
+    status: Boolean(row.is_read) ? 'READ' : 'SENT',
+    user_profile_id: row.user_profile_id ?? row.user_id ?? null,
+  });
+}
+
+async function listLegacyNotifications(input: {
+  ctx: NotificationContext;
+  filters: {
+    isRead?: boolean | null;
+    limit?: number | null;
+    module?: string | null;
+    page?: number | null;
+    pageSize?: number | null;
+    severity?: string | null;
+    status?: string | null;
+    unreadOnly?: boolean | null;
+  };
+}) {
+  const page = Math.max(1, toInteger(input.filters.page, 1));
+  const pageSize = Math.min(100, Math.max(1, toInteger(input.filters.pageSize ?? input.filters.limit, 20)));
+  let query = notificationService()
+    .from('notifications')
+    .select('*', { count: 'exact' })
+    .eq('organization_id', input.ctx.organizationId)
+    .order('created_at', { ascending: false });
+
+  if (!notificationSupportsAdminScope(input.ctx)) {
+    query = query.eq('user_id', input.ctx.userId);
+  }
+
+  const from = (page - 1) * pageSize;
+  const { data, count, error } = await query.range(from, from + pageSize - 1);
+  if (error) {
+    if (isMissingNotificationSchema(error, 'notifications')) {
+      return {
+        data: [],
+        pagination: { page, pageSize, total: 0 },
+      };
+    }
+    throwNotificationError(error, 'list_legacy_notifications', 'notifications');
+  }
+
+  let rows = (data ?? []).map((row) => mapLegacyNotificationRow(row as NotificationRecord));
+
+  if (input.filters.module) {
+    rows = [];
+  }
+  if (input.filters.severity) {
+    const severity = normalizeNotificationCode(input.filters.severity);
+    rows = rows.filter((row) => row.severity === severity);
+  }
+  if (input.filters.status) {
+    const status = normalizeNotificationCode(input.filters.status);
+    rows = rows.filter((row) => row.status === status);
+  }
+  if (input.filters.unreadOnly || input.filters.isRead === false) {
+    rows = rows.filter((row) => !row.isRead);
+  }
+  if (input.filters.isRead === true) {
+    rows = rows.filter((row) => row.isRead);
+  }
+
+  return {
+    data: sortNotificationsByPriority(rows),
+    pagination: {
+      page,
+      pageSize,
+      total: count ?? rows.length,
+    },
   };
 }
 
@@ -322,7 +512,10 @@ export async function listNotifications(input: {
         },
       };
     }
-    throw error;
+    if (isLegacyNotificationsCompatibilityError(error)) {
+      return listLegacyNotifications({ ctx: input.ctx, filters });
+    }
+    throwNotificationError(error, 'list_notifications', 'notifications');
   }
 
   const rows = (data ?? []).filter((row) => canAccessNotificationRow(input.ctx, row as NotificationRecord)).map((row) => mapNotificationRow(row as NotificationRecord));
@@ -337,15 +530,30 @@ export async function listNotifications(input: {
 }
 
 export async function countUnreadNotifications(ctx: NotificationContext) {
-  const { count, error } = await notificationService()
+  const modernResult = await notificationService()
     .from('notifications')
     .select('*', { count: 'exact', head: true })
     .eq('organization_id', ctx.organizationId)
     .eq('user_profile_id', ctx.userId)
     .eq('is_read', false);
+  let count = modernResult.count;
+  let error = modernResult.error;
   if (error) {
     if (isMissingNotificationSchema(error, 'notifications')) return 0;
-    throw error;
+    if (isLegacyNotificationsCompatibilityError(error)) {
+      const legacyResult = await notificationService()
+        .from('notifications')
+        .select('*', { count: 'exact', head: true })
+        .eq('organization_id', ctx.organizationId)
+        .eq('user_id', ctx.userId)
+        .eq('is_read', false);
+      if (legacyResult.error) {
+        if (isMissingNotificationSchema(legacyResult.error, 'notifications')) return 0;
+        throwNotificationError(legacyResult.error, 'count_unread_notifications_legacy', 'notifications');
+      }
+      return legacyResult.count ?? 0;
+    }
+    throwNotificationError(error, 'count_unread_notifications', 'notifications');
   }
   return count ?? 0;
 }
@@ -423,7 +631,7 @@ export async function listNotificationRules(organizationId: string) {
     .order('created_at', { ascending: false });
   if (error) {
     if (isMissingNotificationSchema(error, 'notification_rules')) return [];
-    throw error;
+    throwNotificationError(error, 'list_notification_rules', 'notification_rules');
   }
   return data ?? [];
 }
@@ -505,7 +713,7 @@ export async function listNotificationTemplates(organizationId: string) {
     .order('created_at', { ascending: false });
   if (error) {
     if (isMissingNotificationSchema(error, 'notification_templates')) return [];
-    throw error;
+    throwNotificationError(error, 'list_notification_templates', 'notification_templates');
   }
   return data ?? [];
 }
@@ -590,7 +798,7 @@ export async function listNotificationPreferences(ctx: NotificationContext) {
     .order('module_name', { ascending: true });
   if (error) {
     if (isMissingNotificationSchema(error, 'notification_preferences')) return [];
-    throw error;
+    throwNotificationError(error, 'list_notification_preferences', 'notification_preferences');
   }
   return data ?? [];
 }
@@ -628,7 +836,7 @@ export async function listEscalationRules(organizationId: string) {
     .order('created_at', { ascending: false });
   if (error) {
     if (isMissingNotificationSchema(error, 'escalation_rules')) return [];
-    throw error;
+    throwNotificationError(error, 'list_escalation_rules', 'escalation_rules');
   }
   return data ?? [];
 }
@@ -672,7 +880,7 @@ export async function listReminderRules(organizationId: string) {
   const { data, error } = await notificationService().from('reminder_rules').select('*').eq('organization_id', organizationId).order('created_at', { ascending: false });
   if (error) {
     if (isMissingNotificationSchema(error, 'reminder_rules')) return [];
-    throw error;
+    throwNotificationError(error, 'list_reminder_rules', 'reminder_rules');
   }
   return data ?? [];
 }
@@ -721,7 +929,7 @@ export async function listNotificationDeliveryLogs(organizationId: string) {
     .limit(200);
   if (error) {
     if (isMissingNotificationSchema(error, 'notification_delivery_logs')) return [];
-    throw error;
+    throwNotificationError(error, 'list_notification_delivery_logs', 'notification_delivery_logs');
   }
   return data ?? [];
 }

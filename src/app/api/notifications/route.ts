@@ -24,6 +24,8 @@ export async function GET(request: NextRequest) {
       }),
     );
   } catch (error) {
-    return notificationError(error);
+    return notificationError(error, {
+      routeName: '/api/notifications',
+    });
   }
 }

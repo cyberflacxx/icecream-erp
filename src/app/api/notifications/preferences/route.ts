@@ -9,7 +9,10 @@ export async function GET(request: NextRequest) {
   try {
     return notificationResponse(await listNotificationPreferences(auth.ctx));
   } catch (error) {
-    return notificationError(error);
+    return notificationError(error, {
+      fallbackData: [],
+      routeName: '/api/notifications/preferences',
+    });
   }
 }
 
@@ -20,6 +23,8 @@ export async function PATCH(request: NextRequest) {
     const body = await request.json() as { preferences?: Array<Record<string, unknown>> };
     return notificationResponse(await upsertNotificationPreferences({ body: body.preferences ?? [], ctx: auth.ctx }));
   } catch (error) {
-    return notificationError(error);
+    return notificationError(error, {
+      routeName: '/api/notifications/preferences',
+    });
   }
 }

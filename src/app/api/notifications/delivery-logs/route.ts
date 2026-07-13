@@ -12,6 +12,9 @@ export async function GET(request: NextRequest) {
     }
     return notificationResponse(await listNotificationDeliveryLogs(auth.ctx.organizationId));
   } catch (error) {
-    return notificationError(error);
+    return notificationError(error, {
+      fallbackData: [],
+      routeName: '/api/notifications/delivery-logs',
+    });
   }
 }
