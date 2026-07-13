@@ -20,6 +20,8 @@ interface BranchOption {
   name: string;
 }
 
+const OTP_FAILURE_MESSAGE = 'OTP could not be sent. Please contact the system administrator.';
+
 const idNumberPattern = /^[0-9]{6,9}[A-Z][0-9]{2}$/;
 
 function sanitizeIdNumber(value: string) {
@@ -198,7 +200,7 @@ export default function RegisterPage() {
         if (payload.fieldErrors) {
           setFieldErrors((current) => ({ ...current, ...payload.fieldErrors }));
         }
-        const message = String(payload.error ?? 'OTP could not be sent. Please check email configuration or contact the administrator.');
+        const message = String(payload.error ?? OTP_FAILURE_MESSAGE);
         if (/admin key/i.test(message)) {
           setFieldErrors((current) => ({ ...current, admin_key: message }));
         }
@@ -229,7 +231,7 @@ export default function RegisterPage() {
         color: '#3B1F12',
       });
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'OTP could not be sent. Please check email configuration or contact the administrator.';
+      const message = error instanceof Error && error.message ? error.message : OTP_FAILURE_MESSAGE;
       setFormError(message);
       await Swal.fire({
         icon: 'error',

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { resolveAdminActionKeyValidation } from '@/lib/admin-delete-server';
-import { sendTransactionalEmail } from '@/lib/email';
+import { OTP_EMAIL_FAILURE_MESSAGE, sendTransactionalEmail } from '@/lib/email';
 import {
   createRegistrationRequestToken,
   deletePendingRegistration,
@@ -172,8 +172,7 @@ export async function POST(request: NextRequest) {
     if (pendingRegistrationId) {
       await deletePendingRegistration(service, pendingRegistrationId).catch(() => null);
     }
-    const message = error instanceof Error ? error.message : 'OTP could not be sent. Please check email configuration or contact the administrator.';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json({ error: OTP_EMAIL_FAILURE_MESSAGE }, { status: 500 });
   }
 
   await recordSecurityEvent({

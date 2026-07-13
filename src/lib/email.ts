@@ -10,6 +10,8 @@ type EmailDeliveryReadiness = {
   reason: string | null;
 };
 
+export const OTP_EMAIL_FAILURE_MESSAGE = 'OTP could not be sent. Please contact the system administrator.';
+
 function firstConfiguredEnv(keys: string[], normalizer?: (value: string) => string) {
   for (const key of keys) {
     const rawValue = String(process.env[key] ?? '').trim();
@@ -57,15 +59,49 @@ export function getSmtpReadiness() {
   return { ok: true, reason: null } satisfies EmailDeliveryReadiness;
 }
 
-function canUseSmtp() {
-  return getSmtpReadiness().ok;
+function safeEmailErrorMessage(value: unknown) {
+  if (!(value instanceof Error) || !value.message) {
+    return 'Unknown email delivery error';
+  }
+
+  return value.message.slice(0, 300);
 }
 
-function logEmailFailure(details: { code?: string | null; message?: string | null; reason?: string | null }) {
-  console.error('OTP email send failed', {
-    code: details.code ?? null,
-    message: details.message ?? null,
-    reason: details.reason ?? null,
+function safeEmailErrorCode(value: unknown) {
+  if (typeof value === 'object' && value !== null && 'code' in value) {
+    const code = String((value as { code?: unknown }).code ?? '').trim();
+    return code || 'UNKNOWN';
+  }
+
+  return 'UNKNOWN';
+}
+
+function logMissingSmtpRequirement(reason: string | null) {
+  if (reason === 'SMTP host is not configured.') {
+    console.error('OTP email config missing SMTP host.');
+    return;
+  }
+  if (reason === 'SMTP user is not configured.') {
+    console.error('OTP email config missing SMTP user.');
+    return;
+  }
+  if (reason === 'SMTP password is not configured.') {
+    console.error('OTP email config missing SMTP password.');
+    return;
+  }
+
+  if (reason) {
+    console.error('OTP email send failed with safe error code/message.', {
+      code: 'SMTP_CONFIG_MISSING',
+      message: reason,
+    });
+  }
+}
+
+function logSafeEmailSendFailure(error: unknown) {
+  console.error('OTP email send failed with safe error code/message.', {
+    code: safeEmailErrorCode(error),
+    message: safeEmailErrorMessage(error),
   });
 }
 
@@ -92,48 +128,50 @@ async function sendViaSmtp(message: EmailMessage) {
 }
 
 export async function sendTransactionalEmail(message: EmailMessage) {
-  const apiKey = process.env.RESEND_API_KEY;
-  if (apiKey) {
-    const to = Array.isArray(message.to) ? message.to : [message.to];
-    const response = await fetch('https://api.resend.com/emails', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        from: getEmailFromAddress(),
-        to,
-        subject: message.subject,
-        html: message.html,
-        text: message.text,
-      }),
-    });
-
-    if (response.ok) {
-      return response.json().catch(() => null);
-    }
-
-    const errorText = await response.text();
-    if (!canUseSmtp()) {
-      logEmailFailure({ message: errorText || response.statusText, reason: 'Resend delivery failed and SMTP is not ready.' });
-      throw new Error('OTP could not be sent. Please check email configuration or contact the administrator.');
-    }
-  }
-
   const readiness = getSmtpReadiness();
   if (!readiness.ok) {
-    logEmailFailure({ reason: readiness.reason });
-    throw new Error('OTP could not be sent. Please check email configuration or contact the administrator.');
+    logMissingSmtpRequirement(readiness.reason);
+  } else {
+    try {
+      return await sendViaSmtp(message);
+    } catch (error) {
+      logSafeEmailSendFailure(error);
+    }
   }
 
-  try {
-    return await sendViaSmtp(message);
-  } catch (error) {
-    logEmailFailure({
-      code: typeof error === 'object' && error !== null && 'code' in error ? String((error as { code?: unknown }).code ?? '') : null,
-      message: error instanceof Error ? error.message : 'Unknown SMTP error',
-    });
-    throw new Error('OTP could not be sent. Please check email configuration or contact the administrator.');
+  const apiKey = String(process.env.RESEND_API_KEY ?? '').trim();
+  if (apiKey) {
+    const to = Array.isArray(message.to) ? message.to : [message.to];
+
+    try {
+      const response = await fetch('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          from: getEmailFromAddress(),
+          to,
+          subject: message.subject,
+          html: message.html,
+          text: message.text,
+        }),
+      });
+
+      if (response.ok) {
+        return response.json().catch(() => null);
+      }
+
+      const errorText = await response.text();
+      logSafeEmailSendFailure({
+        code: `RESEND_${response.status}`,
+        message: errorText || response.statusText || 'Resend delivery failed',
+      });
+    } catch (error) {
+      logSafeEmailSendFailure(error);
+    }
   }
+
+  throw new Error(OTP_EMAIL_FAILURE_MESSAGE);
 }
