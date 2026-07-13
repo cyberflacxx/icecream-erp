@@ -21,6 +21,7 @@ interface BranchOption {
 }
 
 const OTP_FAILURE_MESSAGE = 'OTP could not be sent. Please contact the system administrator.';
+const ACCOUNT_CREATION_FAILURE_MESSAGE = 'Account creation failed. Please contact the system administrator.';
 
 const idNumberPattern = /^[0-9]{6,9}[A-Z][0-9]{2}$/;
 
@@ -285,7 +286,7 @@ export default function RegisterPage() {
       const payload = (await response.json().catch(() => ({}))) as { error?: string; redirectTo?: string; work_id?: string };
 
       if (!response.ok) {
-        const message = String(payload.error ?? 'OTP verification failed.');
+        const message = String(payload.error ?? ACCOUNT_CREATION_FAILURE_MESSAGE);
         setFieldErrors((current) => ({
           ...current,
           admin_key: /admin key/i.test(message) ? message : current.admin_key,
@@ -317,7 +318,7 @@ export default function RegisterPage() {
 
       router.push(payload.redirectTo ?? '/auth/login');
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'OTP verification failed.';
+      const message = error instanceof Error && error.message ? error.message : ACCOUNT_CREATION_FAILURE_MESSAGE;
       setFormError(message);
       await Swal.fire({
         icon: 'error',

@@ -1,6 +1,6 @@
 import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes } from 'crypto';
 
-import { ROLES, generateWorkId } from './auth-roles';
+import { ROLES, generateWorkId, workIdToEmail } from './auth-roles';
 import { createServiceRoleClient } from './supabase/server';
 
 export interface RegistrationPayload {
@@ -32,7 +32,31 @@ export interface PendingRegistrationRecord {
   usedAt: string | null;
 }
 
+export interface RegistrationUserAccountRecord {
+  email: string;
+  first_name: string;
+  id: string;
+  id_number: string;
+  is_active: boolean;
+  last_name: string;
+  organization_id: string;
+  password_hash: string;
+  role_id: string;
+  updated_at: string;
+  work_id: string;
+}
+
+export interface SafeRegistrationErrorDetails {
+  code: string;
+  detail: string | null;
+  message: string;
+  step: string;
+  table: string | null;
+}
+
 type SupabaseSchemaClient = ReturnType<ReturnType<typeof createServiceRoleClient>['schema']>;
+
+export const REGISTRATION_ACCOUNT_FAILURE_MESSAGE = 'Account creation failed. Please contact the system administrator.';
 
 export const registrationPasswordPolicy = {
   minLength: 8,
@@ -68,6 +92,27 @@ function isMissingRelation(error: unknown, table: string) {
   return message.includes(`Could not find the table 'icecream_erp.${table}'`) || message.toLowerCase().includes(`${table.toLowerCase()} does not exist`);
 }
 
+function safeErrorString(value: unknown, fallback: string) {
+  if (typeof value !== 'string') {
+    return fallback;
+  }
+
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return fallback;
+  }
+
+  return trimmed.slice(0, 300);
+}
+
+function extractErrorField(error: unknown, field: 'code' | 'details' | 'message') {
+  if (typeof error !== 'object' || error === null || !(field in error)) {
+    return null;
+  }
+
+  return safeErrorString((error as Record<string, unknown>)[field], '');
+}
+
 export function isMissingPendingRegistrationStorage(error: unknown) {
   return isMissingRelation(error, 'registration_otps');
 }
@@ -99,6 +144,57 @@ async function findAuthUserByEmail(email: string) {
 
 export function sanitizeIdNumber(value: string) {
   return value.toUpperCase().replace(/[^0-9A-Z]/g, '');
+}
+
+export function getSafeRegistrationErrorDetails(error: unknown, input: { step: string; table?: string | null }) {
+  return {
+    code: extractErrorField(error, 'code') || 'UNKNOWN',
+    detail: extractErrorField(error, 'details') || null,
+    message: extractErrorField(error, 'message') || safeErrorString(error instanceof Error ? error.message : '', 'Unknown registration error'),
+    step: input.step,
+    table: input.table ?? null,
+  } satisfies SafeRegistrationErrorDetails;
+}
+
+export function getRegistrationClientErrorMessage(error: unknown) {
+  const code = extractErrorField(error, 'code') || '';
+  const message = `${extractErrorField(error, 'message') || ''} ${extractErrorField(error, 'details') || ''}`.toLowerCase();
+
+  if (code === '23505') {
+    if (message.includes('email')) {
+      return 'Email is already registered.';
+    }
+    if (message.includes('id_number') || message.includes('id number')) {
+      return 'An account with this ID number already exists.';
+    }
+  }
+
+  return REGISTRATION_ACCOUNT_FAILURE_MESSAGE;
+}
+
+export function buildRegistrationUserAccountRecord(input: {
+  email: string;
+  firstName: string;
+  idNumber: string;
+  lastName: string;
+  organizationId: string;
+  roleId: string;
+  userProfileId: string;
+  workId: string;
+}) {
+  return {
+    id: input.userProfileId,
+    email: input.email.trim().toLowerCase(),
+    first_name: input.firstName,
+    id_number: sanitizeIdNumber(input.idNumber),
+    is_active: true,
+    last_name: input.lastName,
+    organization_id: input.organizationId,
+    password_hash: 'SUPABASE_AUTH_MANAGED',
+    role_id: input.roleId,
+    updated_at: new Date().toISOString(),
+    work_id: input.workId,
+  } satisfies RegistrationUserAccountRecord;
 }
 
 export function validateRegistrationPayload(input: {
@@ -525,6 +621,37 @@ export async function generateNextWorkId(service: SupabaseSchemaClient) {
 
   const lastSeq = lastUser?.work_id ? parseInt(String(lastUser.work_id).slice(-4), 10) : 0;
   return generateWorkId(Number.isFinite(lastSeq) ? lastSeq : 0);
+}
+
+export async function generateAvailableWorkId(service: SupabaseSchemaClient, maxAttempts = 25) {
+  const year = new Date().getFullYear();
+  const { data: lastUser } = await service
+    .from('users')
+    .select('work_id')
+    .like('work_id', `AQI-${year}%`)
+    .order('work_id', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  let nextSequence = lastUser?.work_id ? parseInt(String(lastUser.work_id).slice(-4), 10) : 0;
+  nextSequence = Number.isFinite(nextSequence) ? nextSequence : 0;
+
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    const workId = generateWorkId(nextSequence + attempt);
+    const syntheticEmail = workIdToEmail(workId);
+
+    const [{ data: existingUser }, { data: existingAccount }, existingAuthUser] = await Promise.all([
+      service.from('users').select('id').eq('work_id', workId).maybeSingle(),
+      service.from('user_accounts').select('id').eq('work_id', workId).maybeSingle(),
+      findAuthUserByEmail(syntheticEmail),
+    ]);
+
+    if (!existingUser && !existingAccount && !existingAuthUser) {
+      return workId;
+    }
+  }
+
+  throw new Error('Unable to generate an available work ID.');
 }
 
 export async function assignUserRole(input: {

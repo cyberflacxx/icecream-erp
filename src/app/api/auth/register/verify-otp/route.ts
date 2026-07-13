@@ -5,14 +5,18 @@ import { resolveAdminActionKeyValidation } from '@/lib/admin-delete-server';
 import { sendTransactionalEmail } from '@/lib/email';
 import {
   assignUserRole,
+  buildRegistrationUserAccountRecord,
   deletePendingRegistration,
   decryptRegistrationPayload,
   findExistingRegistrationAccount,
-  generateNextWorkId,
+  generateAvailableWorkId,
+  getRegistrationClientErrorMessage,
+  getSafeRegistrationErrorDetails,
   getPendingRegistrationById,
   getPrimaryOrganizationId,
   hashOtpCode,
   isMissingPendingRegistrationStorage,
+  REGISTRATION_ACCOUNT_FAILURE_MESSAGE,
   resolveRegistrationRole,
   syncUserBranchAssignment,
   toStoredUserRole,
@@ -21,6 +25,22 @@ import {
 import { recordSecurityEvent } from '@/lib/security-server';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 import { serializeUserPhoneValue } from '@/lib/user-access-profile';
+
+function logRegistrationStep(step: string, details?: Record<string, unknown>) {
+  console.info('Registration verify step.', {
+    step,
+    ...details,
+  });
+}
+
+function logRegistrationFailure(step: string, table: string | null, error: unknown) {
+  console.error('Registration verify failed.', getSafeRegistrationErrorDetails(error, { step, table }));
+}
+
+function throwRegistrationFailure(step: string, table: string | null, error: unknown): never {
+  logRegistrationFailure(step, table, error);
+  throw error;
+}
 
 export async function POST(request: NextRequest) {
   const body = (await request.json().catch(() => ({}))) as { adminKey?: string; admin_key?: string; email?: string; otp?: string; requestId?: string };
@@ -107,6 +127,13 @@ export async function POST(request: NextRequest) {
 
   const normalizedEmail = payload.email.trim().toLowerCase();
   const normalizedBranchId = payload.branchId ? String(payload.branchId) : null;
+  logRegistrationStep('otp_validation_passed', {
+    branchRequired: role.requiresBranch,
+    hasBranchId: Boolean(normalizedBranchId),
+    normalizedEmail,
+    roleId: role.id,
+  });
+
   const existingAccount = await findExistingRegistrationAccount(service, {
     email: normalizedEmail,
     idNumber: payload.idNumber,
@@ -134,90 +161,169 @@ export async function POST(request: NextRequest) {
     }
   }
 
+  logRegistrationStep('prevalidating_registration_dependencies', {
+    normalizedEmail,
+    roleId: role.id,
+  });
+
   const [workId, organizationId] = await Promise.all([
-    generateNextWorkId(service),
+    generateAvailableWorkId(service),
     getPrimaryOrganizationId(service),
   ]);
 
-  const authEmail = workIdToEmail(workId);
-  const { data: authData, error: authError } = await client.auth.admin.createUser({
-    email: authEmail,
-    password: payload.password,
-    email_confirm: true,
-  });
+  if (!organizationId) {
+    logRegistrationFailure('prevalidate_organization', 'organizations', {
+      code: 'ORG_NOT_FOUND',
+      details: 'No organization row is available for registration.',
+      message: 'Organization lookup returned no primary organization.',
+    });
+    return NextResponse.json({ error: REGISTRATION_ACCOUNT_FAILURE_MESSAGE }, { status: 500 });
+  }
 
-  if (authError || !authData.user) {
-    return NextResponse.json({ error: 'Account creation failed. Please try again.' }, { status: 500 });
+  const authEmail = workIdToEmail(workId);
+  let authUserId: string | null = null;
+  let profileId: string | null = null;
+
+  logRegistrationStep('creating_auth_user', {
+    authEmail,
+    normalizedEmail,
+    workId,
+  });
+  try {
+    const { data: authData, error: authError } = await client.auth.admin.createUser({
+      email: authEmail,
+      password: payload.password,
+      email_confirm: true,
+    });
+
+    if (authError || !authData.user) {
+      logRegistrationFailure('create_auth_user', 'auth.users', authError ?? new Error('Auth user creation returned no user.'));
+      return NextResponse.json({ error: REGISTRATION_ACCOUNT_FAILURE_MESSAGE }, { status: 500 });
+    }
+
+    authUserId = authData.user.id;
+  } catch (error) {
+    logRegistrationFailure('create_auth_user', 'auth.users', error);
+    return NextResponse.json({ error: REGISTRATION_ACCOUNT_FAILURE_MESSAGE }, { status: 500 });
   }
 
   const fullName = `${payload.firstName} ${payload.lastName}`.trim();
-  const { data: profile, error: profileError } = await service
-    .from('users')
-    .insert({
-      auth_id: authData.user.id,
-      email: normalizedEmail,
-      first_name: payload.firstName,
-      full_name: fullName,
-      id_number: payload.idNumber,
-      last_name: payload.lastName,
-      phone: serializeUserPhoneValue({ accessProfile: role.legacyRole }),
-      branch_id: normalizedBranchId,
-      organization_id: organizationId,
-      role: toStoredUserRole(role.legacyRole),
-      status: 'active',
-      work_id: workId,
-    })
-    .select('id')
-    .single();
-
-  if (profileError || !profile) {
-    await client.auth.admin.deleteUser(authData.user.id).catch(() => null);
-    return NextResponse.json({ error: 'Account creation failed. Please try again.' }, { status: 500 });
-  }
-
   try {
-    const { error: userAccountError } = await service.from('user_accounts').insert({
-      id: String(profile.id),
-      email: normalizedEmail,
-      first_name: payload.firstName,
-      id_number: payload.idNumber,
-      is_active: true,
-      last_name: payload.lastName,
-      organization_id: organizationId,
-      password_hash: 'SUPABASE_AUTH_MANAGED',
-      role_id: role.id,
-      updated_at: new Date().toISOString(),
-      user_profile_id: String(profile.id),
-      work_id: workId,
+    logRegistrationStep('creating_user_profile', {
+      normalizedEmail,
+      workId,
     });
+    const { data: profile, error: profileError } = await service
+      .from('users')
+      .insert({
+        auth_id: authUserId,
+        email: normalizedEmail,
+        first_name: payload.firstName,
+        full_name: fullName,
+        id_number: payload.idNumber,
+        last_name: payload.lastName,
+        phone: serializeUserPhoneValue({ accessProfile: role.legacyRole }),
+        branch_id: normalizedBranchId,
+        role: toStoredUserRole(role.legacyRole),
+        status: 'active',
+        work_id: workId,
+      })
+      .select('id')
+      .single();
 
-    if (userAccountError) {
-      throw userAccountError;
+    if (profileError || !profile) {
+      throwRegistrationFailure('create_user_profile', 'users', profileError ?? new Error('User profile insert returned no row.'));
     }
 
-    await service
-      .from('users')
-      .update({ user_account_id: String(profile.id) })
-      .eq('id', String(profile.id));
+    profileId = String(profile.id);
 
-    await assignUserRole({
-      assignedBy: null,
+    logRegistrationStep('creating_user_account', {
+      profileId,
       roleId: role.id,
-      service,
-      userProfileId: String(profile.id),
+      workId,
     });
-    await syncUserBranchAssignment({
-      assignedBy: null,
-      branchId: normalizedBranchId,
-      roleName: role.name,
-      service,
-      userProfileId: String(profile.id),
+    const { error: userAccountError } = await service
+      .from('user_accounts')
+      .insert(buildRegistrationUserAccountRecord({
+        email: normalizedEmail,
+        firstName: payload.firstName,
+        idNumber: payload.idNumber,
+        lastName: payload.lastName,
+        organizationId,
+        roleId: role.id,
+        userProfileId: profileId,
+        workId,
+      }));
+
+    if (userAccountError) {
+      throwRegistrationFailure('create_user_account', 'user_accounts', userAccountError);
+    }
+
+    logRegistrationStep('linking_user_account_to_profile', {
+      profileId,
     });
-  } catch {
-    await service.from('user_accounts').delete().eq('id', String(profile.id)).catch(() => null);
-    await service.from('users').delete().eq('id', String(profile.id)).catch(() => null);
-    await client.auth.admin.deleteUser(authData.user.id).catch(() => null);
-    return NextResponse.json({ error: 'Account creation failed. Please try again.' }, { status: 500 });
+    const { error: linkProfileError } = await service
+      .from('users')
+      .update({ user_account_id: profileId })
+      .eq('id', profileId);
+
+    if (linkProfileError) {
+      throwRegistrationFailure('link_user_account_to_profile', 'users', linkProfileError);
+    }
+
+    logRegistrationStep('assigning_role', {
+      profileId,
+      roleId: role.id,
+    });
+    try {
+      await assignUserRole({
+        assignedBy: null,
+        roleId: role.id,
+        service,
+        userProfileId: profileId,
+      });
+    } catch (error) {
+      throwRegistrationFailure('assign_role', 'user_roles', error);
+    }
+
+    logRegistrationStep('assigning_branch', {
+      hasBranchId: Boolean(normalizedBranchId),
+      profileId,
+    });
+    try {
+      await syncUserBranchAssignment({
+        assignedBy: null,
+        branchId: normalizedBranchId,
+        roleName: role.name,
+        service,
+        userProfileId: profileId,
+      });
+    } catch (error) {
+      throwRegistrationFailure('assign_branch', 'user_branch_assignments', error);
+    }
+  } catch (error) {
+    const safeMessage = getRegistrationClientErrorMessage(error);
+
+    if (profileId) {
+      const userAccountRollback = await service.from('user_accounts').delete().eq('id', profileId);
+      if (userAccountRollback.error) {
+        logRegistrationFailure('rollback_user_account', 'user_accounts', userAccountRollback.error);
+      }
+
+      const userProfileRollback = await service.from('users').delete().eq('id', profileId);
+      if (userProfileRollback.error) {
+        logRegistrationFailure('rollback_user_profile', 'users', userProfileRollback.error);
+      }
+    }
+
+    if (authUserId) {
+      await client.auth.admin.deleteUser(authUserId).catch((rollbackError) => {
+        logRegistrationFailure('rollback_auth_user', 'auth.users', rollbackError);
+        return null;
+      });
+    }
+
+    return NextResponse.json({ error: safeMessage }, { status: safeMessage === 'Email is already registered.' ? 409 : safeMessage === 'An account with this ID number already exists.' ? 409 : 500 });
   }
 
   try {
@@ -236,13 +342,19 @@ export async function POST(request: NextRequest) {
   } catch {}
 
   if (pendingRegistration?.id) {
-    await deletePendingRegistration(service, pendingRegistration.id).catch(() => null);
+    logRegistrationStep('cleanup_pending_otp', {
+      pendingRegistrationId: pendingRegistration.id,
+    });
+    await deletePendingRegistration(service, pendingRegistration.id).catch((error) => {
+      logRegistrationFailure('cleanup_pending_otp', 'registration_otps', error);
+      return null;
+    });
   }
 
   await recordSecurityEvent({
     eventType: 'REGISTRATION_COMPLETED',
     organizationId,
-    userProfileId: String(profile.id),
+    userProfileId: profileId,
     status: 'SUCCESS',
     details: { selectedRole: role.id },
     ipAddress: request.headers.get('x-forwarded-for'),
@@ -252,9 +364,9 @@ export async function POST(request: NextRequest) {
   try {
     await service.from('audit_logs').insert({
       action: 'ACCOUNT_REGISTERED',
-      entity_id: String(profile.id),
+      entity_id: profileId,
       entity_type: 'user',
-      user_profile_id: String(profile.id),
+      user_profile_id: profileId,
     });
   } catch {}
 

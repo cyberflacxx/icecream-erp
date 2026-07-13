@@ -13,7 +13,13 @@ import {
 } from '../src/lib/security';
 import { resolveAdminActionKeyValidation } from '../src/lib/admin-delete-server';
 import { getSmtpConfig, getSmtpReadiness } from '../src/lib/email';
-import { getPublicRegistrationRoles } from '../src/lib/registration';
+import {
+  buildRegistrationUserAccountRecord,
+  getPublicRegistrationRoles,
+  getRegistrationClientErrorMessage,
+  getSafeRegistrationErrorDetails,
+  REGISTRATION_ACCOUNT_FAILURE_MESSAGE,
+} from '../src/lib/registration';
 
 test('normalizeUserStatus maps unknown values to INACTIVE', () => {
   assert.equal(normalizeUserStatus('unknown'), 'INACTIVE');
@@ -198,4 +204,54 @@ test('public registration role metadata keeps Super Admin branchless and branch 
 
   assert.equal(superAdmin?.requiresBranch, false);
   assert.equal(branchManager?.requiresBranch, true);
+});
+
+test('registration user account payload matches live icecream_erp.user_accounts columns', () => {
+  const record = buildRegistrationUserAccountRecord({
+    email: ' ADMIN@EXAMPLE.COM ',
+    firstName: 'Ada',
+    idNumber: '12-345678x90',
+    lastName: 'Lovelace',
+    organizationId: 'org-1',
+    roleId: 'role-1',
+    userProfileId: 'profile-1',
+    workId: 'AQI-20260001',
+  });
+
+  assert.deepEqual(record, {
+    email: 'admin@example.com',
+    first_name: 'Ada',
+    id: 'profile-1',
+    id_number: '12345678X90',
+    is_active: true,
+    last_name: 'Lovelace',
+    organization_id: 'org-1',
+    password_hash: 'SUPABASE_AUTH_MANAGED',
+    role_id: 'role-1',
+    updated_at: record.updated_at,
+    work_id: 'AQI-20260001',
+  });
+  assert.equal('user_profile_id' in record, false);
+});
+
+test('registration error helpers keep server logs structured and frontend messages safe', () => {
+  const duplicateEmailError = {
+    code: '23505',
+    details: 'Key (email)=(admin@example.com) already exists.',
+    message: 'duplicate key value violates unique constraint "user_accounts_email_key"',
+  };
+
+  assert.deepEqual(getSafeRegistrationErrorDetails(duplicateEmailError, {
+    step: 'create_user_account',
+    table: 'user_accounts',
+  }), {
+    code: '23505',
+    detail: 'Key (email)=(admin@example.com) already exists.',
+    message: 'duplicate key value violates unique constraint "user_accounts_email_key"',
+    step: 'create_user_account',
+    table: 'user_accounts',
+  });
+
+  assert.equal(getRegistrationClientErrorMessage(duplicateEmailError), 'Email is already registered.');
+  assert.equal(getRegistrationClientErrorMessage(new Error('unexpected failure')), REGISTRATION_ACCOUNT_FAILURE_MESSAGE);
 });
