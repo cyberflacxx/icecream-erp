@@ -80,7 +80,7 @@ export async function loadCustomerBalanceSnapshot(
   let approvedCreditNotes = 0;
   try {
     const creditNotesResult = await service
-      .from('credit_notes')
+      .from('sales_credit_notes')
       .select('amount, status')
       .eq('customer_id', customerId);
     if (creditNotesResult.error) {
@@ -98,7 +98,7 @@ export async function loadCustomerBalanceSnapshot(
   } catch (error) {
     const message = salesErrorMessage(error);
     if (
-      !message.includes("Could not find the table 'icecream_erp.credit_notes'") &&
+      !message.includes("Could not find the table 'icecream_erp.sales_credit_notes'") &&
       !message.includes('does not exist')
     ) {
       throw error;

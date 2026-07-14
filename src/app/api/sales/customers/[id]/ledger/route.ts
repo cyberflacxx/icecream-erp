@@ -64,7 +64,7 @@ export async function GET(
     let creditNotes: Array<Record<string, unknown>> = [];
     try {
       const creditNotesResult = await service
-        .from('credit_notes')
+        .from('sales_credit_notes')
         .select('id, credit_note_number, amount, status, created_at, reason')
         .eq('customer_id', params.id);
       if (creditNotesResult.error) throw creditNotesResult.error;
@@ -72,7 +72,7 @@ export async function GET(
     } catch (error) {
       const message = salesErrorMessage(error);
       if (
-        !message.includes("Could not find the table 'icecream_erp.credit_notes'") &&
+        !message.includes("Could not find the table 'icecream_erp.sales_credit_notes'") &&
         !message.includes('does not exist')
       ) {
         throw error;
