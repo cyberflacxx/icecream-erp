@@ -155,11 +155,11 @@ export function getSafeNotificationErrorDetails(error: unknown) {
 
 function isNotificationSettingsCompatibilityError(error: unknown) {
   return (
-    isMissingNotificationSchema(error, 'notification_rules') ||
-    isMissingNotificationSchema(error, 'notification_templates') ||
-    isMissingNotificationSchema(error, 'notification_preferences') ||
-    isMissingNotificationSchema(error, 'escalation_rules') ||
-    isMissingNotificationSchema(error, 'reminder_rules')
+    isMissingNotificationSchema(error, 'notification_rules', ['organization_id', 'created_at']) ||
+    isMissingNotificationSchema(error, 'notification_templates', ['organization_id', 'created_at']) ||
+    isMissingNotificationSchema(error, 'notification_preferences', ['organization_id', 'user_profile_id', 'module_name']) ||
+    isMissingNotificationSchema(error, 'escalation_rules', ['organization_id', 'created_at']) ||
+    isMissingNotificationSchema(error, 'reminder_rules', ['organization_id', 'created_at'])
   );
 }
 
@@ -438,7 +438,16 @@ async function getActiveTemplate(input: {
     .limit(1)
     .maybeSingle();
   if (error) {
-    if (isMissingNotificationSchema(error, 'notification_templates')) return null;
+    if (
+      isMissingNotificationSchema(error, 'notification_templates', [
+        'organization_id',
+        'module_name',
+        'event_type',
+        'channel',
+        'is_active',
+        'created_at',
+      ])
+    ) return null;
     throw error;
   }
   return data as NotificationRecord | null;
@@ -460,7 +469,15 @@ async function getPreferencesForUsers(input: {
     .eq('is_active', true)
     .in('user_profile_id', input.userIds);
   if (error) {
-    if (isMissingNotificationSchema(error, 'notification_preferences')) {
+    if (
+      isMissingNotificationSchema(error, 'notification_preferences', [
+        'organization_id',
+        'module_name',
+        'channel',
+        'is_active',
+        'user_profile_id',
+      ])
+    ) {
       return new Map<string, NotificationRecord>();
     }
     throw error;
@@ -630,7 +647,7 @@ export async function listNotificationRules(organizationId: string) {
     .eq('organization_id', organizationId)
     .order('created_at', { ascending: false });
   if (error) {
-    if (isMissingNotificationSchema(error, 'notification_rules')) return [];
+    if (isMissingNotificationSchema(error, 'notification_rules', ['organization_id', 'created_at'])) return [];
     throwNotificationError(error, 'list_notification_rules', 'notification_rules');
   }
   return data ?? [];
@@ -712,7 +729,7 @@ export async function listNotificationTemplates(organizationId: string) {
     .eq('organization_id', organizationId)
     .order('created_at', { ascending: false });
   if (error) {
-    if (isMissingNotificationSchema(error, 'notification_templates')) return [];
+    if (isMissingNotificationSchema(error, 'notification_templates', ['organization_id', 'created_at'])) return [];
     throwNotificationError(error, 'list_notification_templates', 'notification_templates');
   }
   return data ?? [];
@@ -797,7 +814,7 @@ export async function listNotificationPreferences(ctx: NotificationContext) {
     .eq('user_profile_id', ctx.userId)
     .order('module_name', { ascending: true });
   if (error) {
-    if (isMissingNotificationSchema(error, 'notification_preferences')) return [];
+    if (isMissingNotificationSchema(error, 'notification_preferences', ['organization_id', 'user_profile_id', 'module_name'])) return [];
     throwNotificationError(error, 'list_notification_preferences', 'notification_preferences');
   }
   return data ?? [];
@@ -835,7 +852,7 @@ export async function listEscalationRules(organizationId: string) {
     .eq('organization_id', organizationId)
     .order('created_at', { ascending: false });
   if (error) {
-    if (isMissingNotificationSchema(error, 'escalation_rules')) return [];
+    if (isMissingNotificationSchema(error, 'escalation_rules', ['organization_id', 'created_at'])) return [];
     throwNotificationError(error, 'list_escalation_rules', 'escalation_rules');
   }
   return data ?? [];
@@ -879,7 +896,7 @@ export async function updateEscalationRule(input: { body: Record<string, unknown
 export async function listReminderRules(organizationId: string) {
   const { data, error } = await notificationService().from('reminder_rules').select('*').eq('organization_id', organizationId).order('created_at', { ascending: false });
   if (error) {
-    if (isMissingNotificationSchema(error, 'reminder_rules')) return [];
+    if (isMissingNotificationSchema(error, 'reminder_rules', ['organization_id', 'created_at'])) return [];
     throwNotificationError(error, 'list_reminder_rules', 'reminder_rules');
   }
   return data ?? [];
@@ -928,7 +945,7 @@ export async function listNotificationDeliveryLogs(organizationId: string) {
     .order('created_at', { ascending: false })
     .limit(200);
   if (error) {
-    if (isMissingNotificationSchema(error, 'notification_delivery_logs')) return [];
+    if (isMissingNotificationSchema(error, 'notification_delivery_logs', ['organization_id', 'created_at'])) return [];
     throwNotificationError(error, 'list_notification_delivery_logs', 'notification_delivery_logs');
   }
   return data ?? [];
@@ -1151,7 +1168,7 @@ export async function getNotificationAlertDashboard(ctx: NotificationContext) {
             .eq('organization_id', ctx.organizationId),
         {
           table: 'stock_balances',
-          columns: ['quantity_on_hand'],
+          columns: ['organization_id', 'quantity_on_hand', 'warehouse_id'],
           relationshipTargets: ['items'],
         },
       ),
@@ -1163,7 +1180,7 @@ export async function getNotificationAlertDashboard(ctx: NotificationContext) {
             .eq('organization_id', ctx.organizationId)
             .order('created_at', { ascending: false })
             .limit(20),
-        { table: 'supplier_shortages' },
+        { table: 'supplier_shortages', columns: ['organization_id', 'created_at'] },
       ),
       optionalNotificationRows(
         async () =>
@@ -1172,7 +1189,10 @@ export async function getNotificationAlertDashboard(ctx: NotificationContext) {
             .select('id, module_name, document_type, document_reference, status, requested_at')
             .eq('organization_id', ctx.organizationId)
             .eq('status', 'PENDING'),
-        { table: 'approval_requests' },
+        {
+          table: 'approval_requests',
+          columns: ['organization_id', 'module_name', 'document_type', 'document_reference', 'status', 'requested_at'],
+        },
       ),
       optionalNotificationRows(
         async () =>
@@ -1185,7 +1205,7 @@ export async function getNotificationAlertDashboard(ctx: NotificationContext) {
             .limit(20),
         {
           table: 'invoices',
-          columns: ['balance_due'],
+          columns: ['organization_id', 'invoice_number', 'due_date', 'balance_due', 'status'],
           relationshipTargets: ['customers'],
         },
       ),
@@ -1197,7 +1217,10 @@ export async function getNotificationAlertDashboard(ctx: NotificationContext) {
             .eq('organization_id', ctx.organizationId)
             .order('inspection_date', { ascending: false })
             .limit(20),
-        { table: 'quality_inspections' },
+        {
+          table: 'quality_inspections',
+          columns: ['organization_id', 'inspection_number', 'qc_status', 'inspection_type', 'inspection_date'],
+        },
       ),
       optionalNotificationRows(
         async () =>
@@ -1209,7 +1232,7 @@ export async function getNotificationAlertDashboard(ctx: NotificationContext) {
             .limit(20),
         {
           table: 'branch_shift_closes',
-          columns: ['cash_variance', 'stock_variance'],
+          columns: ['organization_id', 'shift_date', 'cash_variance', 'stock_variance', 'status'],
         },
       ),
       optionalNotificationRows(
@@ -1220,7 +1243,10 @@ export async function getNotificationAlertDashboard(ctx: NotificationContext) {
             .eq('organization_id', ctx.organizationId)
             .order('created_at', { ascending: false })
             .limit(20),
-        { table: 'security_events' },
+        {
+          table: 'security_events',
+          columns: ['organization_id', 'event_type', 'status', 'details', 'created_at'],
+        },
       ),
     ]);
 
