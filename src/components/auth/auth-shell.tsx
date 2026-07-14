@@ -26,13 +26,13 @@ export function AuthShell({ eyebrow, title, description, children }: AuthShellPr
           </div>
 
           <div className="mt-6 flex items-start gap-4">
-            <div className="flex h-14 w-14 items-center justify-center overflow-hidden rounded-2xl border border-[color:var(--app-border)] bg-[color:var(--app-bg-canvas)]">
+            <div className="flex h-16 w-16 items-center justify-center overflow-hidden rounded-2xl border border-[color:var(--app-border)] bg-[color:var(--app-bg-canvas)]">
               <Image
                 src="/branding/logo.png"
                 alt="Absolute Ice Cream ERP"
-                width={40}
-                height={40}
-                className="h-10 w-10 object-contain"
+                width={60}
+                height={60}
+                className="h-14 w-14 scale-110 object-cover"
               />
             </div>
             <div>

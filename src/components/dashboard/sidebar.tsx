@@ -229,13 +229,13 @@ export function Sidebar() {
       <div className="border-b border-[color:var(--app-border-muted)] px-3 py-3">
         <div className="app-panel-subtle px-3 py-3">
           <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-xl border border-[color:var(--app-border)] bg-[color:var(--app-bg-canvas)] shadow-[var(--app-shadow-sm)]">
+            <div className="flex h-12 w-12 items-center justify-center overflow-hidden rounded-xl border border-[color:var(--app-border)] bg-[color:var(--app-bg-canvas)] shadow-[var(--app-shadow-sm)]">
               <Image
                 src="/branding/logo.png"
                 alt="Absolute Ice Cream ERP"
-                width={32}
-                height={32}
-                className="h-8 w-8 object-contain"
+                width={44}
+                height={44}
+                className="h-11 w-11 scale-110 object-cover"
               />
             </div>
             <div className="min-w-0">

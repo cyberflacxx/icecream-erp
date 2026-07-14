@@ -40,13 +40,13 @@ export function Navbar() {
     >
       <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
         <Link href="/" className="flex items-center gap-3 text-sm font-semibold text-brown sm:text-base">
-          <span className="relative inline-flex h-10 w-10 items-center justify-center overflow-hidden rounded-full border border-orange/30 bg-white/55 shadow-sm backdrop-blur-md">
+          <span className="relative inline-flex h-12 w-12 items-center justify-center overflow-hidden rounded-full border border-orange/30 bg-white/55 shadow-sm backdrop-blur-md">
             <Image
               src="/branding/logo.png"
               alt="Absolute Ice Cream ERP Logo"
               fill
-              sizes="40px"
-              className="object-cover"
+              sizes="48px"
+              className="scale-110 object-cover"
               priority
             />
           </span>
