@@ -52,7 +52,7 @@ export function NotificationBell({
         <DropdownMenu.Content
           align="end"
           sideOffset={12}
-          className="z-50 w-[340px] rounded-xl border border-[color:var(--app-border)] bg-[color:var(--app-surface)] p-2 shadow-[var(--app-shadow-lg)]"
+          className="z-[80] w-[340px] rounded-xl border border-[color:var(--app-border)] bg-[color:var(--app-surface)] p-2 shadow-[var(--app-shadow-lg)]"
         >
           <div className="flex items-center justify-between border-b border-[color:var(--app-border-muted)] px-3 py-3">
             <p className="text-sm font-semibold text-[color:var(--app-text)]">Notifications</p>

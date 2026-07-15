@@ -565,7 +565,10 @@ export default function HomePage() {
               <p className="text-xs text-white/40">Manufacturing Intelligence Platform</p>
             </div>
           </div>
-          <p className="text-sm text-white/30">© {new Date().getFullYear()} Absolute Quality Icecream. All rights reserved.</p>
+          <div className="space-y-1 text-sm text-white/30">
+            <p>© {new Date().getFullYear()} Absolute Quality Icecream. All rights reserved.</p>
+            <p className="text-xs font-medium uppercase tracking-[0.18em] text-white/45">Powered by Nexatech</p>
+          </div>
         </div>
       </footer>
     </div>

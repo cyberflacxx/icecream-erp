@@ -436,6 +436,33 @@
     @apply rounded-xl border px-4 py-3 text-sm;
   }
 
+  form[class*='space-y-'] > :not([hidden]) ~ :not([hidden]) {
+    margin-top: 1.375rem;
+  }
+
+  form :is(input, select, textarea, button),
+  [role='dialog'] :is(input, select, textarea, button) {
+    scroll-margin-top: 7rem;
+  }
+
+  form :is(select, [role='combobox'], [data-radix-popper-content-wrapper]),
+  [role='dialog'] :is(select, [role='combobox']) {
+    z-index: 60;
+  }
+
+  form div[class*='justify-end'][class*='gap-'],
+  [role='dialog'] div[class*='justify-end'][class*='gap-'] {
+    margin-top: 2rem;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.875rem;
+  }
+
+  form div[class*='justify-end'][class*='gap-'] > *,
+  [role='dialog'] div[class*='justify-end'][class*='gap-'] > * {
+    min-height: 2.75rem;
+  }
+
   .auth-input:focus,
   .auth-input-shell:focus-within,
   .surface-input:focus,

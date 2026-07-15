@@ -197,13 +197,18 @@ export default function LoginPage() {
           </button>
         </form>
 
-        <div className="mt-5 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
-          <Link href="/auth/register" className="auth-link">
-            Create account
-          </Link>
-          <Link href="/auth/forgot-password" className="auth-link">
-            Forgot password?
-          </Link>
+        <div className="mt-6 space-y-3 text-sm">
+          <p className="text-xs font-medium uppercase tracking-[0.18em] text-[color:var(--app-subtle)]">
+            Powered by Nexatech
+          </p>
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+            <Link href="/auth/register" className="auth-link">
+              Create account
+            </Link>
+            <Link href="/auth/forgot-password" className="auth-link">
+              Forgot password?
+            </Link>
+          </div>
         </div>
       </div>
     </AuthShell>

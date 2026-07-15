@@ -96,7 +96,7 @@ export function Topbar({ onOpenSidebar }: TopbarProps) {
           <div>
             <div className="flex flex-wrap items-center gap-2">
               <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[color:var(--app-subtle)]">
-                RoboCore-style workspace
+                Operational workspace
               </p>
               <span className="hidden rounded-full border border-[color:var(--app-border)] bg-[color:var(--app-bg-subtle)] px-2 py-0.5 text-[10px] font-semibold text-[color:var(--app-muted)] sm:inline-flex">
                 Live workspace
@@ -188,7 +188,7 @@ export function Topbar({ onOpenSidebar }: TopbarProps) {
 
             {/* Dropdown menu */}
             {dropdownOpen && (
-              <div className="absolute right-0 top-full mt-2 w-56 overflow-hidden rounded-xl border border-[color:var(--app-border)] bg-[color:var(--app-surface)] shadow-[var(--app-shadow-lg)]">
+              <div className="absolute right-0 top-full z-[70] mt-3 w-56 overflow-hidden rounded-xl border border-[color:var(--app-border)] bg-[color:var(--app-surface)] shadow-[var(--app-shadow-lg)]">
                 <div className="border-b border-[color:var(--app-border-muted)] px-4 py-3">
                   <p className="text-xs font-semibold text-[color:var(--app-text)]">{currentUser?.profile?.fullName ?? 'ERP User'}</p>
                   <p className="text-[10px] text-[color:var(--app-subtle)]">{currentUser?.profile?.email ?? ''}</p>

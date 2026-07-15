@@ -43,7 +43,7 @@ export function NotificationBell({
         <DropdownMenu.Content
           align="end"
           sideOffset={12}
-          className="z-50 w-[340px] rounded-2xl border border-border bg-white p-2 shadow-xl dark:border-darkBorder dark:bg-darkCard"
+          className="z-[80] w-[340px] rounded-2xl border border-border bg-white p-2 shadow-xl dark:border-darkBorder dark:bg-darkCard"
         >
           <div className="flex items-center justify-between border-b border-border px-3 py-3 dark:border-darkBorder">
             <p className="text-sm font-semibold text-brown dark:text-darkText">Notifications</p>
