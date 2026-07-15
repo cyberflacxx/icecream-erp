@@ -63,58 +63,65 @@ export function SalesLineItemsEditor({ items, lines, onChange }: SalesLineItemsE
 
       <div className="space-y-3">
         {lines.map((line, index) => (
-          <div key={`${index}-${line.itemId}`} className="grid gap-3 md:grid-cols-[1fr_110px_130px_110px_auto]">
-            <select
-              className="surface-input-soft"
-              value={line.itemId}
-              onChange={(event) => {
-                const item = items.find((row) => row.id === event.target.value);
-                updateLine(index, {
-                  itemId: event.target.value,
-                  unitPrice: item ? String(item.defaultPrice ?? 0) : line.unitPrice,
-                });
-              }}
-            >
-              <option value="">Select item</option>
-              {items.map((item) => (
-                <option key={item.id} value={item.id}>
-                  {item.code ? `${item.code} - ` : ''}
-                  {item.name} ({item.availableQuantity} available)
-                </option>
-              ))}
-            </select>
-            <input
-              className="surface-input-soft"
-              min="0.001"
-              step="0.001"
-              type="number"
-              value={line.quantity}
-              onChange={(event) => updateLine(index, { quantity: event.target.value })}
-            />
-            <input
-              className="surface-input-soft"
-              min="0"
-              step="0.01"
-              type="number"
-              value={line.unitPrice}
-              onChange={(event) => updateLine(index, { unitPrice: event.target.value })}
-            />
-            <input
-              className="surface-input-soft"
-              max="100"
-              min="0"
-              step="0.01"
-              type="number"
-              value={line.discountPercent}
-              onChange={(event) => updateLine(index, { discountPercent: event.target.value })}
-            />
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => onChange(lines.length === 1 ? lines : lines.filter((_, lineIndex) => lineIndex !== index))}
-            >
-              Remove
-            </Button>
+          <div key={`${index}-${line.itemId}`} className="space-y-2">
+            <div className="grid gap-3 md:grid-cols-[1fr_110px_130px_110px_auto]">
+              <select
+                className="surface-input-soft"
+                value={line.itemId}
+                onChange={(event) => {
+                  const item = items.find((row) => row.id === event.target.value);
+                  updateLine(index, {
+                    itemId: event.target.value,
+                    unitPrice: item ? String(item.defaultPrice ?? 0) : line.unitPrice,
+                  });
+                }}
+              >
+                <option value="">Select item</option>
+                {items.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.code ? `${item.code} - ` : ''}
+                    {item.name} ({item.availableQuantity} available)
+                  </option>
+                ))}
+              </select>
+              <input
+                className="surface-input-soft"
+                min="0.001"
+                step="0.001"
+                type="number"
+                value={line.quantity}
+                onChange={(event) => updateLine(index, { quantity: event.target.value })}
+              />
+              <input
+                className="surface-input-soft"
+                min="0"
+                step="0.01"
+                type="number"
+                value={line.unitPrice}
+                onChange={(event) => updateLine(index, { unitPrice: event.target.value })}
+              />
+              <input
+                className="surface-input-soft"
+                max="100"
+                min="0"
+                step="0.01"
+                type="number"
+                value={line.discountPercent}
+                onChange={(event) => updateLine(index, { discountPercent: event.target.value })}
+              />
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => onChange(lines.length === 1 ? lines : lines.filter((_, lineIndex) => lineIndex !== index))}
+              >
+                Remove
+              </Button>
+            </div>
+            {line.itemId && (items.find((item) => item.id === line.itemId)?.availableQuantity ?? 0) <= 0 ? (
+              <p className="text-xs text-amber-700">
+                This item is still selectable with zero stock. Validate availability before approval or dispatch.
+              </p>
+            ) : null}
           </div>
         ))}
       </div>

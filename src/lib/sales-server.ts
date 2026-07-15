@@ -26,6 +26,36 @@ export function isMissingSalesColumn(error: unknown, table: string, columnName: 
   return isMissingColumnError(error, table, columnName);
 }
 
+export function salesErrorDetails(error: unknown) {
+  if (typeof error !== 'object' || error === null) {
+    return {
+      code: null,
+      details: null,
+      hint: null,
+      message: salesErrorMessage(error),
+    };
+  }
+
+  const record = error as {
+    code?: unknown;
+    details?: unknown;
+    hint?: unknown;
+    message?: unknown;
+  };
+
+  return {
+    code: record.code ? String(record.code) : null,
+    details: record.details ? String(record.details) : null,
+    hint: record.hint ? String(record.hint) : null,
+    message: record.message ? String(record.message) : salesErrorMessage(error),
+  };
+}
+
+export function logSalesRouteError(routeName: string, step: string, error: unknown) {
+  const detail = salesErrorDetails(error);
+  console.error(`[sales:${routeName}] ${step}`, detail);
+}
+
 export async function generateSalesReferenceNumber(table: string, prefix: string) {
   const service = salesService();
   const { count, error } = await service.from(table).select('id', { count: 'exact', head: true });

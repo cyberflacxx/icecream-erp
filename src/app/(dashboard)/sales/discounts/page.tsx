@@ -28,6 +28,7 @@ export default function SalesDiscountsPage() {
           { key: 'is_active', header: 'Active' },
         ]}
         data={Array.isArray(query.data) ? query.data : []}
+        emptyState={<EmptyState icon={<AlertCircle className="h-6 w-6" />} title="No discounts found" description="Discount rules will appear here once they are configured." />}
       />
     </div>
   );

@@ -5,6 +5,7 @@ import { isCustomerInactiveStatus } from '@/lib/sales-customers';
 import {
   isMissingSalesColumn,
   isMissingSalesTable,
+  logSalesRouteError,
   loadSalesOrderById,
   loadSalesOrderItems,
 } from '@/lib/sales-server';
@@ -46,92 +47,130 @@ export async function GET(request: NextRequest) {
   const customerId = searchParams.get('customerId') ?? '';
   const startDate = searchParams.get('startDate') ?? '';
   const endDate = searchParams.get('endDate') ?? '';
-
-  let query = service
-    .schema('icecream_erp')
-    .from('invoices')
-    .select(`
-      id, invoice_number, invoice_date, due_date, status, total, amount_paid, balance_due,
-      customers!inner(id, name),
-      invoice_items(id)
-    `)
-    .is('deleted_at', null)
-    .order('invoice_date', { ascending: false });
-
-  if (status) query = query.eq('status', status);
-  if (customerId) query = query.eq('customer_id', customerId);
-  if (startDate) query = query.gte('invoice_date', startDate);
-  if (endDate) query = query.lte('invoice_date', endDate);
-
-  // Branch scoping: filter via sales_order branch
+  let scopedOrderIds: string[] | null = null;
   if (ctx.isBranchScoped && ctx.branchId) {
-    // Use a join-based approach: only include invoices whose sales_order belongs to this branch
-    query = query.eq('sales_orders.branch_id', ctx.branchId);
+    const scopedOrders = await service
+      .schema('icecream_erp')
+      .from('sales_orders')
+      .select('id')
+      .eq('branch_id', ctx.branchId);
+
+    if (scopedOrders.error) {
+      logSalesRouteError('invoices', 'load branch-scoped sales orders', scopedOrders.error);
+      return serverError('Sales invoices could not be loaded.');
+    }
+
+    scopedOrderIds = (scopedOrders.data ?? []).map((row) => String(row.id));
   }
 
-  const primary = await query;
-  if (primary.error) {
-    const compatibleLegacy =
-      isMissingSalesColumn(primary.error, 'invoices', 'total') ||
-      isMissingSalesColumn(primary.error, 'invoices', 'amount_paid') ||
-      isMissingSalesColumn(primary.error, 'invoices', 'invoice_items') ||
-      isMissingSalesColumn(primary.error, 'invoices', 'sales_orders') ||
-      isMissingSalesColumn(primary.error, 'invoices', 'deleted_at') ||
-      isMissingSalesTable(primary.error);
+  const applyFilters = (
+    query: {
+      eq: (column: string, value: string) => any;
+      gte: (column: string, value: string) => any;
+      lte: (column: string, value: string) => any;
+      in: (column: string, values: string[]) => any;
+    },
+    orderColumn = 'sales_order_id',
+  ) => {
+    let next = query;
+    if (status) next = next.eq('status', status);
+    if (customerId) next = next.eq('customer_id', customerId);
+    if (startDate) next = next.gte('invoice_date', startDate);
+    if (endDate) next = next.lte('invoice_date', endDate);
+    if (scopedOrderIds) {
+      next = scopedOrderIds.length
+        ? next.in(orderColumn, scopedOrderIds)
+        : next.in(orderColumn, ['00000000-0000-0000-0000-000000000000']);
+    }
+    return next;
+  };
 
-    if (!compatibleLegacy) return serverError(primary.error.message);
-
-    let fallback = service
+  let invoicesResult = await applyFilters(
+    service
       .schema('icecream_erp')
       .from('invoices')
-      .select('id, invoice_number, invoice_date, due_date, status, total_amount, paid_amount, balance_due, customers(id, name)')
-      .order('invoice_date', { ascending: false });
+      .select('id, invoice_number, invoice_date, due_date, status, total, amount_paid, balance_due, customer_id, sales_order_id')
+      .is('deleted_at', null)
+      .order('invoice_date', { ascending: false }),
+  );
 
-    if (status) fallback = fallback.eq('status', status);
-    if (customerId) fallback = fallback.eq('customer_id', customerId);
-    if (startDate) fallback = fallback.gte('invoice_date', startDate);
-    if (endDate) fallback = fallback.lte('invoice_date', endDate);
-
-    const fallbackResult = await fallback;
-    if (fallbackResult.error) return serverError(fallbackResult.error.message);
-
-    const mapped = (fallbackResult.data ?? []).map((row: Record<string, unknown>) => {
-      const customer = row.customers as { id: string; name: string } | null;
-      return {
-        id: row.id,
-        invoiceNumber: row.invoice_number,
-        customer: customer ? { id: customer.id, name: customer.name } : null,
-        invoiceDate: row.invoice_date,
-        dueDate: row.due_date,
-        status: row.status,
-        total: row.total_amount ? Number(row.total_amount) : 0,
-        amountPaid: row.paid_amount ? Number(row.paid_amount) : 0,
-        balanceDue: row.balance_due ? Number(row.balance_due) : 0,
-        itemsCount: 0,
-      };
-    });
-
-    return NextResponse.json(paginate(mapped, page, pageSize));
+  if (
+    invoicesResult.error &&
+    (
+      isMissingSalesColumn(invoicesResult.error, 'invoices', 'deleted_at') ||
+      isMissingSalesColumn(invoicesResult.error, 'invoices', 'sales_order_id') ||
+      isMissingSalesColumn(invoicesResult.error, 'invoices', 'total') ||
+      isMissingSalesColumn(invoicesResult.error, 'invoices', 'amount_paid')
+    )
+  ) {
+    invoicesResult = await applyFilters(
+      service
+        .schema('icecream_erp')
+        .from('invoices')
+        .select('id, invoice_number, invoice_date, due_date, status, total_amount, paid_amount, balance_due, customer_id, order_id')
+        .order('invoice_date', { ascending: false }),
+      'order_id',
+    );
   }
 
-  const mapped = (primary.data ?? []).map((row: Record<string, unknown>) => {
-    const customer = row.customers as { id: string; name: string } | null;
-    const items = (row.invoice_items as unknown[]) ?? [];
-    return {
-      id: row.id,
-      invoiceNumber: row.invoice_number,
-      customer: customer ? { id: customer.id, name: customer.name } : null,
-      invoiceDate: row.invoice_date,
-      dueDate: row.due_date,
-      status: row.status,
-      total: row.total ? Number(row.total) : 0,
-      amountPaid: row.amount_paid ? Number(row.amount_paid) : 0,
-      balanceDue: row.balance_due ? Number(row.balance_due) : 0,
-      itemsCount: items.length,
-    };
-  });
+  if (invoicesResult.error) {
+    logSalesRouteError('invoices', 'load invoice list', invoicesResult.error);
+    return serverError('Sales invoices could not be loaded.');
+  }
 
-  return NextResponse.json(paginate(mapped, page, pageSize));
+  const rows = (invoicesResult.data ?? []) as Array<Record<string, unknown>>;
+  const customerIds = [...new Set(rows.map((row) => String(row.customer_id ?? '')).filter(Boolean))];
+  const invoiceIds = rows.map((row) => String(row.id));
+
+  const [customersResult, invoiceItemsResult] = await Promise.all([
+    customerIds.length
+      ? service.schema('icecream_erp').from('customers').select('id, name').in('id', customerIds)
+      : Promise.resolve({ data: [], error: null }),
+    invoiceIds.length
+      ? service.schema('icecream_erp').from('invoice_items').select('invoice_id').in('invoice_id', invoiceIds)
+      : Promise.resolve({ data: [], error: null }),
+  ]);
+
+  if (customersResult.error) {
+    logSalesRouteError('invoices', 'load invoice customers', customersResult.error);
+    return serverError('Sales invoices could not be loaded.');
+  }
+  if (invoiceItemsResult.error && !isMissingSalesTable(invoiceItemsResult.error)) {
+    logSalesRouteError('invoices', 'load invoice items', invoiceItemsResult.error);
+    return serverError('Sales invoices could not be loaded.');
+  }
+
+  const customersById = new Map(
+    ((customersResult.data ?? []) as Array<Record<string, unknown>>).map((row) => [
+      String(row.id),
+      { id: String(row.id), name: String(row.name ?? 'Unknown customer') },
+    ]),
+  );
+  const itemsCountByInvoiceId = new Map<string, number>();
+  for (const item of (invoiceItemsResult.data ?? []) as Array<Record<string, unknown>>) {
+    const invoiceId = String(item.invoice_id ?? '');
+    if (!invoiceId) continue;
+    itemsCountByInvoiceId.set(invoiceId, (itemsCountByInvoiceId.get(invoiceId) ?? 0) + 1);
+  }
+
+  return NextResponse.json(
+    paginate(
+      rows.map((row) => ({
+        amountPaid: Number(row.amount_paid ?? row.paid_amount ?? 0),
+        balanceDue: Number(row.balance_due ?? 0),
+        customer: customersById.get(String(row.customer_id ?? '')) ?? null,
+        dueDate: row.due_date ? String(row.due_date) : null,
+        id: String(row.id),
+        invoiceDate: row.invoice_date ? String(row.invoice_date) : null,
+        invoiceNumber: String(row.invoice_number ?? row.id ?? ''),
+        itemsCount: itemsCountByInvoiceId.get(String(row.id)) ?? 0,
+        status: String(row.status ?? ''),
+        total: Number(row.total ?? row.total_amount ?? 0),
+      })),
+      page,
+      pageSize,
+    ),
+  );
 }
 
 // ─── POST /api/sales/invoices ─────────────────────────────────────────────────

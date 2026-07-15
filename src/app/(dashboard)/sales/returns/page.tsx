@@ -28,6 +28,7 @@ export default function SalesReturnsPage() {
           { key: 'status', header: 'Status' },
         ]}
         data={Array.isArray(query.data) ? query.data : []}
+        emptyState={<EmptyState icon={<AlertCircle className="h-6 w-6" />} title="No returns found" description="Customer returns will appear here once they are recorded." />}
       />
     </div>
   );

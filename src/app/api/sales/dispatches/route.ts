@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { badRequest, can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
-import { generateSalesReferenceNumber, isMissingSalesTable, salesService, writeSalesAuditLog } from '@/lib/sales-server';
+import { generateSalesReferenceNumber, isMissingSalesColumn, isMissingSalesTable, logSalesRouteError, salesService, writeSalesAuditLog } from '@/lib/sales-server';
 
 export async function GET() {
   const ctx = await getAuthContext();
@@ -10,14 +10,31 @@ export async function GET() {
 
   try {
     const service = salesService();
-    const { data, error } = await service
+    let dispatchResult = await service
       .from('sales_dispatch_notes')
-      .select('id, dispatch_note_number, invoice_id, customer_id, warehouse_id, dispatch_date, status, vehicle_reference')
+      .select('id, dispatch_note_number, invoice_id, customer_id, warehouse_id, dispatch_date, status, vehicle_reference, created_at')
       .order('dispatch_date', { ascending: false });
-    if (error) throw error;
-    return NextResponse.json(data ?? []);
+
+    if (dispatchResult.error && isMissingSalesColumn(dispatchResult.error, 'sales_dispatch_notes', 'created_at')) {
+      dispatchResult = await service
+        .from('sales_dispatch_notes')
+        .select('id, dispatch_note_number, invoice_id, customer_id, warehouse_id, dispatch_date, status, vehicle_reference')
+        .order('dispatch_date', { ascending: false });
+    }
+
+    if (dispatchResult.error && isMissingSalesColumn(dispatchResult.error, 'sales_dispatch_notes', 'vehicle_reference')) {
+      dispatchResult = await service
+        .from('sales_dispatch_notes')
+        .select('id, dispatch_note_number, invoice_id, customer_id, warehouse_id, dispatch_date, status')
+        .order('dispatch_date', { ascending: false });
+    }
+
+    if (dispatchResult.error) throw dispatchResult.error;
+    return NextResponse.json(dispatchResult.data ?? []);
   } catch (err) {
-    return serverError(err instanceof Error ? err.message : 'Internal server error');
+    if (isMissingSalesTable(err)) return NextResponse.json([]);
+    logSalesRouteError('dispatches', 'load dispatch notes', err);
+    return serverError('Sales dispatches could not be loaded.');
   }
 }
 

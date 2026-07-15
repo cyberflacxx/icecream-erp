@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { badRequest, can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
-import { generateSalesReferenceNumber, isMissingSalesTable, salesErrorMessage, salesService, writeSalesAuditLog } from '@/lib/sales-server';
+import { generateSalesReferenceNumber, isMissingSalesColumn, isMissingSalesTable, logSalesRouteError, salesErrorMessage, salesService, writeSalesAuditLog } from '@/lib/sales-server';
 
 export async function GET() {
   const ctx = await getAuthContext();
@@ -10,16 +10,44 @@ export async function GET() {
 
   try {
     const service = salesService();
-    const { data, error } = await service
+    let returnsResult = await service
       .from('customer_returns')
       .select('id, return_number, customer_id, invoice_id, return_date, reason, total_value, status, qc_status, final_stock_action')
       .is('deleted_at', null)
       .order('return_date', { ascending: false });
-    if (error) throw error;
-    return NextResponse.json(data ?? []);
+
+    if (returnsResult.error && isMissingSalesColumn(returnsResult.error, 'customer_returns', 'deleted_at')) {
+      returnsResult = await service
+        .from('customer_returns')
+        .select('id, return_number, customer_id, invoice_id, return_date, reason, total_value, status, qc_status, final_stock_action')
+        .order('return_date', { ascending: false });
+    }
+
+    if (
+      returnsResult.error &&
+      (
+        isMissingSalesColumn(returnsResult.error, 'customer_returns', 'final_stock_action') ||
+        isMissingSalesColumn(returnsResult.error, 'customer_returns', 'qc_status')
+      )
+    ) {
+      returnsResult = await service
+        .from('customer_returns')
+        .select('id, return_number, customer_id, invoice_id, return_date, reason, total_value, status')
+        .order('return_date', { ascending: false });
+    }
+
+    if (returnsResult.error) throw returnsResult.error;
+    return NextResponse.json(
+      ((returnsResult.data ?? []) as Array<Record<string, unknown>>).map((row) => ({
+        ...row,
+        final_stock_action: row.final_stock_action ?? null,
+        qc_status: row.qc_status ?? 'PENDING_QC',
+      })),
+    );
   } catch (err) {
     if (isMissingSalesTable(err)) return NextResponse.json([]);
-    return serverError(salesErrorMessage(err) || 'Internal server error');
+    logSalesRouteError('returns', 'load customer returns', err);
+    return serverError('Sales returns could not be loaded.');
   }
 }
 

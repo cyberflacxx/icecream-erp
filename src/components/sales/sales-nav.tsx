@@ -23,8 +23,9 @@ export function SalesNav() {
   const pathname = usePathname();
 
   return (
-    <div className="overflow-x-auto rounded-xl border border-[color:var(--app-border)] bg-[color:var(--app-surface)] p-1.5 shadow-sm">
-      <div className="flex min-w-max gap-2">
+    <div className="rounded-xl border border-[color:var(--app-border)] bg-[color:var(--app-surface)] shadow-sm">
+      <div className="overflow-x-auto px-1.5 py-1.5 [scrollbar-width:thin]">
+        <div className="flex min-w-max gap-2 pr-2">
         {links.map((link) => {
           const Icon = link.icon;
           const isActive = pathname === link.href || pathname.startsWith(`${link.href}/`);
@@ -43,6 +44,7 @@ export function SalesNav() {
             </Link>
           );
         })}
+        </div>
       </div>
     </div>
   );

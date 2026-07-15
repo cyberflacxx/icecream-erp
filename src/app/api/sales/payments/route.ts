@@ -4,7 +4,7 @@ import { badRequest, can, forbidden, getAuthContext, serverError, unauthorized }
 import { buildFinanceSourceReference } from '@/lib/finance';
 import { createLinkedFinanceTransaction, financeErrorMessage, isMissingFinanceTable, postFinanceDocument } from '@/lib/finance-server';
 import { canRecordPayment } from '@/lib/sales';
-import { generateSalesReferenceNumber, isMissingSalesTable, salesErrorMessage, salesService, writeSalesAuditLog } from '@/lib/sales-server';
+import { generateSalesReferenceNumber, isMissingSalesColumn, isMissingSalesTable, logSalesRouteError, salesErrorMessage, salesService, writeSalesAuditLog } from '@/lib/sales-server';
 
 function normalizeSalesPaymentMethod(value: string) {
   const normalized = String(value ?? '').trim().toUpperCase();
@@ -19,15 +19,43 @@ export async function GET() {
 
   try {
     const service = salesService();
-    const { data, error } = await service
+    let paymentsResult = await service
       .from('payments')
-      .select('id, payment_number, customer_id, invoice_id, payment_date, amount, payment_method, reference_number, status')
+      .select('id, payment_number, customer_id, invoice_id, payment_date, amount, payment_method, reference_number, status, created_at')
       .order('payment_date', { ascending: false });
-    if (error) throw error;
-    return NextResponse.json(data ?? []);
+
+    if (paymentsResult.error && isMissingSalesColumn(paymentsResult.error, 'payments', 'created_at')) {
+      paymentsResult = await service
+        .from('payments')
+        .select('id, payment_number, customer_id, invoice_id, payment_date, amount, payment_method, reference_number, status')
+        .order('payment_date', { ascending: false });
+    }
+
+    if (
+      paymentsResult.error &&
+      (
+        isMissingSalesColumn(paymentsResult.error, 'payments', 'reference_number') ||
+        isMissingSalesColumn(paymentsResult.error, 'payments', 'status')
+      )
+    ) {
+      paymentsResult = await service
+        .from('payments')
+        .select('id, payment_number, customer_id, invoice_id, payment_date, amount, payment_method')
+        .order('payment_date', { ascending: false });
+    }
+
+    if (paymentsResult.error) throw paymentsResult.error;
+    return NextResponse.json(
+      ((paymentsResult.data ?? []) as Array<Record<string, unknown>>).map((row) => ({
+        ...row,
+        reference_number: row.reference_number ?? null,
+        status: row.status ?? 'PAID',
+      })),
+    );
   } catch (err) {
     if (isMissingSalesTable(err)) return NextResponse.json([]);
-    return serverError(salesErrorMessage(err) || 'Internal server error');
+    logSalesRouteError('payments', 'load payment list', err);
+    return serverError('Sales payments could not be loaded.');
   }
 }
 
