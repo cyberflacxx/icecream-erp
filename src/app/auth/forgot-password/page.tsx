@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useState } from 'react';
+import { MailCheck } from 'lucide-react';
 import Swal from 'sweetalert2';
 
 import { AuthShell } from '@/components/auth/auth-shell';
@@ -16,7 +17,6 @@ export default function ForgotPasswordPage() {
   const [workId, setWorkId] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [workIdError, setWorkIdError] = useState<string | null>(null);
-  const [resetToken, setResetToken] = useState<string | null>(null);
   const [expiresAt, setExpiresAt] = useState<string | null>(null);
 
   function validateWorkId(value: string) {
@@ -45,7 +45,6 @@ export default function ForgotPasswordPage() {
       const payload = (await response.json().catch(() => ({}))) as {
         error?: string;
         expiresAt?: string;
-        resetToken?: string;
         success?: boolean;
       };
 
@@ -61,16 +60,15 @@ export default function ForgotPasswordPage() {
         return;
       }
 
-      setResetToken(payload.resetToken ?? null);
       setExpiresAt(payload.expiresAt ?? null);
 
       await Swal.fire({
         icon: 'success',
-        title: 'Reset Token Generated',
-        html: '<p>Your reset token is ready below. Use it immediately to set a new password.</p>',
-        confirmButtonColor: '#F97316',
-        background: '#fff7e8',
-        color: '#3B1F12',
+        title: 'Reset Email Sent',
+        html: '<p>If the Work ID exists, a password reset link has been sent to the registered email address.</p>',
+        confirmButtonColor: '#1d4ed8',
+        background: '#eff6ff',
+        color: '#17212b',
       });
     } finally {
       setIsSubmitting(false);
@@ -81,11 +79,16 @@ export default function ForgotPasswordPage() {
     <AuthShell
       eyebrow="Credential Recovery"
       title="Forgot Password"
-      description="Generate a reset token for a staff account using the assigned Work ID."
+      description="Request a password reset link for a staff account using the assigned Work ID."
     >
       <div className="auth-card">
-        <h1 className="text-3xl font-semibold text-brown dark:text-darkText">Forgot Password</h1>
-        <p className="mt-2 text-sm text-muted dark:text-darkMuted">Enter your Work ID to generate a password reset token.</p>
+        <div className="inline-flex h-12 w-12 items-center justify-center rounded-2xl border border-[color:var(--app-border)] bg-[color:var(--app-accent-soft)] text-[color:var(--app-accent-strong)]">
+          <MailCheck className="h-5 w-5" />
+        </div>
+        <h1 className="mt-5 text-3xl font-semibold text-[color:var(--app-text)]">Forgot Password</h1>
+        <p className="mt-2 text-sm text-[color:var(--app-muted)]">
+          Enter your Work ID and we will email a secure password reset link to the registered address.
+        </p>
 
         <form className="mt-8 space-y-5" onSubmit={handleSubmit}>
           <label className="auth-field">
@@ -109,23 +112,16 @@ export default function ForgotPasswordPage() {
           </label>
 
           <button type="submit" disabled={isSubmitting} className="auth-primary-button">
-            {isSubmitting ? 'Generating Token...' : 'Generate Reset Token'}
+            {isSubmitting ? 'Sending Reset Link...' : 'Send Reset Link'}
           </button>
         </form>
 
-        {resetToken ? (
-          <div className="auth-alert mt-6 border-orange/20 bg-[#fff7e8] text-brown dark:bg-orange/10 dark:text-darkText">
-            <p className="text-sm font-semibold">Reset token</p>
-            <p className="mt-2 break-all rounded-xl bg-white px-3 py-2 font-mono text-xs dark:bg-darkCard">{resetToken}</p>
-            <p className="mt-2 text-xs text-muted dark:text-darkMuted">Expires: {expiresAt ? new Date(expiresAt).toLocaleString() : 'Within 1 hour'}</p>
-            <Link
-              href={`/auth/reset-password?token=${encodeURIComponent(resetToken)}`}
-              className="mt-4 inline-flex rounded-xl bg-brown px-4 py-2 text-sm font-semibold text-white transition hover:bg-brown/90"
-            >
-              Continue to reset password
-            </Link>
-          </div>
-        ) : null}
+        <div className="auth-alert mt-6 border border-[color:var(--app-border)] bg-[color:var(--app-bg-default)] text-[color:var(--app-muted)]">
+          <p className="text-sm font-semibold text-[color:var(--app-text)]">What happens next</p>
+          <p className="mt-2 text-sm">
+            The reset link expires {expiresAt ? `at ${new Date(expiresAt).toLocaleString()}` : 'within 1 hour'} and can only be used once.
+          </p>
+        </div>
 
         <div className="mt-6 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
           <Link href="/auth/login" className="auth-link">

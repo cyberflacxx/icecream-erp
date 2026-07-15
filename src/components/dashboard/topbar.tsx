@@ -98,7 +98,7 @@ export function Topbar({ onOpenSidebar }: TopbarProps) {
               <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[color:var(--app-subtle)]">
                 Operational workspace
               </p>
-              <span className="hidden rounded-full border border-[color:var(--app-border)] bg-[color:var(--app-bg-subtle)] px-2 py-0.5 text-[10px] font-semibold text-[color:var(--app-muted)] sm:inline-flex">
+              <span className="hidden rounded-full border border-emerald-300/80 bg-emerald-50 px-2.5 py-0.5 text-[10px] font-semibold text-emerald-700 dark:border-emerald-500/40 dark:bg-emerald-500/12 dark:text-emerald-300 sm:inline-flex">
                 Live workspace
               </span>
             </div>

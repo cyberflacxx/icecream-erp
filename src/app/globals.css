@@ -7,26 +7,26 @@
 @layer base {
   :root {
     color-scheme: light;
-    --app-bg: #f3f6fa;
-    --app-bg-canvas: #eef2f7;
-    --app-bg-default: #f7f9fc;
-    --app-bg-subtle: #edf2f8;
-    --app-bg-inset: #e2e8f0;
+    --app-bg: #ebf1f8;
+    --app-bg-canvas: #e7eef7;
+    --app-bg-default: #f4f8fd;
+    --app-bg-subtle: #e9f0fa;
+    --app-bg-inset: #dce7f4;
     --app-surface: #ffffff;
-    --app-surface-strong: #f8fbff;
-    --app-sidebar: rgba(246, 248, 252, 0.92);
-    --app-border: #d7dee8;
-    --app-border-muted: #e1e7ef;
-    --app-border-strong: #9db0c7;
-    --app-text: #17212b;
-    --app-muted: #4f6278;
-    --app-subtle: #73849a;
+    --app-surface-strong: #f7fbff;
+    --app-sidebar: rgba(15, 44, 82, 0.98);
+    --app-border: #cdd9e7;
+    --app-border-muted: #dbe5f0;
+    --app-border-strong: #88a3c4;
+    --app-text: #132033;
+    --app-muted: #475c74;
+    --app-subtle: #647a95;
     --app-accent: #2563eb;
     --app-accent-strong: #1d4ed8;
-    --app-accent-soft: rgba(37, 99, 235, 0.1);
+    --app-accent-soft: rgba(37, 99, 235, 0.12);
     --app-shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.05);
-    --app-shadow-md: 0 8px 22px rgba(15, 23, 42, 0.08);
-    --app-shadow-lg: 0 18px 44px rgba(15, 23, 42, 0.12);
+    --app-shadow-md: 0 12px 28px rgba(15, 23, 42, 0.08);
+    --app-shadow-lg: 0 22px 52px rgba(15, 23, 42, 0.12);
   }
 
   .dark {
@@ -67,8 +67,9 @@
   body {
     @apply bg-cream text-textDark;
     background:
-      radial-gradient(circle at top left, rgba(37, 99, 235, 0.06), transparent 22%),
-      linear-gradient(180deg, #f8fbff 0%, var(--app-bg-canvas) 100%);
+      radial-gradient(circle at top left, rgba(37, 99, 235, 0.12), transparent 24%),
+      radial-gradient(circle at top right, rgba(14, 116, 144, 0.08), transparent 18%),
+      linear-gradient(180deg, #f7fbff 0%, var(--app-bg-canvas) 100%);
     color: var(--app-text);
     font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
     font-size: 0.95rem;
@@ -405,7 +406,7 @@
   .auth-primary-button {
     @apply h-11 w-full rounded-xl font-semibold text-white transition disabled:cursor-not-allowed disabled:opacity-60;
     background: linear-gradient(180deg, color-mix(in srgb, var(--app-accent) 92%, white) 0%, var(--app-accent-strong) 100%);
-    box-shadow: 0 10px 24px rgba(194, 65, 12, 0.22);
+    box-shadow: 0 10px 24px rgba(29, 78, 216, 0.22);
   }
 
   .auth-primary-button:hover {

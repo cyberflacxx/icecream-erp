@@ -15,8 +15,8 @@ export function PageHeader({ title, description, actions, status = 'live' }: Pag
     <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
       <div>
         <div className="flex items-center gap-2">
-          <div className="inline-flex items-center gap-2 rounded-full border border-[color:var(--app-border)] bg-[color:var(--app-bg-subtle)] px-2.5 py-1">
-            <span className="h-1.5 w-1.5 rounded-full bg-[color:var(--app-accent)]" />
+          <div className="inline-flex items-center gap-2 rounded-full border border-[color:var(--app-border-strong)] bg-[color:var(--app-accent-soft)] px-3 py-1 shadow-[var(--app-shadow-sm)]">
+            <span className="h-1.5 w-1.5 rounded-full bg-[color:var(--app-accent-strong)]" />
             <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[color:var(--app-accent-strong)]">Operations Overview</p>
           </div>
           <FeatureBadge status={status} />

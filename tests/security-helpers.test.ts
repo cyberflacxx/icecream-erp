@@ -20,6 +20,7 @@ import {
   getSafeRegistrationErrorDetails,
   REGISTRATION_ACCOUNT_FAILURE_MESSAGE,
 } from '../src/lib/registration';
+import { validatePasswordResetPassword } from '../src/lib/security-server';
 
 test('normalizeUserStatus maps unknown values to INACTIVE', () => {
   assert.equal(normalizeUserStatus('unknown'), 'INACTIVE');
@@ -254,4 +255,21 @@ test('registration error helpers keep server logs structured and frontend messag
 
   assert.equal(getRegistrationClientErrorMessage(duplicateEmailError), 'Email is already registered.');
   assert.equal(getRegistrationClientErrorMessage(new Error('unexpected failure')), REGISTRATION_ACCOUNT_FAILURE_MESSAGE);
+});
+
+test('validatePasswordResetPassword enforces the configured password policy', () => {
+  const strictPolicy = {
+    passwordMinLength: 10,
+    requireLowercase: true,
+    requireNumber: true,
+    requireSpecialCharacter: true,
+    requireUppercase: true,
+  };
+
+  assert.equal(validatePasswordResetPassword('Short1!', strictPolicy), 'Password must be at least 10 characters long.');
+  assert.equal(validatePasswordResetPassword('longpassword1!', strictPolicy), 'Password must include at least one uppercase letter.');
+  assert.equal(validatePasswordResetPassword('LONGPASSWORD1!', strictPolicy), 'Password must include at least one lowercase letter.');
+  assert.equal(validatePasswordResetPassword('LongPassword!', strictPolicy), 'Password must include at least one number.');
+  assert.equal(validatePasswordResetPassword('LongPassword1', strictPolicy), 'Password must include at least one special character.');
+  assert.equal(validatePasswordResetPassword('LongPassword1!', strictPolicy), null);
 });

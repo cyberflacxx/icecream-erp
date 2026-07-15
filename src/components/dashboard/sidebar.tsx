@@ -225,11 +225,11 @@ export function Sidebar() {
   ));
 
   return (
-    <aside className="flex h-full flex-col overflow-hidden border-r border-[color:var(--app-border-muted)] bg-[color:var(--app-sidebar)] backdrop-blur-xl">
-      <div className="border-b border-[color:var(--app-border-muted)] px-3 py-3">
-        <div className="app-panel-subtle px-3 py-3">
+    <aside className="flex h-full flex-col overflow-hidden border-r border-slate-900/10 bg-[linear-gradient(180deg,#0f2c52_0%,#173b6e_58%,#214f8a_100%)] text-white backdrop-blur-xl dark:border-[color:var(--app-border-muted)] dark:bg-[color:var(--app-sidebar)] dark:text-[color:var(--app-text)]">
+      <div className="border-b border-white/12 px-3 py-3 dark:border-[color:var(--app-border-muted)]">
+        <div className="rounded-[26px] border border-white/12 bg-white/10 px-3 py-3 shadow-[0_16px_36px_rgba(2,6,23,0.18)] dark:app-panel-subtle dark:shadow-none">
           <div className="flex items-center gap-3">
-            <div className="flex h-12 w-12 items-center justify-center overflow-hidden rounded-xl border border-[color:var(--app-border)] bg-[color:var(--app-bg-canvas)] shadow-[var(--app-shadow-sm)]">
+            <div className="flex h-12 w-12 items-center justify-center overflow-hidden rounded-xl border border-white/18 bg-white shadow-[var(--app-shadow-sm)] dark:border-[color:var(--app-border)] dark:bg-[color:var(--app-bg-canvas)]">
               <Image
                 src="/branding/logo.png"
                 alt="Absolute Ice Cream ERP"
@@ -239,33 +239,33 @@ export function Sidebar() {
               />
             </div>
             <div className="min-w-0">
-              <p className="truncate text-sm font-semibold tracking-[-0.02em] text-[color:var(--app-text)]">
+              <p className="truncate text-sm font-semibold tracking-[-0.02em] text-white dark:text-[color:var(--app-text)]">
                 Absolute Ice Cream ERP
               </p>
-              <p className="text-[11px] text-[color:var(--app-muted)]">
+              <p className="text-[11px] text-blue-100/78 dark:text-[color:var(--app-muted)]">
                 Internal operations console
               </p>
             </div>
           </div>
 
-          <div className="mt-3 rounded-xl border border-[color:var(--app-border-muted)] bg-[color:var(--app-bg-default)] px-3 py-3">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-[color:var(--app-subtle)]">
+          <div className="mt-3 rounded-2xl border border-white/12 bg-slate-950/18 px-3 py-3 backdrop-blur-sm dark:border-[color:var(--app-border-muted)] dark:bg-[color:var(--app-bg-default)]">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-blue-100/62 dark:text-[color:var(--app-subtle)]">
               Signed in as
             </p>
-            <p className="mt-1.5 truncate text-sm font-semibold text-[color:var(--app-text)]">
+            <p className="mt-1.5 truncate text-sm font-semibold text-white dark:text-[color:var(--app-text)]">
               {currentUser?.profile?.fullName ?? 'ERP User'}
             </p>
-            <div className="mt-1.5 flex items-center gap-2 text-[11px] text-[color:var(--app-muted)]">
-              <span className="h-2 w-2 rounded-full bg-[color:var(--app-accent)]" />
+            <div className="mt-1.5 flex items-center gap-2 text-[11px] text-blue-100/76 dark:text-[color:var(--app-muted)]">
+              <span className="h-2 w-2 rounded-full bg-emerald-300 dark:bg-[color:var(--app-accent)]" />
               <span className="truncate">
                 {isLoading ? 'Loading role...' : roleLabel ?? 'No role assigned'}
               </span>
             </div>
             <Link
               href="/dashboard"
-              className="mt-3 inline-flex items-center gap-2 rounded-lg border border-[color:var(--app-border)] bg-[color:var(--app-bg-subtle)] px-3 py-2 text-[11px] font-semibold text-[color:var(--app-text)] transition hover:border-[color:var(--app-border-strong)] hover:bg-[color:var(--app-surface)]"
+              className="mt-3 inline-flex items-center gap-2 rounded-xl border border-white/16 bg-white px-3 py-2 text-[11px] font-semibold text-slate-900 transition hover:bg-blue-50 dark:border-[color:var(--app-border)] dark:bg-[color:var(--app-bg-subtle)] dark:text-[color:var(--app-text)] dark:hover:border-[color:var(--app-border-strong)] dark:hover:bg-[color:var(--app-surface)]"
             >
-              <LayoutDashboard className="h-3.5 w-3.5 text-[color:var(--app-accent)]" />
+              <LayoutDashboard className="h-3.5 w-3.5 text-[color:var(--app-accent-strong)] dark:text-[color:var(--app-accent)]" />
               Open dashboard
             </Link>
           </div>
@@ -283,7 +283,7 @@ export function Sidebar() {
 
             return (
               <section key={section}>
-                <p className="px-2.5 text-[10px] font-semibold uppercase tracking-[0.2em] text-[color:var(--app-subtle)]">
+                <p className="px-2.5 text-[10px] font-semibold uppercase tracking-[0.2em] text-blue-100/52 dark:text-[color:var(--app-subtle)]">
                   {section}
                 </p>
                 <div className="mt-1.5 space-y-1">
@@ -298,22 +298,22 @@ export function Sidebar() {
                         className={cn(
                           'group flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13px] transition-all duration-150',
                           isActive
-                            ? 'border border-[color:var(--app-border-strong)] bg-[color:var(--app-accent-soft)] text-[color:var(--app-accent-strong)] shadow-[var(--app-shadow-sm)]'
-                            : 'border border-transparent text-[color:var(--app-muted)] hover:border-[color:var(--app-border-muted)] hover:bg-[color:var(--app-bg-subtle)] hover:text-[color:var(--app-text)]',
+                            ? 'border border-white/20 bg-white text-slate-900 shadow-[0_10px_24px_rgba(2,6,23,0.18)] dark:border-[color:var(--app-border-strong)] dark:bg-[color:var(--app-accent-soft)] dark:text-[color:var(--app-accent-strong)] dark:shadow-[var(--app-shadow-sm)]'
+                            : 'border border-transparent text-blue-50/84 hover:border-white/12 hover:bg-white/10 hover:text-white dark:text-[color:var(--app-muted)] dark:hover:border-[color:var(--app-border-muted)] dark:hover:bg-[color:var(--app-bg-subtle)] dark:hover:text-[color:var(--app-text)]',
                         )}
                       >
                         <div
                           className={cn(
                             'flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg border transition',
                             isActive
-                              ? 'border-[color:var(--app-border-strong)] bg-[color:var(--app-bg-canvas)] text-[color:var(--app-accent)]'
-                              : 'border-[color:var(--app-border-muted)] bg-[color:var(--app-bg-default)] text-[color:var(--app-subtle)] group-hover:text-[color:var(--app-accent)]',
+                              ? 'border-slate-200 bg-slate-50 text-[color:var(--app-accent-strong)] dark:border-[color:var(--app-border-strong)] dark:bg-[color:var(--app-bg-canvas)] dark:text-[color:var(--app-accent)]'
+                              : 'border-white/12 bg-slate-950/18 text-blue-100/74 group-hover:border-white/18 group-hover:bg-white/12 group-hover:text-white dark:border-[color:var(--app-border-muted)] dark:bg-[color:var(--app-bg-default)] dark:text-[color:var(--app-subtle)] dark:group-hover:text-[color:var(--app-accent)]',
                           )}
                         >
                           <Icon className="h-3.5 w-3.5" />
                         </div>
                         <span className="truncate font-medium">{item.label}</span>
-                        {isActive ? <span className="ml-auto h-2 w-2 rounded-full bg-[color:var(--app-accent)]" /> : null}
+                        {isActive ? <span className="ml-auto h-2 w-2 rounded-full bg-[color:var(--app-accent-strong)] dark:bg-[color:var(--app-accent)]" /> : null}
                       </Link>
                     );
                   })}
@@ -324,7 +324,7 @@ export function Sidebar() {
         </div>
       </nav>
 
-      <div className="border-t border-[color:var(--app-border-muted)] px-2.5 py-3">
+      <div className="border-t border-white/12 px-2.5 py-3 dark:border-[color:var(--app-border-muted)]">
         <button
           type="button"
           onClick={async () => { await logoutAndRedirect(router); }}
