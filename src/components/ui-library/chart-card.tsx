@@ -8,10 +8,10 @@ interface ChartCardProps {
 
 export function ChartCard({ title, subtitle, children }: ChartCardProps) {
   return (
-    <section className="rounded-xl border border-[color:var(--app-border)] bg-[color:var(--app-surface)] p-5 shadow-sm">
+    <section className="dashboard-blue-card p-5">
       <div className="mb-5">
-        <h3 className="text-base font-semibold tracking-[-0.02em] text-[color:var(--app-text)]">{title}</h3>
-        {subtitle ? <p className="mt-1 text-sm text-[color:var(--app-muted)]">{subtitle}</p> : null}
+        <h3 className="dashboard-blue-value text-base font-semibold tracking-[-0.02em]">{title}</h3>
+        {subtitle ? <p className="dashboard-blue-copy mt-1 text-sm">{subtitle}</p> : null}
       </div>
       {children}
     </section>

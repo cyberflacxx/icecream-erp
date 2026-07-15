@@ -137,28 +137,30 @@ export default function SettingsOverviewPage() {
       </div>
 
       <section className="grid gap-4 lg:grid-cols-3">
-        <div className="surface-card">
-          <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-muted dark:text-darkMuted">
-            <Shield className="h-4 w-4" />
+        <div className="dashboard-blue-card p-4">
+          <div className="dashboard-blue-label flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em]">
+            <span className="dashboard-blue-icon h-9 w-9">
+              <Shield className="h-4 w-4" />
+            </span>
             Security Snapshot
           </div>
-          <div className="mt-3 space-y-2 text-sm text-brown dark:text-darkText">
+          <div className="dashboard-blue-copy mt-3 space-y-2 text-sm">
             <p>Roles configured: {String(summary.roleCount ?? 0)}</p>
             <p>Unread alerts: {String(summary.unreadCount ?? 0)}</p>
             <p>Audit entries: {String(summary.auditCount ?? 0)}</p>
           </div>
         </div>
-        <div className="surface-card">
-          <div className="text-xs font-semibold uppercase tracking-[0.18em] text-muted dark:text-darkMuted">Master Data Coverage</div>
-          <div className="mt-3 space-y-2 text-sm text-brown dark:text-darkText">
+        <div className="dashboard-blue-card p-4">
+          <div className="dashboard-blue-label text-xs font-semibold uppercase tracking-[0.18em]">Master Data Coverage</div>
+          <div className="dashboard-blue-copy mt-3 space-y-2 text-sm">
             <p>Warehouses active: {String(dashboard.activeWarehouses ?? 0)}</p>
             <p>Raw materials active: {String(dashboard.activeRawMaterials ?? 0)}</p>
             <p>Profile status: {String(dashboard.companyProfileStatus ?? 'PENDING')}</p>
           </div>
         </div>
-        <div className="surface-card">
-          <div className="text-xs font-semibold uppercase tracking-[0.18em] text-muted dark:text-darkMuted">Data Movement</div>
-          <div className="mt-3 space-y-2 text-sm text-brown dark:text-darkText">
+        <div className="dashboard-blue-card p-4">
+          <div className="dashboard-blue-label text-xs font-semibold uppercase tracking-[0.18em]">Data Movement</div>
+          <div className="dashboard-blue-copy mt-3 space-y-2 text-sm">
             <p>Pending imports: {String(dashboard.pendingImports ?? 0)}</p>
             <p>Failed imports: {String(dashboard.failedImports ?? 0)}</p>
             <p>Inventory alerts: {String(summary.lowStockCount ?? 0)}</p>

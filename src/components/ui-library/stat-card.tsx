@@ -13,10 +13,10 @@ interface StatCardProps {
 }
 
 const colorStyles = {
-  orange: 'bg-[color:var(--app-accent-soft)] text-[color:var(--app-accent-strong)]',
-  brown: 'bg-slate-100 text-[color:var(--app-text)] dark:bg-slate-800/70 dark:text-[color:var(--app-text)]',
-  success: 'bg-success/10 text-success',
-  warning: 'bg-warning/10 text-warning'
+  orange: 'bg-white/18 text-white border-white/20',
+  brown: 'bg-white/12 text-white border-white/16',
+  success: 'bg-emerald-400/18 text-white border-emerald-200/20',
+  warning: 'bg-amber-300/18 text-white border-amber-200/20'
 } as const;
 
 export function StatCard({
@@ -28,21 +28,21 @@ export function StatCard({
   color = 'orange'
 }: StatCardProps) {
   return (
-    <article className="rounded-xl border border-[color:var(--app-border)] bg-[color:var(--app-surface)] p-5 shadow-sm">
+    <article className="dashboard-blue-card p-5">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <p className="text-sm font-medium text-[color:var(--app-muted)]">{title}</p>
-          <p className="mt-2.5 text-[1.9rem] font-semibold tracking-[-0.03em] text-[color:var(--app-text)]">{value}</p>
+          <p className="dashboard-blue-label text-sm font-semibold">{title}</p>
+          <p className="dashboard-blue-value mt-2.5 text-[1.9rem] font-bold tracking-[-0.03em]">{value}</p>
         </div>
-        <div className={cn('rounded-lg border border-[color:var(--app-border)] p-2.5', colorStyles[color])}>{icon}</div>
+        <div className={cn('dashboard-blue-icon p-2.5 shadow-[0_10px_24px_rgba(15,23,42,0.18)]', colorStyles[color])}>{icon}</div>
       </div>
       {trendValue ? (
         <div
           className={cn(
-            'mt-4 inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em]',
-            trend === 'up' && 'bg-success/10 text-success',
-            trend === 'down' && 'bg-error/10 text-error',
-            trend === 'neutral' && 'border-[color:var(--app-border)] bg-[color:var(--app-bg-subtle)] text-[color:var(--app-muted)]',
+            'dashboard-blue-badge mt-4',
+            trend === 'up' && 'bg-emerald-400/18 text-white border-emerald-200/18',
+            trend === 'down' && 'bg-rose-400/18 text-white border-rose-200/18',
+            trend === 'neutral' && 'bg-white/12 text-white border-white/16',
           )}
         >
           {trend === 'up' ? <ArrowUpRight className="h-3.5 w-3.5" /> : null}

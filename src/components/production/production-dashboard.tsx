@@ -103,11 +103,11 @@ export function ProductionDashboard() {
           <div className="h-72">
             <ResponsiveContainer width="100%" height="100%" initialDimension={{ width: 1, height: 1 }}>
               <BarChart data={charts.outputLast7Days}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#F3D7B6" />
-                <XAxis dataKey="day" stroke="#6B4A3A" fontSize={12} />
-                <YAxis stroke="#6B4A3A" fontSize={12} />
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--dashboard-card-grid)" />
+                <XAxis dataKey="day" stroke="var(--dashboard-card-axis)" fontSize={12} />
+                <YAxis stroke="var(--dashboard-card-axis)" fontSize={12} />
                 <Tooltip />
-                <Bar dataKey="output" fill="#F97316" radius={[10, 10, 0, 0]} />
+                <Bar dataKey="output" fill="var(--dashboard-card-fill)" radius={[10, 10, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -118,7 +118,7 @@ export function ProductionDashboard() {
             <ResponsiveContainer width="100%" height="100%" initialDimension={{ width: 1, height: 1 }}>
               <PieChart>
                 <Tooltip />
-                <Pie data={charts.statusBreakdown} dataKey="count" nameKey="status" outerRadius={105} fill="#3B1F12" />
+                <Pie data={charts.statusBreakdown} dataKey="count" nameKey="status" outerRadius={105} fill="var(--dashboard-card-fill)" />
               </PieChart>
             </ResponsiveContainer>
           </div>
@@ -212,16 +212,16 @@ function WorkflowCard({ description, href, icon, label }: { description: string;
   return (
     <Link
       href={href}
-      className="surface-card group flex items-start justify-between gap-4 bg-gradient-to-br from-white via-white to-amber-50 transition hover:-translate-y-0.5 hover:shadow-md"
+      className="dashboard-blue-card group flex items-start justify-between gap-4 p-4 transition hover:-translate-y-0.5 hover:shadow-[0_18px_34px_rgba(15,23,42,0.24)]"
     >
       <div className="flex gap-3">
-        <span className="app-icon-chip h-11 w-11">{icon}</span>
+        <span className="dashboard-blue-icon h-11 w-11">{icon}</span>
         <div>
-          <p className="font-semibold text-brown">{label}</p>
-          <p className="mt-1 text-sm text-muted">{description}</p>
+          <p className="dashboard-blue-value font-semibold">{label}</p>
+          <p className="dashboard-blue-copy mt-1 text-sm">{description}</p>
         </div>
       </div>
-      <ArrowRight className="mt-1 h-4 w-4 text-muted transition group-hover:translate-x-1 group-hover:text-brown" />
+      <ArrowRight className="dashboard-blue-copy mt-1 h-4 w-4 transition group-hover:translate-x-1 group-hover:text-white" />
     </Link>
   );
 }

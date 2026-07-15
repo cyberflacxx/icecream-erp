@@ -128,15 +128,57 @@
   }
 
   /* Dashboard card — theme-aware */
-  .dash-card {
-    @apply rounded-xl border shadow-sm;
-    border-color: color-mix(in srgb, var(--app-border) 80%, transparent);
-    background: var(--app-surface);
+  .dashboard-blue-card {
+    @apply rounded-2xl border shadow-[var(--app-shadow-md)];
+    background:
+      linear-gradient(160deg, rgba(37, 99, 235, 0.98) 0%, rgba(29, 78, 216, 0.98) 42%, rgba(15, 44, 82, 0.98) 100%);
+    border-color: rgba(191, 219, 254, 0.18);
+    color: rgba(255, 255, 255, 0.96);
+    --dashboard-card-axis: rgba(219, 234, 254, 0.88);
+    --dashboard-card-grid: rgba(191, 219, 254, 0.18);
+    --dashboard-card-fill: #93c5fd;
+    --dashboard-card-warm: #fbbf24;
   }
-  .dash-card-muted {
+
+  .dashboard-blue-card-soft {
     @apply rounded-xl border;
-    border-color: color-mix(in srgb, var(--app-border) 72%, transparent);
-    background: color-mix(in srgb, var(--app-surface-strong) 72%, white);
+    background: rgba(255, 255, 255, 0.1);
+    border-color: rgba(255, 255, 255, 0.14);
+    color: rgba(255, 255, 255, 0.92);
+  }
+
+  .dashboard-blue-icon {
+    @apply inline-flex items-center justify-center rounded-xl border;
+    background: rgba(255, 255, 255, 0.14);
+    border-color: rgba(255, 255, 255, 0.22);
+    color: #ffffff;
+  }
+
+  .dashboard-blue-label {
+    color: rgba(239, 246, 255, 0.92);
+  }
+
+  .dashboard-blue-copy {
+    color: rgba(219, 234, 254, 0.84);
+  }
+
+  .dashboard-blue-value {
+    color: #ffffff;
+  }
+
+  .dashboard-blue-badge {
+    @apply inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em];
+    background: rgba(255, 255, 255, 0.14);
+    border-color: rgba(255, 255, 255, 0.18);
+    color: rgba(255, 255, 255, 0.96);
+  }
+
+  .dash-card {
+    @apply dashboard-blue-card;
+  }
+
+  .dash-card-muted {
+    @apply dashboard-blue-card-soft;
   }
 
   .surface-card {
@@ -186,14 +228,14 @@
     background: var(--app-surface);
   }
 
-  .dark .dash-card {
-    border-color: rgba(255, 255, 255, 0.08);
-    background: rgba(255, 255, 255, 0.04);
-  }
-
-  .dark .dash-card-muted {
-    border-color: rgba(255, 255, 255, 0.06);
-    background: rgba(255, 255, 255, 0.03);
+  .dark .dashboard-blue-card {
+    background:
+      linear-gradient(160deg, rgba(30, 64, 175, 0.94) 0%, rgba(30, 58, 138, 0.96) 50%, rgba(15, 23, 42, 0.98) 100%);
+    border-color: rgba(147, 197, 253, 0.18);
+    --dashboard-card-axis: rgba(219, 234, 254, 0.82);
+    --dashboard-card-grid: rgba(147, 197, 253, 0.16);
+    --dashboard-card-fill: #93c5fd;
+    --dashboard-card-warm: #fcd34d;
   }
 
   .dark .surface-card,

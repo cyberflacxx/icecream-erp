@@ -50,6 +50,11 @@ function formatNumber(value: unknown) {
   return Number.isFinite(numeric) ? numeric.toLocaleString() : '0';
 }
 
+const CHART_AXIS_COLOR = 'var(--dashboard-card-axis)';
+const CHART_GRID_COLOR = 'var(--dashboard-card-grid)';
+const CHART_PRIMARY_COLOR = 'var(--dashboard-card-fill)';
+const CHART_WARM_COLOR = 'var(--dashboard-card-warm)';
+
 export function DashboardOverview() {
   const router = useRouter();
   const { currentUser, isLoading } = useUserContext();
@@ -171,11 +176,11 @@ export function DashboardOverview() {
             <div className="h-72">
               <ResponsiveContainer width="100%" height="100%" initialDimension={{ width: 1, height: 1 }}>
                 <BarChart data={productionLast7Days}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
-                  <XAxis dataKey="day" stroke="rgba(255,255,255,0.3)" fontSize={12} />
-                  <YAxis stroke="rgba(255,255,255,0.3)" fontSize={12} />
+                  <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID_COLOR} />
+                  <XAxis dataKey="day" stroke={CHART_AXIS_COLOR} fontSize={12} />
+                  <YAxis stroke={CHART_AXIS_COLOR} fontSize={12} />
                   <Tooltip />
-                  <Bar dataKey="total" fill="#F97316" radius={[10, 10, 0, 0]} />
+                  <Bar dataKey="total" fill={CHART_PRIMARY_COLOR} radius={[10, 10, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </div>
@@ -185,11 +190,11 @@ export function DashboardOverview() {
             <div className="h-72">
               <ResponsiveContainer width="100%" height="100%" initialDimension={{ width: 1, height: 1 }}>
                 <LineChart data={salesLast7Days}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
-                  <XAxis dataKey="day" stroke="rgba(255,255,255,0.3)" fontSize={12} />
-                  <YAxis stroke="rgba(255,255,255,0.3)" fontSize={12} />
+                  <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID_COLOR} />
+                  <XAxis dataKey="day" stroke={CHART_AXIS_COLOR} fontSize={12} />
+                  <YAxis stroke={CHART_AXIS_COLOR} fontSize={12} />
                   <Tooltip />
-                  <Line type="monotone" dataKey="total" stroke="#f97316" strokeWidth={3} />
+                  <Line type="monotone" dataKey="total" stroke={CHART_PRIMARY_COLOR} strokeWidth={3} />
                 </LineChart>
               </ResponsiveContainer>
             </div>
@@ -308,7 +313,7 @@ export function DashboardOverview() {
                     dataKey="value"
                     nameKey="label"
                     outerRadius={105}
-                    fill="#F97316"
+                    fill={CHART_PRIMARY_COLOR}
                   />
                 </PieChart>
               </ResponsiveContainer>
@@ -319,11 +324,11 @@ export function DashboardOverview() {
             <div className="h-72">
               <ResponsiveContainer width="100%" height="100%" initialDimension={{ width: 1, height: 1 }}>
                 <LineChart data={wastageTrend}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
-                  <XAxis dataKey="day" stroke="rgba(255,255,255,0.3)" fontSize={12} />
-                  <YAxis stroke="rgba(255,255,255,0.3)" fontSize={12} />
+                  <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID_COLOR} />
+                  <XAxis dataKey="day" stroke={CHART_AXIS_COLOR} fontSize={12} />
+                  <YAxis stroke={CHART_AXIS_COLOR} fontSize={12} />
                   <Tooltip />
-                  <Line type="monotone" dataKey="wastage" stroke="#F97316" strokeWidth={3} />
+                  <Line type="monotone" dataKey="wastage" stroke={CHART_WARM_COLOR} strokeWidth={3} />
                 </LineChart>
               </ResponsiveContainer>
             </div>
@@ -402,11 +407,11 @@ export function DashboardOverview() {
             <div className="h-72">
               <ResponsiveContainer width="100%" height="100%" initialDimension={{ width: 1, height: 1 }}>
                 <BarChart data={chartData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
-                  <XAxis dataKey={xAxisKey} stroke="rgba(255,255,255,0.3)" fontSize={12} />
-                  <YAxis stroke="rgba(255,255,255,0.3)" fontSize={12} />
+                  <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID_COLOR} />
+                  <XAxis dataKey={xAxisKey} stroke={CHART_AXIS_COLOR} fontSize={12} />
+                  <YAxis stroke={CHART_AXIS_COLOR} fontSize={12} />
                   <Tooltip />
-                  <Bar dataKey={primaryMetric} fill="#F97316" radius={[10, 10, 0, 0]} />
+                  <Bar dataKey={primaryMetric} fill={CHART_PRIMARY_COLOR} radius={[10, 10, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </div>
@@ -484,11 +489,11 @@ export function DashboardOverview() {
           <div className="h-72">
             <ResponsiveContainer width="100%" height="100%" initialDimension={{ width: 1, height: 1 }}>
               <LineChart data={salesLast7Days}>
-                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
-                <XAxis dataKey="day" stroke="rgba(255,255,255,0.3)" fontSize={12} />
-                <YAxis stroke="rgba(255,255,255,0.3)" fontSize={12} />
+                <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID_COLOR} />
+                <XAxis dataKey="day" stroke={CHART_AXIS_COLOR} fontSize={12} />
+                <YAxis stroke={CHART_AXIS_COLOR} fontSize={12} />
                 <Tooltip />
-                <Line type="monotone" dataKey="total" stroke="#f97316" strokeWidth={3} />
+                <Line type="monotone" dataKey="total" stroke={CHART_PRIMARY_COLOR} strokeWidth={3} />
               </LineChart>
             </ResponsiveContainer>
           </div>
@@ -577,31 +582,31 @@ export function DashboardOverview() {
             <ResponsiveContainer width="100%" height="100%" initialDimension={{ width: 1, height: 1 }}>
               <PieChart>
                 <Tooltip />
-                <Pie data={paymentBreakdown} dataKey="total" nameKey="method" outerRadius={105} fill="#F97316" />
+                <Pie data={paymentBreakdown} dataKey="total" nameKey="method" outerRadius={105} fill={CHART_PRIMARY_COLOR} />
               </PieChart>
             </ResponsiveContainer>
           </div>
         </ChartCard>
 
-        <div className="rounded-xl border border-[color:var(--app-border)] bg-[color:var(--app-surface)] p-5 shadow-sm">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[color:var(--app-accent-strong)]">Shift Close Status</p>
+        <div className="dashboard-blue-card p-5">
+          <p className="dashboard-blue-label text-[11px] font-semibold uppercase tracking-[0.2em]">Shift Close Status</p>
           {shiftCloseStatus ? (
-            <div className="mt-5 space-y-3 text-sm text-[color:var(--app-muted)]">
+            <div className="dashboard-blue-copy mt-5 space-y-3 text-sm">
               <p>
-                <span className="font-semibold text-[color:var(--app-text)]">Branch:</span> {String(shiftCloseStatus.branch ?? currentUser?.branch?.name ?? 'N/A')}
+                <span className="dashboard-blue-value font-semibold">Branch:</span> {String(shiftCloseStatus.branch ?? currentUser?.branch?.name ?? 'N/A')}
               </p>
               <p>
-                <span className="font-semibold text-[color:var(--app-text)]">Shift Date:</span> {String(shiftCloseStatus.shiftDate ?? 'N/A')}
+                <span className="dashboard-blue-value font-semibold">Shift Date:</span> {String(shiftCloseStatus.shiftDate ?? 'N/A')}
               </p>
               <p className="flex items-center gap-2">
-                <span className="font-semibold text-[color:var(--app-text)]">Status:</span>
+                <span className="dashboard-blue-value font-semibold">Status:</span>
                 <StatusBadge status={String(shiftCloseStatus.status ?? 'UNKNOWN')} />
               </p>
               <p>
-                <span className="font-semibold text-[color:var(--app-text)]">Expected Cash:</span> {formatNumber(shiftCloseStatus.expectedCash)}
+                <span className="dashboard-blue-value font-semibold">Expected Cash:</span> {formatNumber(shiftCloseStatus.expectedCash)}
               </p>
               <p>
-                <span className="font-semibold text-[color:var(--app-text)]">Actual Cash:</span> {formatNumber(shiftCloseStatus.actualCash)}
+                <span className="dashboard-blue-value font-semibold">Actual Cash:</span> {formatNumber(shiftCloseStatus.actualCash)}
               </p>
             </div>
           ) : (

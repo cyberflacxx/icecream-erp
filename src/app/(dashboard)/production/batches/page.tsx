@@ -551,21 +551,16 @@ export default function ProductionBatchesPage() {
 }
 
 function SummaryCard({ icon, title, tone, value }: { icon: ReactNode; title: string; tone: 'amber' | 'emerald' | 'orange' | 'sky'; value: number }) {
-  const toneClass = {
-    amber: 'to-amber-50',
-    emerald: 'to-emerald-50',
-    orange: 'to-orange-50',
-    sky: 'to-sky-50',
-  }[tone];
+  void tone;
 
   return (
-    <div className={`surface-card bg-gradient-to-br from-white via-white ${toneClass}`}>
+    <div className="dashboard-blue-card p-4">
       <div className="flex items-center justify-between">
         <div>
-          <p className="text-xs uppercase tracking-[0.22em] text-muted">{title}</p>
-          <p className="mt-3 text-3xl font-semibold text-brown">{value}</p>
+          <p className="dashboard-blue-label text-xs uppercase tracking-[0.22em]">{title}</p>
+          <p className="dashboard-blue-value mt-3 text-3xl font-bold">{value}</p>
         </div>
-        <span className="app-icon-chip h-11 w-11">{icon}</span>
+        <span className="dashboard-blue-icon h-11 w-11">{icon}</span>
       </div>
     </div>
   );

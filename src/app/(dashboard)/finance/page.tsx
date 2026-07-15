@@ -149,12 +149,12 @@ export default function FinancePage() {
           <div className="h-72">
             <ResponsiveContainer width="100%" height="100%" initialDimension={{ width: 1, height: 1 }}>
               <LineChart data={charts.cashflowLast7Days}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#F3D7B6" />
-                <XAxis dataKey="day" stroke="#6B4A3A" fontSize={12} />
-                <YAxis stroke="#6B4A3A" fontSize={12} />
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--dashboard-card-grid)" />
+                <XAxis dataKey="day" stroke="var(--dashboard-card-axis)" fontSize={12} />
+                <YAxis stroke="var(--dashboard-card-axis)" fontSize={12} />
                 <Tooltip />
-                <Line type="monotone" dataKey="revenue" stroke="#16A34A" strokeWidth={3} />
-                <Line type="monotone" dataKey="expenses" stroke="#F97316" strokeWidth={3} />
+                <Line type="monotone" dataKey="revenue" stroke="var(--dashboard-card-fill)" strokeWidth={3} />
+                <Line type="monotone" dataKey="expenses" stroke="var(--dashboard-card-warm)" strokeWidth={3} />
               </LineChart>
             </ResponsiveContainer>
           </div>
@@ -164,11 +164,11 @@ export default function FinancePage() {
           <div className="h-72">
             <ResponsiveContainer width="100%" height="100%" initialDimension={{ width: 1, height: 1 }}>
               <BarChart data={charts.paymentMethodBreakdown}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#F3D7B6" />
-                <XAxis dataKey="method" stroke="#6B4A3A" fontSize={12} />
-                <YAxis stroke="#6B4A3A" fontSize={12} />
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--dashboard-card-grid)" />
+                <XAxis dataKey="method" stroke="var(--dashboard-card-axis)" fontSize={12} />
+                <YAxis stroke="var(--dashboard-card-axis)" fontSize={12} />
                 <Tooltip />
-                <Bar dataKey="total" fill="#3B1F12" radius={[10, 10, 0, 0]} />
+                <Bar dataKey="total" fill="var(--dashboard-card-fill)" radius={[10, 10, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </div>
