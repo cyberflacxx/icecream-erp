@@ -14,6 +14,7 @@ export async function GET(_request: NextRequest) {
     const { data, error } = await service
       .from('fixed_assets')
       .select('id, asset_code, name, category, purchase_date, purchase_cost, useful_life_years, residual_value, depreciation_method, current_value, accumulated_dep, is_active')
+      .eq('organization_id', ctx.organizationId)
       .is('deleted_at', null)
       .order('purchase_date', { ascending: false });
     if (error) throw error;
@@ -54,6 +55,7 @@ export async function POST(request: NextRequest) {
     const { data, error } = await service
       .from('fixed_assets')
       .insert({
+        organization_id: ctx.organizationId,
         asset_code: body.assetCode,
         name: body.name,
         category: body.category,

@@ -17,6 +17,7 @@ export async function GET() {
         production_material_request_items(id, item_id, quantity_requested, quantity_approved, quantity_issued, unit_of_measure_id, notes),
         production_batches(batch_number, warehouse_id)
       `)
+      .eq('organization_id', ctx.organizationId)
       .is('deleted_at', null)
       .order('request_date', { ascending: false });
     if (error) throw error;
@@ -53,6 +54,7 @@ export async function POST(request: NextRequest) {
     const { data: requestRow, error: requestError } = await service
       .from('production_material_requests')
       .insert({
+        organization_id: ctx.organizationId,
         notes: body.notes ?? null,
         production_batch_id: body.productionBatchId,
         request_date: body.requestDate ?? new Date().toISOString().slice(0, 10),

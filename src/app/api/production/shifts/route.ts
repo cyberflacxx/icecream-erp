@@ -14,6 +14,7 @@ export async function GET() {
     const { data, error } = await service
       .from('shift_reports')
       .select('*')
+      .eq('organization_id', ctx.organizationId)
       .is('deleted_at', null)
       .order('report_date', { ascending: false });
     if (error) throw error;
@@ -43,6 +44,7 @@ export async function POST(request: NextRequest) {
     const { data, error } = await service
       .from('shift_reports')
       .insert({
+        organization_id: ctx.organizationId,
         branch_id: body.branchId ?? ctx.branchId,
         notes: body.notes ?? null,
         prepared_by: ctx.userId,

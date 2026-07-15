@@ -19,6 +19,7 @@ export async function GET() {
         production_batches(batch_number),
         items(code, name)
       `)
+      .eq('organization_id', ctx.organizationId)
       .is('deleted_at', null)
       .order('created_at', { ascending: false });
     if (error) throw error;
@@ -74,6 +75,7 @@ export async function POST(request: NextRequest) {
     const { data, error } = await service
       .from('production_wastage')
       .insert({
+        organization_id: String(batch.organization_id ?? ctx.organizationId),
         item_id: body.itemId,
         production_batch_id: body.productionBatchId,
         quantity,

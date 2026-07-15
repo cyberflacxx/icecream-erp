@@ -13,6 +13,7 @@ export async function GET(_request: NextRequest) {
     const { data, error } = await service
       .from('petty_cash_requests')
       .select('id, request_number, branch_id, request_date, amount_requested, purpose, status, approved_by, approved_at, disbursed_at')
+      .eq('organization_id', ctx.organizationId)
       .order('request_date', { ascending: false });
     if (error) throw error;
     return NextResponse.json(data ?? []);
@@ -41,6 +42,7 @@ export async function POST(request: NextRequest) {
     const { data, error } = await service
       .from('petty_cash_requests')
       .insert({
+        organization_id: ctx.organizationId,
         request_number: requestNumber,
         branch_id: body.branchId ?? null,
         requested_by: ctx.userId,
