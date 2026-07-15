@@ -13,6 +13,8 @@ import {
   hashOtpCode,
   maskEmailAddress,
   otpExpiryLabel,
+  REGISTRATION_BRANCH_UNAVAILABLE_MESSAGE,
+  REGISTRATION_ROLE_UNAVAILABLE_MESSAGE,
   registrationOtpExpiresAt,
   resolveRegistrationRole,
   validateRegistrationPayload,
@@ -80,7 +82,7 @@ export async function POST(request: NextRequest) {
   const service = createServiceRoleClient().schema('icecream_erp');
   const role = await resolveRegistrationRole(service, normalized.role);
   if (!role) {
-    return NextResponse.json({ error: 'Selected role is not available.', fieldErrors: { role: 'Selected role is not available.' } }, { status: 400 });
+    return NextResponse.json({ error: REGISTRATION_ROLE_UNAVAILABLE_MESSAGE, fieldErrors: { role: REGISTRATION_ROLE_UNAVAILABLE_MESSAGE } }, { status: 400 });
   }
 
   const normalizedBranchId = normalized.branchId || null;
@@ -95,7 +97,7 @@ export async function POST(request: NextRequest) {
       .eq('id', normalizedBranchId)
       .maybeSingle();
     if (!branch || String(branch.status ?? '').toUpperCase() !== 'ACTIVE') {
-      return NextResponse.json({ error: 'Selected branch is not available.', fieldErrors: { branch_id: 'Selected branch is not available.' } }, { status: 400 });
+      return NextResponse.json({ error: REGISTRATION_BRANCH_UNAVAILABLE_MESSAGE, fieldErrors: { branch_id: REGISTRATION_BRANCH_UNAVAILABLE_MESSAGE } }, { status: 400 });
     }
   }
 

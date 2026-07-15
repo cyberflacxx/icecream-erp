@@ -17,6 +17,8 @@ import {
   hashOtpCode,
   isMissingPendingRegistrationStorage,
   REGISTRATION_ACCOUNT_FAILURE_MESSAGE,
+  REGISTRATION_BRANCH_UNAVAILABLE_MESSAGE,
+  REGISTRATION_ROLE_UNAVAILABLE_MESSAGE,
   resolveRegistrationRole,
   syncUserBranchAssignment,
   toStoredUserRole,
@@ -122,7 +124,7 @@ export async function POST(request: NextRequest) {
 
   const role = await resolveRegistrationRole(service, String(pendingRoleId || payload.role));
   if (!role) {
-    return NextResponse.json({ error: 'Selected role is no longer available.' }, { status: 400 });
+    return NextResponse.json({ error: REGISTRATION_ROLE_UNAVAILABLE_MESSAGE }, { status: 400 });
   }
 
   const normalizedEmail = payload.email.trim().toLowerCase();
@@ -157,7 +159,7 @@ export async function POST(request: NextRequest) {
       .eq('id', normalizedBranchId)
       .maybeSingle();
     if (!branch || String(branch.status ?? '').toUpperCase() !== 'ACTIVE') {
-      return NextResponse.json({ error: 'Selected branch is not available.' }, { status: 400 });
+      return NextResponse.json({ error: REGISTRATION_BRANCH_UNAVAILABLE_MESSAGE }, { status: 400 });
     }
   }
 
@@ -323,7 +325,18 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    return NextResponse.json({ error: safeMessage }, { status: safeMessage === 'Email is already registered.' ? 409 : safeMessage === 'An account with this ID number already exists.' ? 409 : 500 });
+    return NextResponse.json({
+      error: safeMessage,
+    }, {
+      status:
+        safeMessage === 'Email is already registered.' ||
+        safeMessage === 'An account with this ID number already exists.' ||
+        safeMessage === 'Work ID is already registered.'
+          ? 409
+          : safeMessage === REGISTRATION_ROLE_UNAVAILABLE_MESSAGE || safeMessage === REGISTRATION_BRANCH_UNAVAILABLE_MESSAGE
+            ? 400
+            : 500,
+    });
   }
 
   try {

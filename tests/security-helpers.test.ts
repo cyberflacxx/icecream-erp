@@ -184,14 +184,21 @@ test('getSmtpReadiness reports missing SMTP requirements without exposing secret
   }
 });
 
-test('public registration role metadata keeps Super Admin branchless and branch roles branch-required', async () => {
+test('public registration role metadata loads only active database roles and excludes stale lead roles', async () => {
   const fakeService = {
     from() {
       return {
         select() {
           return {
             order() {
-              return Promise.resolve({ data: null, error: new Error('offline') });
+              return Promise.resolve({
+                data: [
+                  { description: 'Full system access', id: 'super-admin-db', is_active: true, name: 'Super Admin' },
+                  { description: 'Branch operations', id: 'branch-manager-db', status: 'ACTIVE', name: 'Branch Manager' },
+                  { description: 'Legacy lead role', id: 'procurement-lead-db', is_active: false, name: 'Procurement Lead' },
+                ],
+                error: null,
+              });
             },
           };
         },
@@ -200,11 +207,13 @@ test('public registration role metadata keeps Super Admin branchless and branch 
   } as never;
 
   const roles = await getPublicRegistrationRoles(fakeService);
-  const superAdmin = roles.find((role) => role.id === 'super_admin');
-  const branchManager = roles.find((role) => role.id === 'branch_manager');
+  const superAdmin = roles.find((role) => role.id === 'super-admin-db');
+  const branchManager = roles.find((role) => role.id === 'branch-manager-db');
+  const procurementLead = roles.find((role) => role.name === 'Procurement Lead');
 
   assert.equal(superAdmin?.requiresBranch, false);
   assert.equal(branchManager?.requiresBranch, true);
+  assert.equal(procurementLead, undefined);
 });
 
 test('registration user account payload matches live icecream_erp.user_accounts columns', () => {
@@ -254,6 +263,11 @@ test('registration error helpers keep server logs structured and frontend messag
   });
 
   assert.equal(getRegistrationClientErrorMessage(duplicateEmailError), 'Email is already registered.');
+  assert.equal(getRegistrationClientErrorMessage({
+    code: '23505',
+    details: 'Key (work_id)=(AQI-20260001) already exists.',
+    message: 'duplicate key value violates unique constraint "users_work_id_key"',
+  }), 'Work ID is already registered.');
   assert.equal(getRegistrationClientErrorMessage(new Error('unexpected failure')), REGISTRATION_ACCOUNT_FAILURE_MESSAGE);
 });
 

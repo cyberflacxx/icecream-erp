@@ -21,7 +21,7 @@ interface BranchOption {
 }
 
 const OTP_FAILURE_MESSAGE = 'OTP could not be sent. Please contact the system administrator.';
-const ACCOUNT_CREATION_FAILURE_MESSAGE = 'Account creation failed. Please contact the system administrator.';
+const ACCOUNT_CREATION_FAILURE_MESSAGE = 'Account creation failed. Please try again.';
 
 const idNumberPattern = /^[0-9]{6,9}[A-Z][0-9]{2}$/;
 
@@ -59,7 +59,7 @@ export default function RegisterPage() {
     (async () => {
       try {
         const response = await fetch('/api/roles/public');
-        const payload = (await response.json()) as { data?: RoleOption[] } | RoleOption[];
+        const payload = (await response.json()) as { data?: RoleOption[]; error?: string } | RoleOption[];
         if (!mounted) return;
         const roleArray = Array.isArray(payload) ? payload : payload.data ?? [];
         if (response.ok && roleArray.length > 0) {
@@ -67,7 +67,7 @@ export default function RegisterPage() {
           setRolesError(null);
         } else {
           setRoles([]);
-          setRolesError('Unable to load roles. Please refresh the page.');
+          setRolesError(Array.isArray(payload) ? 'Unable to load roles. Please refresh the page.' : payload.error ?? 'Unable to load roles. Please refresh the page.');
         }
       } catch {
         if (mounted) {
@@ -356,6 +356,7 @@ export default function RegisterPage() {
     Boolean(roleId) &&
     (!branchIsRequired || Boolean(branchId)) &&
     Boolean(adminKey.trim()) &&
+    roles.length > 0 &&
     !isSubmitting;
 
   const canVerifyOtp = Boolean(otpRequestId && /^[0-9]{6}$/.test(otp.trim()) && !isSubmitting);
@@ -494,7 +495,7 @@ export default function RegisterPage() {
                   fieldErrors.role ? 'border-red-500' : roleId ? 'border-green-500' : 'border-border'
                 } ${registrationLocked ? 'bg-slate-50 text-slate-500' : ''}`}
               >
-                <option value="">Select role</option>
+                <option value="">{isRolesLoading ? 'Loading roles...' : rolesError ? 'Roles unavailable' : 'Select role'}</option>
                 {roles.map((role) => (
                   <option key={role.id} value={role.id}>
                     {role.name}
@@ -565,7 +566,7 @@ export default function RegisterPage() {
               {!otpRequestId ? (
                 <button
                   type="button"
-                  disabled={!canRequestOtp}
+                  disabled={!canRequestOtp || Boolean(rolesError)}
                   onClick={requestOtp}
                   className="auth-primary-button"
                 >

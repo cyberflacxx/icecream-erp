@@ -1,6 +1,6 @@
 import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes } from 'crypto';
 
-import { ROLES, generateWorkId, workIdToEmail } from './auth-roles';
+import { generateWorkId, workIdToEmail } from './auth-roles';
 import { createServiceRoleClient } from './supabase/server';
 
 export interface RegistrationPayload {
@@ -56,7 +56,10 @@ export interface SafeRegistrationErrorDetails {
 
 type SupabaseSchemaClient = ReturnType<ReturnType<typeof createServiceRoleClient>['schema']>;
 
-export const REGISTRATION_ACCOUNT_FAILURE_MESSAGE = 'Account creation failed. Please contact the system administrator.';
+export const REGISTRATION_ACCOUNT_FAILURE_MESSAGE = 'Account creation failed. Please try again.';
+export const REGISTRATION_ROLE_UNAVAILABLE_MESSAGE = 'Selected role is no longer available. Please refresh and try again.';
+export const REGISTRATION_BRANCH_UNAVAILABLE_MESSAGE = 'Selected branch is no longer available. Please refresh and try again.';
+export const REGISTRATION_WORK_ID_UNAVAILABLE_MESSAGE = 'Work ID is already registered.';
 
 export const registrationPasswordPolicy = {
   minLength: 8,
@@ -85,6 +88,31 @@ function deriveKey() {
 
 function normalizeRoleName(roleName: string) {
   return roleName.trim().toLowerCase();
+}
+
+function isTruthyBoolean(value: unknown) {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    return normalized === 'true' || normalized === '1' || normalized === 'yes';
+  }
+  if (typeof value === 'number') return value === 1;
+  return false;
+}
+
+function isActiveRoleRecord(row: Record<string, unknown>) {
+  if ('is_active' in row) {
+    return isTruthyBoolean(row.is_active);
+  }
+
+  if ('status' in row) {
+    const status = String(row.status ?? '').trim().toUpperCase();
+    if (status) {
+      return status === 'ACTIVE';
+    }
+  }
+
+  return true;
 }
 
 function isMissingRelation(error: unknown, table: string) {
@@ -164,9 +192,19 @@ export function getRegistrationClientErrorMessage(error: unknown) {
     if (message.includes('email')) {
       return 'Email is already registered.';
     }
+    if (message.includes('work_id') || message.includes('work id')) {
+      return REGISTRATION_WORK_ID_UNAVAILABLE_MESSAGE;
+    }
     if (message.includes('id_number') || message.includes('id number')) {
       return 'An account with this ID number already exists.';
     }
+  }
+
+  if (message.includes('role') && message.includes('available')) {
+    return REGISTRATION_ROLE_UNAVAILABLE_MESSAGE;
+  }
+  if (message.includes('branch') && message.includes('available')) {
+    return REGISTRATION_BRANCH_UNAVAILABLE_MESSAGE;
   }
 
   return REGISTRATION_ACCOUNT_FAILURE_MESSAGE;
@@ -545,51 +583,31 @@ export function toStoredUserRole(role: string) {
 export async function getPublicRegistrationRoles(service: SupabaseSchemaClient) {
   const { data, error } = await service
     .from('roles')
-    .select('id, name, description')
+    .select('id, name, description, status, is_active')
     .order('name', { ascending: true });
 
-  const staticRoles = ROLES.map((role) => ({
-    id: role.id,
-    name: role.name,
-    description: role.description,
-    legacyRole: role.id,
-    requiresBranch: role.id !== 'super_admin',
-  })) satisfies RegistrationRoleRecord[];
-
-  if (error || !data?.length) {
-    return staticRoles;
+  if (error) {
+    throw error;
   }
 
-  const merged = new Map<string, RegistrationRoleRecord>();
+  return (data ?? [])
+    .map((role) => role as Record<string, unknown>)
+    .filter((role) => role.id && role.name)
+    .filter(isActiveRoleRecord)
+    .map((role) => {
+      const id = String(role.id);
+      const name = String(role.name);
+      const legacyRole = deriveLegacyRole(name, id);
 
-  for (const role of staticRoles) {
-    merged.set(normalizeRoleName(role.name), role);
-    merged.set(normalizeRoleName(role.id), role);
-  }
-
-  for (const role of data) {
-    const legacyRole = deriveLegacyRole(String(role.name), String(role.id));
-    const entry = {
-      id: String(role.id),
-      name: String(role.name),
-      description: role.description ? String(role.description) : null,
-      legacyRole,
-      requiresBranch: legacyRole !== 'super_admin',
-    } satisfies RegistrationRoleRecord;
-    merged.set(normalizeRoleName(entry.name), entry);
-    merged.set(normalizeRoleName(entry.id), entry);
-    if (!merged.has(normalizeRoleName(legacyRole))) {
-      merged.set(normalizeRoleName(legacyRole), entry);
-    }
-  }
-
-  const seen = new Set<string>();
-  return Array.from(merged.values()).filter((role) => {
-    const key = normalizeRoleName(role.name);
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
+      return {
+        id,
+        name,
+        description: role.description ? String(role.description) : null,
+        legacyRole,
+        requiresBranch: legacyRole !== 'super_admin',
+      } satisfies RegistrationRoleRecord;
+    })
+    .sort((left, right) => left.name.localeCompare(right.name));
 }
 
 export async function resolveRegistrationRole(service: SupabaseSchemaClient, selectedRole: string) {
