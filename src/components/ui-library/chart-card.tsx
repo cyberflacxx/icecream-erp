@@ -13,7 +13,9 @@ export function ChartCard({ title, subtitle, children }: ChartCardProps) {
         <h3 className="dashboard-blue-value text-base font-semibold tracking-[-0.02em]">{title}</h3>
         {subtitle ? <p className="dashboard-blue-copy mt-1 text-sm">{subtitle}</p> : null}
       </div>
-      {children}
+      <div className="rounded-[1.25rem] border border-white/20 bg-white/96 p-4 text-slate-900 shadow-inner shadow-slate-900/5">
+        {children}
+      </div>
     </section>
   );
 }
