@@ -8,10 +8,9 @@ import Swal from 'sweetalert2';
 import { AuthShell } from '@/components/auth/auth-shell';
 
 interface RoleOption {
-  description?: string | null;
+  code?: string | null;
   id: string;
   name: string;
-  requiresBranch?: boolean;
 }
 
 interface BranchOption {
@@ -22,11 +21,31 @@ interface BranchOption {
 
 const OTP_FAILURE_MESSAGE = 'OTP could not be sent. Please contact the system administrator.';
 const ACCOUNT_CREATION_FAILURE_MESSAGE = 'Account creation failed. Please try again.';
+const ROLES_LOAD_FAILURE_MESSAGE = 'Unable to load roles right now. Please refresh the page.';
+const ROLES_EMPTY_MESSAGE = 'No registration roles are available. Please contact the administrator.';
 
 const idNumberPattern = /^[0-9]{6,9}[A-Z][0-9]{2}$/;
 
 function sanitizeIdNumber(value: string) {
   return value.toUpperCase().replace(/[^0-9A-Z]/g, '');
+}
+
+function normalizeRoleIdentity(value?: string | null) {
+  return String(value ?? '').trim().toLowerCase().replace(/[\s-]+/g, '_');
+}
+
+function roleRequiresBranch(role: RoleOption | null) {
+  if (!role) {
+    return false;
+  }
+
+  const roleCode = normalizeRoleIdentity(role.code);
+  const roleId = normalizeRoleIdentity(role.id);
+  const roleName = normalizeRoleIdentity(role.name);
+
+  return ![roleCode, roleId, roleName].some((value) =>
+    value === 'super_admin' || value === 'system_admin',
+  );
 }
 
 export default function RegisterPage() {
@@ -54,31 +73,53 @@ export default function RegisterPage() {
   const [rolesError, setRolesError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
+  async function loadRoles(signal?: AbortSignal) {
+    setIsRolesLoading(true);
+
+    try {
+      const response = await fetch('/api/roles/public', { signal });
+      const payload = (await response.json()) as { data?: RoleOption[]; error?: string } | RoleOption[];
+      const roleArray = Array.isArray(payload) ? payload : payload.data ?? [];
+
+      if (!response.ok) {
+        setRoles([]);
+        setRolesError(Array.isArray(payload) ? ROLES_LOAD_FAILURE_MESSAGE : payload.error ?? ROLES_LOAD_FAILURE_MESSAGE);
+        return;
+      }
+
+      if (roleArray.length === 0) {
+        setRoles([]);
+        setRolesError(ROLES_EMPTY_MESSAGE);
+        return;
+      }
+
+      setRoles(
+        roleArray
+          .filter((role) => role?.id && role?.name)
+          .sort((left, right) => left.name.localeCompare(right.name)),
+      );
+      setRolesError(null);
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        return;
+      }
+
+      setRoles([]);
+      setRolesError(ROLES_LOAD_FAILURE_MESSAGE);
+    } finally {
+      setIsRolesLoading(false);
+    }
+  }
+
   useEffect(() => {
+    const controller = new AbortController();
     let mounted = true;
     (async () => {
-      try {
-        const response = await fetch('/api/roles/public');
-        const payload = (await response.json()) as { data?: RoleOption[]; error?: string } | RoleOption[];
-        if (!mounted) return;
-        const roleArray = Array.isArray(payload) ? payload : payload.data ?? [];
-        if (response.ok && roleArray.length > 0) {
-          setRoles(roleArray);
-          setRolesError(null);
-        } else {
-          setRoles([]);
-          setRolesError(Array.isArray(payload) ? 'Unable to load roles. Please refresh the page.' : payload.error ?? 'Unable to load roles. Please refresh the page.');
-        }
-      } catch {
-        if (mounted) {
-          setRoles([]);
-          setRolesError('Unable to load roles. Please refresh the page.');
-        }
-      } finally {
-        if (mounted) {
-          setIsRolesLoading(false);
-        }
+      if (!mounted) {
+        return;
       }
+
+      await loadRoles(controller.signal);
     })();
 
     (async () => {
@@ -94,6 +135,7 @@ export default function RegisterPage() {
 
     return () => {
       mounted = false;
+      controller.abort();
     };
   }, []);
 
@@ -111,7 +153,7 @@ export default function RegisterPage() {
     () => roles.find((role) => role.id === roleId) ?? null,
     [roleId, roles],
   );
-  const branchIsRequired = selectedRole?.requiresBranch ?? (roleId ? roleId !== 'super_admin' : false);
+  const branchIsRequired = roleRequiresBranch(selectedRole);
 
   useEffect(() => {
     if (!branchIsRequired && branchId) {
@@ -378,7 +420,18 @@ export default function RegisterPage() {
           ) : null}
           {rolesError ? (
             <div className="auth-alert mt-6 border-amber-200 bg-amber-50 text-amber-700 dark:bg-amber-950/20">
-              {rolesError}
+              <div className="flex items-center justify-between gap-3">
+                <span>{rolesError}</span>
+                {rolesError === ROLES_LOAD_FAILURE_MESSAGE ? (
+                  <button
+                    type="button"
+                    onClick={() => void loadRoles()}
+                    className="text-xs font-semibold text-orange underline-offset-2 hover:underline"
+                  >
+                    Retry
+                  </button>
+                ) : null}
+              </div>
             </div>
           ) : null}
           {otpRequestId ? (

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 
-import { getPublicRegistrationRoles } from '@/lib/registration';
+import { getPublicRegistrationRoles, getSafeRegistrationErrorDetails } from '@/lib/registration';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
 /** Public endpoint — no auth required. Used by the self-registration page. */
@@ -17,17 +17,18 @@ export async function GET() {
 
     return NextResponse.json({
       data: roles.map((role) => ({
+        code: role.code,
         id: role.id,
         name: role.name,
-        description: role.description,
-        requiresBranch: role.requiresBranch,
       })),
     });
   } catch (error) {
     console.error('Public registration roles failed to load.', {
-      message: error instanceof Error ? error.message : 'Unknown role loading failure',
+      ...getSafeRegistrationErrorDetails(error, {
+        step: 'load_public_registration_roles',
+        table: 'roles',
+      }),
       route: '/api/roles/public',
-      step: 'load_active_roles',
     });
 
     return NextResponse.json(

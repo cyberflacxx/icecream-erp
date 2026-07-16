@@ -188,14 +188,23 @@ test('public registration role metadata loads only active database roles and exc
   const fakeService = {
     from() {
       return {
-        select() {
+        select(selectClause: string) {
           return {
             order() {
+              if (selectClause.includes('is_active')) {
+                return Promise.resolve({
+                  data: null,
+                  error: {
+                    message: 'column icecream_erp.roles.is_active does not exist',
+                  },
+                });
+              }
+
               return Promise.resolve({
                 data: [
-                  { description: 'Full system access', id: 'super-admin-db', is_active: true, name: 'Super Admin' },
-                  { description: 'Branch operations', id: 'branch-manager-db', status: 'ACTIVE', name: 'Branch Manager' },
-                  { description: 'Legacy lead role', id: 'procurement-lead-db', is_active: false, name: 'Procurement Lead' },
+                  { code: 'super_admin', description: 'Full system access', id: 'super-admin-db', name: 'Super Admin', status: 'ACTIVE' },
+                  { code: 'branch_manager', description: 'Branch operations', id: 'branch-manager-db', name: 'Branch Manager', status: 'ACTIVE' },
+                  { code: 'procurement_lead', description: 'Legacy lead role', id: 'procurement-lead-db', name: 'Procurement Lead', status: 'INACTIVE' },
                 ],
                 error: null,
               });
@@ -212,8 +221,51 @@ test('public registration role metadata loads only active database roles and exc
   const procurementLead = roles.find((role) => role.name === 'Procurement Lead');
 
   assert.equal(superAdmin?.requiresBranch, false);
+  assert.equal(superAdmin?.code, 'super_admin');
   assert.equal(branchManager?.requiresBranch, true);
   assert.equal(procurementLead, undefined);
+});
+
+test('public registration role metadata falls back safely when active columns are absent', async () => {
+  const fakeService = {
+    from() {
+      return {
+        select(selectClause: string) {
+          return {
+            order() {
+              if (
+                selectClause.includes('is_active') ||
+                selectClause.includes('status') ||
+                selectClause.includes('description')
+              ) {
+                return Promise.resolve({
+                  data: null,
+                  error: {
+                    message: `column ${selectClause.split(',').slice(-1)[0]?.trim() ?? 'roles.unknown'} does not exist`,
+                  },
+                });
+              }
+
+              return Promise.resolve({
+                data: [
+                  { code: 'super_admin', id: 'super-admin-db', name: 'Super Admin' },
+                  { code: 'branch_manager', id: 'branch-manager-db', name: 'Branch Manager' },
+                ],
+                error: null,
+              });
+            },
+          };
+        },
+      };
+    },
+  } as never;
+
+  const roles = await getPublicRegistrationRoles(fakeService);
+
+  assert.deepEqual(roles.map((role) => ({ code: role.code, name: role.name })), [
+    { code: 'branch_manager', name: 'Branch Manager' },
+    { code: 'super_admin', name: 'Super Admin' },
+  ]);
 });
 
 test('registration user account payload matches live icecream_erp.user_accounts columns', () => {

@@ -14,6 +14,7 @@ export interface RegistrationPayload {
 }
 
 export interface RegistrationRoleRecord {
+  code: string | null;
   description: string | null;
   id: string;
   legacyRole: string;
@@ -113,6 +114,70 @@ function isActiveRoleRecord(row: Record<string, unknown>) {
   }
 
   return true;
+}
+
+function hasColumnSelectionError(error: unknown) {
+  const message = error instanceof Error
+    ? error.message
+    : typeof error === 'object' && error !== null && 'message' in error
+      ? String((error as { message?: unknown }).message ?? '')
+      : '';
+
+  const normalized = message.toLowerCase();
+  return normalized.includes('column') && (
+    normalized.includes('roles.') ||
+    normalized.includes('icecream_erp.roles') ||
+    normalized.includes("could not find the '") ||
+    normalized.includes('does not exist')
+  );
+}
+
+async function queryPublicRegistrationRoles(
+  service: SupabaseSchemaClient,
+  selectClause: string,
+) {
+  const { data, error } = await service
+    .from('roles')
+    .select(selectClause)
+    .order('name', { ascending: true });
+
+  if (error) {
+    throw error;
+  }
+
+  return (data ?? []).map((role) => role as unknown as Record<string, unknown>);
+}
+
+async function fetchPublicRegistrationRoleRows(service: SupabaseSchemaClient) {
+  const selectVariants = [
+    'id, name, code, description, is_active',
+    'id, name, code, is_active',
+    'id, name, description, is_active',
+    'id, name, is_active',
+    'id, name, code, description, status',
+    'id, name, code, status',
+    'id, name, description, status',
+    'id, name, status',
+    'id, name, code, description',
+    'id, name, code',
+    'id, name, description',
+    'id, name',
+  ] as const;
+
+  let lastError: unknown = null;
+
+  for (const selectClause of selectVariants) {
+    try {
+      return await queryPublicRegistrationRoles(service, selectClause);
+    } catch (error) {
+      lastError = error;
+      if (!hasColumnSelectionError(error)) {
+        throw error;
+      }
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error('Unable to load registration roles.');
 }
 
 function isMissingRelation(error: unknown, table: string) {
@@ -581,16 +646,7 @@ export function toStoredUserRole(role: string) {
 }
 
 export async function getPublicRegistrationRoles(service: SupabaseSchemaClient) {
-  const { data, error } = await service
-    .from('roles')
-    .select('id, name, description, status, is_active')
-    .order('name', { ascending: true });
-
-  if (error) {
-    throw error;
-  }
-
-  return (data ?? [])
+  return (await fetchPublicRegistrationRoleRows(service))
     .map((role) => role as Record<string, unknown>)
     .filter((role) => role.id && role.name)
     .filter(isActiveRoleRecord)
@@ -598,11 +654,13 @@ export async function getPublicRegistrationRoles(service: SupabaseSchemaClient) 
       const id = String(role.id);
       const name = String(role.name);
       const legacyRole = deriveLegacyRole(name, id);
+      const code = typeof role.code === 'string' && role.code.trim() ? role.code.trim() : legacyRole;
 
       return {
+        code,
         id,
         name,
-        description: role.description ? String(role.description) : null,
+        description: typeof role.description === 'string' && role.description.trim() ? String(role.description) : null,
         legacyRole,
         requiresBranch: legacyRole !== 'super_admin',
       } satisfies RegistrationRoleRecord;
