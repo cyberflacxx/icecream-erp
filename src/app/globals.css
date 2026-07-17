@@ -191,6 +191,91 @@
     color: rgba(239, 246, 255, 0.92) !important;
   }
 
+  .dashboard-blue-card :is(
+    input,
+    textarea,
+    select,
+    option,
+    [role='combobox'],
+    [cmdk-input],
+    [data-slot='input'],
+    [data-slot='textarea'],
+    [data-radix-select-trigger],
+    [data-radix-select-value]
+  ) {
+    color: #0f172a !important;
+    -webkit-text-fill-color: #0f172a !important;
+  }
+
+  .dashboard-blue-card :is(
+    input,
+    textarea,
+    select,
+    [role='combobox'],
+    [cmdk-input],
+    [data-slot='input'],
+    [data-slot='textarea'],
+    [data-radix-select-trigger]
+  )::placeholder {
+    color: #64748b !important;
+    -webkit-text-fill-color: #64748b !important;
+  }
+
+  .dashboard-blue-card :is(
+    input,
+    textarea,
+    select,
+    [role='combobox'],
+    [cmdk-input],
+    [data-slot='input'],
+    [data-slot='textarea'],
+    [data-radix-select-trigger]
+  ) {
+    background: #ffffff !important;
+    border-color: #cbd5e1 !important;
+    caret-color: #0f172a !important;
+  }
+
+  .dashboard-blue-card :is(
+    input,
+    textarea,
+    select,
+    [role='combobox'],
+    [cmdk-input],
+    [data-slot='input'],
+    [data-slot='textarea'],
+    [data-radix-select-trigger]
+  ):disabled {
+    background: #f1f5f9 !important;
+    color: #64748b !important;
+    -webkit-text-fill-color: #64748b !important;
+  }
+
+  .dashboard-blue-card :is(
+    input,
+    textarea,
+    select,
+    [role='combobox'],
+    [cmdk-input],
+    [data-slot='input'],
+    [data-slot='textarea'],
+    [data-radix-select-trigger]
+  ) :is(svg, i),
+  .dashboard-blue-card :is(
+    input,
+    textarea,
+    select,
+    [role='combobox'],
+    [cmdk-input],
+    [data-slot='input'],
+    [data-slot='textarea'],
+    [data-radix-select-trigger],
+    [data-radix-select-content],
+    [data-radix-select-viewport]
+  ) :is([class*='text-slate'], [class*='text-gray'], [class*='text-muted'], [class*='text-blue']) {
+    color: #334155 !important;
+  }
+
   .dashboard-blue-card :is([class*='bg-orange/10'], [class*='bg-white/10'], [class*='bg-white/12']) {
     background: rgba(255, 255, 255, 0.14) !important;
   }
@@ -257,21 +342,27 @@
   }
 
   .surface-input {
-    @apply h-10 w-full rounded-lg border px-3 text-brown outline-none transition dark:text-darkText;
+    @apply h-10 w-full rounded-lg border px-3 text-brown outline-none transition placeholder:text-slate-500 dark:text-darkText dark:placeholder:text-slate-400;
     border-color: color-mix(in srgb, var(--app-border) 80%, transparent);
-    background: color-mix(in srgb, var(--app-surface-strong) 72%, white);
+    background: #ffffff;
+    color: #0f172a;
+    caret-color: #0f172a;
   }
 
   .surface-input-soft {
-    @apply h-10 w-full rounded-lg border px-3.5 text-brown outline-none transition dark:text-darkText;
+    @apply h-10 w-full rounded-lg border px-3.5 text-brown outline-none transition placeholder:text-slate-500 dark:text-darkText dark:placeholder:text-slate-400;
     border-color: color-mix(in srgb, var(--app-border) 80%, transparent);
-    background: color-mix(in srgb, var(--app-surface-strong) 72%, white);
+    background: #ffffff;
+    color: #0f172a;
+    caret-color: #0f172a;
   }
 
   .surface-textarea-soft {
-    @apply w-full rounded-lg border px-3.5 py-2.5 text-brown outline-none transition dark:text-darkText;
+    @apply w-full rounded-lg border px-3.5 py-2.5 text-brown outline-none transition placeholder:text-slate-500 dark:text-darkText dark:placeholder:text-slate-400;
     border-color: color-mix(in srgb, var(--app-border) 80%, transparent);
-    background: color-mix(in srgb, var(--app-surface-strong) 72%, white);
+    background: #ffffff;
+    color: #0f172a;
+    caret-color: #0f172a;
   }
 
   .surface-checkbox-row {
@@ -312,6 +403,58 @@
   .dark .surface-textarea-soft {
     border-color: rgba(255, 255, 255, 0.08);
     background: rgba(255, 255, 255, 0.03);
+  }
+
+  input,
+  textarea,
+  select,
+  button[role='combobox'],
+  [cmdk-input] {
+    color: #0f172a;
+    caret-color: #0f172a;
+  }
+
+  input::placeholder,
+  textarea::placeholder,
+  [cmdk-input]::placeholder {
+    color: #64748b;
+    opacity: 1;
+  }
+
+  select {
+    color: #0f172a;
+  }
+
+  option {
+    color: #0f172a;
+    background: #ffffff;
+  }
+
+  [data-radix-select-content],
+  [data-radix-select-viewport],
+  [cmdk-root],
+  [cmdk-list] {
+    color: #0f172a;
+  }
+
+  [data-radix-select-content] :is([role='option'], [data-highlighted], [data-state], span, svg),
+  [cmdk-root] :is([cmdk-item], [cmdk-group-heading], [cmdk-empty], span, svg) {
+    color: #0f172a;
+  }
+
+  [data-radix-select-trigger]::placeholder,
+  [data-radix-select-value] {
+    color: #0f172a;
+  }
+
+  input:disabled,
+  textarea:disabled,
+  select:disabled,
+  button[role='combobox']:disabled,
+  [cmdk-input]:disabled {
+    background: #f1f5f9;
+    color: #64748b;
+    -webkit-text-fill-color: #64748b;
   }
 
   /* Glassmorphism */
