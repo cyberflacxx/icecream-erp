@@ -206,6 +206,74 @@ export function normalizePettyCashRequest(row: Record<string, unknown>): Normali
   };
 }
 
+export interface NormalizedCashAccount {
+  accountName: string;
+  accountNumber: string | null;
+  balance: number;
+  branchId: string | null;
+  branchName: string | null;
+  createdAt: string | null;
+  currencyCode: string | null;
+  currentBalance: number;
+  id: string;
+  isActive: boolean;
+  name: string;
+  openingBalance: number;
+  status: string;
+}
+
+export function resolveCashAccountBalance(row: Record<string, unknown>) {
+  return toNumber(
+    row.current_balance ??
+      row.balance ??
+      row.opening_balance ??
+      row.amount ??
+      0,
+  );
+}
+
+export function normalizeCashAccount(row: Record<string, unknown>): NormalizedCashAccount {
+  const name = String(row.name ?? row.account_name ?? '');
+  const accountName = String(row.account_name ?? row.name ?? '');
+  const accountNumber = row.account_number ? String(row.account_number) : null;
+  const balance = resolveCashAccountBalance(row);
+  const branchId = row.branch_id ? String(row.branch_id) : row.branchId ? String(row.branchId) : null;
+  const branch = row.branches as Record<string, unknown> | Array<Record<string, unknown>> | null | undefined;
+  const branchRow = Array.isArray(branch) ? branch[0] ?? null : branch ?? null;
+  const branchName = branchRow?.name ? String(branchRow.name) : null;
+  const createdAt = row.created_at ? String(row.created_at) : row.createdAt ? String(row.createdAt) : null;
+  const currency =
+    row.currency_code ??
+    row.currency ??
+    row.currencyCode ??
+    (row.currencies as Record<string, unknown> | null | undefined)?.code ??
+    null;
+  const openingBalance = toNumber(row.opening_balance ?? row.openingBalance ?? row.balance ?? 0);
+  const isActive = row.is_active === undefined ? true : row.is_active !== false;
+  const status =
+    row.status !== undefined
+      ? String(row.status).toUpperCase()
+      : isActive
+        ? 'ACTIVE'
+        : 'INACTIVE';
+
+  return {
+    accountName,
+    accountNumber,
+    balance,
+    branchId,
+    branchName,
+    createdAt,
+    currencyCode: currency ? String(currency) : null,
+    currentBalance: balance,
+    id: String(row.id ?? ''),
+    isActive,
+    name,
+    openingBalance,
+    status,
+  };
+}
+
 export interface FinanceDashboardData {
   charts: {
     cashflowLast7Days: Array<{

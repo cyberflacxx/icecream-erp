@@ -1,7 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { badRequest, can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
-import { financeErrorMessage, financeService, isMissingFinanceTable, writeFinanceAuditLog } from '@/lib/finance-server';
+import {
+  financeService,
+  loadCashAccountsCompatibility,
+  logFinanceRouteError,
+  writeFinanceAuditLog,
+} from '@/lib/finance-server';
 
 export async function GET(request: NextRequest) {
   const ctx = await getAuthContext();
@@ -13,18 +18,14 @@ export async function GET(request: NextRequest) {
   const branchId = searchParams.get('branchId');
 
   try {
-    let query = service
-      .from('cash_accounts')
-      .select('id, account_id, branch_id, name, balance, is_active')
-      .order('name', { ascending: true });
-    if (branchId) query = query.eq('branch_id', branchId);
-
-    const { data, error } = await query;
-    if (error) throw error;
-    return NextResponse.json(data ?? []);
+    const data = await loadCashAccountsCompatibility(ctx.organizationId, {
+      branchId: branchId ?? undefined,
+      routeName: 'finance.cash-accounts',
+    });
+    return NextResponse.json(data);
   } catch (err) {
-    if (isMissingFinanceTable(err)) return NextResponse.json([]);
-    return serverError(financeErrorMessage(err) || 'Internal server error');
+    logFinanceRouteError('finance.cash-accounts', 'list', err);
+    return serverError('Cash accounts could not be loaded. Please refresh or contact support.');
   }
 }
 

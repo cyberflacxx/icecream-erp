@@ -13,6 +13,7 @@ import {
 import {
   isMissingFinanceColumn,
   isMissingFinanceTable,
+  loadCashAccountsCompatibility,
   loadPettyCashRequestsCompatibility,
   loadLedgerLines,
   logFinanceRouteError,
@@ -159,13 +160,7 @@ export async function GET(request: NextRequest) {
       {
         key: 'cashAccounts',
         warning: sectionWarning('cash accounts'),
-        load: () =>
-          optionalQuery(
-            queryWithoutDeletedAt(
-              service.schema('icecream_erp').from('cash_accounts').select('balance'),
-              () => service.schema('icecream_erp').from('cash_accounts').select('balance'),
-            ),
-          ),
+        load: () => loadCashAccountsCompatibility(ctx.organizationId, { routeName: 'finance.dashboard' }),
       },
       {
         key: 'pettyCashRequests',

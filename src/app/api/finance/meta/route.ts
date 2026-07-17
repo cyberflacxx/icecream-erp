@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 
 import { can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
-import { financeErrorMessage, financeService, isMissingFinanceTable } from '@/lib/finance-server';
+import { financeErrorMessage, financeService, isMissingFinanceTable, loadCashAccountsCompatibility } from '@/lib/finance-server';
 
 type Row = Record<string, unknown>;
 
@@ -62,7 +62,7 @@ export async function GET() {
       fetchRows('accounts', ctx.organizationId),
       fetchRows('bank_accounts', ctx.organizationId),
       fetchRows('branches', ctx.organizationId),
-      fetchRows('cash_accounts', ctx.organizationId),
+      loadCashAccountsCompatibility(ctx.organizationId, { routeName: 'finance.meta' }),
     ]);
 
     return NextResponse.json({
@@ -87,12 +87,12 @@ export async function GET() {
       ),
       cashAccounts: sortByName(
         cashAccounts
-          .filter((row) => row.is_active !== false)
+          .filter((row) => row.isActive !== false)
           .map((row) => ({
-            branchId: row.branch_id ? String(row.branch_id) : null,
+            branchId: row.branchId ? String(row.branchId) : null,
             id: String(row.id),
-            name: String(row.name ?? row.account_name ?? ''),
-            balance: Number(row.balance ?? row.current_balance ?? 0),
+            name: String(row.name ?? row.accountName ?? ''),
+            balance: Number(row.balance ?? row.currentBalance ?? 0),
           })),
       ),
     });

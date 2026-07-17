@@ -3,6 +3,7 @@ import { isMissingColumnError } from '@/lib/postgrest-compat';
 import {
   buildFinanceSourceReference,
   isPostedJournalStatus,
+  normalizeCashAccount,
   normalizePettyCashRequest,
   normalizeFinanceAccountType,
   validateJournalLines,
@@ -206,6 +207,107 @@ export async function loadPettyCashRequestsCompatibility(
       message.includes("Could not find the table 'icecream_erp.petty_cash_requests'") ||
       message.includes('Could not find a relationship between') ||
       /column\s+petty_cash_requests\.[a-z_]+\s+does not exist/i.test(message);
+
+    if (!compatibilityFailure) {
+      logFinanceRouteError(routeName, attempt.step, result.error);
+      throw result.error;
+    }
+
+    logFinanceRouteError(routeName, attempt.step, result.error);
+  }
+
+  return [];
+}
+
+async function runCashAccountsCompatibilityQuery(
+  selectClause: string,
+  organizationId: string,
+  options?: {
+    branchId?: string;
+    routeName?: string;
+  },
+) {
+  let withDeletedAt = financeService()
+    .from('cash_accounts')
+    .select(selectClause)
+    .eq('organization_id', organizationId)
+    .is('deleted_at', null);
+
+  if (options?.branchId) {
+    withDeletedAt = withDeletedAt.eq('branch_id', options.branchId);
+  }
+
+  const withDeletedAtResult = await withDeletedAt.order('name', { ascending: true });
+  if (!withDeletedAtResult.error) {
+    return withDeletedAtResult;
+  }
+
+  if (!isMissingFinanceColumn(withDeletedAtResult.error, 'cash_accounts', 'deleted_at')) {
+    return withDeletedAtResult;
+  }
+
+  let fallback = financeService()
+    .from('cash_accounts')
+    .select(selectClause)
+    .eq('organization_id', organizationId);
+
+  if (options?.branchId) {
+    fallback = fallback.eq('branch_id', options.branchId);
+  }
+
+  return fallback.order('name', { ascending: true });
+}
+
+export async function loadCashAccountsCompatibility(
+  organizationId: string,
+  options?: {
+    branchId?: string;
+    routeName?: string;
+  },
+) {
+  const routeName = options?.routeName ?? 'finance';
+  const attempts = [
+    {
+      select:
+        'id, organization_id, branch_id, account_id, account_name, account_number, name, current_balance, opening_balance, status, is_active, currency_code, currency, created_at, branches(name)',
+      step: 'cash_accounts.modern',
+    },
+    {
+      select:
+        'id, organization_id, branch_id, account_id, account_name, account_number, name, balance, opening_balance, status, is_active, currency_code, currency, created_at, branches(name)',
+      step: 'cash_accounts.balance',
+    },
+    {
+      select:
+        'id, organization_id, branch_id, account_name, account_number, name, current_balance, balance, status, is_active, created_at, branches(name)',
+      step: 'cash_accounts.lean',
+    },
+    {
+      select: 'id, organization_id, branch_id, name, account_name, balance, current_balance, is_active, branches(name)',
+      step: 'cash_accounts.minimal_balance',
+    },
+    {
+      select: 'id, organization_id, name, account_name, created_at',
+      step: 'cash_accounts.minimal_identity',
+    },
+  ];
+
+  for (const attempt of attempts) {
+    const result = await runCashAccountsCompatibilityQuery(attempt.select, organizationId, options);
+    if (!result.error) {
+      return (result.data ?? []).map((row: unknown) => normalizeCashAccount(row as Record<string, unknown>));
+    }
+
+    if (isMissingFinanceTable(result.error)) {
+      return [];
+    }
+
+    const message = financeErrorMessage(result.error);
+    const compatibilityFailure =
+      message.includes("Could not find the table 'icecream_erp.cash_accounts'") ||
+      message.includes('Could not find a relationship between') ||
+      /column\s+cash_accounts\.[a-z_]+\s+does not exist/i.test(message) ||
+      /column\s+branches\.[a-z_]+\s+does not exist/i.test(message);
 
     if (!compatibilityFailure) {
       logFinanceRouteError(routeName, attempt.step, result.error);

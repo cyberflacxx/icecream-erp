@@ -17,7 +17,9 @@ import {
   calculateProductionCostSummary,
   calculateReceivableBalance,
   calculateStraightLineDepreciation,
+  normalizeCashAccount,
   normalizePettyCashRequest,
+  resolveCashAccountBalance,
   resolveFinanceSectionResult,
   resolvePettyCashAmount,
   summarizeBalanceSheetFromLedger,
@@ -160,6 +162,38 @@ test('normalizePettyCashRequest returns canonical and legacy petty cash fields',
   assert.equal(normalized.requestedBy, 'user-1');
   assert.equal(normalized.branchId, 'branch-1');
   assert.equal(normalized.status, 'APPROVED');
+});
+
+test('cash account helpers fall back across compatible balance columns safely', () => {
+  assert.equal(resolveCashAccountBalance({ current_balance: 120 }), 120);
+  assert.equal(resolveCashAccountBalance({ balance: 95 }), 95);
+  assert.equal(resolveCashAccountBalance({ opening_balance: 45 }), 45);
+  assert.equal(resolveCashAccountBalance({ amount: 12 }), 12);
+  assert.equal(resolveCashAccountBalance({}), 0);
+});
+
+test('normalizeCashAccount returns canonical cash account fields from legacy shapes', () => {
+  const normalized = normalizeCashAccount({
+    account_name: 'Main Cash',
+    account_number: 'CASH-001',
+    balance: 50,
+    branch_id: 'branch-1',
+    branches: { name: 'Harare' },
+    created_at: '2026-07-17T09:00:00.000Z',
+    id: 'cash-1',
+    is_active: true,
+  });
+
+  assert.equal(normalized.id, 'cash-1');
+  assert.equal(normalized.name, 'Main Cash');
+  assert.equal(normalized.accountName, 'Main Cash');
+  assert.equal(normalized.accountNumber, 'CASH-001');
+  assert.equal(normalized.balance, 50);
+  assert.equal(normalized.currentBalance, 50);
+  assert.equal(normalized.branchId, 'branch-1');
+  assert.equal(normalized.branchName, 'Harare');
+  assert.equal(normalized.status, 'ACTIVE');
+  assert.equal(normalized.isActive, true);
 });
 
 test('buildEmptyFinanceDashboardData returns zero-safe dashboard defaults', () => {
