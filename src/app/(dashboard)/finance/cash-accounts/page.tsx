@@ -1,9 +1,10 @@
 'use client';
 
 import { type FormEvent, useState } from 'react';
-import { AlertCircle, Plus } from 'lucide-react';
+import { AlertCircle, Banknote, Plus } from 'lucide-react';
 
 import { PageHeader } from '@/components/dashboard/page-header';
+import { FinanceEmptyState } from '@/components/finance/finance-empty-state';
 import { FinanceNav } from '@/components/finance/finance-nav';
 import { Button } from '@/components/ui/button';
 import { DataTable, EmptyState, FormDrawer, LoadingState } from '@/components/ui-library';
@@ -58,7 +59,15 @@ export default function FinanceCashAccountsPage() {
 
   if (query.isLoading) return <LoadingState />;
   if (query.isError || !query.data) {
-    return <EmptyState icon={<AlertCircle className="h-6 w-6" />} title="Cash accounts unavailable" description={query.error?.message ?? 'No cash account data returned.'} />;
+    return (
+      <FinanceEmptyState
+        icon={<AlertCircle className="h-6 w-6" />}
+        title="Cash accounts unavailable"
+        description="Cash account data could not be loaded right now. Please refresh or try again."
+        actionLabel="Retry"
+        onAction={() => void query.refetch()}
+      />
+    );
   }
 
   return (
@@ -78,11 +87,20 @@ export default function FinanceCashAccountsPage() {
       <DataTable
         columns={[
           { key: 'name', header: 'Cash Account' },
-          { key: 'branch_id', header: 'Branch' },
-          { key: 'balance', header: 'Balance', render: (row) => currency.format(Number(row.balance ?? 0)) },
-          { key: 'is_active', header: 'Active', render: (row) => (row.is_active ? 'Yes' : 'No') },
+          { key: 'branchName', header: 'Branch', render: (row) => String(row.branchName ?? row.branch_id ?? 'Unassigned') },
+          { key: 'balance', header: 'Balance', render: (row) => currency.format(Number(row.balance ?? row.currentBalance ?? 0)) },
+          { key: 'isActive', header: 'Active', render: (row) => ((row.isActive ?? row.is_active) ? 'Yes' : 'No') },
         ]}
         data={query.data}
+        emptyState={
+          <FinanceEmptyState
+            icon={<Banknote className="h-6 w-6" />}
+            title="No cash accounts found."
+            description="Create a cash account to track petty cash and cash movements."
+            actionLabel="Create Cash Account"
+            href="/settings/finance-setup"
+          />
+        }
       />
 
       <div className="space-y-3">

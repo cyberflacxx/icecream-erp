@@ -18,6 +18,7 @@ import {
   calculateReceivableBalance,
   calculateStraightLineDepreciation,
   normalizeCashAccount,
+  normalizeFinanceCollectionResponse,
   normalizePettyCashRequest,
   normalizeTrialBalanceRow,
   resolveCashAccountBalance,
@@ -197,6 +198,14 @@ test('normalizeCashAccount returns canonical cash account fields from legacy sha
   assert.equal(normalized.branchName, 'Harare');
   assert.equal(normalized.status, 'ACTIVE');
   assert.equal(normalized.isActive, true);
+});
+
+test('normalizeFinanceCollectionResponse handles array and wrapped finance payload shapes', () => {
+  assert.deepEqual(normalizeFinanceCollectionResponse([{ id: 1 }]), [{ id: 1 }]);
+  assert.deepEqual(normalizeFinanceCollectionResponse({ data: [{ id: 2 }] }), [{ id: 2 }]);
+  assert.deepEqual(normalizeFinanceCollectionResponse({ success: true, data: [{ id: 3 }] }), [{ id: 3 }]);
+  assert.deepEqual(normalizeFinanceCollectionResponse({ success: true, data: null }), []);
+  assert.deepEqual(normalizeFinanceCollectionResponse(null), []);
 });
 
 test('trial balance helpers resolve debit and credit aliases safely', () => {

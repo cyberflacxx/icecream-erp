@@ -334,6 +334,23 @@ export interface NormalizedTrialBalanceRow {
   debit: number;
 }
 
+export function normalizeFinanceCollectionResponse<T>(response: unknown): T[] {
+  if (Array.isArray(response)) {
+    return response as T[];
+  }
+
+  if (!response || typeof response !== 'object') {
+    return [];
+  }
+
+  const candidate = response as { data?: unknown; success?: unknown };
+  if (Array.isArray(candidate.data)) {
+    return candidate.data as T[];
+  }
+
+  return [];
+}
+
 export function buildEmptyFinanceDashboardData(): FinanceDashboardData {
   return {
     charts: {

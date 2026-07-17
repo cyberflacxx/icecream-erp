@@ -3,6 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { useAppAuth } from '@/hooks/useAppAuth';
+import { normalizeFinanceCollectionResponse } from '@/lib/finance';
 import { apiFetch } from '@/lib/api';
 import { API_ROUTES } from '@/lib/shared';
 
@@ -14,6 +15,20 @@ function useFinanceQuery<T>(key: string, path: string) {
     queryFn: async () => {
       const token = await getToken();
       return apiFetch<T>(path, { token });
+    },
+    enabled: isLoaded && Boolean(isSignedIn),
+  });
+}
+
+function useFinanceCollectionQuery<T extends Record<string, unknown>>(key: string, path: string) {
+  const { getToken, isLoaded, isSignedIn, userId } = useAppAuth();
+
+  return useQuery({
+    queryKey: ['finance', key, userId],
+    queryFn: async () => {
+      const token = await getToken();
+      const response = await apiFetch<unknown>(path, { token });
+      return normalizeFinanceCollectionResponse<T>(response);
     },
     enabled: isLoaded && Boolean(isSignedIn),
   });
@@ -58,55 +73,55 @@ export function useJournalEntries() {
 }
 
 export function useBankAccounts() {
-  return useFinanceQuery<Array<Record<string, unknown>>>('bank-accounts', '/api/finance/bank-accounts');
+  return useFinanceCollectionQuery<Record<string, unknown>>('bank-accounts', '/api/finance/bank-accounts');
 }
 
 export function useCashAccounts() {
-  return useFinanceQuery<Array<Record<string, unknown>>>('cash-accounts', '/api/finance/cash-accounts');
+  return useFinanceCollectionQuery<Record<string, unknown>>('cash-accounts', '/api/finance/cash-accounts');
 }
 
 export function useChartOfAccounts() {
-  return useFinanceQuery<Array<Record<string, unknown>>>('chart-of-accounts', '/api/finance/chart-of-accounts');
+  return useFinanceCollectionQuery<Record<string, unknown>>('chart-of-accounts', '/api/finance/chart-of-accounts');
 }
 
 export function useFiscalPeriods() {
-  return useFinanceQuery<Array<Record<string, unknown>>>('fiscal-periods', '/api/finance/fiscal-periods');
+  return useFinanceCollectionQuery<Record<string, unknown>>('fiscal-periods', '/api/finance/fiscal-periods');
 }
 
 export function usePettyCashRequests() {
-  return useFinanceQuery<Array<Record<string, unknown>>>('petty-cash', '/api/finance/petty-cash');
+  return useFinanceCollectionQuery<Record<string, unknown>>('petty-cash', '/api/finance/petty-cash');
 }
 
 export function useFinanceExpenses() {
-  return useFinanceQuery<Array<Record<string, unknown>>>('expenses', '/api/finance/expenses');
+  return useFinanceCollectionQuery<Record<string, unknown>>('expenses', '/api/finance/expenses');
 }
 
 export function useBudgets() {
-  return useFinanceQuery<Array<Record<string, unknown>>>('budgets', '/api/finance/budgets');
+  return useFinanceCollectionQuery<Record<string, unknown>>('budgets', '/api/finance/budgets');
 }
 
 export function useFixedAssets() {
-  return useFinanceQuery<Array<Record<string, unknown>>>('fixed-assets', '/api/finance/fixed-assets');
+  return useFinanceCollectionQuery<Record<string, unknown>>('fixed-assets', '/api/finance/fixed-assets');
 }
 
 export function useTaxCodes() {
-  return useFinanceQuery<Array<Record<string, unknown>>>('tax-codes', '/api/finance/tax-codes');
+  return useFinanceCollectionQuery<Record<string, unknown>>('tax-codes', '/api/finance/tax-codes');
 }
 
 export function useAccountsReceivable() {
-  return useFinanceQuery<Array<Record<string, unknown>>>('accounts-receivable', '/api/finance/accounts-receivable');
+  return useFinanceCollectionQuery<Record<string, unknown>>('accounts-receivable', '/api/finance/accounts-receivable');
 }
 
 export function useAccountsPayable() {
-  return useFinanceQuery<Array<Record<string, unknown>>>('accounts-payable', '/api/finance/accounts-payable');
+  return useFinanceCollectionQuery<Record<string, unknown>>('accounts-payable', '/api/finance/accounts-payable');
 }
 
 export function useBankTransactions() {
-  return useFinanceQuery<Array<Record<string, unknown>>>('bank-transactions', API_ROUTES.FINANCE.BANK_TRANSACTIONS);
+  return useFinanceCollectionQuery<Record<string, unknown>>('bank-transactions', API_ROUTES.FINANCE.BANK_TRANSACTIONS);
 }
 
 export function useCashTransactions() {
-  return useFinanceQuery<Array<Record<string, unknown>>>('cash-transactions', API_ROUTES.FINANCE.CASH);
+  return useFinanceCollectionQuery<Record<string, unknown>>('cash-transactions', API_ROUTES.FINANCE.CASH);
 }
 
 export function useFinanceMeta() {
@@ -119,7 +134,7 @@ export function useFinanceMeta() {
 }
 
 export function useFinanceTransactions() {
-  return useFinanceQuery<Array<Record<string, unknown>>>('transactions', API_ROUTES.FINANCE.TRANSACTIONS);
+  return useFinanceCollectionQuery<Record<string, unknown>>('transactions', API_ROUTES.FINANCE.TRANSACTIONS);
 }
 
 export function useFinanceReport<T = Array<Record<string, unknown>>>(path: string) {

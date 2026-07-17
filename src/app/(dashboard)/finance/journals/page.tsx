@@ -1,13 +1,14 @@
 'use client';
 
 import { type FormEvent, useMemo, useState } from 'react';
-import { AlertCircle, Plus } from 'lucide-react';
+import { AlertCircle, BookOpenText, Plus } from 'lucide-react';
 import Link from 'next/link';
 
 import { PageHeader } from '@/components/dashboard/page-header';
+import { FinanceEmptyState } from '@/components/finance/finance-empty-state';
 import { FinanceNav } from '@/components/finance/finance-nav';
 import { Button } from '@/components/ui/button';
-import { DataTable, EmptyState, FormDrawer, LoadingState } from '@/components/ui-library';
+import { DataTable, FormDrawer, LoadingState } from '@/components/ui-library';
 import { useFinanceMeta, useFinanceMutation, useJournalEntries } from '@/hooks/finance/useFinanceResources';
 import { API_ROUTES } from '@/lib/shared';
 
@@ -113,7 +114,15 @@ export default function FinanceJournalsPage() {
 
   if (query.isLoading) return <LoadingState />;
   if (query.isError || !query.data) {
-    return <EmptyState icon={<AlertCircle className="h-6 w-6" />} title="Journal entries unavailable" description={query.error?.message ?? 'No journal entry data returned.'} />;
+    return (
+      <FinanceEmptyState
+        icon={<AlertCircle className="h-6 w-6" />}
+        title="Journal entries unavailable"
+        description="Journal entry data could not be loaded right now. Please refresh or try again."
+        actionLabel="Retry"
+        onAction={() => void query.refetch()}
+      />
+    );
   }
 
   return (
@@ -171,6 +180,15 @@ export default function FinanceJournalsPage() {
         ]}
         data={query.data.data}
         pagination={query.data.pagination}
+        emptyState={
+          <FinanceEmptyState
+            icon={<BookOpenText className="h-6 w-6" />}
+            title="No journal entries found."
+            description="Journal entries will appear here after transactions are posted."
+            actionLabel="Create Journal Entry"
+            onAction={() => setDrawerOpen(true)}
+          />
+        }
       />
 
       <FormDrawer title="New Journal Adjustment" open={drawerOpen} onClose={() => setDrawerOpen(false)}>

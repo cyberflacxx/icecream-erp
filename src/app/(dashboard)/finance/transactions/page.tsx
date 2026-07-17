@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { AlertCircle, ArrowUpRight, ReceiptText } from 'lucide-react';
 
 import { PageHeader } from '@/components/dashboard/page-header';
+import { FinanceEmptyState } from '@/components/finance/finance-empty-state';
 import { FinanceNav } from '@/components/finance/finance-nav';
 import { Button } from '@/components/ui/button';
 import { DataTable, EmptyState, LoadingState } from '@/components/ui-library';
@@ -17,10 +18,12 @@ export default function FinanceTransactionsPage() {
   if (query.isLoading) return <LoadingState />;
   if (query.isError || !query.data) {
     return (
-      <EmptyState
+      <FinanceEmptyState
         icon={<AlertCircle className="h-6 w-6" />}
         title="Finance transactions unavailable"
-        description={query.error?.message ?? 'No finance transaction data returned.'}
+        description="Finance transactions could not be loaded right now. Please refresh or try again."
+        actionLabel="Retry"
+        onAction={() => void query.refetch()}
       />
     );
   }
