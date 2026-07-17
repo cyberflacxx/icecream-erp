@@ -3,6 +3,7 @@ import { isMissingColumnError } from '@/lib/postgrest-compat';
 import {
   buildFinanceSourceReference,
   isPostedJournalStatus,
+  normalizePettyCashRequest,
   normalizeFinanceAccountType,
   validateJournalLines,
 } from '@/lib/finance';
@@ -95,6 +96,126 @@ export function isMissingFinanceTable(error: unknown) {
 
 export function isMissingFinanceColumn(error: unknown, table: string, columnName: string) {
   return isMissingColumnError(error, table, columnName);
+}
+
+export function getSafeFinanceErrorDetails(error: unknown, routeName: string, step: string) {
+  const source = error as {
+    code?: unknown;
+    details?: unknown;
+    hint?: unknown;
+    message?: unknown;
+  } | null;
+
+  return {
+    code: source?.code ? String(source.code) : null,
+    detail: source?.details ? String(source.details) : null,
+    message: source?.message ? String(source.message) : financeErrorMessage(error),
+    route: routeName,
+    step,
+  };
+}
+
+export function logFinanceRouteError(routeName: string, step: string, error: unknown) {
+  console.error('Finance route failed.', getSafeFinanceErrorDetails(error, routeName, step));
+}
+
+type PettyCashCompatibilityRow = Record<string, unknown>;
+
+async function runPettyCashCompatibilityQuery(
+  selectClause: string,
+  organizationId: string,
+  applyFilters?: (query: any) => any,
+) {
+  const withDeletedAt = financeService()
+    .from('petty_cash_requests')
+    .select(selectClause)
+    .eq('organization_id', organizationId)
+    .is('deleted_at', null);
+
+  const withDeletedAtResult = applyFilters ? await applyFilters(withDeletedAt) : await withDeletedAt;
+  if (!withDeletedAtResult.error) {
+    return withDeletedAtResult;
+  }
+
+  if (!isMissingFinanceColumn(withDeletedAtResult.error, 'petty_cash_requests', 'deleted_at')) {
+    return withDeletedAtResult;
+  }
+
+  const fallback = financeService()
+    .from('petty_cash_requests')
+    .select(selectClause)
+    .eq('organization_id', organizationId);
+  return applyFilters ? applyFilters(fallback) : fallback;
+}
+
+export async function loadPettyCashRequestsCompatibility(
+  organizationId: string,
+  options?: {
+    endDate?: string;
+    routeName?: string;
+    startDate?: string;
+  },
+) {
+  const routeName = options?.routeName ?? 'finance';
+  const applyFilters = (query: any) => {
+    let current = query;
+    if (options?.startDate) current = current.gte('request_date', options.startDate);
+    if (options?.endDate) current = current.lte('request_date', options.endDate);
+    return current.order('request_date', { ascending: false });
+  };
+
+  const attempts = [
+    {
+      select: 'id, organization_id, request_number, branch_id, request_date, amount_requested, amount_approved, amount_paid, purpose, status, requested_by, created_at, branches(name)',
+      step: 'petty_cash_requests.modern',
+    },
+    {
+      select: 'id, organization_id, request_number, branch_id, request_date, requested_amount, amount_approved, amount_paid, purpose, status, requested_by, created_at, branches(name)',
+      step: 'petty_cash_requests.requested_amount',
+    },
+    {
+      select: 'id, organization_id, request_number, branch_id, request_date, amount, amount_approved, amount_paid, purpose, status, requested_by, created_at, branches(name)',
+      step: 'petty_cash_requests.amount',
+    },
+    {
+      select: 'id, organization_id, request_number, branch_id, request_date, total_amount, amount_approved, amount_paid, purpose, status, requested_by, created_at, branches(name)',
+      step: 'petty_cash_requests.total_amount',
+    },
+    {
+      select: 'id, organization_id, request_number, branch_id, request_date, estimated_amount, amount_approved, amount_paid, purpose, status, requested_by, created_at, branches(name)',
+      step: 'petty_cash_requests.estimated_amount',
+    },
+    {
+      select: 'id, organization_id, request_number, branch_id, request_date, purpose, status, requested_by, created_at, branches(name)',
+      step: 'petty_cash_requests.minimal',
+    },
+  ];
+
+  for (const attempt of attempts) {
+    const result = await runPettyCashCompatibilityQuery(attempt.select, organizationId, applyFilters);
+    if (!result.error) {
+      return (result.data ?? []).map((row: unknown) => normalizePettyCashRequest(row as Record<string, unknown>));
+    }
+
+    if (isMissingFinanceTable(result.error)) {
+      return [];
+    }
+
+    const message = financeErrorMessage(result.error);
+    const compatibilityFailure =
+      message.includes("Could not find the table 'icecream_erp.petty_cash_requests'") ||
+      message.includes('Could not find a relationship between') ||
+      /column\s+petty_cash_requests\.[a-z_]+\s+does not exist/i.test(message);
+
+    if (!compatibilityFailure) {
+      logFinanceRouteError(routeName, attempt.step, result.error);
+      throw result.error;
+    }
+
+    logFinanceRouteError(routeName, attempt.step, result.error);
+  }
+
+  return [];
 }
 
 export async function loadLedgerLines(organizationId: string, postedOnly = true) {

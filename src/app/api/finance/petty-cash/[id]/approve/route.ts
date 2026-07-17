@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 
 import { can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
-import { financeService, writeFinanceAuditLog } from '@/lib/finance-server';
+import { financeService, logFinanceRouteError, writeFinanceAuditLog } from '@/lib/finance-server';
 
 export async function POST(
   _request: Request,
@@ -29,6 +29,7 @@ export async function POST(
     await writeFinanceAuditLog('PETTY_CASH_REQUEST_APPROVED', id, ctx.userId, {}, 'petty_cash_request');
     return NextResponse.json(data);
   } catch (err) {
-    return serverError(err instanceof Error ? err.message : 'Internal server error');
+    logFinanceRouteError('finance.petty-cash.approve', 'approve', err);
+    return serverError('Petty cash approval could not be completed. Please refresh or contact support.');
   }
 }

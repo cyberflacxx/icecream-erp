@@ -2,10 +2,11 @@ import { NextResponse } from 'next/server';
 
 import { can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
 import {
-  financeErrorMessage,
   financeService,
   isMissingFinanceColumn,
   isMissingFinanceTable,
+  loadPettyCashRequestsCompatibility,
+  logFinanceRouteError,
   mapNestedRow,
 } from '@/lib/finance-server';
 
@@ -144,11 +145,7 @@ export async function GET() {
         'id, organization_id, transaction_date, transaction_type, amount, source, reference, counterparty, remarks, status, cash_accounts(name)',
         ctx.organizationId,
       ),
-      optionalRows(
-        'petty_cash_requests',
-        'id, organization_id, request_number, branch_id, request_date, amount_requested, purpose, status, branches(name)',
-        ctx.organizationId,
-      ),
+      loadPettyCashRequestsCompatibility(ctx.organizationId, { routeName: 'finance.transactions' }),
       optionalRows(
         'payments',
         'id, organization_id, payment_number, customer_id, invoice_id, payment_date, amount, payment_method, reference_number, status, customers(name), invoices(invoice_number)',
@@ -215,16 +212,16 @@ export async function GET() {
           type: String(row.transaction_type ?? 'CASH'),
         });
       }),
-      ...pettyCashRequests.map((row) => {
+      ...pettyCashRequests.map((row: Record<string, unknown>) => {
         const branch = mapNestedRow(row.branches as Row | Row[] | null);
         return tx({
-          amount: Number(row.amount_requested ?? 0),
+          amount: Number(row.amountRequested ?? row.amount_requested ?? 0),
           counterparty: String(branch?.name ?? 'Petty cash'),
-          date: safeDate(row.request_date),
+          date: safeDate(row.requestDate ?? row.request_date),
           description: String(row.purpose ?? ''),
           id: String(row.id),
           method: 'PETTY_CASH',
-          reference: String(row.request_number ?? row.id),
+          reference: String(row.requestNumber ?? row.request_number ?? row.id),
           source: 'Petty Cash',
           sourceHref: `/finance/petty-cash?request=${row.id}`,
           status: String(row.status ?? 'PENDING'),
@@ -303,6 +300,7 @@ export async function GET() {
       rows.sort((a, b) => String(b.date).localeCompare(String(a.date))).slice(0, 500),
     );
   } catch (error) {
-    return serverError(financeErrorMessage(error) || 'Failed to load finance transactions.');
+    logFinanceRouteError('finance.transactions', 'list', error);
+    return serverError('Some finance transaction data could not be loaded. Please refresh or contact support.');
   }
 }

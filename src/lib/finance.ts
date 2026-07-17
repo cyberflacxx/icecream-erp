@@ -135,6 +135,77 @@ export function calculatePettyCashBalance(fundAmount: number, usedAmount: number
   return ensureNonNegative(fundAmount, 'fundAmount') - ensureNonNegative(usedAmount, 'usedAmount');
 }
 
+export interface NormalizedPettyCashRequest {
+  amountApproved: number;
+  amountPaid: number;
+  amountRequested: number;
+  amount_approved: number;
+  amount_paid: number;
+  amount_requested: number;
+  branchId: string | null;
+  branch_id: string | null;
+  createdAt: string | null;
+  created_at: string | null;
+  id: string;
+  purpose: string | null;
+  requestNumber: string | null;
+  request_number: string | null;
+  requestDate: string | null;
+  request_date: string | null;
+  requestedBy: string | null;
+  requested_by: string | null;
+  status: string;
+}
+
+export function resolvePettyCashAmount(row: Record<string, unknown>) {
+  return toNumber(
+    row.amount_requested ??
+      row.requested_amount ??
+      row.amount ??
+      row.total_amount ??
+      row.estimated_amount ??
+      0,
+  );
+}
+
+export function normalizePettyCashRequest(row: Record<string, unknown>): NormalizedPettyCashRequest {
+  const amountRequested = resolvePettyCashAmount(row);
+  const amountApproved = toNumber(row.amount_approved ?? row.approved_amount ?? row.amountApproved ?? 0);
+  const amountPaid = toNumber(row.amount_paid ?? row.paid_amount ?? row.amountPaid ?? 0);
+  const branchId = row.branch_id ? String(row.branch_id) : row.branchId ? String(row.branchId) : null;
+  const createdAt = row.created_at ? String(row.created_at) : row.createdAt ? String(row.createdAt) : null;
+  const requestNumber = row.request_number
+    ? String(row.request_number)
+    : row.requestNumber
+      ? String(row.requestNumber)
+      : null;
+  const requestDate = row.request_date ? String(row.request_date) : row.requestDate ? String(row.requestDate) : null;
+  const requestedBy = row.requested_by ? String(row.requested_by) : row.requestedBy ? String(row.requestedBy) : null;
+  const status = String(row.status ?? 'PENDING').toUpperCase();
+
+  return {
+    amountApproved,
+    amountPaid,
+    amountRequested,
+    amount_approved: amountApproved,
+    amount_paid: amountPaid,
+    amount_requested: amountRequested,
+    branchId,
+    branch_id: branchId,
+    createdAt,
+    created_at: createdAt,
+    id: String(row.id ?? ''),
+    purpose: row.purpose ? String(row.purpose) : null,
+    requestNumber,
+    requestDate,
+    request_number: requestNumber,
+    request_date: requestDate,
+    requestedBy,
+    requested_by: requestedBy,
+    status,
+  };
+}
+
 export function summarizeTrialBalance(
   lines: Array<{ accountCode: string; accountName: string; creditAmount: number; debitAmount: number }>,
 ) {

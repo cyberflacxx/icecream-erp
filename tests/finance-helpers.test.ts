@@ -16,6 +16,8 @@ import {
   calculateProductionCostSummary,
   calculateReceivableBalance,
   calculateStraightLineDepreciation,
+  normalizePettyCashRequest,
+  resolvePettyCashAmount,
   summarizeBalanceSheetFromLedger,
   summarizeCashFlowFromLedger,
   summarizeProfitAndLossFromLedger,
@@ -120,6 +122,42 @@ test('receivables and payables builders normalize report rows', () => {
   assert.equal(receivables[0]?.balanceDue, 50);
   assert.equal(payables[0]?.supplierName, 'Cold Chain');
   assert.equal(payables[0]?.balance, 80);
+});
+
+test('petty cash helpers fall back across compatible amount columns safely', () => {
+  assert.equal(resolvePettyCashAmount({ amount_requested: 120 }), 120);
+  assert.equal(resolvePettyCashAmount({ requested_amount: 95 }), 95);
+  assert.equal(resolvePettyCashAmount({ amount: 45 }), 45);
+  assert.equal(resolvePettyCashAmount({ total_amount: 33 }), 33);
+  assert.equal(resolvePettyCashAmount({ estimated_amount: 12 }), 12);
+  assert.equal(resolvePettyCashAmount({}), 0);
+});
+
+test('normalizePettyCashRequest returns canonical and legacy petty cash fields', () => {
+  const normalized = normalizePettyCashRequest({
+    amount_paid: 5,
+    approved_amount: 10,
+    branch_id: 'branch-1',
+    created_at: '2026-07-17T09:00:00.000Z',
+    id: 'pc-1',
+    purpose: 'Office supplies',
+    request_date: '2026-07-17',
+    request_number: 'PCR-00001',
+    requested_amount: 25,
+    requested_by: 'user-1',
+    status: 'approved',
+  });
+
+  assert.equal(normalized.amountRequested, 25);
+  assert.equal(normalized.amount_requested, 25);
+  assert.equal(normalized.amountApproved, 10);
+  assert.equal(normalized.amountPaid, 5);
+  assert.equal(normalized.requestNumber, 'PCR-00001');
+  assert.equal(normalized.request_number, 'PCR-00001');
+  assert.equal(normalized.requestDate, '2026-07-17');
+  assert.equal(normalized.requestedBy, 'user-1');
+  assert.equal(normalized.branchId, 'branch-1');
+  assert.equal(normalized.status, 'APPROVED');
 });
 
 test('finance import validators return row level errors', () => {

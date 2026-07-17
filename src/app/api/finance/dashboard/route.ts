@@ -9,10 +9,11 @@ import {
   summarizeProfitAndLossFromLedger,
 } from '@/lib/finance';
 import {
-  financeErrorMessage,
   isMissingFinanceColumn,
   isMissingFinanceTable,
+  loadPettyCashRequestsCompatibility,
   loadLedgerLines,
+  logFinanceRouteError,
 } from '@/lib/finance-server';
 
 async function queryWithoutDeletedAt<T>(primary: PromiseLike<{ data: T[] | null; error: { message: string } | null }>, fallback: () => PromiseLike<{ data: T[] | null; error: { message: string } | null }>) {
@@ -143,14 +144,11 @@ export async function GET(request: NextRequest) {
           .is('deleted_at', null),
           () => service.schema('icecream_erp').from('cash_accounts').select('balance'),
         )),
-        optionalQuery(queryWithoutDeletedAt(
-          service
-          .schema('icecream_erp')
-          .from('petty_cash_requests')
-          .select('amount_requested, status')
-          .is('deleted_at', null),
-          () => service.schema('icecream_erp').from('petty_cash_requests').select('amount_requested, status'),
-        )),
+        loadPettyCashRequestsCompatibility(ctx.organizationId, {
+          endDate: `${endDate}T23:59:59.999Z`,
+          routeName: 'finance.dashboard',
+          startDate: `${startDate}T00:00:00.000Z`,
+        }),
         optionalQuery(queryWithoutDeletedAt(
           service
           .schema('icecream_erp')
@@ -264,7 +262,7 @@ export async function GET(request: NextRequest) {
     const cashBalance = cashAccounts.reduce((sum: number, row: { balance: number }) => sum + Number(row.balance ?? 0), 0);
     const pettyCashBalance = pettyCashRequests
       .filter((row: { status: string }) => row.status === 'APPROVED')
-      .reduce((sum: number, row: { amount_requested: number }) => sum + Number(row.amount_requested ?? 0), 0);
+      .reduce((sum: number, row: { amountRequested: number }) => sum + Number(row.amountRequested ?? 0), 0);
     const stockValuation = stockBalances.reduce((sum: number, row: Record<string, unknown>) => {
       const item = Array.isArray(row.items) ? row.items[0] : row.items;
       return sum + calculateInventoryValuation(
@@ -332,6 +330,7 @@ export async function GET(request: NextRequest) {
       })),
     });
   } catch (err) {
-    return serverError(financeErrorMessage(err) || 'Internal server error');
+    logFinanceRouteError('finance.dashboard', 'summary', err);
+    return serverError('Some finance summary data could not be loaded. Please refresh or contact support.');
   }
 }

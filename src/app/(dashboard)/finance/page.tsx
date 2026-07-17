@@ -59,7 +59,7 @@ export default function FinancePage() {
       <EmptyState
         icon={<AlertCircle className="h-6 w-6" />}
         title="Finance data unavailable"
-        description={dashboardQuery.error?.message ?? 'No finance dashboard data was returned.'}
+        description="Some finance summary data could not be loaded. Please refresh or contact support."
       />
     );
   }
