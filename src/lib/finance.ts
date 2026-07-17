@@ -334,6 +334,23 @@ export interface NormalizedTrialBalanceRow {
   debit: number;
 }
 
+export interface NormalizedFinanceTransactionRow {
+  accountCode: string;
+  accountName: string;
+  amount: number;
+  credit: number;
+  date: string;
+  debit: number;
+  description: string;
+  id: string;
+  reference: string;
+  referenceNumber: string;
+  referenceType: string;
+  source: string;
+  status: string;
+  transactionDate: string;
+}
+
 export function normalizeFinanceCollectionResponse<T>(response: unknown): T[] {
   if (Array.isArray(response)) {
     return response as T[];
@@ -349,6 +366,72 @@ export function normalizeFinanceCollectionResponse<T>(response: unknown): T[] {
   }
 
   return [];
+}
+
+export function resolveFinanceTransactionDate(row: Record<string, unknown>) {
+  return String(
+    row.transaction_date ??
+      row.entry_date ??
+      row.date ??
+      row.posted_at ??
+      row.created_at ??
+      '',
+  )
+    .trim()
+    .slice(0, 10);
+}
+
+export function resolveFinanceTransactionReference(row: Record<string, unknown>) {
+  return String(
+    row.reference_number ??
+      row.reference ??
+      row.document_number ??
+      row.transaction_number ??
+      row.entry_number ??
+      row.id ??
+      '',
+  ).trim();
+}
+
+export function resolveFinanceTransactionDescription(row: Record<string, unknown>) {
+  return String(
+    row.description ??
+      row.narration ??
+      row.notes ??
+      row.memo ??
+      row.reference_type ??
+      'Finance transaction',
+  ).trim();
+}
+
+export function normalizeFinanceTransactionRow(row: Record<string, unknown>): NormalizedFinanceTransactionRow {
+  const debit = resolveLedgerDebit(row);
+  const credit = resolveLedgerCredit(row);
+  const explicitAmount = toNumber(row.amount, Number.NaN);
+  const amount = Number.isFinite(explicitAmount) ? explicitAmount : Math.abs(debit - credit) || debit || credit || 0;
+  const reference = resolveFinanceTransactionReference(row);
+  const date = resolveFinanceTransactionDate(row);
+  const status = String(
+    row.status ??
+      ((row.is_posted === true || String(row.is_posted ?? '').toLowerCase() === 'true') ? 'POSTED' : 'DRAFT'),
+  ).trim();
+
+  return {
+    accountCode: String(row.account_code ?? row.code ?? row.gl_code ?? row.number ?? '').trim(),
+    accountName: String(row.account_name ?? row.name ?? row.title ?? '').trim(),
+    amount,
+    credit,
+    date,
+    debit,
+    description: resolveFinanceTransactionDescription(row),
+    id: String(row.id ?? '').trim(),
+    reference,
+    referenceNumber: reference,
+    referenceType: String(row.reference_type ?? row.type ?? row.source ?? '').trim(),
+    source: String(row.source ?? row.source_document ?? 'Finance Transaction').trim(),
+    status,
+    transactionDate: date,
+  };
 }
 
 export function buildEmptyFinanceDashboardData(): FinanceDashboardData {

@@ -19,9 +19,13 @@ import {
   calculateStraightLineDepreciation,
   normalizeCashAccount,
   normalizeFinanceCollectionResponse,
+  normalizeFinanceTransactionRow,
   normalizePettyCashRequest,
   normalizeTrialBalanceRow,
   resolveCashAccountBalance,
+  resolveFinanceTransactionDate,
+  resolveFinanceTransactionDescription,
+  resolveFinanceTransactionReference,
   resolveLedgerCredit,
   resolveLedgerDebit,
   resolveFinanceSectionResult,
@@ -206,6 +210,36 @@ test('normalizeFinanceCollectionResponse handles array and wrapped finance paylo
   assert.deepEqual(normalizeFinanceCollectionResponse({ success: true, data: [{ id: 3 }] }), [{ id: 3 }]);
   assert.deepEqual(normalizeFinanceCollectionResponse({ success: true, data: null }), []);
   assert.deepEqual(normalizeFinanceCollectionResponse(null), []);
+});
+
+test('finance transaction helpers normalize date, reference, description, and debit-credit aliases safely', () => {
+  assert.equal(resolveFinanceTransactionDate({ transaction_date: '2026-07-17T08:30:00Z' }), '2026-07-17');
+  assert.equal(resolveFinanceTransactionDate({ entry_date: '2026-07-16' }), '2026-07-16');
+  assert.equal(resolveFinanceTransactionReference({ reference_number: 'TXN-1' }), 'TXN-1');
+  assert.equal(resolveFinanceTransactionReference({ document_number: 'DOC-2' }), 'DOC-2');
+  assert.equal(resolveFinanceTransactionDescription({ narration: 'Bank deposit' }), 'Bank deposit');
+  assert.equal(resolveFinanceTransactionDescription({}), 'Finance transaction');
+
+  const normalized = normalizeFinanceTransactionRow({
+    code: '1000',
+    name: 'Main Cash',
+    debit: 55,
+    entry_date: '2026-07-17',
+    id: 'txn-1',
+    narration: 'Opening balance',
+    reference: 'OPEN-1',
+    status: 'APPROVED',
+  });
+
+  assert.equal(normalized.accountCode, '1000');
+  assert.equal(normalized.accountName, 'Main Cash');
+  assert.equal(normalized.debit, 55);
+  assert.equal(normalized.credit, 0);
+  assert.equal(normalized.amount, 55);
+  assert.equal(normalized.reference, 'OPEN-1');
+  assert.equal(normalized.description, 'Opening balance');
+  assert.equal(normalized.transactionDate, '2026-07-17');
+  assert.equal(normalized.status, 'APPROVED');
 });
 
 test('trial balance helpers resolve debit and credit aliases safely', () => {
