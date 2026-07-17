@@ -15,6 +15,10 @@ import {
   buildPurchaseOrderDraftPayload as buildPurchaseOrderDraftPayloadForOrders,
   normalizePurchaseOrderSupplierId as normalizePurchaseOrderSupplierIdForOrders,
 } from '../src/lib/procurement-purchase-orders';
+import {
+  buildRequisitionDraftPayload,
+  normalizeRequisitionItemId,
+} from '../src/lib/procurement-requisitions';
 import { filterSupplierOptions, isSupplierActive, mapSupplierOption } from '../src/lib/procurement-suppliers';
 
 test('validateSupplierCodeUniqueness blocks duplicate supplier codes', () => {
@@ -191,4 +195,33 @@ test('buildPurchaseOrderDraftPayload stores supplier_id canonically', () => {
   assert.equal(payload.supplierId, 'sup-1');
   assert.equal(payload.supplier_id, 'sup-1');
   assert.equal(payload.items[0]?.itemId, 'item-1');
+});
+
+test('normalizeRequisitionItemId accepts item_id and itemId', () => {
+  assert.equal(normalizeRequisitionItemId({ item_id: ' item-1 ' }), 'item-1');
+  assert.equal(normalizeRequisitionItemId({ itemId: 'item-2' }), 'item-2');
+  assert.equal(normalizeRequisitionItemId({ itemId: 'item-2', item_id: 'item-3' }), 'item-3');
+  assert.equal(normalizeRequisitionItemId({}), '');
+});
+
+test('buildRequisitionDraftPayload stores item_id canonically', () => {
+  const payload = buildRequisitionDraftPayload({
+    approverUserId: 'user-1',
+    department: 'Production',
+    items: [
+      {
+        estimatedUnitCost: 12,
+        itemId: 'item-1',
+        quantityRequested: 4,
+        unitOfMeasureId: 'uom-1',
+      },
+    ],
+    neededByDate: '2026-07-20',
+    remarks: 'Urgent',
+  });
+
+  assert.equal(payload.approverUserId, 'user-1');
+  assert.equal(payload.items[0]?.itemId, 'item-1');
+  assert.equal(payload.items[0]?.item_id, 'item-1');
+  assert.equal(payload.department, 'Production');
 });

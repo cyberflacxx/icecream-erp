@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { badRequest, can, forbidden, getAuthContext, notFound, serverError, unauthorized } from '@/lib/api-auth';
+import { normalizeRequisitionItemId } from '@/lib/procurement-requisitions';
 import { isMissingColumnError } from '@/lib/postgrest-compat';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
@@ -41,7 +42,13 @@ export async function GET(
 
     if (error || !requisition) return notFound('Purchase requisition not found.');
 
-    return NextResponse.json(requisition);
+    return NextResponse.json({
+      ...requisition,
+      purchase_requisition_items: (requisition.purchase_requisition_items ?? []).map((item) => ({
+        ...item,
+        itemId: item.item_id ? String(item.item_id) : null,
+      })),
+    });
   } catch (err) {
     return serverError((err as Error).message);
   }
@@ -64,7 +71,8 @@ export async function PATCH(
     remarks?: string | null;
     approverUserId?: string | null;
     items?: Array<{
-      itemId: string;
+      itemId?: string;
+      item_id?: string;
       unitOfMeasureId: string;
       quantityRequested: number;
       estimatedUnitCost?: number | null;
@@ -93,10 +101,19 @@ export async function PATCH(
       return badRequest('Only draft requisitions can be edited.');
     }
 
+    const normalizedItems = body.items?.map((item) => ({
+      ...item,
+      itemId: normalizeRequisitionItemId(item),
+    }));
+
+    if (normalizedItems?.some((item) => !item.itemId)) {
+      return badRequest('Selected item is no longer available. Please refresh and try again.');
+    }
+
     // Validate items if provided
-    if (body.items?.length) {
-      const itemIds = [...new Set(body.items.map((i) => i.itemId))];
-      const unitIds = [...new Set(body.items.map((i) => i.unitOfMeasureId))];
+    if (normalizedItems?.length) {
+      const itemIds = [...new Set(normalizedItems.map((i) => i.itemId))];
+      const unitIds = [...new Set(normalizedItems.map((i) => i.unitOfMeasureId))];
 
       const [itemsPrimary, unitsCheck] = await Promise.all([
         service
@@ -121,7 +138,7 @@ export async function PATCH(
         (itemsCheck.data?.length ?? 0) !== itemIds.length ||
         (unitsCheck.data?.length ?? 0) !== unitIds.length
       ) {
-        return badRequest('One or more requisition items are invalid.');
+        return badRequest('Selected item is no longer available. Please refresh and try again.');
       }
     }
 
@@ -155,10 +172,10 @@ export async function PATCH(
     }
 
     // Replace items if provided
-    if (body.items) {
+    if (normalizedItems) {
       await service.from('purchase_requisition_items').delete().eq('requisition_id', id);
 
-      let itemPayload = body.items.map((item) => ({
+      let itemPayload = normalizedItems.map((item) => ({
         pr_id: id,
         requisition_id: id,
         item_id: item.itemId,
@@ -191,7 +208,15 @@ export async function PATCH(
       .eq('id', id)
       .single();
 
-    return NextResponse.json(full);
+    return NextResponse.json({
+      ...full,
+      purchase_requisition_items: ((full?.purchase_requisition_items as Record<string, unknown>[] | undefined) ?? []).map(
+        (item) => ({
+          ...item,
+          itemId: item.item_id ? String(item.item_id) : null,
+        }),
+      ),
+    });
   } catch (err) {
     return serverError((err as Error).message);
   }

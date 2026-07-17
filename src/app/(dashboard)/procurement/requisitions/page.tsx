@@ -16,6 +16,7 @@ import {
   useRequisitions,
   type RequisitionRow,
 } from '@/hooks/procurement';
+import { buildRequisitionDraftPayload } from '@/lib/procurement-requisitions';
 import { API_ROUTES, PERMISSIONS } from '@/lib/shared';
 import { usePermission } from '@/hooks/usePermission';
 
@@ -23,6 +24,7 @@ type RequisitionFormItem = {
   estimatedUnitCost: string;
   itemId: string;
   quantityRequested: string;
+  rowId: string;
   unitOfMeasureId: string;
 };
 
@@ -52,14 +54,7 @@ type RequisitionDetailResponse = {
 const initialFormState: RequisitionFormState = {
   approverUserId: '',
   department: '',
-  items: [
-    {
-      estimatedUnitCost: '0',
-      itemId: '',
-      quantityRequested: '1',
-      unitOfMeasureId: '',
-    },
-  ],
+  items: [buildEmptyLine()],
   neededByDate: '',
   remarks: '',
 };
@@ -114,6 +109,10 @@ function buildEmptyLine(): RequisitionFormItem {
     estimatedUnitCost: '0',
     itemId: '',
     quantityRequested: '1',
+    rowId:
+      typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+        ? crypto.randomUUID()
+        : `req-item-${Date.now()}-${Math.random().toString(16).slice(2)}`,
     unitOfMeasureId: '',
   };
 }
@@ -184,6 +183,7 @@ export default function RequisitionsPage() {
                 estimatedUnitCost: String(item.estimated_unit_cost ?? 0),
                 itemId: item.item_id,
                 quantityRequested: String(item.quantity_requested ?? 1),
+                rowId: item.id,
                 unitOfMeasureId: item.unit_of_measure_id,
               }))
             : [buildEmptyLine()],
@@ -232,13 +232,13 @@ export default function RequisitionsPage() {
     }
 
     try {
-      const payload = {
+      const payload = buildRequisitionDraftPayload({
         approverUserId: formState.approverUserId || null,
         department: formState.department,
         items,
         neededByDate: formState.neededByDate || null,
         remarks: formState.remarks || null,
-      };
+      });
 
       if (editingRequisitionId) {
         await request(API_ROUTES.PROCUREMENT.REQUISITION(editingRequisitionId), {
@@ -611,7 +611,7 @@ export default function RequisitionsPage() {
             </div>
 
             {formState.items.map((item, index) => (
-              <div key={`${item.itemId}-${index}`} className="rounded-2xl border border-border/70 bg-white/80 p-4">
+              <div key={item.rowId} className="rounded-2xl border border-border/70 bg-white/80 p-4">
                 <div className="grid gap-3 md:grid-cols-[minmax(0,1.6fr)_120px_140px_140px_auto]">
                   <div className="space-y-2">
                     <select
@@ -636,6 +636,10 @@ export default function RequisitionsPage() {
                       className="surface-input-soft"
                     >
                       <option value="">Select item</option>
+                      {item.itemId &&
+                      !(metaQuery.data?.items ?? []).some((candidate) => candidate.id === item.itemId) ? (
+                        <option value={item.itemId}>Saved item selection</option>
+                      ) : null}
                       {(metaQuery.data?.items ?? []).map((row) => (
                         <option key={row.id} value={row.id}>
                           {row.code} - {row.name}

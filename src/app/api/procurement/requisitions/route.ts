@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { badRequest, can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
+import { normalizeRequisitionItemId } from '@/lib/procurement-requisitions';
 import { isMissingColumnError } from '@/lib/postgrest-compat';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
@@ -109,7 +110,8 @@ export async function POST(request: NextRequest) {
     remarks?: string | null;
     approverUserId?: string | null;
     items: Array<{
-      itemId: string;
+      itemId?: string;
+      item_id?: string;
       unitOfMeasureId: string;
       quantityRequested: number;
       estimatedUnitCost?: number | null;
@@ -128,9 +130,18 @@ export async function POST(request: NextRequest) {
   }
 
   try {
+    const normalizedItems = body.items.map((item) => ({
+      ...item,
+      itemId: normalizeRequisitionItemId(item),
+    }));
+
+    if (normalizedItems.some((item) => !item.itemId)) {
+      return badRequest('Selected item is no longer available. Please refresh and try again.');
+    }
+
     // Validate items exist
-    const itemIds = [...new Set(body.items.map((i) => i.itemId))];
-    const unitIds = [...new Set(body.items.map((i) => i.unitOfMeasureId))];
+    const itemIds = [...new Set(normalizedItems.map((i) => i.itemId))];
+    const unitIds = [...new Set(normalizedItems.map((i) => i.unitOfMeasureId))];
 
     const [itemsPrimary, unitsCheck] = await Promise.all([
       service
@@ -152,7 +163,7 @@ export async function POST(request: NextRequest) {
         : itemsPrimary;
 
     if ((itemsCheck.data?.length ?? 0) !== itemIds.length || (unitsCheck.data?.length ?? 0) !== unitIds.length) {
-      return badRequest('One or more requisition items are invalid.');
+      return badRequest('Selected item is no longer available. Please refresh and try again.');
     }
 
     if (body.approverUserId) {
@@ -197,7 +208,7 @@ export async function POST(request: NextRequest) {
 
     if (reqErr) return serverError(reqErr.message);
 
-    let itemPayload = body.items.map((item) => ({
+    let itemPayload = normalizedItems.map((item) => ({
       pr_id: (requisition as Record<string, unknown>).id,
       requisition_id: (requisition as Record<string, unknown>).id,
       item_id: item.itemId,
