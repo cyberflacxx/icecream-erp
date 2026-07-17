@@ -6,6 +6,7 @@ import { useQueryClient } from '@tanstack/react-query';
 
 import { PageHeader } from '@/components/dashboard/page-header';
 import { ProcurementNav } from '@/components/procurement/procurement-nav';
+import { SupplierSelect } from '@/components/procurement/supplier-select';
 import { Button } from '@/components/ui/button';
 import { DataTable, EmptyState, FormDrawer, StatusBadge } from '@/components/ui-library';
 import { useGRNs, useProcurementMeta, useProcurementRequest, usePurchaseOrder, useSupplierInvoices } from '@/hooks/procurement';
@@ -273,19 +274,11 @@ export default function ProcurementInvoicesPage() {
           <div className="grid gap-5 sm:grid-cols-2">
             <label className="space-y-2 text-sm text-muted">
               <span>Supplier</span>
-              <select
+              <SupplierSelect
                 required
                 value={formState.supplierId}
-                onChange={(event) => setFormState((current) => ({ ...current, supplierId: event.target.value }))}
-                className="surface-input-soft"
-              >
-                <option value="">Select supplier</option>
-                {(metaQuery.data?.suppliers ?? []).map((supplier) => (
-                  <option key={supplier.id} value={supplier.id}>
-                    {supplier.name}
-                  </option>
-                ))}
-              </select>
+                onChange={(supplierId) => setFormState((current) => ({ ...current, supplierId }))}
+              />
             </label>
             <label className="space-y-2 text-sm text-muted">
               <span>Purchase Order</span>

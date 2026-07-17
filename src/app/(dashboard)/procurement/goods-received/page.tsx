@@ -11,6 +11,7 @@ import { PERMISSIONS } from '@/lib/shared';
 import { PageHeader } from '@/components/dashboard/page-header';
 import { PaginationControls } from '@/components/inventory/pagination-controls';
 import { ProcurementNav } from '@/components/procurement/procurement-nav';
+import { SupplierSelect } from '@/components/procurement/supplier-select';
 import { Button } from '@/components/ui/button';
 import {
   useGRNs,
@@ -548,20 +549,12 @@ export default function GoodsReceivedPage() {
             </label>
             <label className="space-y-2 text-sm text-muted">
               <span>Supplier</span>
-              <select
+              <SupplierSelect
                 required={formState.entryMode === 'MANUAL'}
                 disabled={formState.entryMode !== 'MANUAL'}
                 value={formState.supplierId}
-                onChange={(event) => setFormState((current) => ({ ...current, supplierId: event.target.value }))}
-                className="surface-input-soft"
-              >
-                <option value="">Select supplier</option>
-                {(metaQuery.data?.suppliers ?? []).map((supplier) => (
-                  <option key={supplier.id} value={supplier.id}>
-                    {supplier.name}
-                  </option>
-                ))}
-              </select>
+                onChange={(supplierId) => setFormState((current) => ({ ...current, supplierId }))}
+              />
             </label>
             <label className="space-y-2 text-sm text-muted">
               <span>HQ Warehouse</span>

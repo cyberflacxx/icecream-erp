@@ -2,6 +2,11 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { badRequest, can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
 import { isMissingColumnError } from '@/lib/postgrest-compat';
+import {
+  filterSupplierOptions,
+  getSafeSupplierErrorDetails,
+  listSupplierOptionRecords,
+} from '@/lib/procurement-suppliers';
 import { recordAuditLog } from '@/lib/security-server';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
@@ -33,8 +38,24 @@ export async function GET(request: NextRequest) {
   const search = searchParams.get('search');
   const status = searchParams.get('status');
   const categoryId = searchParams.get('categoryId');
+  const picker = searchParams.get('picker') === 'true';
+  const activeOnly = searchParams.get('activeOnly') !== 'false';
 
   try {
+    if (picker) {
+      const rows = filterSupplierOptions(
+        await listSupplierOptionRecords(service, ctx.organizationId),
+        {
+          activeOnly,
+          search,
+        },
+      );
+
+      return NextResponse.json({
+        data: rows,
+      });
+    }
+
     const buildPrimaryQuery = () =>
       service
         .from('suppliers')
@@ -93,12 +114,18 @@ export async function GET(request: NextRequest) {
       errorMessage = fallback.error?.message ?? null;
     }
 
-    if (errorMessage) return serverError(errorMessage);
+    if (errorMessage) {
+      console.error('Supplier list query failed.', getSafeSupplierErrorDetails({ message: errorMessage }, 'list_suppliers_query'));
+      return serverError('Unable to load suppliers right now.');
+    }
     const categoryIds = [...new Set(rows.map((row) => String(row.category_id ?? '')).filter(Boolean))];
     const categoriesResult = categoryIds.length
       ? await service.from('supplier_categories').select('id, name').in('id', categoryIds)
       : { data: [], error: null };
-    if (categoriesResult.error) return serverError(categoriesResult.error.message);
+    if (categoriesResult.error) {
+      console.error('Supplier category lookup failed.', getSafeSupplierErrorDetails(categoriesResult.error, 'load_supplier_categories'));
+      return serverError('Unable to load suppliers right now.');
+    }
     const categories = new Map((categoriesResult.data ?? []).map((row) => [String(row.id), row as Record<string, unknown>]));
 
     const mapped = rows.map((r) => {
@@ -132,7 +159,8 @@ export async function GET(request: NextRequest) {
       pagination: { page, pageSize, total },
     });
   } catch (err) {
-    return serverError((err as Error).message);
+    console.error('Supplier list request failed.', getSafeSupplierErrorDetails(err, 'list_suppliers'));
+    return serverError('Unable to load suppliers right now.');
   }
 }
 

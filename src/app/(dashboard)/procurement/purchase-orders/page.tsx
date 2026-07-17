@@ -22,6 +22,7 @@ import { PERMISSIONS } from '@/lib/shared';
 import { PageHeader } from '@/components/dashboard/page-header';
 import { PaginationControls } from '@/components/inventory/pagination-controls';
 import { ProcurementNav } from '@/components/procurement/procurement-nav';
+import { SupplierSelect } from '@/components/procurement/supplier-select';
 import { Button } from '@/components/ui/button';
 import {
   formatPurchaseOrderStatusLabel,
@@ -35,6 +36,7 @@ import {
   useProcurementRequest,
   usePurchaseOrders,
   type PurchaseOrderRow,
+  useSupplierOptions,
 } from '@/hooks/procurement';
 import { usePermission } from '@/hooks/usePermission';
 
@@ -210,6 +212,7 @@ export default function PurchaseOrdersPage() {
   const queryClient = useQueryClient();
   const request = useProcurementRequest();
   const metaQuery = useProcurementMeta();
+  const supplierOptionsQuery = useSupplierOptions();
   const inventoryItemsQuery = useQuery({
     queryKey: ['procurement', 'purchase-order-item-options'],
     queryFn: () => request<unknown>('/api/inventory/items?page=1&pageSize=100&status=active'),
@@ -522,8 +525,8 @@ export default function PurchaseOrdersPage() {
           {
             key: 'supplierId',
             label: 'Supplier',
-            options: (metaQuery.data?.suppliers ?? []).map((supplier) => ({
-              label: supplier.name,
+            options: (supplierOptionsQuery.data ?? []).map((supplier) => ({
+              label: supplier.code ? `${supplier.code} - ${supplier.name}` : supplier.name,
               value: supplier.id
             })),
             type: 'select',
@@ -739,19 +742,11 @@ export default function PurchaseOrdersPage() {
             <div className="grid gap-4 md:grid-cols-2">
               <label className="space-y-2 text-sm text-muted">
                 <span>Supplier</span>
-                <select
+                <SupplierSelect
                   required
                   value={formState.supplierId}
-                  onChange={(event) => setFormState((current) => ({ ...current, supplierId: event.target.value }))}
-                  className="surface-input-soft"
-                >
-                  <option value="">Select supplier</option>
-                  {(metaQuery.data?.suppliers ?? []).map((supplier) => (
-                    <option key={supplier.id} value={supplier.id}>
-                      {supplier.name}
-                    </option>
-                  ))}
-                </select>
+                  onChange={(supplierId) => setFormState((current) => ({ ...current, supplierId }))}
+                />
               </label>
 
               <label className="space-y-2 text-sm text-muted">

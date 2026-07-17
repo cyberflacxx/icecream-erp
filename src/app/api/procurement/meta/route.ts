@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
 import { isMissingColumnError } from '@/lib/postgrest-compat';
+import { getSafeSupplierErrorDetails, listSupplierOptionRecords } from '@/lib/procurement-suppliers';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
 function toNumber(value: unknown) {
@@ -29,7 +30,6 @@ export async function GET(_request: NextRequest) {
     }
 
     const [
-      suppliersPrimary,
       itemsPrimary,
       unitsRes,
       warehousesRes,
@@ -40,13 +40,7 @@ export async function GET(_request: NextRequest) {
       grnItemsRes,
       approversPrimary,
     ] = await Promise.all([
-      service
-        .from('suppliers')
-        .select('id, code, name, email, phone, status, category_id')
-        .is('deleted_at', null)
-        .eq('organization_id', ctx.organizationId)
-        .eq('status', 'ACTIVE')
-        .order('name'),
+      listSupplierOptionRecords(service, ctx.organizationId),
       service
         .from('items')
         .select('id, code, name, description, item_type, unit_of_measure_id')
@@ -88,16 +82,6 @@ export async function GET(_request: NextRequest) {
         .order('full_name'),
     ]);
 
-    const suppliersRes =
-      suppliersPrimary.error && isMissingColumnError(suppliersPrimary.error, 'suppliers', 'deleted_at')
-        ? await service
-            .from('suppliers')
-            .select('id, code, name, email, phone, status, category_id')
-            .eq('organization_id', ctx.organizationId)
-            .eq('status', 'ACTIVE')
-            .order('name')
-        : suppliersPrimary;
-
     const itemsRes =
       itemsPrimary.error && isMissingColumnError(itemsPrimary.error, 'items', 'deleted_at')
         ? await service
@@ -108,7 +92,6 @@ export async function GET(_request: NextRequest) {
             .order('name')
         : itemsPrimary;
 
-    if (suppliersRes.error) return serverError(suppliersRes.error.message);
     if (itemsRes.error) return serverError(itemsRes.error.message);
     if (unitsRes.error) return serverError(unitsRes.error.message);
     if (warehousesRes.error) return serverError(warehousesRes.error.message);
@@ -251,7 +234,7 @@ export async function GET(_request: NextRequest) {
           fullName: String(user.full_name ?? 'Unknown'),
           role: user.role ? String(user.role) : null,
         })),
-      suppliers: suppliersRes.data ?? [],
+      suppliers: suppliersPrimary,
       items: (itemsRes.data ?? []).map((item) => ({
         code: String(item.code ?? ''),
         description: item.description ? String(item.description) : null,
@@ -293,6 +276,7 @@ export async function GET(_request: NextRequest) {
       departments: uniqueDepartments,
     });
   } catch (err) {
-    return serverError((err as Error).message);
+    console.error('Procurement meta request failed.', getSafeSupplierErrorDetails(err, 'procurement_meta'));
+    return serverError('Unable to load procurement form options right now.');
   }
 }
