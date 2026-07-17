@@ -324,6 +324,16 @@ export interface FinanceDashboardApiResponse {
   warnings: string[];
 }
 
+export interface NormalizedTrialBalanceRow {
+  accountCode: string;
+  accountId: string;
+  accountName: string;
+  accountType: string;
+  balance: number;
+  credit: number;
+  debit: number;
+}
+
 export function buildEmptyFinanceDashboardData(): FinanceDashboardData {
   return {
     charts: {
@@ -366,6 +376,42 @@ export function resolveFinanceSectionResult<T>(
   return {
     value: fallbackValue,
     warning,
+  };
+}
+
+export function resolveLedgerDebit(row: Record<string, unknown>) {
+  const explicitDebit = toNumber(row.debit_amount ?? row.debit ?? row.debit_value, Number.NaN);
+  if (Number.isFinite(explicitDebit)) {
+    return explicitDebit;
+  }
+
+  const amount = toNumber(row.amount, 0);
+  const side = String(row.debit_credit ?? row.side ?? '').trim().toUpperCase();
+  return side === 'DEBIT' || side === 'DR' ? amount : 0;
+}
+
+export function resolveLedgerCredit(row: Record<string, unknown>) {
+  const explicitCredit = toNumber(row.credit_amount ?? row.credit ?? row.credit_value, Number.NaN);
+  if (Number.isFinite(explicitCredit)) {
+    return explicitCredit;
+  }
+
+  const amount = toNumber(row.amount, 0);
+  const side = String(row.debit_credit ?? row.side ?? '').trim().toUpperCase();
+  return side === 'CREDIT' || side === 'CR' ? amount : 0;
+}
+
+export function normalizeTrialBalanceRow(row: Record<string, unknown>): NormalizedTrialBalanceRow {
+  const debit = resolveLedgerDebit(row);
+  const credit = resolveLedgerCredit(row);
+  return {
+    accountCode: String(row.account_code ?? row.code ?? row.gl_code ?? row.number ?? ''),
+    accountId: String(row.account_id ?? row.id ?? ''),
+    accountName: String(row.account_name ?? row.name ?? row.title ?? ''),
+    accountType: normalizeFinanceAccountType(String(row.account_type ?? row.type ?? row.category ?? '')),
+    balance: debit - credit,
+    credit,
+    debit,
   };
 }
 

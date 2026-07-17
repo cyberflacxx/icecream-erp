@@ -19,7 +19,10 @@ import {
   calculateStraightLineDepreciation,
   normalizeCashAccount,
   normalizePettyCashRequest,
+  normalizeTrialBalanceRow,
   resolveCashAccountBalance,
+  resolveLedgerCredit,
+  resolveLedgerDebit,
   resolveFinanceSectionResult,
   resolvePettyCashAmount,
   summarizeBalanceSheetFromLedger,
@@ -194,6 +197,37 @@ test('normalizeCashAccount returns canonical cash account fields from legacy sha
   assert.equal(normalized.branchName, 'Harare');
   assert.equal(normalized.status, 'ACTIVE');
   assert.equal(normalized.isActive, true);
+});
+
+test('trial balance helpers resolve debit and credit aliases safely', () => {
+  assert.equal(resolveLedgerDebit({ debit_amount: 20 }), 20);
+  assert.equal(resolveLedgerDebit({ debit: 18 }), 18);
+  assert.equal(resolveLedgerDebit({ amount: 11, debit_credit: 'DEBIT' }), 11);
+  assert.equal(resolveLedgerDebit({ amount: 11, side: 'CR' }), 0);
+
+  assert.equal(resolveLedgerCredit({ credit_amount: 15 }), 15);
+  assert.equal(resolveLedgerCredit({ credit: 12 }), 12);
+  assert.equal(resolveLedgerCredit({ amount: 9, debit_credit: 'CREDIT' }), 9);
+  assert.equal(resolveLedgerCredit({ amount: 9, side: 'DR' }), 0);
+});
+
+test('normalizeTrialBalanceRow falls back across account aliases and derives balance', () => {
+  const normalized = normalizeTrialBalanceRow({
+    credit_value: 25,
+    debit_value: 40,
+    gl_code: '4000',
+    id: 'acct-1',
+    title: 'Sales Revenue',
+    category: 'revenue',
+  });
+
+  assert.equal(normalized.accountId, 'acct-1');
+  assert.equal(normalized.accountCode, '4000');
+  assert.equal(normalized.accountName, 'Sales Revenue');
+  assert.equal(normalized.accountType, 'REVENUE');
+  assert.equal(normalized.debit, 40);
+  assert.equal(normalized.credit, 25);
+  assert.equal(normalized.balance, 15);
 });
 
 test('buildEmptyFinanceDashboardData returns zero-safe dashboard defaults', () => {

@@ -6,6 +6,9 @@ import {
   normalizeCashAccount,
   normalizePettyCashRequest,
   normalizeFinanceAccountType,
+  normalizeTrialBalanceRow,
+  resolveLedgerCredit,
+  resolveLedgerDebit,
   validateJournalLines,
 } from '@/lib/finance';
 
@@ -337,13 +340,20 @@ export async function loadLedgerLines(organizationId: string, postedOnly = true)
     return rows.map((row) => mapModernLedgerLine(row as FinanceRow));
   }
 
-  const legacyTableMissing =
+  const modernCompatibleFailure =
     isMissingFinanceTable(modern.error) ||
     isMissingFinanceColumn(modern.error, 'journal_entries', 'is_posted') ||
     isMissingFinanceColumn(modern.error, 'journal_entries', 'reference_type') ||
-    isMissingFinanceColumn(modern.error, 'accounts', 'account_code');
+    isMissingFinanceColumn(modern.error, 'journal_entries', 'reference_id') ||
+    isMissingFinanceColumn(modern.error, 'journal_entry_lines', 'debit_amount') ||
+    isMissingFinanceColumn(modern.error, 'journal_entry_lines', 'credit_amount') ||
+    isMissingFinanceColumn(modern.error, 'accounts', 'account_code') ||
+    isMissingFinanceColumn(modern.error, 'accounts', 'account_name') ||
+    isMissingFinanceColumn(modern.error, 'accounts', 'account_type') ||
+    financeErrorMessage(modern.error).includes('journal_entries') ||
+    financeErrorMessage(modern.error).includes('accounts');
 
-  if (!legacyTableMissing) {
+  if (!modernCompatibleFailure) {
     throw modern.error;
   }
 
@@ -354,13 +364,29 @@ export async function loadLedgerLines(organizationId: string, postedOnly = true)
     )
     .eq('journal_entries.organization_id', organizationId);
 
-  if (legacy.error) throw legacy.error;
+  if (!legacy.error) {
+    const rows = (legacy.data ?? []).filter((row) => {
+      const entry = mapNestedRow(row.journal_entries as FinanceRow | FinanceRow[] | null);
+      return !postedOnly || isPostedJournalStatus(String(entry?.status ?? ''));
+    });
+    return rows.map((row) => mapLegacyLedgerLine(row as FinanceRow));
+  }
 
-  const rows = (legacy.data ?? []).filter((row) => {
-    const entry = mapNestedRow(row.journal_entries as FinanceRow | FinanceRow[] | null);
-    return !postedOnly || isPostedJournalStatus(String(entry?.status ?? ''));
-  });
-  return rows.map((row) => mapLegacyLedgerLine(row as FinanceRow));
+  const legacyCompatibleFailure =
+    isMissingFinanceTable(legacy.error) ||
+    isMissingFinanceColumn(legacy.error, 'journal_lines', 'debit') ||
+    isMissingFinanceColumn(legacy.error, 'journal_lines', 'credit') ||
+    isMissingFinanceColumn(legacy.error, 'accounts', 'code') ||
+    isMissingFinanceColumn(legacy.error, 'accounts', 'name') ||
+    isMissingFinanceColumn(legacy.error, 'accounts', 'type') ||
+    financeErrorMessage(legacy.error).includes('journal_entries') ||
+    financeErrorMessage(legacy.error).includes('accounts');
+
+  if (!legacyCompatibleFailure) {
+    throw legacy.error;
+  }
+
+  return loadAccountsOnlyLedgerFallback(service, organizationId);
 }
 
 export async function findJournalBySource(
@@ -716,13 +742,19 @@ async function resolvePostingAccounts(
 function mapModernLedgerLine(row: FinanceRow): LedgerLine {
   const account = mapNestedRow(row.accounts as FinanceRow | FinanceRow[] | null);
   const entry = mapNestedRow(row.journal_entries as FinanceRow | FinanceRow[] | null);
+  const normalized = normalizeTrialBalanceRow({
+    ...row,
+    account_code: account?.account_code ?? account?.code,
+    account_name: account?.account_name ?? account?.name,
+    account_type: account?.account_type ?? account?.type,
+  });
   return {
-    accountCode: String(account?.account_code ?? account?.code ?? ''),
+    accountCode: normalized.accountCode,
     accountId: String(row.account_id ?? account?.id ?? ''),
-    accountName: String(account?.account_name ?? account?.name ?? ''),
-    accountType: normalizeFinanceAccountType(String(account?.account_type ?? account?.type ?? '')),
-    creditAmount: Number(row.credit_amount ?? row.credit ?? 0),
-    debitAmount: Number(row.debit_amount ?? row.debit ?? 0),
+    accountName: normalized.accountName,
+    accountType: normalized.accountType,
+    creditAmount: normalized.credit,
+    debitAmount: normalized.debit,
     description: row.description ? String(row.description) : null,
     entryDate: entry?.entry_date ? String(entry.entry_date) : null,
     entryNumber: entry?.entry_number ? String(entry.entry_number) : null,
@@ -740,13 +772,19 @@ function mapLegacyLedgerLine(row: FinanceRow): LedgerLine {
   const entry = mapNestedRow(row.journal_entries as FinanceRow | FinanceRow[] | null);
   const reference = entry?.reference ? String(entry.reference) : null;
   const parsed = parseLegacySourceReference(reference);
+  const normalized = normalizeTrialBalanceRow({
+    ...row,
+    account_code: account?.account_code ?? account?.code,
+    account_name: account?.account_name ?? account?.name,
+    account_type: account?.account_type ?? account?.type,
+  });
   return {
-    accountCode: String(account?.code ?? account?.account_code ?? ''),
+    accountCode: normalized.accountCode,
     accountId: String(row.account_id ?? account?.id ?? ''),
-    accountName: String(account?.name ?? account?.account_name ?? ''),
-    accountType: normalizeFinanceAccountType(String(account?.type ?? account?.account_type ?? '')),
-    creditAmount: Number(row.credit ?? row.credit_amount ?? 0),
-    debitAmount: Number(row.debit ?? row.debit_amount ?? 0),
+    accountName: normalized.accountName,
+    accountType: normalized.accountType,
+    creditAmount: normalized.credit,
+    debitAmount: normalized.debit,
     description: row.description ? String(row.description) : null,
     entryDate: entry?.entry_date ? String(entry.entry_date) : null,
     entryNumber: entry?.entry_number ? String(entry.entry_number) : null,
@@ -757,6 +795,58 @@ function mapLegacyLedgerLine(row: FinanceRow): LedgerLine {
     sourceReference: reference,
     status: String(entry?.status ?? ''),
   };
+}
+
+async function loadAccountsOnlyLedgerFallback(
+  service: ReturnType<typeof financeService>,
+  organizationId: string,
+) {
+  const attempts = [
+    'id, organization_id, account_code, account_name, account_type, is_active',
+    'id, organization_id, code, name, type, is_active',
+    'id, organization_id, gl_code, title, category, is_active',
+    'id, organization_id, number, name, type',
+    'id, organization_id, name',
+  ];
+
+  for (const selectClause of attempts) {
+    const result = await service
+      .from('accounts')
+      .select(selectClause)
+      .eq('organization_id', organizationId);
+
+    if (!result.error) {
+      return (result.data ?? [])
+        .map((row) => row as FinanceRow)
+        .filter((row) => row.is_active !== false)
+        .map((row) => {
+          const normalized = normalizeTrialBalanceRow(row);
+          return {
+            accountCode: normalized.accountCode,
+            accountId: normalized.accountId,
+            accountName: normalized.accountName || 'Unknown account',
+            accountType: normalized.accountType,
+            creditAmount: 0,
+            debitAmount: 0,
+            description: null,
+            entryDate: null,
+            entryNumber: null,
+            journalId: `account:${normalized.accountId}`,
+            sourceDocumentId: null,
+            sourceDocumentType: null,
+            sourceModule: null,
+            sourceReference: null,
+            status: 'POSTED',
+          } satisfies LedgerLine;
+        });
+    }
+
+    if (!isMissingFinanceTable(result.error) && !/column\s+accounts\.[a-z_]+\s+does not exist/i.test(financeErrorMessage(result.error))) {
+      throw result.error;
+    }
+  }
+
+  return [] as LedgerLine[];
 }
 
 function parseLegacySourceReference(reference: string | null) {
