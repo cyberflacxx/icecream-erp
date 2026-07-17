@@ -9,6 +9,26 @@ export function normalizeRequisitionItemId(input: {
   return itemId ?? '';
 }
 
+export function normalizeRequisitionUnitOfMeasureId(input: {
+  unitOfMeasureId?: unknown;
+  unit_of_measure_id?: unknown;
+  uomId?: unknown;
+  uom_id?: unknown;
+  uom?: unknown;
+}) {
+  const unitOfMeasureId = [
+    input.unit_of_measure_id,
+    input.unitOfMeasureId,
+    input.uom_id,
+    input.uomId,
+    input.uom,
+  ]
+    .map((value) => String(value ?? '').trim())
+    .find(Boolean);
+
+  return unitOfMeasureId ?? '';
+}
+
 interface RequisitionDraftPayloadInput {
   approverUserId?: string | null;
   department: string;
@@ -18,7 +38,11 @@ interface RequisitionDraftPayloadInput {
     item_id?: string | null;
     quantityRequested: number;
     remarks?: string | null;
-    unitOfMeasureId: string;
+    unitOfMeasureId?: string | null;
+    unit_of_measure_id?: string | null;
+    uomId?: string | null;
+    uom_id?: string | null;
+    uom?: string | null;
   }>;
   neededByDate?: string | null;
   remarks?: string | null;
@@ -30,6 +54,7 @@ export function buildRequisitionDraftPayload(input: RequisitionDraftPayloadInput
     department: input.department,
     items: input.items.map((item) => {
       const itemId = normalizeRequisitionItemId(item);
+      const unitOfMeasureId = normalizeRequisitionUnitOfMeasureId(item);
 
       return {
         estimatedUnitCost: item.estimatedUnitCost ?? null,
@@ -37,7 +62,10 @@ export function buildRequisitionDraftPayload(input: RequisitionDraftPayloadInput
         item_id: itemId,
         quantityRequested: item.quantityRequested,
         remarks: item.remarks ?? null,
-        unitOfMeasureId: item.unitOfMeasureId,
+        unitOfMeasureId,
+        unit_of_measure_id: unitOfMeasureId,
+        uomId: unitOfMeasureId,
+        uom_id: unitOfMeasureId,
       };
     }),
     neededByDate: input.neededByDate ?? null,

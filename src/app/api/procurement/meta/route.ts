@@ -30,8 +30,9 @@ export async function GET(_request: NextRequest) {
     }
 
     const [
+      suppliersPrimary,
       itemsPrimary,
-      unitsRes,
+      unitsPrimary,
       warehousesRes,
       purchaseOrdersRes,
       purchaseOrderItemsRes,
@@ -50,7 +51,7 @@ export async function GET(_request: NextRequest) {
         .order('name'),
       service
         .from('units_of_measure')
-        .select('id, name, abbreviation')
+        .select('id, name, abbreviation, code, symbol')
         .eq('organization_id', ctx.organizationId)
         .order('name'),
       warehouseQuery,
@@ -91,6 +92,15 @@ export async function GET(_request: NextRequest) {
             .eq('organization_id', ctx.organizationId)
             .order('name')
         : itemsPrimary;
+
+    const unitsRes =
+      unitsPrimary.error && isMissingColumnError(unitsPrimary.error, 'units_of_measure', 'abbreviation')
+        ? await service
+            .from('units_of_measure')
+            .select('id, name, code, symbol')
+            .eq('organization_id', ctx.organizationId)
+            .order('name')
+        : unitsPrimary;
 
     if (itemsRes.error) return serverError(itemsRes.error.message);
     if (unitsRes.error) return serverError(unitsRes.error.message);
@@ -240,6 +250,7 @@ export async function GET(_request: NextRequest) {
         description: item.description ? String(item.description) : null,
         id: String(item.id),
         itemType: item.item_type ? String(item.item_type) : null,
+        label: item.code ? `${String(item.code)} - ${String(item.name ?? item.code ?? 'Unnamed item')}` : String(item.name ?? item.code ?? 'Unnamed item'),
         inventory: (() => {
           const summary = itemInventory.get(String(item.id));
           const reorderLevel = toNumber((item as Record<string, unknown>).reorder_level);
@@ -259,9 +270,26 @@ export async function GET(_request: NextRequest) {
           };
         })(),
         name: String(item.name ?? item.code ?? 'Unnamed item'),
+        unit_of_measure_id: item.unit_of_measure_id ? String(item.unit_of_measure_id) : null,
         unitOfMeasureId: item.unit_of_measure_id ? String(item.unit_of_measure_id) : null,
+        uomId: item.unit_of_measure_id ? String(item.unit_of_measure_id) : null,
       })),
-      units: unitsRes.data ?? [],
+      units: (unitsRes.data ?? []).map((unit) => {
+        const code = 'code' in unit && unit.code ? String(unit.code) : null;
+        const symbol = 'symbol' in unit && unit.symbol ? String(unit.symbol) : null;
+        const abbreviation = 'abbreviation' in unit && unit.abbreviation ? String(unit.abbreviation) : null;
+        const name = unit.name ? String(unit.name) : '';
+        const shortCode = abbreviation ?? code ?? symbol ?? name;
+
+        return {
+          abbreviation: abbreviation ?? code ?? symbol ?? name,
+          code: code ?? shortCode,
+          id: String(unit.id),
+          label: name || shortCode,
+          name,
+          symbol: symbol ?? abbreviation ?? code ?? null,
+        };
+      }),
       warehouses: accessibleWarehouses,
       purchaseOrders: (purchaseOrdersRes.data ?? [])
         .filter((o) => poStatusFilter.has(String(o.status ?? '').toLowerCase()))

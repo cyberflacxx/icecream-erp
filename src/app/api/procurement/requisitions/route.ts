@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { badRequest, can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
-import { normalizeRequisitionItemId } from '@/lib/procurement-requisitions';
+import { normalizeRequisitionItemId, normalizeRequisitionUnitOfMeasureId } from '@/lib/procurement-requisitions';
 import { isMissingColumnError } from '@/lib/postgrest-compat';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
@@ -112,7 +112,11 @@ export async function POST(request: NextRequest) {
     items: Array<{
       itemId?: string;
       item_id?: string;
-      unitOfMeasureId: string;
+      unitOfMeasureId?: string;
+      unit_of_measure_id?: string;
+      uomId?: string;
+      uom_id?: string;
+      uom?: string;
       quantityRequested: number;
       estimatedUnitCost?: number | null;
       remarks?: string | null;
@@ -133,10 +137,14 @@ export async function POST(request: NextRequest) {
     const normalizedItems = body.items.map((item) => ({
       ...item,
       itemId: normalizeRequisitionItemId(item),
+      unitOfMeasureId: normalizeRequisitionUnitOfMeasureId(item),
     }));
 
     if (normalizedItems.some((item) => !item.itemId)) {
       return badRequest('Selected item is no longer available. Please refresh and try again.');
+    }
+    if (normalizedItems.some((item) => !item.unitOfMeasureId)) {
+      return badRequest('Selected unit of measurement is no longer available. Please refresh and try again.');
     }
 
     // Validate items exist
@@ -162,8 +170,11 @@ export async function POST(request: NextRequest) {
         ? await service.from('items').select('id').eq('organization_id', ctx.organizationId).in('id', itemIds)
         : itemsPrimary;
 
-    if ((itemsCheck.data?.length ?? 0) !== itemIds.length || (unitsCheck.data?.length ?? 0) !== unitIds.length) {
+    if ((itemsCheck.data?.length ?? 0) !== itemIds.length) {
       return badRequest('Selected item is no longer available. Please refresh and try again.');
+    }
+    if ((unitsCheck.data?.length ?? 0) !== unitIds.length) {
+      return badRequest('Selected unit of measurement is no longer available. Please refresh and try again.');
     }
 
     if (body.approverUserId) {
@@ -242,7 +253,16 @@ export async function POST(request: NextRequest) {
       .eq('id', (requisition as Record<string, unknown>).id)
       .single();
 
-    return NextResponse.json(full, { status: 201 });
+    return NextResponse.json({
+      ...full,
+      purchase_requisition_items: ((full?.purchase_requisition_items as Record<string, unknown>[] | undefined) ?? []).map(
+        (item) => ({
+          ...item,
+          itemId: item.item_id ? String(item.item_id) : null,
+          unitOfMeasureId: item.unit_of_measure_id ? String(item.unit_of_measure_id) : null,
+        }),
+      ),
+    }, { status: 201 });
   } catch (err) {
     return serverError((err as Error).message);
   }

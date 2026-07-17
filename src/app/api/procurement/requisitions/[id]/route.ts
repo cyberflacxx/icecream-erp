@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { badRequest, can, forbidden, getAuthContext, notFound, serverError, unauthorized } from '@/lib/api-auth';
-import { normalizeRequisitionItemId } from '@/lib/procurement-requisitions';
+import { normalizeRequisitionItemId, normalizeRequisitionUnitOfMeasureId } from '@/lib/procurement-requisitions';
 import { isMissingColumnError } from '@/lib/postgrest-compat';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
@@ -47,6 +47,7 @@ export async function GET(
       purchase_requisition_items: (requisition.purchase_requisition_items ?? []).map((item) => ({
         ...item,
         itemId: item.item_id ? String(item.item_id) : null,
+        unitOfMeasureId: item.unit_of_measure_id ? String(item.unit_of_measure_id) : null,
       })),
     });
   } catch (err) {
@@ -73,7 +74,11 @@ export async function PATCH(
     items?: Array<{
       itemId?: string;
       item_id?: string;
-      unitOfMeasureId: string;
+      unitOfMeasureId?: string;
+      unit_of_measure_id?: string;
+      uomId?: string;
+      uom_id?: string;
+      uom?: string;
       quantityRequested: number;
       estimatedUnitCost?: number | null;
       remarks?: string | null;
@@ -104,10 +109,14 @@ export async function PATCH(
     const normalizedItems = body.items?.map((item) => ({
       ...item,
       itemId: normalizeRequisitionItemId(item),
+      unitOfMeasureId: normalizeRequisitionUnitOfMeasureId(item),
     }));
 
     if (normalizedItems?.some((item) => !item.itemId)) {
       return badRequest('Selected item is no longer available. Please refresh and try again.');
+    }
+    if (normalizedItems?.some((item) => !item.unitOfMeasureId)) {
+      return badRequest('Selected unit of measurement is no longer available. Please refresh and try again.');
     }
 
     // Validate items if provided
@@ -134,11 +143,11 @@ export async function PATCH(
           ? await service.from('items').select('id').eq('organization_id', ctx.organizationId).in('id', itemIds)
           : itemsPrimary;
 
-      if (
-        (itemsCheck.data?.length ?? 0) !== itemIds.length ||
-        (unitsCheck.data?.length ?? 0) !== unitIds.length
-      ) {
+      if ((itemsCheck.data?.length ?? 0) !== itemIds.length) {
         return badRequest('Selected item is no longer available. Please refresh and try again.');
+      }
+      if ((unitsCheck.data?.length ?? 0) !== unitIds.length) {
+        return badRequest('Selected unit of measurement is no longer available. Please refresh and try again.');
       }
     }
 
@@ -214,6 +223,7 @@ export async function PATCH(
         (item) => ({
           ...item,
           itemId: item.item_id ? String(item.item_id) : null,
+          unitOfMeasureId: item.unit_of_measure_id ? String(item.unit_of_measure_id) : null,
         }),
       ),
     });

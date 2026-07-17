@@ -18,6 +18,7 @@ import {
 import {
   buildRequisitionDraftPayload,
   normalizeRequisitionItemId,
+  normalizeRequisitionUnitOfMeasureId,
 } from '../src/lib/procurement-requisitions';
 import { filterSupplierOptions, isSupplierActive, mapSupplierOption } from '../src/lib/procurement-suppliers';
 
@@ -204,6 +205,15 @@ test('normalizeRequisitionItemId accepts item_id and itemId', () => {
   assert.equal(normalizeRequisitionItemId({}), '');
 });
 
+test('normalizeRequisitionUnitOfMeasureId accepts unit aliases', () => {
+  assert.equal(normalizeRequisitionUnitOfMeasureId({ unit_of_measure_id: ' uom-1 ' }), 'uom-1');
+  assert.equal(normalizeRequisitionUnitOfMeasureId({ unitOfMeasureId: 'uom-2' }), 'uom-2');
+  assert.equal(normalizeRequisitionUnitOfMeasureId({ uom_id: 'uom-3' }), 'uom-3');
+  assert.equal(normalizeRequisitionUnitOfMeasureId({ uomId: 'uom-4' }), 'uom-4');
+  assert.equal(normalizeRequisitionUnitOfMeasureId({ uom: 'uom-5' }), 'uom-5');
+  assert.equal(normalizeRequisitionUnitOfMeasureId({}), '');
+});
+
 test('buildRequisitionDraftPayload stores item_id canonically', () => {
   const payload = buildRequisitionDraftPayload({
     approverUserId: 'user-1',
@@ -223,5 +233,7 @@ test('buildRequisitionDraftPayload stores item_id canonically', () => {
   assert.equal(payload.approverUserId, 'user-1');
   assert.equal(payload.items[0]?.itemId, 'item-1');
   assert.equal(payload.items[0]?.item_id, 'item-1');
+  assert.equal(payload.items[0]?.unitOfMeasureId, 'uom-1');
+  assert.equal(payload.items[0]?.unit_of_measure_id, 'uom-1');
   assert.equal(payload.department, 'Production');
 });

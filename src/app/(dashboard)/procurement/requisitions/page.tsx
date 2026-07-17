@@ -45,7 +45,9 @@ type RequisitionDetailResponse = {
   purchase_requisition_items: Array<{
     id: string;
     item_id: string;
+    itemId?: string | null;
     unit_of_measure_id: string;
+    unitOfMeasureId?: string | null;
     quantity_requested: number | string;
     estimated_unit_cost: number | string | null;
   }>;
@@ -150,8 +152,12 @@ export default function RequisitionsPage() {
 
   const requisitions = requisitionsQuery.data?.data ?? [];
   const pagination = requisitionsQuery.data?.pagination;
+  const itemOptions = metaQuery.data?.items ?? [];
+  const unitOptions = metaQuery.data?.units ?? [];
+  const itemLoadFailed = metaQuery.isError;
+  const unitLoadFailed = metaQuery.isError;
   const selectedItems = formState.items.map(
-    (item) => metaQuery.data?.items.find((candidate) => candidate.id === item.itemId) ?? null,
+    (item) => itemOptions.find((candidate) => candidate.id === item.itemId) ?? null,
   );
 
   function resetForm() {
@@ -181,10 +187,10 @@ export default function RequisitionsPage() {
           detail.purchase_requisition_items.length > 0
             ? detail.purchase_requisition_items.map((item) => ({
                 estimatedUnitCost: String(item.estimated_unit_cost ?? 0),
-                itemId: item.item_id,
+                itemId: item.itemId ?? item.item_id,
                 quantityRequested: String(item.quantity_requested ?? 1),
                 rowId: item.id,
-                unitOfMeasureId: item.unit_of_measure_id,
+                unitOfMeasureId: item.unitOfMeasureId ?? item.unit_of_measure_id,
               }))
             : [buildEmptyLine()],
         neededByDate: detail.needed_by_date ? String(detail.needed_by_date).slice(0, 10) : '',
@@ -617,7 +623,7 @@ export default function RequisitionsPage() {
                     <select
                       value={item.itemId}
                       onChange={(event) => {
-                        const selectedItem = metaQuery.data?.items.find(
+                        const selectedItem = itemOptions.find(
                           (candidate) => candidate.id === event.target.value,
                         );
                         setFormState((current) => ({
@@ -634,18 +640,45 @@ export default function RequisitionsPage() {
                         }));
                       }}
                       className="surface-input-soft"
+                      disabled={metaQuery.isLoading || itemLoadFailed || itemOptions.length === 0}
                     >
-                      <option value="">Select item</option>
+                      <option value="">
+                        {metaQuery.isLoading
+                          ? 'Loading items...'
+                          : itemLoadFailed
+                            ? 'Items unavailable'
+                            : itemOptions.length === 0
+                              ? 'No items found'
+                              : 'Select item'}
+                      </option>
                       {item.itemId &&
-                      !(metaQuery.data?.items ?? []).some((candidate) => candidate.id === item.itemId) ? (
+                      !itemOptions.some((candidate) => candidate.id === item.itemId) ? (
                         <option value={item.itemId}>Saved item selection</option>
                       ) : null}
-                      {(metaQuery.data?.items ?? []).map((row) => (
+                      {itemOptions.map((row) => (
                         <option key={row.id} value={row.id}>
-                          {row.code} - {row.name}
+                          {row.label ?? (row.code ? `${row.code} - ${row.name}` : row.name)}
                         </option>
                       ))}
                     </select>
+                    {itemLoadFailed ? (
+                      <div className="flex items-center justify-between gap-3 rounded-xl border border-border/60 bg-white/90 px-3 py-2 text-xs text-muted">
+                        <span>Unable to load items right now. Please refresh and try again.</span>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          className="h-7 px-2 text-[11px]"
+                          onClick={() => void metaQuery.refetch()}
+                        >
+                          Retry
+                        </Button>
+                      </div>
+                    ) : !metaQuery.isLoading && itemOptions.length === 0 ? (
+                      <div className="rounded-xl border border-border/60 bg-white/90 px-3 py-2 text-xs text-muted">
+                        No items found. Create an item first.
+                      </div>
+                    ) : null}
                     <div className="rounded-xl border border-border/60 bg-cream/50 px-3 py-2 text-xs text-muted">
                       {selectedItems[index]
                         ? `${selectedItems[index]?.itemType?.replace(/_/g, ' ') ?? 'Item'}${selectedItems[index]?.description ? ` • ${selectedItems[index]?.description}` : ''}`
@@ -697,14 +730,28 @@ export default function RequisitionsPage() {
                       }))
                     }
                     className="surface-input-soft"
+                    disabled={metaQuery.isLoading || unitLoadFailed || unitOptions.length === 0}
                   >
-                    <option value="">UOM</option>
-                    {(metaQuery.data?.units ?? []).map((row) => (
+                    <option value="">
+                      {metaQuery.isLoading
+                        ? 'Loading units...'
+                        : unitLoadFailed
+                          ? 'Units unavailable'
+                          : unitOptions.length === 0
+                            ? 'No units found'
+                            : 'UOM'}
+                    </option>
+                    {unitOptions.map((row) => (
                       <option key={row.id} value={row.id}>
-                        {row.abbreviation}
+                        {row.label ?? row.symbol ?? row.code ?? row.name}
                       </option>
                     ))}
                   </select>
+                  {unitLoadFailed ? (
+                    <div className="text-xs text-muted">Unable to load units of measurement right now. Please refresh and try again.</div>
+                  ) : !metaQuery.isLoading && unitOptions.length === 0 ? (
+                    <div className="text-xs text-muted">No units of measurement found. Create units first.</div>
+                  ) : null}
                   <input
                     min="0"
                     step="0.01"
