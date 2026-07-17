@@ -1,6 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { badRequest, can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
+import {
+  normalizeGoodsReceivedItemId,
+  normalizeGoodsReceivedPurchaseOrderId,
+  normalizeGoodsReceivedSupplierId,
+  normalizeGoodsReceivedUnitOfMeasureId,
+} from '@/lib/procurement-goods-received';
 import { isPurchaseOrderSentLike } from '@/lib/procurement-purchase-orders';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
@@ -183,7 +189,11 @@ export async function POST(request: NextRequest) {
   const service = createServiceRoleClient();
 
   let body: {
+    purchase_order_id?: string | null;
     purchaseOrderId?: string | null;
+    po_id?: string | null;
+    poId?: string | null;
+    supplier_id?: string | null;
     supplierId?: string | null;
     warehouseId: string;
     receivedDate?: string | null;
@@ -191,12 +201,22 @@ export async function POST(request: NextRequest) {
     qualityNotes?: string | null;
     entryMode?: string | null;
     items?: Array<{
-      itemId: string;
+      itemId?: string | null;
+      item_id?: string | null;
+      product_id?: string | null;
+      productId?: string | null;
+      raw_material_id?: string | null;
+      rawMaterialId?: string | null;
       poItemId?: string | null;
+      po_item_id?: string | null;
       quantityExpected: number;
       quantityReceived: number;
       quantityRejected: number;
       unitCost: number;
+      unitOfMeasureId?: string | null;
+      unit_of_measure_id?: string | null;
+      uom_id?: string | null;
+      uomId?: string | null;
       batchNumber?: string | null;
       expiryDate?: string | null;
       qualityNotes?: string | null;
@@ -209,30 +229,50 @@ export async function POST(request: NextRequest) {
     return badRequest('Invalid JSON body');
   }
 
-  const isManualEntry = String(body.entryMode ?? '').toLowerCase() === 'manual' || !body.purchaseOrderId;
+  const purchaseOrderId = normalizeGoodsReceivedPurchaseOrderId(body);
+  const supplierId = normalizeGoodsReceivedSupplierId(body);
+  const normalizedItems =
+    body.items?.map((item) => {
+      const itemId = normalizeGoodsReceivedItemId(item);
+      const unitOfMeasureId = normalizeGoodsReceivedUnitOfMeasureId(item);
+      const poItemId = String(item.po_item_id ?? item.poItemId ?? '').trim();
+
+      return {
+        ...item,
+        itemId,
+        poItemId: poItemId || null,
+        unitOfMeasureId,
+      };
+    }) ?? [];
+  const isManualEntry = String(body.entryMode ?? '').toLowerCase() === 'manual' || !purchaseOrderId;
 
   if (!body.warehouseId) {
     return badRequest('warehouseId is required');
   }
-  if (!isManualEntry && !body.purchaseOrderId) {
+  if (!isManualEntry && !purchaseOrderId) {
     return badRequest('purchaseOrderId is required for PO-linked receipts.');
   }
-  if (isManualEntry && !body.supplierId) {
+  if (isManualEntry && !supplierId) {
     return badRequest('supplierId is required for manual GRNs.');
+  }
+  if (normalizedItems.some((item) => !item.itemId)) {
+    return badRequest('Selected item is no longer available. Please refresh and try again.');
   }
 
   try {
     let order: Record<string, unknown> | null = null;
-    if (!isManualEntry && body.purchaseOrderId) {
+    if (!isManualEntry && purchaseOrderId) {
       const { data: purchaseOrder, error: orderErr } = await service
         .from('purchase_orders')
         .select('id, supplier_id, status, purchase_order_items(*)')
         .is('deleted_at', null)
         .eq('organization_id', ctx.organizationId)
-        .eq('id', body.purchaseOrderId)
+        .eq('id', purchaseOrderId)
         .single();
 
-      if (orderErr || !purchaseOrder) return badRequest('Purchase order not found.');
+      if (orderErr || !purchaseOrder) {
+        return badRequest('Selected purchase order is no longer available. Please refresh and try again.');
+      }
 
       order = purchaseOrder as Record<string, unknown>;
       if (!isPurchaseOrderSentLike(order.status)) {
@@ -240,15 +280,47 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    if (body.supplierId) {
+    if (supplierId) {
       const { data: supplier, error: supplierError } = await service
         .from('suppliers')
         .select('id')
         .is('deleted_at', null)
         .eq('organization_id', ctx.organizationId)
-        .eq('id', body.supplierId)
+        .eq('id', supplierId)
         .single();
-      if (supplierError || !supplier) return badRequest('Supplier not found.');
+      if (supplierError || !supplier) {
+        return badRequest('Selected supplier is no longer available. Please refresh and try again.');
+      }
+    }
+
+    if (normalizedItems.length) {
+      const itemIds = [...new Set(normalizedItems.map((item) => item.itemId).filter(Boolean))];
+      const unitIds = [...new Set(normalizedItems.map((item) => item.unitOfMeasureId).filter(Boolean))];
+      const [itemsPrimary, unitsRes] = await Promise.all([
+        service
+          .from('items')
+          .select('id')
+          .is('deleted_at', null)
+          .eq('organization_id', ctx.organizationId)
+          .in('id', itemIds),
+        unitIds.length
+          ? service.from('units_of_measure').select('id').eq('organization_id', ctx.organizationId).in('id', unitIds)
+          : Promise.resolve({ data: [], error: null }),
+      ]);
+
+      const itemsRes =
+        itemsPrimary.error && isMissingColumnError(itemsPrimary.error, 'items', 'deleted_at')
+          ? await service.from('items').select('id').eq('organization_id', ctx.organizationId).in('id', itemIds)
+          : itemsPrimary;
+
+      if (itemsRes.error) return serverError(itemsRes.error.message);
+      if (unitsRes.error) return serverError(unitsRes.error.message);
+      if ((itemsRes.data?.length ?? 0) !== itemIds.length) {
+        return badRequest('Selected item is no longer available. Please refresh and try again.');
+      }
+      if ((unitsRes.data?.length ?? 0) !== unitIds.length) {
+        return badRequest('Selected unit of measurement is no longer available. Please refresh and try again.');
+      }
     }
 
     // Validate warehouse. Central warehouses have no branch_id and are valid
@@ -286,8 +358,8 @@ export async function POST(request: NextRequest) {
       .from('goods_received_notes')
       .insert({
         grn_number: grnNumber,
-        purchase_order_id: body.purchaseOrderId ?? null,
-        supplier_id: body.supplierId ?? (order?.supplier_id as string | null) ?? null,
+        purchase_order_id: purchaseOrderId || null,
+        supplier_id: supplierId || (order?.supplier_id as string | null) || null,
         entry_mode: isManualEntry ? 'manual' : 'po_linked',
         warehouse_id: body.warehouseId,
         organization_id: ctx.organizationId,
@@ -316,10 +388,10 @@ export async function POST(request: NextRequest) {
         .from('goods_received_notes')
         .insert({
           grn_number: grnNumber,
-          po_id: body.purchaseOrderId ?? null,
+          po_id: purchaseOrderId || null,
           warehouse_id: body.warehouseId,
           organization_id: ctx.organizationId,
-          supplier_id: body.supplierId ?? (order?.supplier_id as string | null) ?? null,
+          supplier_id: supplierId || (order?.supplier_id as string | null) || null,
           received_date: (body.receivedDate ?? new Date().toISOString()).slice(0, 10),
           notes: body.notes ?? null,
           invoice_ref: body.qualityNotes ?? null,
@@ -337,8 +409,8 @@ export async function POST(request: NextRequest) {
 
     // Build items: use provided or derive from PO items
     const poItems = ((order?.purchase_order_items as Record<string, unknown>[]) ?? []);
-    const itemsToInsert = body.items?.length
-      ? body.items
+    const itemsToInsert = normalizedItems.length
+      ? normalizedItems
       : poItems.map((pi) => ({
           itemId: pi.item_id as string,
           poItemId: pi.id as string,

@@ -18,6 +18,7 @@ export interface ProcurementMetaResponse {
     code: string;
     description: string | null;
     itemType: string | null;
+    label: string;
     inventory: {
       currentStock: number;
       isLowStock: boolean;
@@ -34,16 +35,21 @@ export interface ProcurementMetaResponse {
       }>;
     };
     name: string;
+    unit_of_measure_id?: string | null;
     unitOfMeasureId: string | null;
+    uomId?: string | null;
   }>;
   purchaseOrders: Array<{
     id: string;
+    label?: string;
     poNumber: string;
     status: string;
     supplier: {
       id: string;
       name: string;
-    };
+    } | null;
+    supplierId?: string | null;
+    supplierName?: string | null;
   }>;
   suppliers: Array<{
     id: string;
@@ -54,7 +60,10 @@ export interface ProcurementMetaResponse {
   units: Array<{
     id: string;
     abbreviation: string;
+    code?: string | null;
+    label?: string;
     name: string;
+    symbol?: string | null;
   }>;
   warehouses: Array<{
     id: string;

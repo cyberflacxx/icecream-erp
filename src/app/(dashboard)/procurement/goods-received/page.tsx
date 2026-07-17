@@ -6,6 +6,7 @@ import { useSearchParams } from 'next/navigation';
 import { useQueryClient } from '@tanstack/react-query';
 
 import { DataTable, EmptyState, FilterBar, FormDrawer, StatusBadge } from '@/components/ui-library';
+import { buildGoodsReceivedDraftPayload } from '@/lib/procurement-goods-received';
 import { PERMISSIONS } from '@/lib/shared';
 
 import { PageHeader } from '@/components/dashboard/page-header';
@@ -41,12 +42,34 @@ type GrnLineItem = {
   quantityReceived: string;
   quantityRejected: string;
   reason: string;
+  rowId: string;
   unitCost: string;
+  unitOfMeasureId: string;
 };
 
 interface FeedbackState {
   message: string;
   tone: 'error' | 'success';
+}
+
+function createGrnRowId() {
+  return `grn-line-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function buildEmptyGrnLineItem(): GrnLineItem {
+  return {
+    batchNumber: '',
+    expiryDate: '',
+    itemId: '',
+    qualityNotes: '',
+    quantityExpected: 0,
+    quantityReceived: '0',
+    quantityRejected: '0',
+    reason: '',
+    rowId: createGrnRowId(),
+    unitCost: '0',
+    unitOfMeasureId: '',
+  };
 }
 
 export default function GoodsReceivedPage() {
@@ -79,6 +102,12 @@ export default function GoodsReceivedPage() {
   });
   const purchaseOrderQuery = usePurchaseOrder(formState.purchaseOrderId || undefined);
   const hqWarehouses = (metaQuery.data?.warehouses ?? []).filter((warehouse) => warehouse.branchId === null);
+  const purchaseOrderOptions = metaQuery.data?.purchaseOrders ?? [];
+  const itemOptions = metaQuery.data?.items ?? [];
+  const unitOptions = metaQuery.data?.units ?? [];
+  const purchaseOrderLoadFailed = metaQuery.isError;
+  const itemLoadFailed = metaQuery.isError;
+  const unitLoadFailed = metaQuery.isError;
 
   useEffect(() => {
     if (!purchaseOrderIdParam) {
@@ -94,9 +123,10 @@ export default function GoodsReceivedPage() {
       | {
           items: Array<{
             id: string;
-            item: { id: string };
+            item: { id: string } | null;
             quantityOrdered: number;
             quantityReceived: number;
+            unitOfMeasure?: { id: string } | null;
           }>;
         }
       | undefined;
@@ -110,33 +140,23 @@ export default function GoodsReceivedPage() {
       order.items.map((item) => ({
         batchNumber: '',
         expiryDate: '',
-        itemId: item.item.id,
+        itemId: item.item?.id ?? '',
         poItemId: item.id,
         qualityNotes: '',
         quantityExpected: Math.max(0, item.quantityOrdered - item.quantityReceived),
         quantityReceived: String(Math.max(0, item.quantityOrdered - item.quantityReceived)),
         quantityRejected: '0',
         reason: '',
+        rowId: createGrnRowId(),
         unitCost: '0',
+        unitOfMeasureId: item.unitOfMeasure?.id ?? '',
       })),
     );
   }, [purchaseOrderQuery.data, formState.entryMode]);
 
   useEffect(() => {
     if (formState.entryMode === 'MANUAL' && lineItems.length === 0) {
-      setLineItems([
-        {
-          batchNumber: '',
-          expiryDate: '',
-          itemId: '',
-          qualityNotes: '',
-          quantityExpected: 0,
-          quantityReceived: '0',
-          quantityRejected: '0',
-          reason: '',
-          unitCost: '0',
-        }
-      ]);
+      setLineItems([buildEmptyGrnLineItem()]);
     }
   }, [formState.entryMode, lineItems.length]);
 
@@ -167,20 +187,7 @@ export default function GoodsReceivedPage() {
   }
 
   function addManualLine() {
-    setLineItems((current) => [
-      ...current,
-      {
-        batchNumber: '',
-        expiryDate: '',
-        itemId: '',
-        qualityNotes: '',
-        quantityExpected: 0,
-        quantityReceived: '0',
-        quantityRejected: '0',
-        reason: '',
-        unitCost: '0',
-      },
-    ]);
+    setLineItems((current) => [...current, buildEmptyGrnLineItem()]);
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -207,18 +214,28 @@ export default function GoodsReceivedPage() {
       return;
     }
 
-    const receiveItems = lineItems.map((item) => ({
-      batchNumber: item.batchNumber || null,
-      expiryDate: item.expiryDate || null,
-      itemId: item.itemId,
-      overReceiveReason: item.reason || null,
-      poItemId: item.poItemId,
-      qualityNotes: item.qualityNotes || null,
-      quantityExpected: Number(item.quantityExpected || 0),
-      quantityReceived: Number(item.quantityReceived),
-      quantityRejected: Number(item.quantityRejected),
-      unitCost: Number(item.unitCost || 0),
-    }));
+    const payload = buildGoodsReceivedDraftPayload({
+      entryMode: formState.entryMode.toLowerCase(),
+      items: lineItems.map((item) => ({
+        batchNumber: item.batchNumber || null,
+        expiryDate: item.expiryDate || null,
+        itemId: item.itemId,
+        poItemId: item.poItemId,
+        qualityNotes: item.qualityNotes || null,
+        quantityExpected: Number(item.quantityExpected || 0),
+        quantityReceived: Number(item.quantityReceived),
+        quantityRejected: Number(item.quantityRejected),
+        reason: item.reason || null,
+        unitCost: Number(item.unitCost || 0),
+        unitOfMeasureId: item.unitOfMeasureId,
+      })),
+      notes: formState.notes || null,
+      purchaseOrderId: formState.entryMode === 'PO_LINKED' ? formState.purchaseOrderId : null,
+      qualityNotes: formState.qualityNotes || null,
+      supplierId: formState.entryMode === 'MANUAL' ? formState.supplierId : null,
+      warehouseId: formState.warehouseId,
+    });
+    const receiveItems = payload.items;
 
     if (
       receiveItems.some(
@@ -251,23 +268,22 @@ export default function GoodsReceivedPage() {
     try {
       const grn = await request<{ id: string }>('/api/procurement/grns', {
         body: JSON.stringify({
-          notes: formState.notes || null,
-          entryMode: formState.entryMode.toLowerCase(),
-          purchaseOrderId: formState.entryMode === 'PO_LINKED' ? formState.purchaseOrderId : null,
-          qualityNotes: formState.qualityNotes || null,
-          supplierId: formState.entryMode === 'MANUAL' ? formState.supplierId : null,
-          warehouseId: formState.warehouseId,
+          ...payload,
           items:
             formState.entryMode === 'MANUAL'
-              ? receiveItems.map((item) => ({
+              ? payload.items.map((item) => ({
                   batchNumber: item.batchNumber,
                   expiryDate: item.expiryDate,
                   itemId: item.itemId,
+                  item_id: item.item_id,
                   qualityNotes: item.qualityNotes,
                   quantityExpected: item.quantityExpected,
                   quantityReceived: item.quantityReceived,
                   quantityRejected: item.quantityRejected,
                   unitCost: item.unitCost,
+                  unitOfMeasureId: item.unitOfMeasureId,
+                  unit_of_measure_id: item.unit_of_measure_id,
+                  uomId: item.uomId,
                 }))
               : undefined,
         }),
@@ -328,7 +344,7 @@ export default function GoodsReceivedPage() {
             key: 'purchaseOrderId',
             label: 'Purchase Order',
             options: (metaQuery.data?.purchaseOrders ?? []).map((order) => ({
-              label: `${order.poNumber} - ${order.supplier.name}`,
+              label: order.label ?? `${order.poNumber} - ${order.supplier?.name ?? 'Unknown supplier'}`,
               value: order.id
             })),
             type: 'select',
@@ -532,20 +548,50 @@ export default function GoodsReceivedPage() {
               <span>Purchase Order</span>
               <select
                 required={formState.entryMode === 'PO_LINKED'}
-                disabled={formState.entryMode !== 'PO_LINKED'}
+                disabled={formState.entryMode !== 'PO_LINKED' || metaQuery.isLoading || purchaseOrderLoadFailed || purchaseOrderOptions.length === 0}
                 value={formState.purchaseOrderId}
                 onChange={(event) =>
                   setFormState((current) => ({ ...current, purchaseOrderId: event.target.value }))
                 }
                 className="surface-input-soft"
               >
-                <option value="">Select PO</option>
-                {(metaQuery.data?.purchaseOrders ?? []).map((order) => (
+                <option value="">
+                  {metaQuery.isLoading
+                    ? 'Loading purchase orders...'
+                    : purchaseOrderLoadFailed
+                      ? 'Purchase orders unavailable'
+                      : purchaseOrderOptions.length === 0
+                        ? 'No purchase orders available'
+                        : 'Select PO'}
+                </option>
+                {formState.purchaseOrderId &&
+                !purchaseOrderOptions.some((order) => order.id === formState.purchaseOrderId) ? (
+                  <option value={formState.purchaseOrderId}>Saved purchase order selection</option>
+                ) : null}
+                {purchaseOrderOptions.map((order) => (
                   <option key={order.id} value={order.id}>
                     {order.poNumber} - {order.supplier?.name ?? 'Unknown supplier'}
                   </option>
                 ))}
               </select>
+              {purchaseOrderLoadFailed ? (
+                <div className="flex items-center justify-between gap-3 rounded-xl border border-border/60 bg-white/90 px-3 py-2 text-xs text-muted">
+                  <span>Unable to load purchase orders right now. Please refresh and try again.</span>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="h-7 px-2 text-[11px]"
+                    onClick={() => void metaQuery.refetch()}
+                  >
+                    Retry
+                  </Button>
+                </div>
+              ) : !metaQuery.isLoading && purchaseOrderOptions.length === 0 ? (
+                <div className="rounded-xl border border-border/60 bg-white/90 px-3 py-2 text-xs text-muted">
+                  No purchase orders available for receiving.
+                </div>
+              ) : null}
             </label>
             <label className="space-y-2 text-sm text-muted">
               <span>Supplier</span>
@@ -594,23 +640,67 @@ export default function GoodsReceivedPage() {
               </p>
             </div>
             {lineItems.map((item, index) => (
-              <div key={item.poItemId ?? `${item.itemId}-${index}`} className="grid gap-3 md:grid-cols-[1fr_120px_120px_120px_120px_1fr_1fr]">
+              <div key={item.rowId} className="grid gap-3 md:grid-cols-[1fr_120px_140px_120px_120px_120px_1fr_1fr]">
                 <select
                   value={item.itemId}
-                  disabled={formState.entryMode === 'PO_LINKED'}
+                  disabled={formState.entryMode === 'PO_LINKED' || metaQuery.isLoading || itemLoadFailed || itemOptions.length === 0}
                   onChange={(event) =>
-                    setLineItems((current) =>
-                      current.map((row, rowIndex) =>
-                        rowIndex === index ? { ...row, itemId: event.target.value } : row,
-                      ),
-                    )
+                    setLineItems((current) => {
+                      const selectedItem = itemOptions.find((row) => row.id === event.target.value) ?? null;
+
+                      return current.map((row, rowIndex) =>
+                        rowIndex === index
+                          ? {
+                              ...row,
+                              itemId: event.target.value,
+                              unitOfMeasureId: selectedItem?.unitOfMeasureId ?? row.unitOfMeasureId,
+                            }
+                          : row,
+                      );
+                    })
                   }
                   className="surface-input-soft"
                 >
-                  <option value="">Select item</option>
-                  {(metaQuery.data?.items ?? []).map((row) => (
+                  <option value="">
+                    {metaQuery.isLoading
+                      ? 'Loading items...'
+                      : itemLoadFailed
+                        ? 'Items unavailable'
+                        : itemOptions.length === 0
+                          ? 'No items found'
+                          : 'Select item'}
+                  </option>
+                  {item.itemId &&
+                  !itemOptions.some((candidate) => candidate.id === item.itemId) ? (
+                    <option value={item.itemId}>Saved item selection</option>
+                  ) : null}
+                  {itemOptions.map((row) => (
                     <option key={row.id} value={row.id}>
-                      {row.code} - {row.name}
+                      {row.label ?? (row.code ? `${row.code} - ${row.name}` : row.name)}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  value={item.unitOfMeasureId}
+                  disabled
+                  className="surface-input-soft"
+                >
+                  <option value="">
+                    {metaQuery.isLoading
+                      ? 'Loading units...'
+                      : unitLoadFailed
+                        ? 'Units unavailable'
+                        : unitOptions.length === 0
+                          ? 'No units found'
+                          : 'UOM'}
+                  </option>
+                  {item.unitOfMeasureId &&
+                  !unitOptions.some((candidate) => candidate.id === item.unitOfMeasureId) ? (
+                    <option value={item.unitOfMeasureId}>Saved unit selection</option>
+                  ) : null}
+                  {unitOptions.map((row) => (
+                    <option key={row.id} value={row.id}>
+                      {row.label ?? row.symbol ?? row.code ?? row.name}
                     </option>
                   ))}
                 </select>
@@ -709,6 +799,33 @@ export default function GoodsReceivedPage() {
                 />
               </div>
             ))}
+            {itemLoadFailed ? (
+              <div className="flex items-center justify-between gap-3 rounded-xl border border-border/60 bg-white/90 px-3 py-2 text-xs text-muted">
+                <span>Unable to load items right now. Please refresh and try again.</span>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="h-7 px-2 text-[11px]"
+                  onClick={() => void metaQuery.refetch()}
+                >
+                  Retry
+                </Button>
+              </div>
+            ) : !metaQuery.isLoading && itemOptions.length === 0 ? (
+              <div className="rounded-xl border border-border/60 bg-white/90 px-3 py-2 text-xs text-muted">
+                No items found. Create an item first.
+              </div>
+            ) : null}
+            {unitLoadFailed ? (
+              <div className="rounded-xl border border-border/60 bg-white/90 px-3 py-2 text-xs text-muted">
+                Unable to load units of measurement right now. Please refresh and try again.
+              </div>
+            ) : !metaQuery.isLoading && unitOptions.length === 0 ? (
+              <div className="rounded-xl border border-border/60 bg-white/90 px-3 py-2 text-xs text-muted">
+                No units of measurement found. Create units first.
+              </div>
+            ) : null}
             {formState.entryMode === 'MANUAL' ? (
               <Button
                 type="button"

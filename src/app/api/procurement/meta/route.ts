@@ -295,8 +295,21 @@ export async function GET(_request: NextRequest) {
         .filter((o) => poStatusFilter.has(String(o.status ?? '').toLowerCase()))
         .map((o: Record<string, unknown>) => ({
           id: o.id,
+          label: `${String(o.po_number ?? 'Purchase order')} - ${String(((o.suppliers as Record<string, unknown> | null)?.name ?? 'Unknown supplier'))}`,
           poNumber: o.po_number,
           status: o.status,
+          supplier_id: (o.suppliers as Record<string, unknown> | null)?.id
+            ? String((o.suppliers as Record<string, unknown>).id)
+            : null,
+          supplierId: (o.suppliers as Record<string, unknown> | null)?.id
+            ? String((o.suppliers as Record<string, unknown>).id)
+            : null,
+          supplier_name: (o.suppliers as Record<string, unknown> | null)?.name
+            ? String((o.suppliers as Record<string, unknown>).name)
+            : null,
+          supplierName: (o.suppliers as Record<string, unknown> | null)?.name
+            ? String((o.suppliers as Record<string, unknown>).name)
+            : null,
           supplier: o.suppliers
             ? { id: (o.suppliers as Record<string, unknown>).id, name: (o.suppliers as Record<string, unknown>).name }
             : null,

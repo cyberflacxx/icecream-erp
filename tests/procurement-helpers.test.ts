@@ -16,6 +16,12 @@ import {
   normalizePurchaseOrderSupplierId as normalizePurchaseOrderSupplierIdForOrders,
 } from '../src/lib/procurement-purchase-orders';
 import {
+  buildGoodsReceivedDraftPayload,
+  normalizeGoodsReceivedItemId,
+  normalizeGoodsReceivedPurchaseOrderId,
+  normalizeGoodsReceivedUnitOfMeasureId,
+} from '../src/lib/procurement-goods-received';
+import {
   buildRequisitionDraftPayload,
   normalizeRequisitionItemId,
   normalizeRequisitionUnitOfMeasureId,
@@ -236,4 +242,67 @@ test('buildRequisitionDraftPayload stores item_id canonically', () => {
   assert.equal(payload.items[0]?.unitOfMeasureId, 'uom-1');
   assert.equal(payload.items[0]?.unit_of_measure_id, 'uom-1');
   assert.equal(payload.department, 'Production');
+});
+
+test('normalizeGoodsReceivedPurchaseOrderId accepts purchase order aliases', () => {
+  assert.equal(normalizeGoodsReceivedPurchaseOrderId({ purchase_order_id: ' po-1 ' }), 'po-1');
+  assert.equal(normalizeGoodsReceivedPurchaseOrderId({ purchaseOrderId: 'po-2' }), 'po-2');
+  assert.equal(normalizeGoodsReceivedPurchaseOrderId({ po_id: 'po-3' }), 'po-3');
+  assert.equal(normalizeGoodsReceivedPurchaseOrderId({ poId: 'po-4' }), 'po-4');
+  assert.equal(
+    normalizeGoodsReceivedPurchaseOrderId({ purchaseOrderId: 'po-2', purchase_order_id: 'po-1' }),
+    'po-1',
+  );
+});
+
+test('normalizeGoodsReceivedItemId accepts item aliases', () => {
+  assert.equal(normalizeGoodsReceivedItemId({ item_id: ' item-1 ' }), 'item-1');
+  assert.equal(normalizeGoodsReceivedItemId({ itemId: 'item-2' }), 'item-2');
+  assert.equal(normalizeGoodsReceivedItemId({ product_id: 'item-3' }), 'item-3');
+  assert.equal(normalizeGoodsReceivedItemId({ rawMaterialId: 'item-4' }), 'item-4');
+  assert.equal(normalizeGoodsReceivedItemId({}), '');
+});
+
+test('normalizeGoodsReceivedUnitOfMeasureId accepts UOM aliases', () => {
+  assert.equal(normalizeGoodsReceivedUnitOfMeasureId({ unit_of_measure_id: ' uom-1 ' }), 'uom-1');
+  assert.equal(normalizeGoodsReceivedUnitOfMeasureId({ unitOfMeasureId: 'uom-2' }), 'uom-2');
+  assert.equal(normalizeGoodsReceivedUnitOfMeasureId({ uom_id: 'uom-3' }), 'uom-3');
+  assert.equal(normalizeGoodsReceivedUnitOfMeasureId({ uomId: 'uom-4' }), 'uom-4');
+  assert.equal(normalizeGoodsReceivedUnitOfMeasureId({ uom: 'uom-5' }), 'uom-5');
+  assert.equal(normalizeGoodsReceivedUnitOfMeasureId({}), '');
+});
+
+test('buildGoodsReceivedDraftPayload stores purchase order, item, and UOM ids canonically', () => {
+  const payload = buildGoodsReceivedDraftPayload({
+    entryMode: 'manual',
+    items: [
+      {
+        itemId: 'item-1',
+        poItemId: 'po-item-1',
+        quantityExpected: 4,
+        quantityReceived: 4,
+        quantityRejected: 0,
+        reason: null,
+        unitCost: 12,
+        unitOfMeasureId: 'uom-1',
+      },
+    ],
+    notes: 'Receive now',
+    purchaseOrderId: 'po-1',
+    qualityNotes: 'Checked',
+    supplierId: 'sup-1',
+    warehouseId: 'wh-1',
+  });
+
+  assert.equal(payload.purchaseOrderId, 'po-1');
+  assert.equal(payload.purchase_order_id, 'po-1');
+  assert.equal(payload.supplierId, 'sup-1');
+  assert.equal(payload.supplier_id, 'sup-1');
+  assert.equal(payload.items[0]?.itemId, 'item-1');
+  assert.equal(payload.items[0]?.item_id, 'item-1');
+  assert.equal(payload.items[0]?.poItemId, 'po-item-1');
+  assert.equal(payload.items[0]?.po_item_id, 'po-item-1');
+  assert.equal(payload.items[0]?.unitOfMeasureId, 'uom-1');
+  assert.equal(payload.items[0]?.unit_of_measure_id, 'uom-1');
+  assert.equal(payload.items[0]?.uomId, 'uom-1');
 });
