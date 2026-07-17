@@ -25,6 +25,7 @@ import { ProcurementNav } from '@/components/procurement/procurement-nav';
 import { SupplierSelect } from '@/components/procurement/supplier-select';
 import { Button } from '@/components/ui/button';
 import {
+  buildPurchaseOrderDraftPayload,
   formatPurchaseOrderStatusLabel,
   isPurchaseOrderApprovable,
   isPurchaseOrderRejectable,
@@ -347,17 +348,18 @@ export default function PurchaseOrdersPage() {
 
     try {
       await request('/api/procurement/purchase-orders', {
-        body: JSON.stringify({
+        body: JSON.stringify(buildPurchaseOrderDraftPayload({
           discountAmount: Number(formState.discountAmount),
           expectedDeliveryDate: formState.expectedDeliveryDate || null,
           items,
           notes: formState.notes || null,
-          orderDate: formState.orderDate || undefined,
+          orderDate: formState.orderDate || null,
           approverUserId: formState.approverUserId || null,
           requisitionId: formState.requisitionId || null,
           supplierId: formState.supplierId,
+          supplier_id: formState.supplierId,
           taxAmount: Number(formState.taxAmount)
-        }),
+        })),
         method: 'POST'
       });
       setFeedback({ message: 'Purchase order created successfully.', tone: 'success' });

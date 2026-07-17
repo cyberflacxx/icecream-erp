@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { badRequest, can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
 import {
+  normalizePurchaseOrderSupplierId,
   derivePurchaseOrderStatus,
   normalizePurchaseOrderStatus,
 } from '@/lib/procurement-purchase-orders';
@@ -121,7 +122,8 @@ export async function POST(request: NextRequest) {
   const service = createServiceRoleClient();
 
   let body: {
-    supplierId: string;
+    supplierId?: string;
+    supplier_id?: string;
     requisitionId?: string | null;
     orderDate?: string | null;
     expectedDeliveryDate?: string | null;
@@ -143,8 +145,10 @@ export async function POST(request: NextRequest) {
     return badRequest('Invalid JSON body');
   }
 
-  if (!body.supplierId || !body.items?.length) {
-    return badRequest('supplierId and items are required');
+  const supplierId = normalizePurchaseOrderSupplierId(body);
+
+  if (!supplierId || !body.items?.length) {
+    return badRequest('supplier_id and items are required');
   }
 
   try {
@@ -154,7 +158,7 @@ export async function POST(request: NextRequest) {
       .select('id')
       .is('deleted_at', null)
       .eq('organization_id', ctx.organizationId)
-      .eq('id', body.supplierId)
+      .eq('id', supplierId)
       .single();
 
     if (supErr && isMissingColumnError(supErr, 'suppliers', 'deleted_at')) {
@@ -162,13 +166,15 @@ export async function POST(request: NextRequest) {
         .from('suppliers')
         .select('id')
         .eq('organization_id', ctx.organizationId)
-        .eq('id', body.supplierId)
+        .eq('id', supplierId)
         .single();
       supplier = fallback.data;
       supErr = fallback.error;
     }
 
-    if (supErr || !supplier) return badRequest('Supplier not found.');
+    if (supErr || !supplier) {
+      return badRequest('Selected supplier is no longer available. Please refresh and try again.');
+    }
 
     // Validate requisition if provided
     if (body.requisitionId) {
@@ -233,7 +239,7 @@ export async function POST(request: NextRequest) {
       .from('purchase_orders')
       .insert({
         po_number: poNumber,
-        supplier_id: body.supplierId,
+        supplier_id: supplierId,
         requisition_id: body.requisitionId ?? null,
         order_date: body.orderDate ?? new Date().toISOString(),
         expected_delivery_date: body.expectedDeliveryDate ?? null,

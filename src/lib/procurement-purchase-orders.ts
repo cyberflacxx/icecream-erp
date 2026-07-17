@@ -67,3 +67,49 @@ export function isPurchaseOrderRejectable(status: unknown) {
 export function isPurchaseOrderApprovable(status: unknown) {
   return normalizePurchaseOrderStatus(status) === 'DRAFT';
 }
+
+export function normalizePurchaseOrderSupplierId(input: {
+  supplierId?: unknown;
+  supplier_id?: unknown;
+}) {
+  const supplierId = [input.supplier_id, input.supplierId]
+    .map((value) => String(value ?? '').trim())
+    .find(Boolean);
+
+  return supplierId ?? '';
+}
+
+interface PurchaseOrderDraftPayloadInput {
+  approverUserId?: string | null;
+  discountAmount: number;
+  expectedDeliveryDate?: string | null;
+  items: Array<{
+    itemId: string;
+    quantityOrdered: number;
+    unitCost: number;
+    unitOfMeasureId: string;
+  }>;
+  notes?: string | null;
+  orderDate?: string | null;
+  requisitionId?: string | null;
+  supplierId?: string | null;
+  supplier_id?: string | null;
+  taxAmount: number;
+}
+
+export function buildPurchaseOrderDraftPayload(input: PurchaseOrderDraftPayloadInput) {
+  const supplierId = normalizePurchaseOrderSupplierId(input);
+
+  return {
+    approverUserId: input.approverUserId ?? null,
+    discountAmount: input.discountAmount,
+    expectedDeliveryDate: input.expectedDeliveryDate ?? null,
+    items: input.items,
+    notes: input.notes ?? null,
+    orderDate: input.orderDate ?? null,
+    requisitionId: input.requisitionId ?? null,
+    supplierId,
+    supplier_id: supplierId,
+    taxAmount: input.taxAmount,
+  };
+}

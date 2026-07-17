@@ -11,7 +11,7 @@ interface SupplierSelectProps {
   onChange: (value: string) => void;
   placeholder?: string;
   required?: boolean;
-  value: string;
+  value?: string | null;
 }
 
 export function SupplierSelect({
@@ -26,6 +26,8 @@ export function SupplierSelect({
   const suppliers = supplierQuery.data ?? [];
   const loadFailed = supplierQuery.isError;
   const hasSuppliers = suppliers.length > 0;
+  const normalizedValue = String(value ?? '').trim();
+  const hasSelectedSupplier = suppliers.some((supplier) => supplier.id === normalizedValue);
 
   const helperMessage = loadFailed
     ? 'Unable to load suppliers right now. Please refresh and try again.'
@@ -38,7 +40,7 @@ export function SupplierSelect({
       <select
         required={required}
         disabled={disabled || supplierQuery.isLoading || loadFailed || !hasSuppliers}
-        value={value}
+        value={normalizedValue}
         onChange={(event) => onChange(event.target.value)}
         className={cn('surface-input-soft', className)}
       >
@@ -51,6 +53,9 @@ export function SupplierSelect({
                 ? 'No suppliers found'
                 : placeholder}
         </option>
+        {normalizedValue && !hasSelectedSupplier ? (
+          <option value={normalizedValue}>Saved supplier selection</option>
+        ) : null}
         {suppliers.map((supplier) => (
           <option key={supplier.id} value={supplier.id}>
             {formatSupplierOptionLabel(supplier)}

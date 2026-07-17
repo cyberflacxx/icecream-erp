@@ -10,6 +10,7 @@ export * from './usePurchaseOrders';
 export * from './useRequisitions';
 export * from './useSupplier';
 export * from './useSupplierInvoices';
+export * from './useSupplierOptions';
 export * from './useSupplierPayments';
 export * from './useSupplierPurchaseHistory';
 export * from './useSupplierReturns';

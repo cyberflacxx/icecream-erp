@@ -11,6 +11,11 @@ import {
   validateSupplierImportRows,
   validateSupplierCodeUniqueness,
 } from '../src/lib/procurement';
+import {
+  buildPurchaseOrderDraftPayload as buildPurchaseOrderDraftPayloadForOrders,
+  normalizePurchaseOrderSupplierId as normalizePurchaseOrderSupplierIdForOrders,
+} from '../src/lib/procurement-purchase-orders';
+import { filterSupplierOptions, isSupplierActive, mapSupplierOption } from '../src/lib/procurement-suppliers';
 
 test('validateSupplierCodeUniqueness blocks duplicate supplier codes', () => {
   assert.equal(validateSupplierCodeUniqueness(['SUP-001', 'SUP-002'], 'SUP-003'), true);
@@ -122,4 +127,68 @@ test('supplier import validation accepts valid rows and rejects invalid ones', (
   assert.equal(result.errors.length, 5);
   assert.equal(result.errors.some((error) => error.message.includes('Duplicate supplier code')), true);
   assert.equal(result.errors.some((error) => error.message.includes('Email Address is invalid')), true);
+});
+
+test('supplier option helpers keep active suppliers and map code/name safely', () => {
+  const rows = [
+    {
+      code: 'SUP-001',
+      contact_person: 'Joy',
+      credit_limit: 1200,
+      email: 'joy@example.com',
+      id: 'sup-1',
+      is_active: true,
+      name: 'Cold Chain Supplies',
+      payment_terms: '30 DAYS',
+      phone: '+263700000001',
+      status: 'ACTIVE',
+    },
+    {
+      code: null,
+      id: 'sup-2',
+      name: 'Dormant Supplier',
+      status: 'INACTIVE',
+    },
+  ].map((row) => row as Record<string, unknown>);
+
+  assert.equal(isSupplierActive(rows[0] ?? {}), true);
+  assert.equal(isSupplierActive(rows[1] ?? {}), false);
+
+  const mapped = rows.map(mapSupplierOption);
+  const filtered = filterSupplierOptions(mapped, { activeOnly: true, search: 'cold' });
+
+  assert.equal(filtered.length, 1);
+  assert.equal(filtered[0]?.id, 'sup-1');
+  assert.equal(filtered[0]?.code, 'SUP-001');
+  assert.equal(filtered[0]?.contactPerson, 'Joy');
+});
+
+test('normalizePurchaseOrderSupplierId accepts supplier_id and supplierId', () => {
+  assert.equal(normalizePurchaseOrderSupplierIdForOrders({ supplier_id: ' sup-1 ' }), 'sup-1');
+  assert.equal(normalizePurchaseOrderSupplierIdForOrders({ supplierId: 'sup-2' }), 'sup-2');
+  assert.equal(
+    normalizePurchaseOrderSupplierIdForOrders({ supplierId: 'sup-2', supplier_id: 'sup-3' }),
+    'sup-3',
+  );
+  assert.equal(normalizePurchaseOrderSupplierIdForOrders({}), '');
+});
+
+test('buildPurchaseOrderDraftPayload stores supplier_id canonically', () => {
+  const payload = buildPurchaseOrderDraftPayloadForOrders({
+    discountAmount: 0,
+    items: [
+      {
+        itemId: 'item-1',
+        quantityOrdered: 2,
+        unitCost: 10,
+        unitOfMeasureId: 'uom-1',
+      },
+    ],
+    supplierId: 'sup-1',
+    taxAmount: 0,
+  });
+
+  assert.equal(payload.supplierId, 'sup-1');
+  assert.equal(payload.supplier_id, 'sup-1');
+  assert.equal(payload.items[0]?.itemId, 'item-1');
 });

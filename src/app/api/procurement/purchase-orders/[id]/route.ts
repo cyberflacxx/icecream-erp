@@ -4,6 +4,7 @@ import { badRequest, can, forbidden, getAuthContext, notFound, serverError, unau
 import {
   derivePurchaseOrderStatus,
   isPurchaseOrderApprovable,
+  normalizePurchaseOrderSupplierId,
 } from '@/lib/procurement-purchase-orders';
 import { isMissingColumnError } from '@/lib/postgrest-compat';
 import { createServiceRoleClient } from '@/lib/supabase/server';
@@ -24,7 +25,7 @@ export async function GET(
       .from('purchase_orders')
       .select(
         `id, po_number, order_date, expected_delivery_date, status,
-         subtotal, tax_amount, discount_amount, total, notes, approved_at, approved_by, approver_user_id, sent_at, rejected_at, requisition_id,
+         subtotal, tax_amount, discount_amount, total, notes, approved_at, approved_by, approver_user_id, sent_at, rejected_at, requisition_id, supplier_id,
          suppliers(id, name, email, phone, address)`,
       )
       .is('deleted_at', null)
@@ -108,6 +109,7 @@ export async function GET(
       rejectedAt: o.rejected_at ? String(o.rejected_at) : null,
       requisitionId: o.requisition_id ? String(o.requisition_id) : null,
       notes: o.notes ? String(o.notes) : null,
+      supplierId: o.supplier_id ? String(o.supplier_id) : null,
       subtotal: Number(o.subtotal ?? 0),
       taxAmount: Number(o.tax_amount ?? 0),
       discountAmount: Number(o.discount_amount ?? 0),
@@ -176,6 +178,7 @@ export async function PATCH(
 
   let body: {
     supplierId?: string;
+    supplier_id?: string;
     orderDate?: string | null;
     expectedDeliveryDate?: string | null;
       notes?: string | null;
@@ -210,6 +213,34 @@ export async function PATCH(
     const order = existing as Record<string, unknown>;
     if (!isPurchaseOrderApprovable(order.status)) {
       return badRequest('Only draft purchase orders can be edited.');
+    }
+
+    const supplierId = normalizePurchaseOrderSupplierId(body);
+    const shouldValidateSupplier = body.supplierId !== undefined || body.supplier_id !== undefined;
+
+    if (shouldValidateSupplier) {
+      let { data: supplier, error: supplierError } = await service
+        .from('suppliers')
+        .select('id')
+        .is('deleted_at', null)
+        .eq('organization_id', ctx.organizationId)
+        .eq('id', supplierId)
+        .single();
+
+      if (supplierError && isMissingColumnError(supplierError, 'suppliers', 'deleted_at')) {
+        const fallback = await service
+          .from('suppliers')
+          .select('id')
+          .eq('organization_id', ctx.organizationId)
+          .eq('id', supplierId)
+          .single();
+        supplier = fallback.data;
+        supplierError = fallback.error;
+      }
+
+      if (!supplierId || supplierError || !supplier) {
+        return badRequest('Selected supplier is no longer available. Please refresh and try again.');
+      }
     }
 
     // Validate items if provided
@@ -263,7 +294,7 @@ export async function PATCH(
     const total = subtotal + taxAmount - discountAmount;
 
     const updatePayload: Record<string, unknown> = { subtotal, total };
-    if (body.supplierId !== undefined) updatePayload.supplier_id = body.supplierId;
+    if (shouldValidateSupplier) updatePayload.supplier_id = supplierId;
     if (body.orderDate !== undefined) updatePayload.order_date = body.orderDate;
     if (body.expectedDeliveryDate !== undefined) updatePayload.expected_delivery_date = body.expectedDeliveryDate;
     if (body.notes !== undefined) updatePayload.notes = body.notes;

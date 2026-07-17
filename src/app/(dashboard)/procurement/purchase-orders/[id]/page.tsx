@@ -14,6 +14,7 @@ import { useProcurementMeta, useProcurementRequest, usePurchaseOrder } from '@/h
 import { downloadFromUrl } from '@/lib/export';
 import { API_ROUTES, PERMISSIONS } from '@/lib/shared';
 import {
+  buildPurchaseOrderDraftPayload,
   formatPurchaseOrderStatusLabel,
   isPurchaseOrderApprovable,
   isPurchaseOrderRejectable,
@@ -31,6 +32,7 @@ interface PurchaseOrderDetailPageProps {
 interface PurchaseOrderDetail {
   id: string;
   poNumber: string;
+  supplierId: string | null;
   supplier: {
     id: string;
     name: string;
@@ -159,7 +161,7 @@ function createEditState(order: PurchaseOrderDetail): EditFormState {
         : [createLineDraft()],
     notes: order.notes ?? '',
     orderDate: order.orderDate ? String(order.orderDate).slice(0, 10) : '',
-    supplierId: order.supplier?.id ?? '',
+    supplierId: order.supplierId ?? order.supplier?.id ?? '',
     taxAmount: String(order.taxAmount ?? 0),
   };
 }
@@ -182,8 +184,8 @@ export default function PurchaseOrderDetailPage({ params }: PurchaseOrderDetailP
 
   useEffect(() => {
     if (!order) return;
-    setFormState(createEditState(order));
-  }, [order]);
+    setFormState((current) => (current && isEditOpen ? current : createEditState(order)));
+  }, [isEditOpen, order]);
 
   async function refresh() {
     await queryClient.invalidateQueries({
@@ -274,7 +276,7 @@ export default function PurchaseOrderDetailPage({ params }: PurchaseOrderDetailP
 
     try {
       await request(API_ROUTES.PROCUREMENT.PURCHASE_ORDER(params.id), {
-        body: JSON.stringify({
+        body: JSON.stringify(buildPurchaseOrderDraftPayload({
           approverUserId: formState.approverUserId || null,
           discountAmount: Number(formState.discountAmount || 0),
           expectedDeliveryDate: formState.expectedDeliveryDate || null,
@@ -282,8 +284,9 @@ export default function PurchaseOrderDetailPage({ params }: PurchaseOrderDetailP
           notes: formState.notes || null,
           orderDate: formState.orderDate || null,
           supplierId: formState.supplierId,
+          supplier_id: formState.supplierId,
           taxAmount: Number(formState.taxAmount || 0),
-        }),
+        })),
         method: 'PATCH',
       });
 
@@ -399,7 +402,14 @@ export default function PurchaseOrderDetailPage({ params }: PurchaseOrderDetailP
             </Button>
 
             {order && isPurchaseOrderApprovable(normalizedStatus) && canEdit ? (
-              <Button size="sm" variant="outline" onClick={() => setIsEditOpen(true)}>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  setFormState(createEditState(order));
+                  setIsEditOpen(true);
+                }}
+              >
                 Edit Draft
               </Button>
             ) : null}
