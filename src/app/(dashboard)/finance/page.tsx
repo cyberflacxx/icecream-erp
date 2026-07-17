@@ -54,7 +54,7 @@ export default function FinancePage() {
     );
   }
 
-  if (dashboardQuery.isError || !dashboardQuery.data) {
+  if (dashboardQuery.isError || !dashboardQuery.data?.data) {
     return (
       <EmptyState
         icon={<AlertCircle className="h-6 w-6" />}
@@ -64,7 +64,8 @@ export default function FinancePage() {
     );
   }
 
-  const { stats, charts, overdueInvoices, recentEntries } = dashboardQuery.data;
+  const { data, warnings } = dashboardQuery.data;
+  const { stats, charts, overdueInvoices, recentEntries } = data;
 
   return (
     <div className="space-y-8">
@@ -74,6 +75,12 @@ export default function FinancePage() {
         status="partial"
       />
       <FinanceNav />
+
+      {warnings.length ? (
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          {warnings[0]}
+        </div>
+      ) : null}
 
       <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard

@@ -3,9 +3,11 @@ import { NextRequest, NextResponse } from 'next/server';
 import { can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 import {
+  buildEmptyFinanceDashboardData,
   calculateBranchCostSummary,
   calculateInventoryValuation,
   calculateProductionCostSummary,
+  resolveFinanceSectionResult,
   summarizeProfitAndLossFromLedger,
 } from '@/lib/finance';
 import {
@@ -36,6 +38,10 @@ async function optionalQuery<T>(query: PromiseLike<{ data: T[] | null; error: { 
   return result.data ?? [];
 }
 
+function sectionWarning(label: string) {
+  return `Some ${label} data could not be loaded.`;
+}
+
 export async function GET(request: NextRequest) {
   const ctx = await getAuthContext();
   if (!ctx) return unauthorized();
@@ -52,127 +58,163 @@ export async function GET(request: NextRequest) {
     const startDate = searchParams.get('startDate') ?? sevenDaysAgo.toISOString().slice(0, 10);
     const endDate = searchParams.get('endDate') ?? today.toISOString().slice(0, 10);
 
-    const [
-      payments,
-      branchExpenses,
-      overdueInvoices,
-      supplierInvoices,
-      supplierPayments,
-      bankAccounts,
-      cashAccounts,
-      pettyCashRequests,
-      financeExpenses,
-      stockBalances,
-      branchSales,
-      productionBatches,
-      ledgerLines,
-    ] = await Promise.all([
-        optionalQuery(
-          service
-            .schema('icecream_erp')
-            .from('payments')
-            .select('id, payment_date, amount, payment_method')
-            .gte('payment_date', `${startDate}T00:00:00.000Z`)
-            .lte('payment_date', `${endDate}T23:59:59.999Z`)
-            .order('payment_date', { ascending: true }),
-        ),
-
-        optionalQuery(queryWithoutDeletedAt(
-          service
-          .schema('icecream_erp')
-          .from('branch_expenses')
-          .select('id, expense_date, amount')
-          .is('deleted_at', null)
-          .gte('expense_date', `${startDate}T00:00:00.000Z`)
-          .lte('expense_date', `${endDate}T23:59:59.999Z`)
-          .order('expense_date', { ascending: true }),
-          () => service
-            .schema('icecream_erp')
-            .from('branch_expenses')
-            .select('id, expense_date, amount')
-            .gte('expense_date', `${startDate}T00:00:00.000Z`)
-            .lte('expense_date', `${endDate}T23:59:59.999Z`)
-            .order('expense_date', { ascending: true }),
-        )),
-
-        optionalQuery(queryWithoutDeletedAt(
-          service
-          .schema('icecream_erp')
-          .from('invoices')
-          .select('id, invoice_number, status, due_date, balance_due, customers(name)')
-          .is('deleted_at', null)
-          .in('status', ['SENT', 'PARTIAL_PAID', 'OVERDUE'])
-          .order('due_date', { ascending: true })
-          .limit(8),
-          () => service
-            .schema('icecream_erp')
-            .from('invoices')
-            .select('id, invoice_number, status, due_date, balance_due, customers(name)')
-            .in('status', ['SENT', 'PARTIAL_PAID', 'OVERDUE'])
-            .order('due_date', { ascending: true })
-            .limit(8),
-        )),
-        optionalQuery(queryWithoutDeletedAt(
-          service
-          .schema('icecream_erp')
-          .from('supplier_invoices')
-          .select('id, invoice_total')
-          .is('deleted_at', null),
-          () => service.schema('icecream_erp').from('supplier_invoices').select('id, invoice_total'),
-        )),
-        optionalQuery(queryWithoutDeletedAt(
-          service
-          .schema('icecream_erp')
-          .from('supplier_payments')
-          .select('supplier_invoice_id, amount_paid')
-          .is('deleted_at', null),
-          () => service.schema('icecream_erp').from('supplier_payments').select('supplier_invoice_id, amount_paid'),
-        )),
-        optionalQuery(queryWithoutDeletedAt(
-          service
-          .schema('icecream_erp')
-          .from('bank_accounts')
-          .select('current_balance')
-          .is('deleted_at', null),
-          () => service.schema('icecream_erp').from('bank_accounts').select('current_balance'),
-        )),
-        optionalQuery(queryWithoutDeletedAt(
-          service
-          .schema('icecream_erp')
-          .from('cash_accounts')
-          .select('balance')
-          .is('deleted_at', null),
-          () => service.schema('icecream_erp').from('cash_accounts').select('balance'),
-        )),
-        loadPettyCashRequestsCompatibility(ctx.organizationId, {
-          endDate: `${endDate}T23:59:59.999Z`,
-          routeName: 'finance.dashboard',
-          startDate: `${startDate}T00:00:00.000Z`,
-        }),
-        optionalQuery(queryWithoutDeletedAt(
-          service
-          .schema('icecream_erp')
-          .from('finance_expenses')
-          .select('amount, status')
-          .is('deleted_at', null),
-          () => service.schema('icecream_erp').from('finance_expenses').select('amount, status'),
-        )),
-        optionalQuery(
-          service
-            .schema('icecream_erp')
-            .from('stock_balances')
-            .select('quantity, quantity_on_hand, items(standard_cost, unit_cost)')
-            .eq('organization_id', ctx.organizationId),
-        ),
-        optionalQuery(queryWithoutDeletedAt(
-          service
-          .schema('icecream_erp')
-          .from('branch_sales')
-          .select('sale_date, total_amount')
-          .is('deleted_at', null),
-          () => service.schema('icecream_erp').from('branch_sales').select('sale_date, total_amount'),
-        )),
-        (async () => {
+    const sectionConfigs = [
+      {
+        key: 'payments',
+        warning: sectionWarning('payments'),
+        load: () =>
+          optionalQuery(
+            service
+              .schema('icecream_erp')
+              .from('payments')
+              .select('id, payment_date, amount, payment_method')
+              .gte('payment_date', `${startDate}T00:00:00.000Z`)
+              .lte('payment_date', `${endDate}T23:59:59.999Z`)
+              .order('payment_date', { ascending: true }),
+          ),
+      },
+      {
+        key: 'branchExpenses',
+        warning: sectionWarning('branch expenses'),
+        load: () =>
+          optionalQuery(
+            queryWithoutDeletedAt(
+              service
+                .schema('icecream_erp')
+                .from('branch_expenses')
+                .select('id, expense_date, amount')
+                .is('deleted_at', null)
+                .gte('expense_date', `${startDate}T00:00:00.000Z`)
+                .lte('expense_date', `${endDate}T23:59:59.999Z`)
+                .order('expense_date', { ascending: true }),
+              () =>
+                service
+                  .schema('icecream_erp')
+                  .from('branch_expenses')
+                  .select('id, expense_date, amount')
+                  .gte('expense_date', `${startDate}T00:00:00.000Z`)
+                  .lte('expense_date', `${endDate}T23:59:59.999Z`)
+                  .order('expense_date', { ascending: true }),
+            ),
+          ),
+      },
+      {
+        key: 'overdueInvoices',
+        warning: sectionWarning('receivables'),
+        load: () =>
+          optionalQuery(
+            queryWithoutDeletedAt(
+              service
+                .schema('icecream_erp')
+                .from('invoices')
+                .select('id, invoice_number, status, due_date, balance_due, customers(name)')
+                .is('deleted_at', null)
+                .in('status', ['SENT', 'PARTIAL_PAID', 'OVERDUE'])
+                .order('due_date', { ascending: true })
+                .limit(8),
+              () =>
+                service
+                  .schema('icecream_erp')
+                  .from('invoices')
+                  .select('id, invoice_number, status, due_date, balance_due, customers(name)')
+                  .in('status', ['SENT', 'PARTIAL_PAID', 'OVERDUE'])
+                  .order('due_date', { ascending: true })
+                  .limit(8),
+            ),
+          ),
+      },
+      {
+        key: 'supplierInvoices',
+        warning: sectionWarning('payables'),
+        load: () =>
+          optionalQuery(
+            queryWithoutDeletedAt(
+              service.schema('icecream_erp').from('supplier_invoices').select('id, invoice_total'),
+              () => service.schema('icecream_erp').from('supplier_invoices').select('id, invoice_total'),
+            ),
+          ),
+      },
+      {
+        key: 'supplierPayments',
+        warning: sectionWarning('supplier payments'),
+        load: () =>
+          optionalQuery(
+            queryWithoutDeletedAt(
+              service.schema('icecream_erp').from('supplier_payments').select('supplier_invoice_id, amount_paid'),
+              () => service.schema('icecream_erp').from('supplier_payments').select('supplier_invoice_id, amount_paid'),
+            ),
+          ),
+      },
+      {
+        key: 'bankAccounts',
+        warning: sectionWarning('bank accounts'),
+        load: () =>
+          optionalQuery(
+            queryWithoutDeletedAt(
+              service.schema('icecream_erp').from('bank_accounts').select('current_balance'),
+              () => service.schema('icecream_erp').from('bank_accounts').select('current_balance'),
+            ),
+          ),
+      },
+      {
+        key: 'cashAccounts',
+        warning: sectionWarning('cash accounts'),
+        load: () =>
+          optionalQuery(
+            queryWithoutDeletedAt(
+              service.schema('icecream_erp').from('cash_accounts').select('balance'),
+              () => service.schema('icecream_erp').from('cash_accounts').select('balance'),
+            ),
+          ),
+      },
+      {
+        key: 'pettyCashRequests',
+        warning: sectionWarning('petty cash'),
+        load: () =>
+          loadPettyCashRequestsCompatibility(ctx.organizationId, {
+            endDate: `${endDate}T23:59:59.999Z`,
+            routeName: 'finance.dashboard',
+            startDate: `${startDate}T00:00:00.000Z`,
+          }),
+      },
+      {
+        key: 'financeExpenses',
+        warning: sectionWarning('finance expenses'),
+        load: () =>
+          optionalQuery(
+            queryWithoutDeletedAt(
+              service.schema('icecream_erp').from('finance_expenses').select('amount, status'),
+              () => service.schema('icecream_erp').from('finance_expenses').select('amount, status'),
+            ),
+          ),
+      },
+      {
+        key: 'stockBalances',
+        warning: sectionWarning('inventory valuation'),
+        load: () =>
+          optionalQuery(
+            service
+              .schema('icecream_erp')
+              .from('stock_balances')
+              .select('quantity, quantity_on_hand, items(standard_cost, unit_cost)')
+              .eq('organization_id', ctx.organizationId),
+          ),
+      },
+      {
+        key: 'branchSales',
+        warning: sectionWarning('branch sales'),
+        load: () =>
+          optionalQuery(
+            queryWithoutDeletedAt(
+              service.schema('icecream_erp').from('branch_sales').select('sale_date, total_amount').is('deleted_at', null),
+              () => service.schema('icecream_erp').from('branch_sales').select('sale_date, total_amount'),
+            ),
+          ),
+      },
+      {
+        key: 'productionBatches',
+        warning: sectionWarning('production costing'),
+        load: async () => {
           const primary = await service
             .schema('icecream_erp')
             .from('production_batches')
@@ -212,17 +254,53 @@ export async function GET(request: NextRequest) {
           }
 
           return fallback.data ?? [];
-        })(),
-        loadLedgerLines(ctx.organizationId),
-      ]);
+        },
+      },
+      {
+        key: 'ledgerLines',
+        warning: sectionWarning('trial balance'),
+        load: () => loadLedgerLines(ctx.organizationId),
+      },
+    ] as const;
+
+    const settledSections = await Promise.allSettled(sectionConfigs.map((section) => section.load()));
+    const warnings: string[] = [];
+    const sections = {
+      bankAccounts: [] as Array<{ current_balance?: number | null }>,
+      branchExpenses: [] as Array<{ amount?: number | null; expense_date?: string | null }>,
+      branchSales: [] as Array<{ sale_date?: string | null; total_amount?: number | null }>,
+      cashAccounts: [] as Array<{ balance?: number | null }>,
+      financeExpenses: [] as Array<{ amount?: number | null; status?: string | null }>,
+      ledgerLines: [] as Awaited<ReturnType<typeof loadLedgerLines>>,
+      overdueInvoices: [] as Array<Record<string, unknown>>,
+      payments: [] as Array<{ amount?: number | null; payment_date?: string | null; payment_method?: string | null }>,
+      pettyCashRequests: [] as Awaited<ReturnType<typeof loadPettyCashRequestsCompatibility>>,
+      productionBatches: [] as Array<Record<string, unknown>>,
+      stockBalances: [] as Array<Record<string, unknown>>,
+      supplierInvoices: [] as Array<{ invoice_total?: number | null }>,
+      supplierPayments: [] as Array<{ amount_paid?: number | null }>,
+    };
+
+    settledSections.forEach((result, index) => {
+      const config = sectionConfigs[index];
+      const fallbackValue = sections[config.key] as never;
+      const resolved = resolveFinanceSectionResult(result as PromiseSettledResult<never>, fallbackValue, config.warning);
+
+      if (resolved.warning) {
+        warnings.push(resolved.warning);
+        logFinanceRouteError('finance.dashboard', config.key, result.status === 'rejected' ? result.reason : null);
+      }
+
+      (sections[config.key] as never) = resolved.value;
+    });
 
     const revenueByDay = new Map<string, number>();
     const expenseByDay = new Map<string, number>();
     const paymentMethodMap = new Map<string, number>();
 
-    const effectivePayments = payments.length > 0
-      ? payments
-      : (branchSales as Array<Record<string, unknown>>).map((sale) => ({
+    const effectivePayments = sections.payments.length > 0
+      ? sections.payments
+      : sections.branchSales.map((sale) => ({
           payment_date: String(sale.sale_date ?? new Date().toISOString().slice(0, 10)),
           amount: Number(sale.total_amount ?? 0),
           payment_method: 'SALES',
@@ -235,7 +313,7 @@ export async function GET(request: NextRequest) {
       paymentMethodMap.set(p.payment_method, (paymentMethodMap.get(p.payment_method) ?? 0) + amount);
     }
 
-    for (const e of branchExpenses ?? []) {
+    for (const e of sections.branchExpenses ?? []) {
       const day = e.expense_date.slice(0, 10);
       expenseByDay.set(day, (expenseByDay.get(day) ?? 0) + Number(e.amount ?? 0));
     }
@@ -245,32 +323,32 @@ export async function GET(request: NextRequest) {
       .sort()
       .map((day) => ({ day, revenue: revenueByDay.get(day) ?? 0, expenses: expenseByDay.get(day) ?? 0 }));
 
-    const outstandingReceivables = overdueInvoices.reduce(
+    const outstandingReceivables = sections.overdueInvoices.reduce(
       (sum: number, inv: { balance_due: number }) => sum + Number(inv.balance_due ?? 0), 0
     );
     const totalRevenue = effectivePayments.reduce((sum: number, p: { amount: number }) => sum + Number(p.amount ?? 0), 0);
-    const totalBranchExpenses = branchExpenses.reduce((sum: number, e: { amount: number }) => sum + Number(e.amount ?? 0), 0);
-    const totalFinanceExpenses = financeExpenses.reduce((sum: number, e: { amount: number }) => sum + Number(e.amount ?? 0), 0);
+    const totalBranchExpenses = sections.branchExpenses.reduce((sum: number, e: { amount: number }) => sum + Number(e.amount ?? 0), 0);
+    const totalFinanceExpenses = sections.financeExpenses.reduce((sum: number, e: { amount: number }) => sum + Number(e.amount ?? 0), 0);
     const totalExpenses = totalBranchExpenses + totalFinanceExpenses;
-    const grossProfitSummary = summarizeProfitAndLossFromLedger(ledgerLines);
+    const grossProfitSummary = summarizeProfitAndLossFromLedger(sections.ledgerLines);
     const outstandingPayables = Math.max(
       0,
-      supplierInvoices.reduce((sum: number, inv: { invoice_total: number }) => sum + Number(inv.invoice_total ?? 0), 0) -
-        supplierPayments.reduce((sum: number, p: { amount_paid: number }) => sum + Number(p.amount_paid ?? 0), 0),
+      sections.supplierInvoices.reduce((sum: number, inv: { invoice_total: number }) => sum + Number(inv.invoice_total ?? 0), 0) -
+        sections.supplierPayments.reduce((sum: number, p: { amount_paid: number }) => sum + Number(p.amount_paid ?? 0), 0),
     );
-    const bankBalance = bankAccounts.reduce((sum: number, row: { current_balance: number }) => sum + Number(row.current_balance ?? 0), 0);
-    const cashBalance = cashAccounts.reduce((sum: number, row: { balance: number }) => sum + Number(row.balance ?? 0), 0);
-    const pettyCashBalance = pettyCashRequests
+    const bankBalance = sections.bankAccounts.reduce((sum: number, row: { current_balance: number }) => sum + Number(row.current_balance ?? 0), 0);
+    const cashBalance = sections.cashAccounts.reduce((sum: number, row: { balance: number }) => sum + Number(row.balance ?? 0), 0);
+    const pettyCashBalance = sections.pettyCashRequests
       .filter((row: { status: string }) => row.status === 'APPROVED')
       .reduce((sum: number, row: { amountRequested: number }) => sum + Number(row.amountRequested ?? 0), 0);
-    const stockValuation = stockBalances.reduce((sum: number, row: Record<string, unknown>) => {
+    const stockValuation = sections.stockBalances.reduce((sum: number, row: Record<string, unknown>) => {
       const item = Array.isArray(row.items) ? row.items[0] : row.items;
       return sum + calculateInventoryValuation(
         Number(row.quantity ?? row.quantity_on_hand ?? 0),
         Number((item as { standard_cost?: number } | null)?.standard_cost ?? (item as { unit_cost?: number } | null)?.unit_cost ?? 0),
       );
     }, 0);
-    const productionCost = productionBatches.reduce((sum: number, row: Record<string, unknown>) => {
+    const productionCost = sections.productionBatches.reduce((sum: number, row: Record<string, unknown>) => {
       const summary = calculateProductionCostSummary(
         Number(row.material_cost ?? row.total_material_cost ?? 0),
         Number(row.labour_cost ?? row.total_labour_cost ?? 0),
@@ -280,57 +358,69 @@ export async function GET(request: NextRequest) {
       return sum + summary.totalCost;
     }, 0);
     const branchProfitability = calculateBranchCostSummary(
-      branchSales.reduce((sum: number, row: { total_amount: number }) => sum + Number(row.total_amount ?? 0), 0),
+      sections.branchSales.reduce((sum: number, row: { total_amount: number }) => sum + Number(row.total_amount ?? 0), 0),
       0,
       totalBranchExpenses,
       0,
     ).netProfit;
     const pendingApprovals =
-      pettyCashRequests.filter((row: { status: string }) => row.status === 'PENDING').length +
-      financeExpenses.filter((row: { status: string }) => row.status === 'DRAFT' || row.status === 'PENDING_APPROVAL').length;
+      sections.pettyCashRequests.filter((row: { status: string }) => row.status === 'PENDING').length +
+      sections.financeExpenses.filter((row: { status: string }) => row.status === 'DRAFT' || row.status === 'PENDING_APPROVAL').length;
+
+    const data = buildEmptyFinanceDashboardData();
+    data.stats = {
+      bankBalance,
+      branchProfitability,
+      cashBalance,
+      grossProfit: grossProfitSummary.grossProfit,
+      netProfit: grossProfitSummary.netProfit,
+      paymentsCount: effectivePayments.length,
+      pendingApprovals,
+      pettyCashBalance,
+      productionCost,
+      revenue: totalRevenue,
+      stockValuation,
+      totalExpenses,
+      outstandingReceivables,
+      outstandingPayables,
+    };
+    data.charts = {
+      cashflowLast7Days,
+      paymentMethodBreakdown: Array.from(paymentMethodMap.entries()).map(([method, total]) => ({ method, total })),
+    };
+    data.overdueInvoices = sections.overdueInvoices.map((inv: Record<string, unknown>) => {
+      const customers = inv.customers as { name?: string } | Array<{ name?: string }> | null;
+      const customer = Array.isArray(customers) ? customers[0] : customers;
+      return {
+        invoiceNumber: String(inv.invoice_number ?? ''),
+        status: String(inv.status ?? ''),
+        dueDate: inv.due_date ? String(inv.due_date).slice(0, 10) : 'N/A',
+        balance: Number(inv.balance_due ?? 0),
+        customer: customer?.name ?? 'Walk-in',
+      };
+    });
+    data.recentEntries = sections.ledgerLines.slice(0, 10).map((entry) => ({
+      entryNumber: entry.entryNumber ?? '',
+      entryDate: entry.entryDate ? String(entry.entryDate).slice(0, 10) : '',
+      description: entry.description ?? '',
+      debit: entry.debitAmount,
+      credit: entry.creditAmount,
+    }));
 
     return NextResponse.json({
-      stats: {
-        bankBalance,
-        branchProfitability,
-        cashBalance,
-        grossProfit: grossProfitSummary.grossProfit,
-        netProfit: grossProfitSummary.netProfit,
-        paymentsCount: effectivePayments.length,
-        pendingApprovals,
-        pettyCashBalance,
-        productionCost,
-        revenue: totalRevenue,
-        stockValuation,
-        totalExpenses,
-        outstandingReceivables,
-        outstandingPayables,
-      },
-      charts: {
-        cashflowLast7Days,
-        paymentMethodBreakdown: Array.from(paymentMethodMap.entries()).map(([method, total]) => ({ method, total })),
-      },
-      overdueInvoices: overdueInvoices.map((inv: Record<string, unknown>) => {
-        const customers = inv.customers as { name?: string } | Array<{ name?: string }> | null;
-        const customer = Array.isArray(customers) ? customers[0] : customers;
-        return {
-          invoiceNumber: String(inv.invoice_number ?? ''),
-          status: String(inv.status ?? ''),
-          dueDate: inv.due_date ? String(inv.due_date).slice(0, 10) : 'N/A',
-          balance: Number(inv.balance_due ?? 0),
-          customer: customer?.name ?? 'Walk-in',
-        };
-      }),
-      recentEntries: ledgerLines.slice(0, 10).map((entry) => ({
-        entryNumber: entry.entryNumber ?? '',
-        entryDate: entry.entryDate ? String(entry.entryDate).slice(0, 10) : '',
-        description: entry.description ?? '',
-        debit: entry.debitAmount,
-        credit: entry.creditAmount,
-      })),
+      data,
+      success: true,
+      warnings,
     });
   } catch (err) {
     logFinanceRouteError('finance.dashboard', 'summary', err);
-    return serverError('Some finance summary data could not be loaded. Please refresh or contact support.');
+    return NextResponse.json(
+      {
+        data: buildEmptyFinanceDashboardData(),
+        success: true,
+        warnings: ['Some finance summary data could not be loaded. Please refresh or contact support.'],
+      },
+      { status: 200 },
+    );
   }
 }

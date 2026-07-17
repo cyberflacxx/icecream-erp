@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  buildEmptyFinanceDashboardData,
   buildFinanceSourceReference,
   buildPayablesRows,
   buildReceivablesRows,
@@ -17,6 +18,7 @@ import {
   calculateReceivableBalance,
   calculateStraightLineDepreciation,
   normalizePettyCashRequest,
+  resolveFinanceSectionResult,
   resolvePettyCashAmount,
   summarizeBalanceSheetFromLedger,
   summarizeCashFlowFromLedger,
@@ -158,6 +160,29 @@ test('normalizePettyCashRequest returns canonical and legacy petty cash fields',
   assert.equal(normalized.requestedBy, 'user-1');
   assert.equal(normalized.branchId, 'branch-1');
   assert.equal(normalized.status, 'APPROVED');
+});
+
+test('buildEmptyFinanceDashboardData returns zero-safe dashboard defaults', () => {
+  const data = buildEmptyFinanceDashboardData();
+
+  assert.equal(data.stats.revenue, 0);
+  assert.equal(data.stats.pettyCashBalance, 0);
+  assert.equal(data.overdueInvoices.length, 0);
+  assert.equal(data.recentEntries.length, 0);
+  assert.equal(data.charts.cashflowLast7Days.length, 0);
+});
+
+test('resolveFinanceSectionResult keeps fulfilled values and falls back with warning on failure', async () => {
+  const ok = await Promise.allSettled([Promise.resolve([1, 2, 3])]);
+  const failed = await Promise.allSettled([Promise.reject(new Error('missing column'))]);
+
+  const fulfilled = resolveFinanceSectionResult(ok[0]!, [] as number[], 'Some section failed.');
+  const rejected = resolveFinanceSectionResult(failed[0]!, [] as number[], 'Some section failed.');
+
+  assert.deepEqual(fulfilled.value, [1, 2, 3]);
+  assert.equal(fulfilled.warning, null);
+  assert.deepEqual(rejected.value, []);
+  assert.equal(rejected.warning, 'Some section failed.');
 });
 
 test('finance import validators return row level errors', () => {

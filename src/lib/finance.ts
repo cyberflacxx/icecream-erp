@@ -206,6 +206,101 @@ export function normalizePettyCashRequest(row: Record<string, unknown>): Normali
   };
 }
 
+export interface FinanceDashboardData {
+  charts: {
+    cashflowLast7Days: Array<{
+      day: string;
+      expenses: number;
+      revenue: number;
+    }>;
+    paymentMethodBreakdown: Array<{
+      method: string;
+      total: number;
+    }>;
+  };
+  overdueInvoices: Array<{
+    balance: number;
+    customer: string;
+    dueDate: string;
+    invoiceNumber: string;
+    status: string;
+  }>;
+  recentEntries: Array<{
+    credit: number;
+    debit: number;
+    description: string;
+    entryDate: string;
+    entryNumber: string;
+  }>;
+  stats: {
+    bankBalance: number;
+    branchProfitability: number;
+    cashBalance: number;
+    grossProfit: number;
+    netProfit: number;
+    outstandingPayables: number;
+    outstandingReceivables: number;
+    paymentsCount: number;
+    pendingApprovals: number;
+    pettyCashBalance: number;
+    productionCost: number;
+    revenue: number;
+    stockValuation: number;
+    totalExpenses: number;
+  };
+}
+
+export interface FinanceDashboardApiResponse {
+  data: FinanceDashboardData;
+  success: boolean;
+  warnings: string[];
+}
+
+export function buildEmptyFinanceDashboardData(): FinanceDashboardData {
+  return {
+    charts: {
+      cashflowLast7Days: [],
+      paymentMethodBreakdown: [],
+    },
+    overdueInvoices: [],
+    recentEntries: [],
+    stats: {
+      bankBalance: 0,
+      branchProfitability: 0,
+      cashBalance: 0,
+      grossProfit: 0,
+      netProfit: 0,
+      outstandingPayables: 0,
+      outstandingReceivables: 0,
+      paymentsCount: 0,
+      pendingApprovals: 0,
+      pettyCashBalance: 0,
+      productionCost: 0,
+      revenue: 0,
+      stockValuation: 0,
+      totalExpenses: 0,
+    },
+  };
+}
+
+export function resolveFinanceSectionResult<T>(
+  result: PromiseSettledResult<T>,
+  fallbackValue: T,
+  warning: string,
+) {
+  if (result.status === 'fulfilled') {
+    return {
+      value: result.value,
+      warning: null,
+    };
+  }
+
+  return {
+    value: fallbackValue,
+    warning,
+  };
+}
+
 export function summarizeTrialBalance(
   lines: Array<{ accountCode: string; accountName: string; creditAmount: number; debitAmount: number }>,
 ) {
