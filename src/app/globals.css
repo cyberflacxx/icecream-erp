@@ -136,8 +136,10 @@
     color: rgba(255, 255, 255, 0.96);
     --dashboard-card-axis: rgba(219, 234, 254, 0.88);
     --dashboard-card-grid: rgba(191, 219, 254, 0.18);
-    --dashboard-card-fill: #93c5fd;
-    --dashboard-card-warm: #fbbf24;
+    --dashboard-card-fill: #facc15;
+    --dashboard-card-warm: #38bdf8;
+    --dashboard-card-positive: #22c55e;
+    --dashboard-card-negative: #ef4444;
   }
 
   .dashboard-blue-card-soft {
@@ -171,6 +173,62 @@
     background: rgba(255, 255, 255, 0.14);
     border-color: rgba(255, 255, 255, 0.18);
     color: rgba(255, 255, 255, 0.96);
+  }
+
+  .dashboard-blue-card :is(h1, h2, h3, h4, h5, h6) {
+    color: #ffffff !important;
+  }
+
+  .dashboard-blue-card :is(p, span, small, strong, em, a, li, dt, dd, label, th, td) {
+    color: rgba(239, 246, 255, 0.92);
+  }
+
+  .dashboard-blue-card :is(svg, i) {
+    color: rgba(255, 255, 255, 0.92) !important;
+  }
+
+  .dashboard-blue-card :is([class*='text-brown'], [class*='text-slate'], [class*='text-gray'], [class*='text-blue'], [class*='text-muted'], [class*='text-orange']) {
+    color: rgba(239, 246, 255, 0.92) !important;
+  }
+
+  .dashboard-blue-card :is([class*='bg-orange/10'], [class*='bg-white/10'], [class*='bg-white/12']) {
+    background: rgba(255, 255, 255, 0.14) !important;
+  }
+
+  .dashboard-blue-card :is([class*='border-orange'], [class*='border-brown'], [class*='border-white/10'], [class*='border-white/12']) {
+    border-color: rgba(255, 255, 255, 0.22) !important;
+  }
+
+  .dashboard-blue-card :is([class*='hover:bg-white/90'], [class*='hover:bg-white/10']) {
+    --tw-bg-opacity: 1;
+  }
+
+  .dashboard-blue-card .dashboard-card-title,
+  .dashboard-blue-card .dashboard-blue-value {
+    color: #ffffff !important;
+  }
+
+  .dashboard-blue-card .dashboard-card-copy,
+  .dashboard-blue-card .dashboard-blue-copy {
+    color: rgba(219, 234, 254, 0.88) !important;
+  }
+
+  .dashboard-blue-card .dashboard-card-label,
+  .dashboard-blue-card .dashboard-blue-label {
+    color: rgba(239, 246, 255, 0.94) !important;
+  }
+
+  .dashboard-blue-card .dashboard-card-meta {
+    color: rgba(219, 234, 254, 0.78) !important;
+  }
+
+  .dashboard-blue-card .dashboard-card-plot {
+    color: #0f172a !important;
+  }
+
+  .dashboard-blue-card .dashboard-card-plot :is(h1, h2, h3, h4, h5, h6, p, span, small, strong, em, a, li, dt, dd, label, th, td, svg, i),
+  .dashboard-blue-card .dashboard-card-plot :is([class*='text-brown'], [class*='text-slate'], [class*='text-gray'], [class*='text-blue'], [class*='text-muted'], [class*='text-orange']) {
+    color: inherit !important;
   }
 
   .dash-card {
@@ -234,8 +292,10 @@
     border-color: rgba(147, 197, 253, 0.18);
     --dashboard-card-axis: rgba(219, 234, 254, 0.82);
     --dashboard-card-grid: rgba(147, 197, 253, 0.16);
-    --dashboard-card-fill: #93c5fd;
-    --dashboard-card-warm: #fcd34d;
+    --dashboard-card-fill: #fde047;
+    --dashboard-card-warm: #38bdf8;
+    --dashboard-card-positive: #22c55e;
+    --dashboard-card-negative: #ef4444;
   }
 
   .dark .surface-card,

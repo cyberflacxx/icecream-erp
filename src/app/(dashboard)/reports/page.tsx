@@ -63,6 +63,13 @@ const reportLabels: Record<ReportType, string> = {
   worker_productivity: 'Worker Productivity Report'
 };
 
+const REPORT_CHART_PRIMARY = '#FACC15';
+const REPORT_CHART_SECONDARY = '#38BDF8';
+const REPORT_CHART_POSITIVE = '#22C55E';
+const REPORT_CHART_NEGATIVE = '#EF4444';
+const REPORT_CHART_GRID = '#D8E2F0';
+const REPORT_CHART_AXIS = '#334155';
+
 function getDefaultDateRange() {
   const end = new Date();
   const start = new Date();
@@ -495,27 +502,27 @@ export default function ReportsPage() {
                 <PieChart>
                   <Tooltip />
                   <Legend />
-                  <Pie data={chartData} dataKey="value" nameKey="reason" outerRadius={105} fill="#F97316" />
+                  <Pie data={chartData} dataKey="value" nameKey="reason" outerRadius={105} fill={REPORT_CHART_PRIMARY} />
                 </PieChart>
               ) : activeReportType === 'raw_material_usage' ? (
                 <LineChart data={chartData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#F3D7B6" />
-                  <XAxis dataKey="date" stroke="#6B4A3A" fontSize={12} />
-                  <YAxis stroke="#6B4A3A" fontSize={12} />
+                  <CartesianGrid strokeDasharray="3 3" stroke={REPORT_CHART_GRID} />
+                  <XAxis dataKey="date" stroke={REPORT_CHART_AXIS} fontSize={12} />
+                  <YAxis stroke={REPORT_CHART_AXIS} fontSize={12} />
                   <Tooltip />
                   <Legend />
-                  <Line type="monotone" dataKey="received" stroke="#16A34A" strokeWidth={2} />
-                  <Line type="monotone" dataKey="issued" stroke="#F97316" strokeWidth={2} />
+                  <Line type="monotone" dataKey="received" stroke={REPORT_CHART_POSITIVE} strokeWidth={2} />
+                  <Line type="monotone" dataKey="issued" stroke={REPORT_CHART_PRIMARY} strokeWidth={2} />
                 </LineChart>
               ) : (
                 <BarChart data={chartData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#F3D7B6" />
-                  <XAxis dataKey={defaultXAxisKey} stroke="#6B4A3A" fontSize={12} />
-                  <YAxis stroke="#6B4A3A" fontSize={12} />
+                  <CartesianGrid strokeDasharray="3 3" stroke={REPORT_CHART_GRID} />
+                  <XAxis dataKey={defaultXAxisKey} stroke={REPORT_CHART_AXIS} fontSize={12} />
+                  <YAxis stroke={REPORT_CHART_AXIS} fontSize={12} />
                   <Tooltip />
                   <Legend />
-                  <Bar dataKey={defaultBarKey} fill="#F97316" radius={[8, 8, 0, 0]} />
-                  {secondaryBarKey ? <Bar dataKey={secondaryBarKey} fill="#3B1F12" radius={[8, 8, 0, 0]} /> : null}
+                  <Bar dataKey={defaultBarKey} fill={REPORT_CHART_PRIMARY} radius={[8, 8, 0, 0]} />
+                  {secondaryBarKey ? <Bar dataKey={secondaryBarKey} fill={REPORT_CHART_SECONDARY} radius={[8, 8, 0, 0]} /> : null}
                 </BarChart>
               )}
             </ResponsiveContainer>

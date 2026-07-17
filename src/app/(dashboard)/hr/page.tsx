@@ -71,9 +71,9 @@ export default function HRPage() {
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {stats.map((stat) => (
           <div key={stat.label} className="dash-card p-5">
-            <p className="text-xs text-brown/50 dark:text-white/40">{stat.label}</p>
-            <p className="mt-2 font-display text-3xl font-bold text-brown dark:text-white">{stat.value}</p>
-            <p className="mt-1 text-xs text-brown/45 dark:text-white/35">{stat.sub}</p>
+            <p className="dashboard-blue-label text-xs font-semibold uppercase tracking-[0.16em]">{stat.label}</p>
+            <p className="dashboard-blue-value mt-2 font-display text-3xl font-bold">{stat.value}</p>
+            <p className="dashboard-blue-copy mt-1 text-xs">{stat.sub}</p>
           </div>
         ))}
       </div>
@@ -82,15 +82,15 @@ export default function HRPage() {
         {quickLinks.map((item) => {
           const Icon = item.icon;
           return (
-            <Link key={item.href} href={item.href} className="dash-card group rounded-2xl p-5 transition hover:border-orange/30 hover:bg-white/90 dark:hover:bg-white/10">
+            <Link key={item.href} href={item.href} className="dash-card group rounded-2xl p-5 transition hover:-translate-y-0.5 hover:border-white/30 hover:bg-white/10">
               <div className="flex items-center justify-between">
-                <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-orange/10 text-orange">
+                <div className="dashboard-blue-icon flex h-11 w-11 items-center justify-center rounded-xl">
                   <Icon className="h-5 w-5" />
                 </div>
-                <ArrowRight className="h-4 w-4 text-brown/35 transition group-hover:translate-x-1 group-hover:text-brown dark:text-white/30 dark:group-hover:text-white" />
+                <ArrowRight className="dashboard-blue-copy h-4 w-4 transition group-hover:translate-x-1 group-hover:text-white" />
               </div>
-              <p className="mt-4 font-semibold text-brown dark:text-white">{item.label}</p>
-              <p className="mt-1 text-sm text-brown/55 dark:text-white/45">{item.desc}</p>
+              <p className="dashboard-blue-value mt-4 font-semibold">{item.label}</p>
+              <p className="dashboard-blue-copy mt-1 text-sm">{item.desc}</p>
             </Link>
           );
         })}
