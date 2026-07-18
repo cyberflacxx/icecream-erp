@@ -6,6 +6,10 @@ import { isMissingColumnError } from '@/lib/postgrest-compat';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
 const LEGACY_REQUISITION_ITEM_COLUMNS = ['pr_id', 'quantity', 'estimated_cost', 'notes'] as const;
+const REQUISITION_SELECT_BASE =
+  'id, requisition_number, department, request_date, needed_by_date, status, approval_status, requested_by, approver_user_id, approved_by, approved_at, rejected_by, rejected_at, remarks';
+const REQUISITION_SELECT_WITH_APPROVER_DETAILS = `${REQUISITION_SELECT_BASE}, approver_name, approver_email, approval_notes`;
+const APPROVED_REQUISITION_STATUSES = ['approved', 'level1_approved'] as const;
 
 function stripMissingLegacyRequisitionItemColumn<T extends Record<string, unknown>>(payload: T, error: unknown) {
   const column = LEGACY_REQUISITION_ITEM_COLUMNS.find((entry) =>
@@ -16,6 +20,19 @@ function stripMissingLegacyRequisitionItemColumn<T extends Record<string, unknow
   const nextPayload = { ...payload };
   delete nextPayload[column];
   return nextPayload;
+}
+
+function sanitizeStatusFilter(value: string | null) {
+  return String(value ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_]/g, '');
+}
+
+function applyApprovedRequisitionFilter<T extends { or: (filters: string) => T }>(query: T) {
+  return query.or(
+    `status.in.(${APPROVED_REQUISITION_STATUSES.join(',')}),approval_status.in.(${APPROVED_REQUISITION_STATUSES.join(',')})`,
+  );
 }
 
 export async function GET(request: NextRequest) {
@@ -29,28 +46,115 @@ export async function GET(request: NextRequest) {
   const page = Math.max(1, parseInt(searchParams.get('page') ?? '1'));
   const pageSize = Math.min(100, parseInt(searchParams.get('pageSize') ?? '20'));
   const status = searchParams.get('status');
+  const picker = searchParams.get('picker') === 'true';
   const department = searchParams.get('department');
   const startDate = searchParams.get('startDate');
   const endDate = searchParams.get('endDate');
 
   try {
+    const select = picker ? REQUISITION_SELECT_WITH_APPROVER_DETAILS : REQUISITION_SELECT_BASE;
     let query = service
       .from('purchase_requisitions')
-      .select(
-        'id, requisition_number, department, request_date, needed_by_date, status, approval_status, requested_by, approver_user_id, approved_by, approved_at, rejected_by, rejected_at, remarks',
-        { count: 'exact' },
-      )
+      .select(select, picker ? undefined : { count: 'exact' })
       .is('deleted_at', null)
       .eq('organization_id', ctx.organizationId)
       .order('created_at', { ascending: false });
 
-    if (status) query = query.eq('status', status);
+    const normalizedStatus = sanitizeStatusFilter(status);
+    if (normalizedStatus === 'approved') {
+      query = applyApprovedRequisitionFilter(query);
+    } else if (normalizedStatus) {
+      query = query.or(`status.eq.${normalizedStatus},approval_status.eq.${normalizedStatus}`);
+    }
     if (department) query = query.eq('department', department);
     if (startDate) query = query.gte('request_date', startDate);
     if (endDate) query = query.lte('request_date', endDate);
 
     const from = (page - 1) * pageSize;
-    const { data, count, error } = await query.range(from, from + pageSize - 1);
+    const { data, count, error } = picker
+      ? await query.limit(pageSize)
+      : await query.range(from, from + pageSize - 1);
+
+    if (
+      error &&
+      picker &&
+      ['approver_name', 'approver_email', 'approval_notes'].some((column) =>
+        isMissingColumnError(error, 'purchase_requisitions', column),
+      )
+    ) {
+      const fallbackQuery = service
+        .from('purchase_requisitions')
+        .select(REQUISITION_SELECT_BASE)
+        .is('deleted_at', null)
+        .eq('organization_id', ctx.organizationId)
+        .order('created_at', { ascending: false });
+
+      const fallbackApplied =
+        normalizedStatus === 'approved'
+          ? applyApprovedRequisitionFilter(fallbackQuery)
+          : normalizedStatus
+            ? fallbackQuery.or(`status.eq.${normalizedStatus},approval_status.eq.${normalizedStatus}`)
+            : fallbackQuery;
+
+      if (department) fallbackApplied.eq('department', department);
+      if (startDate) fallbackApplied.gte('request_date', startDate);
+      if (endDate) fallbackApplied.lte('request_date', endDate);
+
+      const fallbackResult = picker
+        ? await fallbackApplied.limit(pageSize)
+        : await fallbackApplied.range(from, from + pageSize - 1);
+      if (fallbackResult.error) return serverError(fallbackResult.error.message);
+
+      const rows = fallbackResult.data ?? [];
+      const userIds = [
+        ...new Set(
+          rows
+            .flatMap((row) => [row.requested_by, row.approver_user_id, row.approved_by, row.rejected_by])
+            .map((value) => String(value ?? ''))
+            .filter(Boolean),
+        ),
+      ];
+      const usersResult = userIds.length
+        ? await service.from('users').select('id, full_name').in('id', userIds)
+        : { data: [], error: null };
+      const usersById = new Map(
+        (usersResult.error ? [] : usersResult.data ?? []).map((row) => [String(row.id), String(row.full_name ?? 'Unknown')]),
+      );
+      const mapped = rows.map((r: Record<string, unknown>) => ({
+        id: r.id,
+        requisition_number: r.requisition_number,
+        requisitionNumber: r.requisition_number,
+        department: r.department,
+        created_at: r.request_date,
+        createdAt: r.request_date,
+        requestDate: r.request_date,
+        neededByDate: r.needed_by_date,
+        status: r.approval_status ?? r.status,
+        approvalStatus: r.approval_status ?? r.status,
+        requested_by: r.requested_by ? String(r.requested_by) : null,
+        requestedBy: usersById.get(String(r.requested_by ?? '')) ?? 'Unknown',
+        requestedById: r.requested_by ? String(r.requested_by) : null,
+        approverName: usersById.get(String(r.approver_user_id ?? '')) ?? null,
+        approverEmail: null,
+        approverUserId: r.approver_user_id ? String(r.approver_user_id) : null,
+        approvalNotes: null,
+        approvedBy: usersById.get(String(r.approved_by ?? '')) ?? null,
+        approvedAt: r.approved_at ? String(r.approved_at) : null,
+        rejectedBy: usersById.get(String(r.rejected_by ?? '')) ?? null,
+        rejectedAt: r.rejected_at ? String(r.rejected_at) : null,
+        remarks: r.remarks ? String(r.remarks) : null,
+        label: `${String(r.requisition_number ?? 'Requisition')} - ${usersById.get(String(r.requested_by ?? '')) ?? 'Unknown'} - ${String(r.approval_status ?? r.status ?? 'draft').replace(/_/g, ' ')}`,
+      }));
+
+      if (picker) {
+        return NextResponse.json({ success: true, data: mapped });
+      }
+
+      return NextResponse.json({
+        data: mapped,
+        pagination: { page, pageSize, total: fallbackResult.count ?? 0 },
+      });
+    }
 
     if (error) return serverError(error.message);
 
@@ -71,22 +175,33 @@ export async function GET(request: NextRequest) {
 
     const mapped = (data ?? []).map((r: Record<string, unknown>) => ({
       id: r.id,
+      requisition_number: r.requisition_number,
       requisitionNumber: r.requisition_number,
       department: r.department,
+      created_at: r.request_date,
+      createdAt: r.request_date,
       requestDate: r.request_date,
       neededByDate: r.needed_by_date,
-      status: r.status,
+      status: r.approval_status ?? r.status,
       approvalStatus: r.approval_status ?? r.status,
+      requested_by: r.requested_by ? String(r.requested_by) : null,
       requestedBy: usersById.get(String(r.requested_by ?? '')) ?? 'Unknown',
       requestedById: r.requested_by ? String(r.requested_by) : null,
-      approverName: usersById.get(String(r.approver_user_id ?? '')) ?? null,
+      approverName: usersById.get(String(r.approver_user_id ?? '')) ?? (r.approver_name ? String(r.approver_name) : null),
+      approverEmail: r.approver_email ? String(r.approver_email) : null,
       approverUserId: r.approver_user_id ? String(r.approver_user_id) : null,
+      approvalNotes: r.approval_notes ? String(r.approval_notes) : null,
       approvedBy: usersById.get(String(r.approved_by ?? '')) ?? null,
       approvedAt: r.approved_at ? String(r.approved_at) : null,
       rejectedBy: usersById.get(String(r.rejected_by ?? '')) ?? null,
       rejectedAt: r.rejected_at ? String(r.rejected_at) : null,
       remarks: r.remarks ? String(r.remarks) : null,
+      label: `${String(r.requisition_number ?? 'Requisition')} - ${usersById.get(String(r.requested_by ?? '')) ?? 'Unknown'} - ${String(r.approval_status ?? r.status ?? 'draft').replace(/_/g, ' ')}`,
     }));
+
+    if (picker) {
+      return NextResponse.json({ success: true, data: mapped });
+    }
 
     return NextResponse.json({
       data: mapped,
@@ -108,7 +223,10 @@ export async function POST(request: NextRequest) {
     department: string;
     neededByDate?: string | null;
     remarks?: string | null;
+    approverName?: string | null;
+    approverEmail?: string | null;
     approverUserId?: string | null;
+    approvalNotes?: string | null;
     items: Array<{
       itemId?: string;
       item_id?: string;
@@ -207,7 +325,10 @@ export async function POST(request: NextRequest) {
         department: body.department,
         needed_by_date: body.neededByDate ?? null,
         remarks: body.remarks ?? null,
+        approver_name: body.approverName?.trim() || null,
+        approver_email: body.approverEmail?.trim() || null,
         approver_user_id: body.approverUserId ?? null,
+        approval_notes: body.approvalNotes?.trim() || null,
         request_date: new Date().toISOString(),
         requested_by: ctx.userId,
         organization_id: ctx.organizationId,

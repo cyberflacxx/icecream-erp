@@ -80,7 +80,10 @@ export function normalizePurchaseOrderSupplierId(input: {
 }
 
 interface PurchaseOrderDraftPayloadInput {
+  approverEmail?: string | null;
+  approverName?: string | null;
   approverUserId?: string | null;
+  approvalNotes?: string | null;
   discountAmount: number;
   expectedDeliveryDate?: string | null;
   items: Array<{
@@ -101,7 +104,10 @@ export function buildPurchaseOrderDraftPayload(input: PurchaseOrderDraftPayloadI
   const supplierId = normalizePurchaseOrderSupplierId(input);
 
   return {
+    approverEmail: input.approverEmail?.trim() || null,
+    approverName: input.approverName?.trim() || null,
     approverUserId: input.approverUserId ?? null,
+    approvalNotes: input.approvalNotes?.trim() || null,
     discountAmount: input.discountAmount,
     expectedDeliveryDate: input.expectedDeliveryDate ?? null,
     items: input.items,

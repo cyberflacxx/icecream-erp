@@ -61,6 +61,7 @@ const initialSupplierState = {
   categoryId: '',
   code: '',
   contactPerson: '',
+  creditLimit: '0',
   email: '',
   name: '',
   paymentTerms: '',
@@ -192,6 +193,7 @@ export function TransactionShortcuts({
           categoryId: supplierState.categoryId || undefined,
           code: supplierState.code.trim() || null,
           contactPerson: supplierState.contactPerson.trim() || null,
+          creditLimit: Number(supplierState.creditLimit || 0),
           email: supplierState.email.trim() || null,
           name: supplierState.name.trim(),
           paymentTerms: supplierState.paymentTerms.trim() || null,
@@ -437,6 +439,17 @@ export function TransactionShortcuts({
                   type="email"
                   value={supplierState.email}
                   onChange={(event) => setSupplierState((current) => ({ ...current, email: event.target.value }))}
+                  className="surface-input-soft"
+                />
+              </label>
+              <label className="space-y-2 text-sm text-muted">
+                <span>Credit limit</span>
+                <input
+                  min="0"
+                  step="0.01"
+                  type="number"
+                  value={supplierState.creditLimit}
+                  onChange={(event) => setSupplierState((current) => ({ ...current, creditLimit: event.target.value }))}
                   className="surface-input-soft"
                 />
               </label>

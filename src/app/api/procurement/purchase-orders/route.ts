@@ -10,6 +10,15 @@ import { isMissingColumnError } from '@/lib/postgrest-compat';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
 const LEGACY_PURCHASE_ORDER_ITEM_COLUMNS = ['po_id', 'quantity', 'unit_price', 'tax_rate', 'line_total', 'received_qty'] as const;
+const PURCHASE_ORDER_SELECT_BASE = `id, po_number, order_date, expected_delivery_date, status, total, approver_user_id, approved_by, approved_at, sent_at, rejected_at,
+         requisition_id,
+         suppliers(id, name),
+         purchase_order_items(id)`;
+const PURCHASE_ORDER_SELECT_WITH_APPROVER_DETAILS = `id, po_number, order_date, expected_delivery_date, status, total, approver_user_id, approver_name, approver_email, approval_notes, approved_by, approved_at, sent_at, rejected_at,
+         requisition_id,
+         suppliers(id, name),
+         purchase_order_items(id)`;
+const APPROVED_REQUISITION_STATUSES = ['approved', 'level1_approved'] as const;
 
 function stripMissingLegacyPurchaseOrderItemColumn<T extends Record<string, unknown>>(payload: T, error: unknown) {
   const column = LEGACY_PURCHASE_ORDER_ITEM_COLUMNS.find((entry) =>
@@ -20,6 +29,23 @@ function stripMissingLegacyPurchaseOrderItemColumn<T extends Record<string, unkn
   const nextPayload = { ...payload };
   delete nextPayload[column];
   return nextPayload;
+}
+
+function stripMissingOptionalHeaderColumn<T extends Record<string, unknown>>(payload: T, error: unknown) {
+  for (const column of ['approver_name', 'approver_email', 'approval_notes'] as const) {
+    if (isMissingColumnError(error, 'purchase_orders', column)) {
+      const nextPayload = { ...payload };
+      delete nextPayload[column];
+      return nextPayload;
+    }
+  }
+
+  return null;
+}
+
+function isApprovedRequisitionStatus(status: unknown, approvalStatus: unknown) {
+  const candidates = [status, approvalStatus].map((value) => String(value ?? '').trim().toLowerCase());
+  return candidates.some((value) => APPROVED_REQUISITION_STATUSES.includes(value as (typeof APPROVED_REQUISITION_STATUSES)[number]));
 }
 
 export async function GET(request: NextRequest) {
@@ -40,12 +66,7 @@ export async function GET(request: NextRequest) {
   try {
     let query = service
       .from('purchase_orders')
-      .select(
-        `id, po_number, order_date, expected_delivery_date, status, total, approver_user_id, approved_by, approved_at, sent_at, rejected_at,
-         suppliers(id, name),
-         purchase_order_items(id)`,
-        { count: 'exact' },
-      )
+      .select(PURCHASE_ORDER_SELECT_WITH_APPROVER_DETAILS, { count: 'exact' })
       .is('deleted_at', null)
       .eq('organization_id', ctx.organizationId)
       .order('created_at', { ascending: false });
@@ -64,7 +85,39 @@ export async function GET(request: NextRequest) {
     if (endDate) query = query.lte('order_date', endDate);
 
     const from = (page - 1) * pageSize;
-    const { data, count, error } = await query.range(from, from + pageSize - 1);
+    let { data, count, error } = await query.range(from, from + pageSize - 1);
+
+    if (
+      error &&
+      ['approver_name', 'approver_email', 'approval_notes'].some((column) =>
+        isMissingColumnError(error, 'purchase_orders', column),
+      )
+    ) {
+      let fallbackQuery = service
+        .from('purchase_orders')
+        .select(PURCHASE_ORDER_SELECT_BASE, { count: 'exact' })
+        .is('deleted_at', null)
+        .eq('organization_id', ctx.organizationId)
+        .order('created_at', { ascending: false });
+
+      if (status) {
+        const normalizedStatus = normalizePurchaseOrderStatus(status);
+        if (normalizedStatus === 'REJECTED') {
+          fallbackQuery = fallbackQuery.not('rejected_at', 'is', null);
+        } else {
+          const variants = [...new Set([status, status.toLowerCase(), status.toUpperCase()])];
+          fallbackQuery = fallbackQuery.in('status', variants);
+        }
+      }
+      if (supplierId) fallbackQuery = fallbackQuery.eq('supplier_id', supplierId);
+      if (startDate) fallbackQuery = fallbackQuery.gte('order_date', startDate);
+      if (endDate) fallbackQuery = fallbackQuery.lte('order_date', endDate);
+
+      const fallback = await fallbackQuery.range(from, from + pageSize - 1);
+      data = fallback.data;
+      count = fallback.count;
+      error = fallback.error;
+    }
 
     if (error) return serverError(error.message);
 
@@ -92,12 +145,15 @@ export async function GET(request: NextRequest) {
         sentAt: r.sent_at,
         status: r.status,
       }),
-      approverName: usersById.get(String(r.approver_user_id ?? '')) ?? null,
+      approverName: usersById.get(String(r.approver_user_id ?? '')) ?? (r.approver_name ? String(r.approver_name) : null),
+      approverEmail: r.approver_email ? String(r.approver_email) : null,
       approverUserId: r.approver_user_id ? String(r.approver_user_id) : null,
+      approvalNotes: r.approval_notes ? String(r.approval_notes) : null,
       approvedBy: usersById.get(String(r.approved_by ?? '')) ?? null,
       approvedAt: r.approved_at ? String(r.approved_at) : null,
       sentAt: r.sent_at ? String(r.sent_at) : null,
       rejectedAt: r.rejected_at ? String(r.rejected_at) : null,
+      requisitionId: r.requisition_id ? String(r.requisition_id) : null,
       total: Number(r.total ?? 0),
       supplier: r.suppliers
         ? { id: (r.suppliers as Record<string, unknown>).id, name: (r.suppliers as Record<string, unknown>).name }
@@ -130,7 +186,10 @@ export async function POST(request: NextRequest) {
     notes?: string | null;
     taxAmount?: number;
     discountAmount?: number;
+    approverName?: string | null;
+    approverEmail?: string | null;
     approverUserId?: string | null;
+    approvalNotes?: string | null;
     items: Array<{
       itemId: string;
       unitOfMeasureId: string;
@@ -180,14 +239,14 @@ export async function POST(request: NextRequest) {
     if (body.requisitionId) {
       const { data: req, error: reqErr } = await service
         .from('purchase_requisitions')
-        .select('id, status')
+        .select('id, status, approval_status')
         .is('deleted_at', null)
         .eq('organization_id', ctx.organizationId)
         .eq('id', body.requisitionId)
         .single();
 
       if (reqErr || !req) return badRequest('Purchase requisition not found.');
-      if ((req as Record<string, unknown>).status !== 'level1_approved') {
+      if (!isApprovedRequisitionStatus((req as Record<string, unknown>).status, (req as Record<string, unknown>).approval_status)) {
         return badRequest('Purchase order can only be created from approved requisitions.');
       }
     }
@@ -235,30 +294,39 @@ export async function POST(request: NextRequest) {
     const subtotal = body.items.reduce((sum, i) => sum + i.quantityOrdered * i.unitCost, 0);
     const total = subtotal + taxAmount - discountAmount;
 
-    const { data: order, error: orderErr } = await service
-      .from('purchase_orders')
-      .insert({
-        po_number: poNumber,
-        supplier_id: supplierId,
-        requisition_id: body.requisitionId ?? null,
-        order_date: body.orderDate ?? new Date().toISOString(),
-        expected_delivery_date: body.expectedDeliveryDate ?? null,
-        notes: body.notes ?? null,
-        approver_user_id: body.approverUserId ?? null,
-        organization_id: ctx.organizationId,
-        created_by: ctx.userId,
-        status: 'DRAFT',
-        subtotal,
-        tax_amount: taxAmount,
-        discount_amount: discountAmount,
-        total,
-        approved_at: null,
-        approved_by: null,
-      })
-      .select()
-      .single();
+    let orderPayload: Record<string, unknown> = {
+      po_number: poNumber,
+      supplier_id: supplierId,
+      requisition_id: body.requisitionId ?? null,
+      order_date: body.orderDate ?? new Date().toISOString(),
+      expected_delivery_date: body.expectedDeliveryDate ?? null,
+      notes: body.notes ?? null,
+      approver_name: body.approverName?.trim() || null,
+      approver_email: body.approverEmail?.trim() || null,
+      approver_user_id: body.approverUserId ?? null,
+      approval_notes: body.approvalNotes?.trim() || null,
+      organization_id: ctx.organizationId,
+      created_by: ctx.userId,
+      status: 'DRAFT',
+      subtotal,
+      tax_amount: taxAmount,
+      discount_amount: discountAmount,
+      total,
+      approved_at: null,
+      approved_by: null,
+    };
+    let orderInsert = await service.from('purchase_orders').insert(orderPayload).select().single();
+    while (orderInsert.error) {
+      const nextPayload = stripMissingOptionalHeaderColumn(orderPayload, orderInsert.error);
+      if (!nextPayload || JSON.stringify(nextPayload) === JSON.stringify(orderPayload)) {
+        break;
+      }
+      orderPayload = nextPayload;
+      orderInsert = await service.from('purchase_orders').insert(orderPayload).select().single();
+    }
 
-    if (orderErr) return serverError(orderErr.message);
+    if (orderInsert.error) return serverError(orderInsert.error.message);
+    const order = orderInsert.data;
 
     const orderId = (order as Record<string, unknown>).id as string;
 

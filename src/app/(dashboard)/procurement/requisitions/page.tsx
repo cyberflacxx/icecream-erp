@@ -30,7 +30,10 @@ type RequisitionFormItem = {
 };
 
 type RequisitionFormState = {
+  approverEmail: string;
+  approverName: string;
   approverUserId: string;
+  approvalNotes: string;
   department: string;
   items: RequisitionFormItem[];
   neededByDate: string;
@@ -42,7 +45,13 @@ type RequisitionDetailResponse = {
   department: string;
   needed_by_date: string | null;
   remarks: string | null;
+  approver_name?: string | null;
+  approverName?: string | null;
+  approver_email?: string | null;
+  approverEmail?: string | null;
   approver_user_id: string | null;
+  approval_notes?: string | null;
+  approvalNotes?: string | null;
   purchase_requisition_items: Array<{
     id: string;
     item_id: string;
@@ -55,7 +64,10 @@ type RequisitionDetailResponse = {
 };
 
 const initialFormState: RequisitionFormState = {
+  approverEmail: '',
+  approverName: '',
   approverUserId: '',
+  approvalNotes: '',
   department: '',
   items: [buildEmptyLine()],
   neededByDate: '',
@@ -190,7 +202,10 @@ export default function RequisitionsPage() {
 
       setEditingRequisitionId(row.id);
       setFormState({
+        approverEmail: detail.approverEmail ?? detail.approver_email ?? '',
+        approverName: detail.approverName ?? detail.approver_name ?? '',
         approverUserId: detail.approver_user_id ?? '',
+        approvalNotes: detail.approvalNotes ?? detail.approval_notes ?? '',
         department: detail.department ?? '',
         items:
           detail.purchase_requisition_items.length > 0
@@ -248,7 +263,10 @@ export default function RequisitionsPage() {
 
     try {
       const payload = buildRequisitionDraftPayload({
+        approverEmail: formState.approverEmail || null,
+        approverName: formState.approverName || null,
         approverUserId: formState.approverUserId || null,
+        approvalNotes: formState.approvalNotes || null,
         department: formState.department,
         items,
         neededByDate: formState.neededByDate || null,
@@ -580,27 +598,58 @@ export default function RequisitionsPage() {
               <p className="text-sm font-semibold uppercase tracking-[0.18em] text-orange">Approval Details</p>
               <p className="mt-1 text-xs text-muted">Assign an approver directly when the client wants named routing, or leave this blank for normal supervisor flow.</p>
             </div>
-            <label className="space-y-2 text-sm text-muted">
-              <span>Approver</span>
-              <select
-                value={formState.approverUserId}
-                onChange={(event) =>
-                  setFormState((current) => ({ ...current, approverUserId: event.target.value }))
-                }
-                className="surface-input-soft"
-              >
-                <option value="">Auto route to supervisor</option>
-                {(metaQuery.data?.approvers ?? []).map((approver) => (
-                  <option key={approver.id} value={approver.id}>
-                    {approver.fullName}
-                    {approver.role ? ` (${approver.role.replace(/_/g, ' ')})` : ''}
-                  </option>
-                ))}
-              </select>
-              <p className="text-xs text-muted">
-                Pick a named approver when the client wants direct routing, or leave this blank for normal supervisor flow.
-              </p>
-            </label>
+            <div className="grid gap-4 md:grid-cols-2">
+              <label className="space-y-2 text-sm text-muted md:col-span-2">
+                <span>Approver</span>
+                <select
+                  value={formState.approverUserId}
+                  onChange={(event) =>
+                    setFormState((current) => ({ ...current, approverUserId: event.target.value }))
+                  }
+                  className="surface-input-soft"
+                >
+                  <option value="">Auto route to supervisor</option>
+                  {(metaQuery.data?.approvers ?? []).map((approver) => (
+                    <option key={approver.id} value={approver.id}>
+                      {approver.fullName}
+                      {approver.role ? ` (${approver.role.replace(/_/g, ' ')})` : ''}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs text-muted">
+                  Pick a named approver when available, or leave this blank and capture manual approval contact details below.
+                </p>
+              </label>
+              <label className="space-y-2 text-sm text-muted">
+                <span>Manual approver name</span>
+                <input
+                  value={formState.approverName}
+                  onChange={(event) => setFormState((current) => ({ ...current, approverName: event.target.value }))}
+                  className="surface-input-soft"
+                  placeholder="Supervisor or approver name"
+                />
+              </label>
+              <label className="space-y-2 text-sm text-muted">
+                <span>Manual approver email</span>
+                <input
+                  type="email"
+                  value={formState.approverEmail}
+                  onChange={(event) => setFormState((current) => ({ ...current, approverEmail: event.target.value }))}
+                  className="surface-input-soft"
+                  placeholder="approver@example.com"
+                />
+              </label>
+              <label className="space-y-2 text-sm text-muted md:col-span-2">
+                <span>Approval notes</span>
+                <textarea
+                  rows={2}
+                  value={formState.approvalNotes}
+                  onChange={(event) => setFormState((current) => ({ ...current, approvalNotes: event.target.value }))}
+                  className="surface-textarea-soft"
+                  placeholder="Escalation path, approval context, or fallback approver instructions."
+                />
+              </label>
+            </div>
           </section>
 
           <section className="space-y-4 rounded-2xl border border-border/70 bg-white/80 p-4">

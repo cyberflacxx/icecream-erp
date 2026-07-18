@@ -41,7 +41,10 @@ interface PurchaseOrderDetail {
     address: string | null;
   } | null;
   requisitionId: string | null;
+  approverName?: string | null;
+  approverEmail?: string | null;
   approverUserId: string | null;
+  approvalNotes?: string | null;
   approvedBy: string | null;
   orderDate: string;
   expectedDeliveryDate: string | null;
@@ -90,7 +93,10 @@ type EditLine = {
 };
 
 type EditFormState = {
+  approverEmail: string;
+  approverName: string;
   approverUserId: string;
+  approvalNotes: string;
   discountAmount: string;
   expectedDeliveryDate: string;
   items: EditLine[];
@@ -146,7 +152,10 @@ const actionButtonClassNames = {
 
 function createEditState(order: PurchaseOrderDetail): EditFormState {
   return {
+    approverEmail: order.approverEmail ?? '',
+    approverName: order.approverName ?? '',
     approverUserId: order.approverUserId ?? '',
+    approvalNotes: order.approvalNotes ?? '',
     discountAmount: String(order.discountAmount ?? 0),
     expectedDeliveryDate: order.expectedDeliveryDate ? String(order.expectedDeliveryDate).slice(0, 10) : '',
     items:
@@ -277,7 +286,10 @@ export default function PurchaseOrderDetailPage({ params }: PurchaseOrderDetailP
     try {
       await request(API_ROUTES.PROCUREMENT.PURCHASE_ORDER(params.id), {
         body: JSON.stringify(buildPurchaseOrderDraftPayload({
+          approverEmail: formState.approverEmail || null,
+          approverName: formState.approverName || null,
           approverUserId: formState.approverUserId || null,
+          approvalNotes: formState.approvalNotes || null,
           discountAmount: Number(formState.discountAmount || 0),
           expectedDeliveryDate: formState.expectedDeliveryDate || null,
           items,
@@ -673,6 +685,27 @@ export default function PurchaseOrderDetailPage({ params }: PurchaseOrderDetailP
                       ))}
                     </select>
                   </label>
+                  <label className="space-y-2 text-sm text-muted">
+                    <span>Manual approver name</span>
+                    <input
+                      value={formState.approverName}
+                      onChange={(event) =>
+                        setFormState((current) => (current ? { ...current, approverName: event.target.value } : current))
+                      }
+                      className="surface-input-soft"
+                    />
+                  </label>
+                  <label className="space-y-2 text-sm text-muted">
+                    <span>Manual approver email</span>
+                    <input
+                      type="email"
+                      value={formState.approverEmail}
+                      onChange={(event) =>
+                        setFormState((current) => (current ? { ...current, approverEmail: event.target.value } : current))
+                      }
+                      className="surface-input-soft"
+                    />
+                  </label>
 
                   <label className="space-y-2 text-sm text-muted">
                     <span>Order Date</span>
@@ -727,6 +760,17 @@ export default function PurchaseOrderDetailPage({ params }: PurchaseOrderDetailP
                         )
                       }
                       className="surface-input-soft"
+                    />
+                  </label>
+                  <label className="space-y-2 text-sm text-muted md:col-span-2">
+                    <span>Approval Notes</span>
+                    <textarea
+                      rows={2}
+                      value={formState.approvalNotes}
+                      onChange={(event) =>
+                        setFormState((current) => (current ? { ...current, approvalNotes: event.target.value } : current))
+                      }
+                      className="surface-textarea-soft"
                     />
                   </label>
                 </div>

@@ -6,6 +6,10 @@ import { isMissingColumnError } from '@/lib/postgrest-compat';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
 const LEGACY_REQUISITION_ITEM_COLUMNS = ['pr_id', 'quantity', 'estimated_cost', 'notes'] as const;
+const REQUISITION_DETAIL_SELECT_BASE =
+  'id, requisition_number, department, needed_by_date, remarks, status, approval_status, approver_user_id, requested_by, approved_by, approved_at, rejected_by, rejected_at, purchase_requisition_items(id, item_id, unit_of_measure_id, quantity_requested, quantity_approved, estimated_unit_cost, remarks)';
+const REQUISITION_DETAIL_SELECT_WITH_APPROVER_DETAILS =
+  'id, requisition_number, department, needed_by_date, remarks, status, approval_status, approver_user_id, approver_name, approver_email, approval_notes, requested_by, approved_by, approved_at, rejected_by, rejected_at, purchase_requisition_items(id, item_id, unit_of_measure_id, quantity_requested, quantity_approved, estimated_unit_cost, remarks)';
 
 function stripMissingLegacyRequisitionItemColumn<T extends Record<string, unknown>>(payload: T, error: unknown) {
   const column = LEGACY_REQUISITION_ITEM_COLUMNS.find((entry) =>
@@ -30,20 +34,38 @@ export async function GET(
   const service = createServiceRoleClient();
 
   try {
-    const { data: requisition, error } = await service
+    let response = await service
       .from('purchase_requisitions')
-      .select(
-        'id, requisition_number, department, needed_by_date, remarks, status, approval_status, approver_user_id, requested_by, approved_by, approved_at, rejected_by, rejected_at, purchase_requisition_items(id, item_id, unit_of_measure_id, quantity_requested, quantity_approved, estimated_unit_cost, remarks)',
-      )
+      .select(REQUISITION_DETAIL_SELECT_WITH_APPROVER_DETAILS)
       .is('deleted_at', null)
       .eq('organization_id', ctx.organizationId)
       .eq('id', id)
       .single();
 
+    if (
+      response.error &&
+      ['approver_name', 'approver_email', 'approval_notes'].some((column) =>
+        isMissingColumnError(response.error, 'purchase_requisitions', column),
+      )
+    ) {
+      response = await service
+        .from('purchase_requisitions')
+        .select(REQUISITION_DETAIL_SELECT_BASE)
+        .is('deleted_at', null)
+        .eq('organization_id', ctx.organizationId)
+        .eq('id', id)
+        .single();
+    }
+
+    const { data: requisition, error } = response;
+
     if (error || !requisition) return notFound('Purchase requisition not found.');
 
     return NextResponse.json({
       ...requisition,
+      approverName: requisition.approver_name ? String(requisition.approver_name) : null,
+      approverEmail: requisition.approver_email ? String(requisition.approver_email) : null,
+      approvalNotes: requisition.approval_notes ? String(requisition.approval_notes) : null,
       purchase_requisition_items: (requisition.purchase_requisition_items ?? []).map((item) => ({
         ...item,
         itemId: item.item_id ? String(item.item_id) : null,
@@ -70,7 +92,10 @@ export async function PATCH(
     department?: string;
     neededByDate?: string | null;
     remarks?: string | null;
+    approverName?: string | null;
+    approverEmail?: string | null;
     approverUserId?: string | null;
+    approvalNotes?: string | null;
     items?: Array<{
       itemId?: string;
       item_id?: string;
@@ -170,7 +195,10 @@ export async function PATCH(
     if (body.department !== undefined) updatePayload.department = body.department;
     if (body.neededByDate !== undefined) updatePayload.needed_by_date = body.neededByDate;
     if (body.remarks !== undefined) updatePayload.remarks = body.remarks;
+    if (body.approverName !== undefined) updatePayload.approver_name = body.approverName?.trim() || null;
+    if (body.approverEmail !== undefined) updatePayload.approver_email = body.approverEmail?.trim() || null;
     if (body.approverUserId !== undefined) updatePayload.approver_user_id = body.approverUserId;
+    if (body.approvalNotes !== undefined) updatePayload.approval_notes = body.approvalNotes?.trim() || null;
 
     if (Object.keys(updatePayload).length > 0) {
       const { error: updateErr } = await service

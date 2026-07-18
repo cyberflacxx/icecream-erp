@@ -31,6 +31,9 @@ export function normalizeRequisitionUnitOfMeasureId(input: {
 
 interface RequisitionDraftPayloadInput {
   approverUserId?: string | null;
+  approverEmail?: string | null;
+  approverName?: string | null;
+  approvalNotes?: string | null;
   department: string;
   items: Array<{
     estimatedUnitCost?: number | null;
@@ -50,7 +53,10 @@ interface RequisitionDraftPayloadInput {
 
 export function buildRequisitionDraftPayload(input: RequisitionDraftPayloadInput) {
   return {
+    approverEmail: input.approverEmail?.trim() || null,
+    approverName: input.approverName?.trim() || null,
     approverUserId: input.approverUserId ?? null,
+    approvalNotes: input.approvalNotes?.trim() || null,
     department: input.department,
     items: input.items.map((item) => {
       const itemId = normalizeRequisitionItemId(item);

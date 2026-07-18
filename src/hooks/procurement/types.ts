@@ -48,20 +48,27 @@ export interface SupplierHistoryRow {
 export interface RequisitionRow {
   id: string;
   requisitionNumber: string;
+  requisition_number?: string;
   department: string;
   requestDate: string;
+  createdAt?: string;
+  created_at?: string;
   neededByDate: string | null;
   status: string;
   approvalStatus: string;
   requestedBy: string;
+  requested_by?: string | null;
   requestedById: string | null;
   approverName: string | null;
+  approverEmail?: string | null;
   approverUserId: string | null;
+  approvalNotes?: string | null;
   approvedBy: string | null;
   approvedAt: string | null;
   rejectedBy: string | null;
   rejectedAt: string | null;
   remarks: string | null;
+  label?: string;
 }
 
 export interface RequisitionFilters {
@@ -80,11 +87,14 @@ export interface PurchaseOrderRow {
   expectedDeliveryDate: string | null;
   status: string;
   approverName: string | null;
+  approverEmail?: string | null;
   approverUserId: string | null;
+  approvalNotes?: string | null;
   approvedBy: string | null;
   approvedAt: string | null;
   sentAt: string | null;
   rejectedAt: string | null;
+  requisitionId?: string | null;
   supplier: {
     id: string;
     name: string;

@@ -186,6 +186,9 @@ test('normalizePurchaseOrderSupplierId accepts supplier_id and supplierId', () =
 
 test('buildPurchaseOrderDraftPayload stores supplier_id canonically', () => {
   const payload = buildPurchaseOrderDraftPayloadForOrders({
+    approverEmail: 'approver@example.com',
+    approverName: 'Jane Approver',
+    approvalNotes: 'Route through HQ buyer',
     discountAmount: 0,
     items: [
       {
@@ -201,6 +204,9 @@ test('buildPurchaseOrderDraftPayload stores supplier_id canonically', () => {
 
   assert.equal(payload.supplierId, 'sup-1');
   assert.equal(payload.supplier_id, 'sup-1');
+  assert.equal(payload.approverName, 'Jane Approver');
+  assert.equal(payload.approverEmail, 'approver@example.com');
+  assert.equal(payload.approvalNotes, 'Route through HQ buyer');
   assert.equal(payload.items[0]?.itemId, 'item-1');
 });
 
@@ -222,7 +228,10 @@ test('normalizeRequisitionUnitOfMeasureId accepts unit aliases', () => {
 
 test('buildRequisitionDraftPayload stores item_id canonically', () => {
   const payload = buildRequisitionDraftPayload({
+    approverEmail: 'approver@example.com',
+    approverName: 'Jane Approver',
     approverUserId: 'user-1',
+    approvalNotes: 'Escalate if unavailable',
     department: 'Production',
     items: [
       {
@@ -237,6 +246,9 @@ test('buildRequisitionDraftPayload stores item_id canonically', () => {
   });
 
   assert.equal(payload.approverUserId, 'user-1');
+  assert.equal(payload.approverName, 'Jane Approver');
+  assert.equal(payload.approverEmail, 'approver@example.com');
+  assert.equal(payload.approvalNotes, 'Escalate if unavailable');
   assert.equal(payload.items[0]?.itemId, 'item-1');
   assert.equal(payload.items[0]?.item_id, 'item-1');
   assert.equal(payload.items[0]?.unitOfMeasureId, 'uom-1');

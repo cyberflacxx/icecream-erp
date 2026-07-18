@@ -154,7 +154,10 @@ function createLineItemDraft() {
 
 function createInitialFormState(requisitionId = '') {
   return {
+    approverEmail: '',
+    approverName: '',
     approverUserId: '',
+    approvalNotes: '',
     discountAmount: '0',
     expectedDeliveryDate: '',
     items: [createLineItemDraft()],
@@ -204,6 +207,33 @@ interface FeedbackState {
   tone: 'error' | 'success';
 }
 
+interface RequisitionPickerOption {
+  id: string;
+  label: string;
+  requisitionNumber: string;
+}
+
+interface RequisitionDetailResponse {
+  id: string;
+  needed_by_date: string | null;
+  approver_user_id: string | null;
+  approver_name?: string | null;
+  approverName?: string | null;
+  approver_email?: string | null;
+  approverEmail?: string | null;
+  approval_notes?: string | null;
+  approvalNotes?: string | null;
+  purchase_requisition_items: Array<{
+    id: string;
+    item_id: string;
+    itemId?: string | null;
+    unit_of_measure_id: string;
+    unitOfMeasureId?: string | null;
+    quantity_requested: number | string;
+    estimated_unit_cost?: number | string | null;
+  }>;
+}
+
 export default function PurchaseOrdersPage() {
   const searchParams = useSearchParams();
   const requisitionIdParam = searchParams.get('requisitionId');
@@ -220,6 +250,8 @@ export default function PurchaseOrdersPage() {
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [formState, setFormState] = useState(() => createInitialFormState(requisitionIdParam ?? ''));
+  const [requisitionLoadError, setRequisitionLoadError] = useState<string | null>(null);
+  const [isLoadingRequisition, setIsLoadingRequisition] = useState(false);
   const [pendingAction, setPendingAction] = useState<string | null>(null);
 
   const queryClient = useQueryClient();
@@ -229,6 +261,16 @@ export default function PurchaseOrdersPage() {
   const inventoryItemsQuery = useQuery({
     queryKey: ['procurement', 'purchase-order-item-options'],
     queryFn: () => request<unknown>('/api/inventory/items?page=1&pageSize=100&status=active'),
+  });
+  const requisitionPickerQuery = useQuery({
+    queryKey: ['procurement', 'purchase-order-requisition-picker'],
+    queryFn: async () => {
+      const response = await request<{ data?: RequisitionPickerOption[]; success?: boolean }>(
+        '/api/procurement/requisitions?picker=true&status=approved&pageSize=100',
+      );
+      return response.data ?? [];
+    },
+    enabled: isDrawerOpen,
   });
   const ordersQuery = usePurchaseOrders({
     page: filters.page,
@@ -256,6 +298,43 @@ export default function PurchaseOrdersPage() {
 
     void inventoryItemsQuery.refetch();
   }, [inventoryItemsQuery, isDrawerOpen]);
+
+  async function loadRequisitionIntoForm(requisitionId: string) {
+    if (!requisitionId) {
+      setRequisitionLoadError(null);
+      return;
+    }
+
+    setIsLoadingRequisition(true);
+    setRequisitionLoadError(null);
+
+    try {
+      const detail = await request<RequisitionDetailResponse>(`/api/procurement/requisitions/${requisitionId}`);
+      setFormState((current) => ({
+        ...current,
+        approverEmail: current.approverEmail || detail.approverEmail || detail.approver_email || '',
+        approverName: current.approverName || detail.approverName || detail.approver_name || '',
+        approverUserId: current.approverUserId || detail.approver_user_id || '',
+        approvalNotes: current.approvalNotes || detail.approvalNotes || detail.approval_notes || '',
+        expectedDeliveryDate: current.expectedDeliveryDate || (detail.needed_by_date ? String(detail.needed_by_date).slice(0, 10) : ''),
+        items:
+          detail.purchase_requisition_items.length > 0
+            ? detail.purchase_requisition_items.map((item) => ({
+                itemId: item.itemId ?? item.item_id ?? '',
+                quantityOrdered: String(item.quantity_requested ?? 1),
+                rowId: item.id,
+                unitCost: String(item.estimated_unit_cost ?? 0),
+                unitOfMeasureId: item.unitOfMeasureId ?? item.unit_of_measure_id ?? '',
+              }))
+            : [createLineItemDraft()],
+        requisitionId,
+      }));
+    } catch (error) {
+      setRequisitionLoadError(error instanceof Error ? error.message : 'Unable to load requisition details right now.');
+    } finally {
+      setIsLoadingRequisition(false);
+    }
+  }
 
   const orders = ordersQuery.data?.data ?? [];
   const pagination = ordersQuery.data?.pagination;
@@ -366,12 +445,15 @@ export default function PurchaseOrdersPage() {
     try {
       await request('/api/procurement/purchase-orders', {
         body: JSON.stringify(buildPurchaseOrderDraftPayload({
+          approverEmail: formState.approverEmail || null,
+          approverName: formState.approverName || null,
           discountAmount: Number(formState.discountAmount),
           expectedDeliveryDate: formState.expectedDeliveryDate || null,
           items,
           notes: formState.notes || null,
           orderDate: formState.orderDate || null,
           approverUserId: formState.approverUserId || null,
+          approvalNotes: formState.approvalNotes || null,
           requisitionId: formState.requisitionId || null,
           supplierId: formState.supplierId,
           supplier_id: formState.supplierId,
@@ -829,15 +911,62 @@ export default function PurchaseOrdersPage() {
                 </select>
               </label>
 
-              <label className="space-y-2 text-sm text-muted">
-                <span>Requisition ID</span>
-                <input
+              <div className="space-y-2 text-sm text-muted">
+                <span>Approved Requisition</span>
+                <select
                   value={formState.requisitionId}
-                  onChange={(event) =>
-                    setFormState((current) => ({ ...current, requisitionId: event.target.value }))
-                  }
+                  onChange={async (event) => {
+                    const nextId = event.target.value;
+                    setFormState((current) => ({ ...current, requisitionId: nextId }));
+                    if (nextId) {
+                      await loadRequisitionIntoForm(nextId);
+                    } else {
+                      setRequisitionLoadError(null);
+                    }
+                  }}
                   className="surface-input-soft"
-                  placeholder="Optional reference"
+                >
+                  <option value="">
+                    {requisitionPickerQuery.isLoading ? 'Loading requisitions...' : 'Optional source requisition'}
+                  </option>
+                  {(requisitionPickerQuery.data ?? []).map((requisition) => (
+                    <option key={requisition.id} value={requisition.id}>
+                      {requisition.label || requisition.requisitionNumber}
+                    </option>
+                  ))}
+                </select>
+                <div className="flex flex-wrap items-center gap-2 text-xs text-muted">
+                  {isLoadingRequisition ? <span>Loading requisition lines...</span> : null}
+                  {!isLoadingRequisition && requisitionPickerQuery.data?.length === 0 && !requisitionPickerQuery.isLoading ? (
+                    <span>No approved requisitions are available for PO conversion.</span>
+                  ) : null}
+                  {requisitionLoadError ? <span className="text-rose-600">{requisitionLoadError}</span> : null}
+                  {requisitionLoadError && formState.requisitionId ? (
+                    <button type="button" className="text-primary underline" onClick={() => void loadRequisitionIntoForm(formState.requisitionId)}>
+                      Retry
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+
+              <label className="space-y-2 text-sm text-muted">
+                <span>Manual approver name</span>
+                <input
+                  value={formState.approverName}
+                  onChange={(event) => setFormState((current) => ({ ...current, approverName: event.target.value }))}
+                  className="surface-input-soft"
+                  placeholder="Supervisor or approver name"
+                />
+              </label>
+
+              <label className="space-y-2 text-sm text-muted">
+                <span>Manual approver email</span>
+                <input
+                  type="email"
+                  value={formState.approverEmail}
+                  onChange={(event) => setFormState((current) => ({ ...current, approverEmail: event.target.value }))}
+                  className="surface-input-soft"
+                  placeholder="approver@example.com"
                 />
               </label>
 
@@ -886,6 +1015,16 @@ export default function PurchaseOrdersPage() {
                     setFormState((current) => ({ ...current, discountAmount: event.target.value }))
                   }
                   className="surface-input-soft"
+                />
+              </label>
+              <label className="space-y-2 text-sm text-muted md:col-span-2">
+                <span>Approval Notes</span>
+                <textarea
+                  rows={2}
+                  value={formState.approvalNotes}
+                  onChange={(event) => setFormState((current) => ({ ...current, approvalNotes: event.target.value }))}
+                  className="surface-textarea-soft"
+                  placeholder="Approval instructions, requisition context, or supplier routing notes."
                 />
               </label>
             </div>

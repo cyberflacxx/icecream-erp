@@ -9,6 +9,25 @@ import {
 import { isMissingColumnError } from '@/lib/postgrest-compat';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
+const PURCHASE_ORDER_DETAIL_SELECT_BASE = `id, po_number, order_date, expected_delivery_date, status,
+         subtotal, tax_amount, discount_amount, total, notes, approved_at, approved_by, approver_user_id, sent_at, rejected_at, requisition_id, supplier_id,
+         suppliers(id, name, email, phone, address)`;
+const PURCHASE_ORDER_DETAIL_SELECT_WITH_APPROVER_DETAILS = `id, po_number, order_date, expected_delivery_date, status,
+         subtotal, tax_amount, discount_amount, total, notes, approved_at, approved_by, approver_user_id, approver_name, approver_email, approval_notes, sent_at, rejected_at, requisition_id, supplier_id,
+         suppliers(id, name, email, phone, address)`;
+
+function stripMissingOptionalHeaderColumn<T extends Record<string, unknown>>(payload: T, error: unknown) {
+  for (const column of ['approver_name', 'approver_email', 'approval_notes'] as const) {
+    if (isMissingColumnError(error, 'purchase_orders', column)) {
+      const nextPayload = { ...payload };
+      delete nextPayload[column];
+      return nextPayload;
+    }
+  }
+
+  return null;
+}
+
 export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
@@ -21,17 +40,30 @@ export async function GET(
   const service = createServiceRoleClient();
 
   try {
-    const { data: order, error } = await service
+    let response = await service
       .from('purchase_orders')
-      .select(
-        `id, po_number, order_date, expected_delivery_date, status,
-         subtotal, tax_amount, discount_amount, total, notes, approved_at, approved_by, approver_user_id, sent_at, rejected_at, requisition_id, supplier_id,
-         suppliers(id, name, email, phone, address)`,
-      )
+      .select(PURCHASE_ORDER_DETAIL_SELECT_WITH_APPROVER_DETAILS)
       .is('deleted_at', null)
       .eq('organization_id', ctx.organizationId)
       .eq('id', id)
       .maybeSingle();
+
+    if (
+      response.error &&
+      ['approver_name', 'approver_email', 'approval_notes'].some((column) =>
+        isMissingColumnError(response.error, 'purchase_orders', column),
+      )
+    ) {
+      response = await service
+        .from('purchase_orders')
+        .select(PURCHASE_ORDER_DETAIL_SELECT_BASE)
+        .is('deleted_at', null)
+        .eq('organization_id', ctx.organizationId)
+        .eq('id', id)
+        .maybeSingle();
+    }
+
+    const { data: order, error } = response;
 
     if (error) return serverError(error.message);
     if (!order) return notFound('Purchase order not found.');
@@ -104,7 +136,10 @@ export async function GET(
       }),
       approvedAt: o.approved_at ? String(o.approved_at) : null,
       approvedBy: o.approved_by ? String(o.approved_by) : null,
+      approverName: o.approver_name ? String(o.approver_name) : null,
+      approverEmail: o.approver_email ? String(o.approver_email) : null,
       approverUserId: o.approver_user_id ? String(o.approver_user_id) : null,
+      approvalNotes: o.approval_notes ? String(o.approval_notes) : null,
       sentAt: o.sent_at ? String(o.sent_at) : null,
       rejectedAt: o.rejected_at ? String(o.rejected_at) : null,
       requisitionId: o.requisition_id ? String(o.requisition_id) : null,
@@ -181,11 +216,14 @@ export async function PATCH(
     supplier_id?: string;
     orderDate?: string | null;
     expectedDeliveryDate?: string | null;
-      notes?: string | null;
-      taxAmount?: number;
-      discountAmount?: number;
-      approverUserId?: string | null;
-      items?: Array<{
+    notes?: string | null;
+    taxAmount?: number;
+    discountAmount?: number;
+    approverName?: string | null;
+    approverEmail?: string | null;
+    approverUserId?: string | null;
+    approvalNotes?: string | null;
+    items?: Array<{
       itemId: string;
       unitOfMeasureId: string;
       quantityOrdered: number;
@@ -298,14 +336,27 @@ export async function PATCH(
     if (body.orderDate !== undefined) updatePayload.order_date = body.orderDate;
     if (body.expectedDeliveryDate !== undefined) updatePayload.expected_delivery_date = body.expectedDeliveryDate;
     if (body.notes !== undefined) updatePayload.notes = body.notes;
+    if (body.approverName !== undefined) updatePayload.approver_name = body.approverName?.trim() || null;
+    if (body.approverEmail !== undefined) updatePayload.approver_email = body.approverEmail?.trim() || null;
     if (body.taxAmount !== undefined) updatePayload.tax_amount = body.taxAmount;
     if (body.discountAmount !== undefined) updatePayload.discount_amount = body.discountAmount;
     if (body.approverUserId !== undefined) updatePayload.approver_user_id = body.approverUserId;
+    if (body.approvalNotes !== undefined) updatePayload.approval_notes = body.approvalNotes?.trim() || null;
 
-    const { error: updateErr } = await service
+    let { error: updateErr } = await service
       .from('purchase_orders')
       .update(updatePayload)
       .eq('id', id);
+    while (updateErr) {
+      const nextPayload = stripMissingOptionalHeaderColumn(updatePayload, updateErr);
+      if (!nextPayload || JSON.stringify(nextPayload) === JSON.stringify(updatePayload)) {
+        break;
+      }
+      Object.keys(updatePayload).forEach((key) => delete updatePayload[key]);
+      Object.assign(updatePayload, nextPayload);
+      const retry = await service.from('purchase_orders').update(updatePayload).eq('id', id);
+      updateErr = retry.error;
+    }
     if (updateErr) return serverError(updateErr.message);
 
     // Replace items if provided
