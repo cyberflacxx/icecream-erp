@@ -23,6 +23,7 @@ import { PageHeader } from '@/components/dashboard/page-header';
 import { PaginationControls } from '@/components/inventory/pagination-controls';
 import { ProcurementNav } from '@/components/procurement/procurement-nav';
 import { SupplierSelect } from '@/components/procurement/supplier-select';
+import { TransactionShortcuts } from '@/components/procurement/transaction-shortcuts';
 import { Button } from '@/components/ui/button';
 import {
   buildPurchaseOrderDraftPayload,
@@ -59,6 +60,9 @@ const purchasableItemTypes = new Set([
 
 interface PurchaseOrderItemOption {
   code: string;
+  costPrice?: number;
+  defaultPurchasePrice?: number;
+  description?: string | null;
   id: string;
   inventory?: {
     currentStock: number;
@@ -77,7 +81,9 @@ interface PurchaseOrderItemOption {
   };
   itemType: string | null;
   name: string;
+  purchasePrice?: number;
   unitOfMeasureId: string | null;
+  unitOfMeasureName?: string | null;
 }
 
 function normalizePurchaseOrderItemsResponse(payload: unknown): PurchaseOrderItemOption[] {
@@ -91,8 +97,8 @@ function normalizePurchaseOrderItemsResponse(payload: unknown): PurchaseOrderIte
           ? container.items
           : [];
 
-  return source
-    .map((item) => {
+  const normalized = source
+    .map((item): PurchaseOrderItemOption | null => {
       if (!item || typeof item !== 'object') return null;
 
       const row = item as Record<string, unknown>;
@@ -117,14 +123,20 @@ function normalizePurchaseOrderItemsResponse(payload: unknown): PurchaseOrderIte
 
       return {
         code: String(row.code ?? ''),
+        costPrice: Number(row.cost_price ?? row.unitCost ?? row.standard_cost ?? 0),
+        defaultPurchasePrice: Number(row.default_purchase_price ?? row.unitCost ?? row.standard_cost ?? 0),
+        description: typeof row.description === 'string' ? row.description : null,
         id: String(row.id ?? ''),
         itemType,
         name: String(row.name ?? row.code ?? 'Unnamed item'),
+        purchasePrice: Number(row.purchase_price ?? row.unitCost ?? row.standard_cost ?? 0),
         unitOfMeasureId: String(row.unitOfMeasureId ?? unitOfMeasure?.id ?? row.unit_of_measure_id ?? row.unit_id ?? '') || null,
-      } satisfies PurchaseOrderItemOption;
+        unitOfMeasureName: String(row.unitOfMeasureName ?? row.uomName ?? unitOfMeasure?.name ?? ''),
+      };
     })
-    .filter((item): item is PurchaseOrderItemOption => Boolean(item?.id))
-    .sort((left, right) => left.name.localeCompare(right.name));
+    .filter((item): item is PurchaseOrderItemOption => Boolean(item?.id));
+
+  return normalized.sort((left, right) => left.name.localeCompare(right.name));
 }
 
 function createLineItemDraft() {
@@ -261,11 +273,16 @@ export default function PurchaseOrdersPage() {
 
       merged.set(item.id, {
         code: item.code,
+        costPrice: Number(item.cost_price ?? item.unit_cost ?? 0),
+        defaultPurchasePrice: Number(item.default_purchase_price ?? item.cost_price ?? item.unit_cost ?? 0),
+        description: item.description,
         id: item.id,
         inventory: item.inventory,
         itemType,
         name: item.name,
+        purchasePrice: Number(item.purchase_price ?? item.cost_price ?? item.unit_cost ?? 0),
         unitOfMeasureId: item.unitOfMeasureId,
+        unitOfMeasureName: item.unitOfMeasureName ?? item.uomName ?? item.unit_of_measure_name ?? null,
       });
     }
 
@@ -423,11 +440,16 @@ export default function PurchaseOrdersPage() {
 
         if (field === 'itemId') {
           const matchedItem = purchaseOrderItems.find((item) => item.id === value);
+          const derivedUnitCost = matchedItem?.costPrice
+            ?? matchedItem?.purchasePrice
+            ?? matchedItem?.defaultPurchasePrice
+            ?? 0;
 
           return {
             ...row,
             itemId: value,
-            unitOfMeasureId: row.unitOfMeasureId || matchedItem?.unitOfMeasureId || '',
+            unitCost: String(derivedUnitCost),
+            unitOfMeasureId: matchedItem?.unitOfMeasureId || row.unitOfMeasureId || '',
           };
         }
 
@@ -740,7 +762,11 @@ export default function PurchaseOrdersPage() {
             </div>
           ) : null}
 
-          <div className="rounded-3xl border border-border/70 bg-[linear-gradient(180deg,rgba(255,255,255,0.96),rgba(255,247,232,0.88))] p-5">
+          <section className="rounded-3xl border border-border/70 bg-[linear-gradient(180deg,rgba(255,255,255,0.96),rgba(255,247,232,0.88))] p-5">
+            <div className="mb-4">
+              <p className="text-sm font-semibold uppercase tracking-[0.18em] text-orange">Supplier Details</p>
+              <p className="mt-1 text-xs text-muted">Choose the supplier, manual approver, and originating requisition before the order moves into pricing and receiving.</p>
+            </div>
             <div className="grid gap-4 md:grid-cols-2">
               <label className="space-y-2 text-sm text-muted">
                 <span>Supplier</span>
@@ -750,6 +776,40 @@ export default function PurchaseOrdersPage() {
                   onChange={(supplierId) => setFormState((current) => ({ ...current, supplierId }))}
                 />
               </label>
+
+              <div className="space-y-2 text-sm text-muted">
+                <span>Quick Actions</span>
+                <TransactionShortcuts
+                  onSupplierCreated={(supplier) =>
+                    setFormState((current) => ({ ...current, supplierId: supplier.id }))
+                  }
+                  onItemCreated={(createdItem) =>
+                    setFormState((current) => ({
+                      ...current,
+                      items: current.items.map((row, rowIndex) =>
+                        rowIndex === current.items.length - 1 && !row.itemId
+                          ? {
+                              ...row,
+                              itemId: createdItem.id,
+                              unitCost: String(createdItem.unitCost ?? 0),
+                              unitOfMeasureId: createdItem.unitOfMeasureId,
+                            }
+                          : row,
+                      ),
+                    }))
+                  }
+                  onUomCreated={(unit) =>
+                    setFormState((current) => ({
+                      ...current,
+                      items: current.items.map((row, rowIndex) =>
+                        rowIndex === current.items.length - 1 && !row.unitOfMeasureId
+                          ? { ...row, unitOfMeasureId: unit.id }
+                          : row,
+                      ),
+                    }))
+                  }
+                />
+              </div>
 
               <label className="space-y-2 text-sm text-muted">
                 <span>Approver</span>
@@ -829,18 +889,24 @@ export default function PurchaseOrdersPage() {
                 />
               </label>
             </div>
-          </div>
+          </section>
 
-          <label className="space-y-2 text-sm text-muted">
-            <span>Notes</span>
-            <textarea
-              rows={3}
-              value={formState.notes}
-              onChange={(event) => setFormState((current) => ({ ...current, notes: event.target.value }))}
-              className="surface-textarea-soft"
-              placeholder="Supplier instructions, delivery notes, or approval context"
-            />
-          </label>
+          <section className="space-y-4 rounded-3xl border border-border/70 bg-white/80 p-4">
+            <div>
+              <p className="text-sm font-semibold uppercase tracking-[0.18em] text-orange">Purchase Order Details</p>
+              <p className="mt-1 text-xs text-muted">Capture delivery timing, tax, discounts, and notes before the order is reviewed and sent to the supplier.</p>
+            </div>
+            <label className="space-y-2 text-sm text-muted">
+              <span>Notes</span>
+              <textarea
+                rows={3}
+                value={formState.notes}
+                onChange={(event) => setFormState((current) => ({ ...current, notes: event.target.value }))}
+                className="surface-textarea-soft"
+                placeholder="Supplier instructions, delivery notes, or approval context"
+              />
+            </label>
+          </section>
 
           <section className="rounded-3xl border border-border/70 bg-white/75 p-4 shadow-sm">
             <div className="flex flex-col gap-3 border-b border-border/70 pb-3 sm:flex-row sm:items-center sm:justify-between">
@@ -863,7 +929,7 @@ export default function PurchaseOrdersPage() {
 
             <div className="mt-3 space-y-3">
               {formState.items.map((item) => {
-                const selectedMetaItem = (metaQuery.data?.items ?? []).find((candidate) => candidate.id === item.itemId);
+                const selectedMetaItem = purchaseOrderItems.find((candidate) => candidate.id === item.itemId) ?? null;
 
                 return (
                 <div
@@ -887,6 +953,11 @@ export default function PurchaseOrdersPage() {
                           </option>
                         ))}
                       </select>
+                      <div className="rounded-2xl border border-border/60 bg-white/90 px-3 py-2 text-xs text-muted">
+                        {selectedMetaItem
+                          ? `${selectedMetaItem.description ?? 'No saved item description.'}${selectedMetaItem.unitOfMeasureName ? ` • UOM: ${selectedMetaItem.unitOfMeasureName}` : ''}`
+                          : 'Select an item to auto-fill the saved description, UOM, and default purchase price.'}
+                      </div>
                     </div>
 
                     <div className="space-y-2">
@@ -952,13 +1023,14 @@ export default function PurchaseOrdersPage() {
                   <div className="mt-3 rounded-2xl border border-border/60 bg-white/90 px-3 py-2 text-xs text-muted">
                     {selectedMetaItem ? (
                       <div className="grid gap-1 sm:grid-cols-2 xl:grid-cols-3">
-                        <span>Current: {selectedMetaItem.inventory.currentStock.toFixed(3)}</span>
-                        <span>Reorder: {selectedMetaItem.inventory.reorderLevel.toFixed(3)}</span>
-                        <span>On Order: {selectedMetaItem.inventory.quantityOnOrder.toFixed(3)}</span>
-                        <span>Received Today: {selectedMetaItem.inventory.quantityReceivedToday.toFixed(3)}</span>
-                        <span>Last Receipt: {selectedMetaItem.inventory.lastReceivedDate ? new Date(selectedMetaItem.inventory.lastReceivedDate).toLocaleDateString() : 'None'}</span>
-                        <span className={selectedMetaItem.inventory.isLowStock ? 'font-semibold text-rose-700' : ''}>
-                          Store: {selectedMetaItem.inventory.primaryWarehouseName ?? 'No balance'}
+                        <span>Default Price: {currencyFormatter.format(selectedMetaItem.costPrice ?? selectedMetaItem.purchasePrice ?? selectedMetaItem.defaultPurchasePrice ?? 0)}</span>
+                        <span>Current: {Number(selectedMetaItem.inventory?.currentStock ?? 0).toFixed(3)}</span>
+                        <span>Reorder: {Number(selectedMetaItem.inventory?.reorderLevel ?? 0).toFixed(3)}</span>
+                        <span>On Order: {Number(selectedMetaItem.inventory?.quantityOnOrder ?? 0).toFixed(3)}</span>
+                        <span>Received Today: {Number(selectedMetaItem.inventory?.quantityReceivedToday ?? 0).toFixed(3)}</span>
+                        <span>Last Receipt: {selectedMetaItem.inventory?.lastReceivedDate ? new Date(selectedMetaItem.inventory.lastReceivedDate).toLocaleDateString() : 'None'}</span>
+                        <span className={selectedMetaItem.inventory?.isLowStock ? 'font-semibold text-rose-700' : ''}>
+                          Store: {selectedMetaItem.inventory?.primaryWarehouseName ?? 'No balance'}
                         </span>
                       </div>
                     ) : (
@@ -968,6 +1040,13 @@ export default function PurchaseOrdersPage() {
                 </div>
               )})}
             </div>
+          </section>
+
+          <section className="rounded-3xl border border-border/70 bg-white/80 p-4">
+            <p className="text-sm font-semibold uppercase tracking-[0.18em] text-orange">Approval And Audit Trail</p>
+            <p className="mt-2 text-sm text-muted">
+              The saved purchase order keeps the selected approver, creator, approval timestamps, supplier-send activity, and receiving/posting history visible for launch operations.
+            </p>
           </section>
 
           <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">

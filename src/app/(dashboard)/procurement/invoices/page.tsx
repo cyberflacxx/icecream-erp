@@ -7,6 +7,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { PageHeader } from '@/components/dashboard/page-header';
 import { ProcurementNav } from '@/components/procurement/procurement-nav';
 import { SupplierSelect } from '@/components/procurement/supplier-select';
+import { TransactionShortcuts } from '@/components/procurement/transaction-shortcuts';
 import { Button } from '@/components/ui/button';
 import { DataTable, EmptyState, FormDrawer, StatusBadge } from '@/components/ui-library';
 import { useGRNs, useProcurementMeta, useProcurementRequest, usePurchaseOrder, useSupplierInvoices } from '@/hooks/procurement';
@@ -26,8 +27,10 @@ const initialFormState = {
 
 type InvoiceLine = {
   itemId: string;
+  orderedQuantity?: number;
   poUnitCost: string;
   quantityInvoiced: string;
+  receivedQuantity?: number;
   unitCost: string;
 };
 
@@ -62,6 +65,28 @@ export default function ProcurementInvoicesPage() {
     () => (grnsQuery.data?.data ?? []).find((grn) => grn.id === formState.goodsReceivedNoteId) ?? null,
     [formState.goodsReceivedNoteId, grnsQuery.data?.data],
   );
+  const poItems = useMemo(() => {
+    const order = orderQuery.data as
+      | {
+          items?: Array<{
+            id: string;
+            item: { id: string; name?: string | null } | null;
+            quantityOrdered: number;
+            quantityReceived: number;
+            unitCost: number;
+          }>;
+        }
+      | undefined;
+    return order?.items ?? [];
+  }, [orderQuery.data]);
+  const invoicedQuantityByItem = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const line of lineItems) {
+      if (!line.itemId) continue;
+      map.set(line.itemId, (map.get(line.itemId) ?? 0) + Number(line.quantityInvoiced ?? 0));
+    }
+    return map;
+  }, [lineItems]);
 
   useEffect(() => {
     const order = orderQuery.data as
@@ -69,6 +94,7 @@ export default function ProcurementInvoicesPage() {
           items: Array<{
             item: { id: string } | null;
             quantityOrdered: number;
+            quantityReceived?: number;
             unitCost: number;
           }>;
           supplier: { id: string } | null;
@@ -84,8 +110,10 @@ export default function ProcurementInvoicesPage() {
     setLineItems(
       order.items.map((item) => ({
         itemId: item.item?.id ?? '',
+        orderedQuantity: item.quantityOrdered,
         poUnitCost: String(item.unitCost),
         quantityInvoiced: String(item.quantityOrdered),
+        receivedQuantity: item.quantityReceived,
         unitCost: String(item.unitCost),
       })),
     );
@@ -271,7 +299,12 @@ export default function ProcurementInvoicesPage() {
             Link the invoice to the purchase order or GRN whenever possible so procurement, finance, and payment history stay traceable.
           </div>
 
-          <div className="grid gap-5 sm:grid-cols-2">
+          <section className="space-y-4 rounded-2xl border border-border/70 bg-white/80 p-4">
+            <div>
+              <p className="text-sm font-semibold uppercase tracking-[0.18em] text-orange">Supplier Details</p>
+              <p className="mt-1 text-xs text-muted">Link the invoice to the supplier, PO, and GRN so procurement and finance can reconcile quantities and balances cleanly.</p>
+            </div>
+            <div className="grid gap-5 sm:grid-cols-2">
             <label className="space-y-2 text-sm text-muted">
               <span>Supplier</span>
               <SupplierSelect
@@ -280,6 +313,28 @@ export default function ProcurementInvoicesPage() {
                 onChange={(supplierId) => setFormState((current) => ({ ...current, supplierId }))}
               />
             </label>
+            <div className="space-y-2 text-sm text-muted">
+              <span>Quick Actions</span>
+              <TransactionShortcuts
+                onSupplierCreated={(supplier) =>
+                  setFormState((current) => ({ ...current, supplierId: supplier.id }))
+                }
+                onItemCreated={(createdItem) =>
+                  setLineItems((current) =>
+                    current.map((row, rowIndex) =>
+                      rowIndex === current.length - 1 && !row.itemId
+                        ? {
+                            ...row,
+                            itemId: createdItem.id,
+                            poUnitCost: String(createdItem.unitCost ?? 0),
+                            unitCost: String(createdItem.unitCost ?? 0),
+                          }
+                        : row,
+                    ),
+                  )
+                }
+              />
+            </div>
             <label className="space-y-2 text-sm text-muted">
               <span>Purchase Order</span>
               <select
@@ -358,13 +413,14 @@ export default function ProcurementInvoicesPage() {
                 className="surface-input-soft"
               />
             </label>
-          </div>
+            </div>
+          </section>
 
           {(selectedOrder || selectedGrn) ? (
-            <div className="grid gap-3 sm:grid-cols-2">
+            <section className="grid gap-3 sm:grid-cols-2">
               {selectedOrder ? (
                 <div className="rounded-2xl border border-border bg-white px-4 py-3 text-sm text-muted">
-                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-orange">Linked PO</p>
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-orange">Linked Purchase Order</p>
                   <p className="mt-2 text-brown">{selectedOrder.poNumber}</p>
                   <p className="mt-1">{selectedOrder.supplier?.name ?? 'Unknown supplier'}</p>
                 </div>
@@ -376,13 +432,13 @@ export default function ProcurementInvoicesPage() {
                   <p className="mt-1">{selectedGrn.purchaseOrder?.poNumber ?? 'Manual receipt'}</p>
                 </div>
               ) : null}
-            </div>
+            </section>
           ) : null}
 
           <div className="space-y-3 rounded-2xl border border-border bg-cream/60 p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm font-semibold uppercase tracking-[0.18em] text-orange">Invoice Line Items</p>
+                <p className="text-sm font-semibold uppercase tracking-[0.18em] text-orange">Invoice Items</p>
                 <p className="mt-1 text-xs text-muted">
                   Capture what the supplier billed, and keep the PO reference cost visible for comparison.
                 </p>
@@ -476,9 +532,35 @@ export default function ProcurementInvoicesPage() {
                 >
                   Remove
                 </Button>
+                {item.itemId ? (
+                  <div className="rounded-2xl border border-border/60 bg-white/90 px-3 py-2 text-xs text-muted md:col-span-5">
+                    {(() => {
+                      const poLine = poItems.find((candidate) => candidate.item?.id === item.itemId);
+                      const ordered = Number(item.orderedQuantity ?? poLine?.quantityOrdered ?? 0);
+                      const received = Number(item.receivedQuantity ?? poLine?.quantityReceived ?? 0);
+                      const invoiced = Number(invoicedQuantityByItem.get(item.itemId) ?? 0);
+                      const outstanding = Math.max(0, ordered - invoiced);
+                      return `Ordered: ${ordered.toFixed(3)} • Received: ${received.toFixed(3)} • Invoiced: ${invoiced.toFixed(3)} • Outstanding: ${outstanding.toFixed(3)}`;
+                    })()}
+                  </div>
+                ) : null}
               </div>
             ))}
           </div>
+
+          <section className="rounded-2xl border border-border/70 bg-white/80 p-4">
+            <p className="text-sm font-semibold uppercase tracking-[0.18em] text-orange">Quantity Reconciliation</p>
+            <p className="mt-2 text-sm text-muted">
+              Originating PO, received quantities, invoiced quantities, and outstanding balances stay visible here so procurement and finance do not over-invoice a delivery.
+            </p>
+          </section>
+
+          <section className="rounded-2xl border border-border/70 bg-white/80 p-4">
+            <p className="text-sm font-semibold uppercase tracking-[0.18em] text-orange">Audit Trail</p>
+            <p className="mt-2 text-sm text-muted">
+              Invoice creation, posting, and linked-document updates are written to the server-side audit log and remain visible from the invoice workspace after save.
+            </p>
+          </section>
 
           <div className="flex justify-end gap-3">
             <Button type="button" variant="outline" onClick={() => setIsDrawerOpen(false)}>

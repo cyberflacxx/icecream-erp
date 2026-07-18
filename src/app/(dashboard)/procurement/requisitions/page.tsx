@@ -9,6 +9,7 @@ import { DataTable, EmptyState, FilterBar, FormDrawer, StatusBadge } from '@/com
 import { PageHeader } from '@/components/dashboard/page-header';
 import { PaginationControls } from '@/components/inventory/pagination-controls';
 import { ProcurementNav } from '@/components/procurement/procurement-nav';
+import { TransactionShortcuts } from '@/components/procurement/transaction-shortcuts';
 import { Button } from '@/components/ui/button';
 import {
   useProcurementMeta,
@@ -154,8 +155,8 @@ export default function RequisitionsPage() {
   const pagination = requisitionsQuery.data?.pagination;
   const itemOptions = metaQuery.data?.items ?? [];
   const unitOptions = metaQuery.data?.units ?? [];
-  const itemLoadFailed = metaQuery.isError;
-  const unitLoadFailed = metaQuery.isError;
+  const itemLoadFailed = metaQuery.isError && itemOptions.length === 0;
+  const unitLoadFailed = metaQuery.isError && unitOptions.length === 0;
   const selectedItems = formState.items.map(
     (item) => itemOptions.find((candidate) => candidate.id === item.itemId) ?? null,
   );
@@ -531,7 +532,12 @@ export default function RequisitionsPage() {
             </div>
           ) : null}
 
-          <div className="grid gap-5 sm:grid-cols-2">
+          <section className="space-y-4 rounded-2xl border border-border/70 bg-white/80 p-4">
+            <div>
+              <p className="text-sm font-semibold uppercase tracking-[0.18em] text-orange">Requisition Details</p>
+              <p className="mt-1 text-xs text-muted">Capture the department need, due date, and internal context before you build the request lines.</p>
+            </div>
+            <div className="grid gap-5 sm:grid-cols-2">
             <label className="space-y-2 text-sm text-muted">
               <span>Department</span>
               <input
@@ -559,7 +565,15 @@ export default function RequisitionsPage() {
                 className="surface-input-soft"
               />
             </label>
-            <label className="space-y-2 text-sm text-muted sm:col-span-2">
+            </div>
+          </section>
+
+          <section className="space-y-4 rounded-2xl border border-border/70 bg-white/80 p-4">
+            <div>
+              <p className="text-sm font-semibold uppercase tracking-[0.18em] text-orange">Approval Details</p>
+              <p className="mt-1 text-xs text-muted">Assign an approver directly when the client wants named routing, or leave it blank for normal supervisor flow.</p>
+            </div>
+            <label className="space-y-2 text-sm text-muted">
               <span>Approver</span>
               <select
                 value={formState.approverUserId}
@@ -580,9 +594,14 @@ export default function RequisitionsPage() {
                 Pick a named approver when the client wants direct routing, or leave this blank for normal supervisor flow.
               </p>
             </label>
-          </div>
+          </section>
 
-          <label className="space-y-2 text-sm text-muted">
+          <section className="space-y-4 rounded-2xl border border-border/70 bg-white/80 p-4">
+            <div>
+              <p className="text-sm font-semibold uppercase tracking-[0.18em] text-orange">Notes And Attachments</p>
+              <p className="mt-1 text-xs text-muted">Use remarks to explain urgency, quality expectations, or supplier guidance for the approver and buyer.</p>
+            </div>
+            <label className="space-y-2 text-sm text-muted">
             <span>Remarks</span>
             <textarea
               rows={3}
@@ -592,28 +611,59 @@ export default function RequisitionsPage() {
               placeholder="Add context for what is needed, urgency, or supplier guidance."
             />
           </label>
+          </section>
 
-          <div className="space-y-3 rounded-2xl border border-border bg-cream/60 p-4">
+          <section className="space-y-3 rounded-2xl border border-border bg-cream/60 p-4">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
-                <p className="text-sm font-semibold uppercase tracking-[0.18em] text-orange">Line Items</p>
+                <p className="text-sm font-semibold uppercase tracking-[0.18em] text-orange">Requested Items</p>
                 <p className="text-xs text-muted">
                   Select the item first so the unit of measure and item context fall into place cleanly.
                 </p>
               </div>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={() =>
-                  setFormState((current) => ({
-                    ...current,
-                    items: [...current.items, buildEmptyLine()],
-                  }))
-                }
-              >
-                Add Item
-              </Button>
+              <div className="flex flex-wrap gap-2">
+                <TransactionShortcuts
+                  allowSupplier={false}
+                  onItemCreated={(createdItem) =>
+                    setFormState((current) => ({
+                      ...current,
+                      items: current.items.map((row, rowIndex) =>
+                        rowIndex === current.items.length - 1 && !row.itemId
+                          ? {
+                              ...row,
+                              estimatedUnitCost: String(createdItem.unitCost ?? 0),
+                              itemId: createdItem.id,
+                              unitOfMeasureId: createdItem.unitOfMeasureId,
+                            }
+                          : row,
+                      ),
+                    }))
+                  }
+                  onUomCreated={(createdUnit) =>
+                    setFormState((current) => ({
+                      ...current,
+                      items: current.items.map((row, rowIndex) =>
+                        rowIndex === current.items.length - 1 && !row.unitOfMeasureId
+                          ? { ...row, unitOfMeasureId: createdUnit.id }
+                          : row,
+                      ),
+                    }))
+                  }
+                />
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() =>
+                    setFormState((current) => ({
+                      ...current,
+                      items: [...current.items, buildEmptyLine()],
+                    }))
+                  }
+                >
+                  Add Item
+                </Button>
+              </div>
             </div>
 
             {formState.items.map((item, index) => (
@@ -786,7 +836,14 @@ export default function RequisitionsPage() {
                 </div>
               </div>
             ))}
-          </div>
+          </section>
+
+          <section className="rounded-2xl border border-border/70 bg-white/80 p-4">
+            <p className="text-sm font-semibold uppercase tracking-[0.18em] text-orange">Audit Trail</p>
+            <p className="mt-2 text-sm text-muted">
+              Created by, approval history, and later status changes appear on the requisition row after the draft is saved.
+            </p>
+          </section>
 
           <div className="flex justify-end gap-3">
             <Button

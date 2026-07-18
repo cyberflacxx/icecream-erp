@@ -1,7 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { badRequest, can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
+import { getErrorMessage, isMissingTableError } from '@/lib/postgrest-compat';
+import { recordAuditLog } from '@/lib/security-server';
 import { createServiceRoleClient } from '@/lib/supabase/server';
+
+function logSupplierInvoiceError(step: string, error: unknown) {
+  const row = error && typeof error === 'object' ? (error as Record<string, unknown>) : null;
+  console.error('Supplier invoice request failed.', {
+    code: typeof row?.code === 'string' ? row.code : 'UNKNOWN',
+    detail: typeof row?.details === 'string' ? row.details : null,
+    message: getErrorMessage(error) || 'Unknown supplier invoice error',
+    step,
+    table: 'supplier_invoices',
+  });
+}
 
 export async function GET(_request: NextRequest) {
   const ctx = await getAuthContext();
@@ -22,17 +35,19 @@ export async function GET(_request: NextRequest) {
   ]);
 
   if (invoices.error) {
-    if (invoices.error.message.includes("Could not find the table 'icecream_erp.supplier_invoices'")) {
+    if (isMissingTableError(invoices.error, 'supplier_invoices')) {
       return NextResponse.json([]);
     }
-    return serverError(invoices.error.message);
+    logSupplierInvoiceError('list_supplier_invoices', invoices.error);
+    return serverError('Unable to load supplier invoices right now.');
   }
   let paymentsData = payments.data ?? [];
   if (payments.error) {
-    if (payments.error.message.includes("Could not find the table 'icecream_erp.supplier_payments'")) {
+    if (isMissingTableError(payments.error, 'supplier_payments')) {
       paymentsData = [];
     } else {
-      return serverError(payments.error.message);
+      logSupplierInvoiceError('list_supplier_payments', payments.error);
+      return serverError('Unable to load supplier invoices right now.');
     }
   }
 
@@ -89,8 +104,12 @@ export async function POST(request: NextRequest) {
   const total = body.items.reduce((sum, item) => sum + Number(item.quantityInvoiced) * Number(item.unitCost), 0);
   const service = createServiceRoleClient();
   const tableCheck = await service.from('supplier_invoices').select('id', { count: 'exact', head: true });
-  if (tableCheck.error?.message.includes("Could not find the table 'icecream_erp.supplier_invoices'")) {
+  if (tableCheck.error && isMissingTableError(tableCheck.error, 'supplier_invoices')) {
     return serverError('Supplier invoices table is not deployed in Supabase yet.');
+  }
+  if (tableCheck.error) {
+    logSupplierInvoiceError('check_supplier_invoices_table', tableCheck.error);
+    return serverError('Unable to save supplier invoice right now.');
   }
   const { data: invoice, error } = await service
     .from('supplier_invoices')
@@ -108,7 +127,10 @@ export async function POST(request: NextRequest) {
     .select()
     .single();
 
-  if (error || !invoice) return serverError(error?.message ?? 'Failed to create supplier invoice.');
+  if (error || !invoice) {
+    logSupplierInvoiceError('create_supplier_invoice', error);
+    return serverError('Unable to save supplier invoice right now.');
+  }
 
   const { error: itemsError } = await service.from('supplier_invoice_items').insert(
     body.items.map((item) => ({
@@ -121,6 +143,27 @@ export async function POST(request: NextRequest) {
     })),
   );
 
-  if (itemsError) return serverError(itemsError.message);
+  if (itemsError) {
+    logSupplierInvoiceError('create_supplier_invoice_items', itemsError);
+    return serverError('Unable to save supplier invoice right now.');
+  }
+
+  await recordAuditLog({
+    action: body.purchaseOrderId ? 'SUPPLIER_INVOICE_LINKED_TO_PO' : 'SUPPLIER_INVOICE_CREATED',
+    entityId: String(invoice.id),
+    entityType: 'supplier_invoice',
+    newValues: {
+      goodsReceivedNoteId: body.goodsReceivedNoteId ?? null,
+      invoiceNumber: body.invoiceNumber,
+      itemCount: body.items.length,
+      purchaseOrderId: body.purchaseOrderId ?? null,
+      supplierId: body.supplierId,
+      total,
+    },
+    organizationId: ctx.organizationId,
+    userAgent: request.headers.get('user-agent'),
+    userProfileId: ctx.userAccountId ?? ctx.userId,
+  });
+
   return NextResponse.json(invoice, { status: 201 });
 }

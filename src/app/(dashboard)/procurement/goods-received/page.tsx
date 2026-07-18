@@ -13,6 +13,7 @@ import { PageHeader } from '@/components/dashboard/page-header';
 import { PaginationControls } from '@/components/inventory/pagination-controls';
 import { ProcurementNav } from '@/components/procurement/procurement-nav';
 import { SupplierSelect } from '@/components/procurement/supplier-select';
+import { TransactionShortcuts } from '@/components/procurement/transaction-shortcuts';
 import { Button } from '@/components/ui/button';
 import {
   useGRNs,
@@ -105,9 +106,9 @@ export default function GoodsReceivedPage() {
   const purchaseOrderOptions = metaQuery.data?.purchaseOrders ?? [];
   const itemOptions = metaQuery.data?.items ?? [];
   const unitOptions = metaQuery.data?.units ?? [];
-  const purchaseOrderLoadFailed = metaQuery.isError;
-  const itemLoadFailed = metaQuery.isError;
-  const unitLoadFailed = metaQuery.isError;
+  const purchaseOrderLoadFailed = metaQuery.isError && purchaseOrderOptions.length === 0;
+  const itemLoadFailed = metaQuery.isError && itemOptions.length === 0;
+  const unitLoadFailed = metaQuery.isError && unitOptions.length === 0;
 
   useEffect(() => {
     if (!purchaseOrderIdParam) {
@@ -247,6 +248,19 @@ export default function GoodsReceivedPage() {
       )
     ) {
       setFormError('Invalid quantities detected in one or more line items.');
+      return;
+    }
+
+    if (
+      lineItems.some(
+        (item) =>
+          formState.entryMode === 'PO_LINKED' &&
+          Number(item.quantityExpected) > 0 &&
+          Number(item.quantityReceived) > Number(item.quantityExpected) &&
+          !String(item.reason ?? '').trim(),
+      )
+    ) {
+      setFormError('Provide an over-receive reason whenever the received quantity exceeds the outstanding PO quantity.');
       return;
     }
 
@@ -525,7 +539,12 @@ export default function GoodsReceivedPage() {
             This GRN workflow posts accepted stock into an HQ warehouse only after supervisor approval and inventory posting.
           </div>
 
-          <div className="grid gap-5 sm:grid-cols-2">
+          <section className="space-y-4 rounded-2xl border border-border/70 bg-white/80 p-4">
+            <div>
+              <p className="text-sm font-semibold uppercase tracking-[0.18em] text-orange">Supplier / Purchase Order Details</p>
+              <p className="mt-1 text-xs text-muted">Choose whether the receipt is PO-linked or manual, then confirm the supplier and receiving warehouse before quantity capture.</p>
+            </div>
+            <div className="grid gap-5 sm:grid-cols-2">
             <label className="space-y-2 text-sm text-muted">
               <span>Entry Mode</span>
               <select
@@ -602,6 +621,37 @@ export default function GoodsReceivedPage() {
                 onChange={(supplierId) => setFormState((current) => ({ ...current, supplierId }))}
               />
             </label>
+            <div className="space-y-2 text-sm text-muted">
+              <span>Quick Actions</span>
+              <TransactionShortcuts
+                onSupplierCreated={(supplier) =>
+                  setFormState((current) => ({ ...current, supplierId: supplier.id }))
+                }
+                onItemCreated={(createdItem) =>
+                  setLineItems((current) =>
+                    current.map((row, rowIndex) =>
+                      rowIndex === current.length - 1 && !row.itemId
+                        ? {
+                            ...row,
+                            itemId: createdItem.id,
+                            unitCost: String(createdItem.unitCost ?? 0),
+                            unitOfMeasureId: createdItem.unitOfMeasureId,
+                          }
+                        : row,
+                    ),
+                  )
+                }
+                onUomCreated={(unit) =>
+                  setLineItems((current) =>
+                    current.map((row, rowIndex) =>
+                      rowIndex === current.length - 1 && !row.unitOfMeasureId
+                        ? { ...row, unitOfMeasureId: unit.id }
+                        : row,
+                    ),
+                  )
+                }
+              />
+            </div>
             <label className="space-y-2 text-sm text-muted">
               <span>HQ Warehouse</span>
               <select
@@ -618,9 +668,15 @@ export default function GoodsReceivedPage() {
                 ))}
               </select>
             </label>
-          </div>
+            </div>
+          </section>
 
-          <label className="space-y-2 text-sm text-muted">
+          <section className="space-y-4 rounded-2xl border border-border/70 bg-white/80 p-4">
+            <div>
+              <p className="text-sm font-semibold uppercase tracking-[0.18em] text-orange">Approval / Posting</p>
+              <p className="mt-1 text-xs text-muted">Quality notes and posting safeguards stay with the GRN until approval and warehouse posting are completed.</p>
+            </div>
+            <label className="space-y-2 text-sm text-muted">
             <span>Quality Notes</span>
             <textarea
               rows={2}
@@ -631,10 +687,11 @@ export default function GoodsReceivedPage() {
               className="surface-textarea-soft"
             />
           </label>
+          </section>
 
           <div className="space-y-3 rounded-2xl border border-border bg-cream/60 p-4">
             <div>
-              <p className="text-sm font-semibold uppercase tracking-[0.18em] text-orange">Expected and Received</p>
+              <p className="text-sm font-semibold uppercase tracking-[0.18em] text-orange">Received Items</p>
               <p className="mt-1 text-xs text-muted">
                 PO-linked receipts inherit the selected PO lines. Manual receipts let you capture stock even when no PO was used.
               </p>
@@ -682,8 +739,15 @@ export default function GoodsReceivedPage() {
                 </select>
                 <select
                   value={item.unitOfMeasureId}
-                  disabled
+                  disabled={metaQuery.isLoading || unitLoadFailed || unitOptions.length === 0}
                   className="surface-input-soft"
+                  onChange={(event) =>
+                    setLineItems((current) =>
+                      current.map((row, rowIndex) =>
+                        rowIndex === index ? { ...row, unitOfMeasureId: event.target.value } : row,
+                      ),
+                    )
+                  }
                 >
                   <option value="">
                     {metaQuery.isLoading
@@ -838,7 +902,12 @@ export default function GoodsReceivedPage() {
             ) : null}
           </div>
 
-          <label className="space-y-2 text-sm text-muted">
+          <section className="space-y-4 rounded-2xl border border-border/70 bg-white/80 p-4">
+            <div>
+              <p className="text-sm font-semibold uppercase tracking-[0.18em] text-orange">Audit Trail</p>
+              <p className="mt-1 text-xs text-muted">Approval, rejection, and posting events are logged on the server and remain linked to the GRN and resulting stock movement.</p>
+            </div>
+            <label className="space-y-2 text-sm text-muted">
             <span>Notes</span>
             <textarea
               rows={2}
@@ -847,6 +916,7 @@ export default function GoodsReceivedPage() {
               className="surface-textarea-soft"
             />
           </label>
+          </section>
 
           <div className="flex justify-end gap-3">
             <Button type="button" variant="outline" onClick={() => setIsDrawerOpen(false)}>
