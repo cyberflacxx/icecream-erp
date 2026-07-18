@@ -22,6 +22,28 @@ export function normalizeGoodsReceivedSupplierId(input: {
   return supplierId ?? '';
 }
 
+export function normalizeGoodsReceivedWarehouseId(input: {
+  warehouse_id?: unknown;
+  warehouseId?: unknown;
+  receiving_warehouse_id?: unknown;
+  receivingWarehouseId?: unknown;
+  destination_warehouse_id?: unknown;
+  destinationWarehouseId?: unknown;
+}) {
+  const warehouseId = [
+    input.warehouse_id,
+    input.warehouseId,
+    input.receiving_warehouse_id,
+    input.receivingWarehouseId,
+    input.destination_warehouse_id,
+    input.destinationWarehouseId,
+  ]
+    .map((value) => String(value ?? '').trim())
+    .find(Boolean);
+
+  return warehouseId ?? '';
+}
+
 export function normalizeGoodsReceivedItemId(input: {
   item_id?: unknown;
   itemId?: unknown;
@@ -91,12 +113,18 @@ interface GoodsReceivedDraftPayloadInput {
   qualityNotes?: string | null;
   supplierId?: string | null;
   supplier_id?: string | null;
-  warehouseId: string;
+  warehouse_id?: string | null;
+  warehouseId?: string | null;
+  receiving_warehouse_id?: string | null;
+  receivingWarehouseId?: string | null;
+  destination_warehouse_id?: string | null;
+  destinationWarehouseId?: string | null;
 }
 
 export function buildGoodsReceivedDraftPayload(input: GoodsReceivedDraftPayloadInput) {
   const purchaseOrderId = normalizeGoodsReceivedPurchaseOrderId(input);
   const supplierId = normalizeGoodsReceivedSupplierId(input);
+  const warehouseId = normalizeGoodsReceivedWarehouseId(input);
 
   return {
     entryMode: input.entryMode,
@@ -130,6 +158,9 @@ export function buildGoodsReceivedDraftPayload(input: GoodsReceivedDraftPayloadI
     qualityNotes: input.qualityNotes ?? null,
     supplierId: supplierId || null,
     supplier_id: supplierId || null,
-    warehouseId: input.warehouseId,
+    warehouseId: warehouseId || null,
+    warehouse_id: warehouseId || null,
+    receivingWarehouseId: warehouseId || null,
+    receiving_warehouse_id: warehouseId || null,
   };
 }

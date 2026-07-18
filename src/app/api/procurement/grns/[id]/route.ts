@@ -57,6 +57,10 @@ export async function GET(
 
   return NextResponse.json({
     ...row,
+    warehouse_id: row.warehouse_id ? String(row.warehouse_id) : null,
+    warehouseId: row.warehouse_id ? String(row.warehouse_id) : null,
+    receiving_warehouse_id: row.warehouse_id ? String(row.warehouse_id) : null,
+    receivingWarehouseId: row.warehouse_id ? String(row.warehouse_id) : null,
     purchase_order_id: purchaseOrderId ? String(purchaseOrderId) : null,
     purchaseOrderId: purchaseOrderId ? String(purchaseOrderId) : null,
     qualityNotes: row.quality_notes ?? row.invoice_ref ?? null,

@@ -78,6 +78,7 @@ export interface ProcurementMetaResponse {
   warehouses: Array<{
     id: string;
     code: string;
+    label?: string;
     name: string;
     branchId: string | null;
     type: string | null;

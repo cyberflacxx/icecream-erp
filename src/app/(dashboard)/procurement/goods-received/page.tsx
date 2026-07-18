@@ -11,6 +11,7 @@ import { PERMISSIONS } from '@/lib/shared';
 
 import { PageHeader } from '@/components/dashboard/page-header';
 import { PaginationControls } from '@/components/inventory/pagination-controls';
+import { WarehouseSelect } from '@/components/inventory/warehouse-select';
 import { ProcurementNav } from '@/components/procurement/procurement-nav';
 import { SupplierSelect } from '@/components/procurement/supplier-select';
 import { TransactionShortcuts } from '@/components/procurement/transaction-shortcuts';
@@ -102,7 +103,6 @@ export default function GoodsReceivedPage() {
     status: filters.status || undefined
   });
   const purchaseOrderQuery = usePurchaseOrder(formState.purchaseOrderId || undefined);
-  const hqWarehouses = (metaQuery.data?.warehouses ?? []).filter((warehouse) => warehouse.branchId === null);
   const purchaseOrderOptions = metaQuery.data?.purchaseOrders ?? [];
   const itemOptions = metaQuery.data?.items ?? [];
   const unitOptions = metaQuery.data?.units ?? [];
@@ -196,7 +196,7 @@ export default function GoodsReceivedPage() {
     setFeedback(null);
 
     if (!formState.warehouseId) {
-      setFormError('HQ warehouse is required.');
+      setFormError('Please select a receiving warehouse.');
       return;
     }
 
@@ -653,20 +653,13 @@ export default function GoodsReceivedPage() {
               />
             </div>
             <label className="space-y-2 text-sm text-muted">
-              <span>HQ Warehouse</span>
-              <select
+              <span>Receiving Warehouse</span>
+              <WarehouseSelect
                 required
                 value={formState.warehouseId}
-                onChange={(event) => setFormState((current) => ({ ...current, warehouseId: event.target.value }))}
-                className="surface-input-soft"
-              >
-                <option value="">Select HQ warehouse</option>
-                {hqWarehouses.map((warehouse) => (
-                  <option key={warehouse.id} value={warehouse.id}>
-                    {warehouse.name}
-                  </option>
-                ))}
-              </select>
+                onChange={(warehouseId) => setFormState((current) => ({ ...current, warehouseId }))}
+                placeholder="Select receiving warehouse"
+              />
             </label>
             </div>
           </section>

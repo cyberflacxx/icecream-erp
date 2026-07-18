@@ -272,6 +272,7 @@ export async function GET(_request: NextRequest) {
         branchId: warehouse.branch_id ? String(warehouse.branch_id) : null,
         code: String(warehouse.code ?? ''),
         id: String(warehouse.id),
+        label: warehouse.code ? `${String(warehouse.code)} - ${String(warehouse.name ?? '')}` : String(warehouse.name ?? ''),
         name: String(warehouse.name ?? ''),
         type: warehouse.type ? String(warehouse.type) : null,
         warehouseType: warehouse.warehouse_type ? String(warehouse.warehouse_type) : null,

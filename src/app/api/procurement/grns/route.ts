@@ -5,6 +5,7 @@ import {
   normalizeGoodsReceivedItemId,
   normalizeGoodsReceivedPurchaseOrderId,
   normalizeGoodsReceivedSupplierId,
+  normalizeGoodsReceivedWarehouseId,
   normalizeGoodsReceivedUnitOfMeasureId,
 } from '@/lib/procurement-goods-received';
 import { isPurchaseOrderSentLike } from '@/lib/procurement-purchase-orders';
@@ -195,7 +196,12 @@ export async function POST(request: NextRequest) {
     poId?: string | null;
     supplier_id?: string | null;
     supplierId?: string | null;
-    warehouseId: string;
+    warehouse_id?: string | null;
+    warehouseId?: string | null;
+    receiving_warehouse_id?: string | null;
+    receivingWarehouseId?: string | null;
+    destination_warehouse_id?: string | null;
+    destinationWarehouseId?: string | null;
     receivedDate?: string | null;
     notes?: string | null;
     qualityNotes?: string | null;
@@ -231,6 +237,7 @@ export async function POST(request: NextRequest) {
 
   const purchaseOrderId = normalizeGoodsReceivedPurchaseOrderId(body);
   const supplierId = normalizeGoodsReceivedSupplierId(body);
+  const warehouseId = normalizeGoodsReceivedWarehouseId(body);
   const normalizedItems =
     body.items?.map((item) => {
       const itemId = normalizeGoodsReceivedItemId(item);
@@ -246,8 +253,8 @@ export async function POST(request: NextRequest) {
     }) ?? [];
   const isManualEntry = String(body.entryMode ?? '').toLowerCase() === 'manual' || !purchaseOrderId;
 
-  if (!body.warehouseId) {
-    return badRequest('warehouseId is required');
+  if (!warehouseId) {
+    return badRequest('Please select a receiving warehouse.');
   }
   if (!isManualEntry && !purchaseOrderId) {
     return badRequest('purchaseOrderId is required for PO-linked receipts.');
@@ -329,13 +336,13 @@ export async function POST(request: NextRequest) {
     const { data: warehouse, error: whErr } = await service
       .from('warehouses')
       .select('id, branch_id, type, warehouse_type')
-      .eq('id', body.warehouseId)
+      .eq('id', warehouseId)
       .eq('is_active', true)
       .eq('organization_id', ctx.organizationId)
       .single();
     if (whErr || !warehouse) return badRequest('Warehouse not found or out of scope.');
     const warehouseBranchId = warehouse.branch_id ? String(warehouse.branch_id) : null;
-    const hasWarehouseAssignment = ctx.warehouseAssignments.includes(body.warehouseId);
+    const hasWarehouseAssignment = ctx.warehouseAssignments.includes(warehouseId);
     if (
       ctx.isBranchScoped &&
       ctx.branchId &&
@@ -361,7 +368,7 @@ export async function POST(request: NextRequest) {
         purchase_order_id: purchaseOrderId || null,
         supplier_id: supplierId || (order?.supplier_id as string | null) || null,
         entry_mode: isManualEntry ? 'manual' : 'po_linked',
-        warehouse_id: body.warehouseId,
+        warehouse_id: warehouseId,
         organization_id: ctx.organizationId,
         received_by: ctx.userId,
         received_date: body.receivedDate ?? new Date().toISOString(),
@@ -389,7 +396,7 @@ export async function POST(request: NextRequest) {
         .insert({
           grn_number: grnNumber,
           po_id: purchaseOrderId || null,
-          warehouse_id: body.warehouseId,
+          warehouse_id: warehouseId,
           organization_id: ctx.organizationId,
           supplier_id: supplierId || (order?.supplier_id as string | null) || null,
           received_date: (body.receivedDate ?? new Date().toISOString()).slice(0, 10),

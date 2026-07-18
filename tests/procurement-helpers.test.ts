@@ -20,6 +20,7 @@ import {
   normalizeGoodsReceivedItemId,
   normalizeGoodsReceivedPurchaseOrderId,
   normalizeGoodsReceivedUnitOfMeasureId,
+  normalizeGoodsReceivedWarehouseId,
 } from '../src/lib/procurement-goods-received';
 import {
   buildRequisitionDraftPayload,
@@ -284,6 +285,16 @@ test('normalizeGoodsReceivedUnitOfMeasureId accepts UOM aliases', () => {
   assert.equal(normalizeGoodsReceivedUnitOfMeasureId({}), '');
 });
 
+test('normalizeGoodsReceivedWarehouseId accepts warehouse aliases', () => {
+  assert.equal(normalizeGoodsReceivedWarehouseId({ warehouse_id: ' wh-1 ' }), 'wh-1');
+  assert.equal(normalizeGoodsReceivedWarehouseId({ warehouseId: 'wh-2' }), 'wh-2');
+  assert.equal(normalizeGoodsReceivedWarehouseId({ receiving_warehouse_id: 'wh-3' }), 'wh-3');
+  assert.equal(normalizeGoodsReceivedWarehouseId({ receivingWarehouseId: 'wh-4' }), 'wh-4');
+  assert.equal(normalizeGoodsReceivedWarehouseId({ destination_warehouse_id: 'wh-5' }), 'wh-5');
+  assert.equal(normalizeGoodsReceivedWarehouseId({ destinationWarehouseId: 'wh-6' }), 'wh-6');
+  assert.equal(normalizeGoodsReceivedWarehouseId({}), '');
+});
+
 test('buildGoodsReceivedDraftPayload stores purchase order, item, and UOM ids canonically', () => {
   const payload = buildGoodsReceivedDraftPayload({
     entryMode: 'manual',
@@ -302,14 +313,18 @@ test('buildGoodsReceivedDraftPayload stores purchase order, item, and UOM ids ca
     notes: 'Receive now',
     purchaseOrderId: 'po-1',
     qualityNotes: 'Checked',
+    receivingWarehouseId: 'wh-1',
     supplierId: 'sup-1',
-    warehouseId: 'wh-1',
   });
 
   assert.equal(payload.purchaseOrderId, 'po-1');
   assert.equal(payload.purchase_order_id, 'po-1');
   assert.equal(payload.supplierId, 'sup-1');
   assert.equal(payload.supplier_id, 'sup-1');
+  assert.equal(payload.warehouseId, 'wh-1');
+  assert.equal(payload.warehouse_id, 'wh-1');
+  assert.equal(payload.receivingWarehouseId, 'wh-1');
+  assert.equal(payload.receiving_warehouse_id, 'wh-1');
   assert.equal(payload.items[0]?.itemId, 'item-1');
   assert.equal(payload.items[0]?.item_id, 'item-1');
   assert.equal(payload.items[0]?.poItemId, 'po-item-1');

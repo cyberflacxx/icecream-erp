@@ -8,16 +8,17 @@ import {
   serverError,
   unauthorized,
 } from '@/lib/api-auth';
-import { normalizeWarehouseCode, normalizeWarehouseType, resolveWarehouseDisplayType, resolveWarehouseStorageType } from '@/lib/inventory';
+import { isMissingTableColumnError, normalizeWarehouseCode, normalizeWarehouseType, resolveWarehouseDisplayType, resolveWarehouseStorageType } from '@/lib/inventory';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
 export async function GET(request: NextRequest) {
-  void request;
   const ctx = await getAuthContext();
   if (!ctx) return unauthorized();
   if (!can(ctx, 'inventory.warehouse.view', 'inventory.read')) return forbidden();
 
   const service = createServiceRoleClient();
+  const { searchParams } = new URL(request.url);
+  const picker = searchParams.get('picker') === 'true';
 
   let query = service
     .from('warehouses')
@@ -29,14 +30,79 @@ export async function GET(request: NextRequest) {
     .order('name', { ascending: true });
 
   if (ctx.isBranchScoped && ctx.branchId) {
-    query = query.eq('branch_id', ctx.branchId);
+    query = picker ? query.or(`branch_id.eq.${ctx.branchId},branch_id.is.null`) : query.eq('branch_id', ctx.branchId);
   }
 
-  const { data: warehouses, error } = await query;
+  let { data: warehouses, error } = await query;
+  if (
+    error &&
+    (isMissingTableColumnError(error, 'warehouses', 'is_active') ||
+      isMissingTableColumnError(error, 'warehouses', 'warehouse_type') ||
+      isMissingTableColumnError(error, 'warehouses', 'type') ||
+      isMissingTableColumnError(error, 'warehouses', 'branch_id'))
+  ) {
+    let fallbackQuery = service
+      .from('warehouses')
+      .select('id, code, name')
+      .eq('organization_id', ctx.organizationId)
+      .order('name', { ascending: true });
+
+    if (ctx.isBranchScoped && ctx.branchId && !picker) {
+      fallbackQuery = fallbackQuery.eq('branch_id', ctx.branchId);
+    }
+
+    const fallback = await fallbackQuery;
+    warehouses = fallback.data as typeof warehouses;
+    error = fallback.error;
+  }
+
   if (error) return serverError(error.message);
 
+  const normalizedWarehouses = (warehouses ?? [])
+    .filter((warehouse) => {
+      if (warehouse.is_active === false) return false;
+      return true;
+    })
+    .map((warehouse) => {
+      const code = String(warehouse.code ?? '').trim();
+      const name = String(warehouse.name ?? '').trim();
+      const branchId = 'branch_id' in warehouse && warehouse.branch_id ? String(warehouse.branch_id) : null;
+      const warehouseType = 'warehouse_type' in warehouse && warehouse.warehouse_type ? String(warehouse.warehouse_type) : null;
+      const type = 'type' in warehouse && warehouse.type ? String(warehouse.type) : null;
+      return {
+        id: String(warehouse.id),
+        code,
+        name,
+        branchId,
+        branch_id: branchId,
+        type,
+        warehouseType,
+        warehouse_type: warehouseType,
+        status: warehouse.is_active === false ? 'INACTIVE' : 'ACTIVE',
+        label: code ? `${code} - ${name}` : name,
+        raw: warehouse,
+      };
+    });
+
+  if (picker) {
+    return NextResponse.json({
+      success: true,
+      data: normalizedWarehouses.map((warehouse) => ({
+        branch_id: warehouse.branch_id,
+        branchId: warehouse.branchId,
+        code: warehouse.code,
+        id: warehouse.id,
+        label: warehouse.label,
+        name: warehouse.name,
+        status: warehouse.status,
+        warehouse_type: warehouse.warehouse_type,
+        warehouseType: warehouse.warehouseType,
+      })),
+    });
+  }
+
   // Fetch stock balances summary per warehouse
-  const warehouseIds = (warehouses ?? []).map((w) => w.id);
+  const warehouseIds = normalizedWarehouses.map((w) => w.id);
 
   let balancesData: Array<{
     warehouse_id: string;
@@ -66,7 +132,7 @@ export async function GET(request: NextRequest) {
     balancesByWarehouse.set(b.warehouse_id, existing);
   }
 
-  const result = (warehouses ?? []).map((warehouse) => {
+  const result = normalizedWarehouses.map((warehouse) => {
     const balances = balancesByWarehouse.get(warehouse.id) ?? [];
     const itemCount = balances.filter((b) => b.quantity_on_hand > 0).length;
     const totalValue = balances.reduce((sum, b) => {
@@ -79,14 +145,14 @@ export async function GET(request: NextRequest) {
       code: warehouse.code,
       name: warehouse.name,
       type: resolveWarehouseDisplayType({
-        code: String(warehouse.code ?? ''),
-        type: warehouse.type ? String(warehouse.type) : null,
-        warehouseType: warehouse.warehouse_type ? String(warehouse.warehouse_type) : null,
+        code: warehouse.code,
+        type: warehouse.type,
+        warehouseType: warehouse.warehouseType,
       }),
-      isActive: warehouse.is_active,
-      address: warehouse.address ?? null,
+      isActive: warehouse.status === 'ACTIVE',
+      address: ('address' in warehouse.raw ? warehouse.raw.address : null) ?? null,
       branch: (() => {
-        const raw = warehouse.branches as { id: string; name: string } | Array<{ id: string; name: string }> | null;
+        const raw = ('branches' in warehouse.raw ? warehouse.raw.branches : null) as { id: string; name: string } | Array<{ id: string; name: string }> | null;
         const b = Array.isArray(raw) ? (raw[0] ?? null) : raw;
         return b ? { id: b.id, name: b.name } : null;
       })(),
