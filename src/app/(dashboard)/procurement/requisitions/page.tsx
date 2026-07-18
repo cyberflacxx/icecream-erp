@@ -79,8 +79,16 @@ function isApprovedStatus(status: string) {
 
 function formatDateLabel(value: string | null) {
   if (!value) return null;
-
   return new Date(value).toLocaleDateString();
+}
+
+function formatItemTypeLabel(value: string | null | undefined) {
+  if (!value) return 'Item';
+  return value.replaceAll('_', ' ').toLowerCase().replace(/\b\w/g, (character) => character.toUpperCase());
+}
+
+function formatQuantityLabel(value: number | null | undefined) {
+  return Number(value ?? 0).toFixed(3);
 }
 
 function getWorkflowCopy(row: RequisitionRow) {
@@ -348,11 +356,10 @@ export default function RequisitionsPage() {
           {
             key: 'department',
             label: 'Department',
-            options:
-              (metaQuery.data?.departments ?? []).map((department) => ({
-                label: department,
-                value: department,
-              })) ?? [],
+            options: (metaQuery.data?.departments ?? []).map((department) => ({
+              label: department,
+              value: department,
+            })),
             type: 'select',
             value: filters.department,
           },
@@ -538,40 +545,40 @@ export default function RequisitionsPage() {
               <p className="mt-1 text-xs text-muted">Capture the department need, due date, and internal context before you build the request lines.</p>
             </div>
             <div className="grid gap-5 sm:grid-cols-2">
-            <label className="space-y-2 text-sm text-muted">
-              <span>Department</span>
-              <input
-                required
-                list="procurement-requisition-departments"
-                value={formState.department}
-                onChange={(event) => setFormState((current) => ({ ...current, department: event.target.value }))}
-                className="surface-input-soft"
-                placeholder="Production, Stores, Branch Operations..."
-              />
-              <datalist id="procurement-requisition-departments">
-                {(metaQuery.data?.departments ?? []).map((department) => (
-                  <option key={department} value={department} />
-                ))}
-              </datalist>
-            </label>
-            <label className="space-y-2 text-sm text-muted">
-              <span>Needed By Date</span>
-              <input
-                type="date"
-                value={formState.neededByDate}
-                onChange={(event) =>
-                  setFormState((current) => ({ ...current, neededByDate: event.target.value }))
-                }
-                className="surface-input-soft"
-              />
-            </label>
+              <label className="space-y-2 text-sm text-muted">
+                <span>Department</span>
+                <input
+                  required
+                  list="procurement-requisition-departments"
+                  value={formState.department}
+                  onChange={(event) => setFormState((current) => ({ ...current, department: event.target.value }))}
+                  className="surface-input-soft"
+                  placeholder="Production, Stores, Branch Operations..."
+                />
+                <datalist id="procurement-requisition-departments">
+                  {(metaQuery.data?.departments ?? []).map((department) => (
+                    <option key={department} value={department} />
+                  ))}
+                </datalist>
+              </label>
+              <label className="space-y-2 text-sm text-muted">
+                <span>Needed By Date</span>
+                <input
+                  type="date"
+                  value={formState.neededByDate}
+                  onChange={(event) =>
+                    setFormState((current) => ({ ...current, neededByDate: event.target.value }))
+                  }
+                  className="surface-input-soft"
+                />
+              </label>
             </div>
           </section>
 
           <section className="space-y-4 rounded-2xl border border-border/70 bg-white/80 p-4">
             <div>
               <p className="text-sm font-semibold uppercase tracking-[0.18em] text-orange">Approval Details</p>
-              <p className="mt-1 text-xs text-muted">Assign an approver directly when the client wants named routing, or leave it blank for normal supervisor flow.</p>
+              <p className="mt-1 text-xs text-muted">Assign an approver directly when the client wants named routing, or leave this blank for normal supervisor flow.</p>
             </div>
             <label className="space-y-2 text-sm text-muted">
               <span>Approver</span>
@@ -602,23 +609,23 @@ export default function RequisitionsPage() {
               <p className="mt-1 text-xs text-muted">Use remarks to explain urgency, quality expectations, or supplier guidance for the approver and buyer.</p>
             </div>
             <label className="space-y-2 text-sm text-muted">
-            <span>Remarks</span>
-            <textarea
-              rows={3}
-              value={formState.remarks}
-              onChange={(event) => setFormState((current) => ({ ...current, remarks: event.target.value }))}
-              className="surface-textarea-soft"
-              placeholder="Add context for what is needed, urgency, or supplier guidance."
-            />
-          </label>
+              <span>Remarks</span>
+              <textarea
+                rows={3}
+                value={formState.remarks}
+                onChange={(event) => setFormState((current) => ({ ...current, remarks: event.target.value }))}
+                className="surface-textarea-soft"
+                placeholder="Add context for what is needed, urgency, or supplier guidance."
+              />
+            </label>
           </section>
 
-          <section className="space-y-3 rounded-2xl border border-border bg-cream/60 p-4">
+          <section className="space-y-4 rounded-2xl border border-border bg-cream/60 p-5">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <p className="text-sm font-semibold uppercase tracking-[0.18em] text-orange">Requested Items</p>
-                <p className="text-xs text-muted">
-                  Select the item first so the unit of measure and item context fall into place cleanly.
+                <p className="text-sm text-muted">
+                  Select an item first. Unit of measure and item details will populate from the item master.
                 </p>
               </div>
               <div className="flex flex-wrap gap-2">
@@ -666,176 +673,259 @@ export default function RequisitionsPage() {
               </div>
             </div>
 
-            {formState.items.map((item, index) => (
-              <div key={item.rowId} className="rounded-2xl border border-border/70 bg-white/80 p-4">
-                <div className="grid gap-3 md:grid-cols-[minmax(0,1.6fr)_120px_140px_140px_auto]">
-                  <div className="space-y-2">
-                    <select
-                      value={item.itemId}
-                      onChange={(event) => {
-                        const selectedItem = itemOptions.find(
-                          (candidate) => candidate.id === event.target.value,
-                        );
-                        setFormState((current) => ({
-                          ...current,
-                          items: current.items.map((row, rowIndex) =>
-                            rowIndex === index
-                              ? {
-                                  ...row,
-                                  itemId: event.target.value,
-                                  unitOfMeasureId: selectedItem?.unitOfMeasureId ?? row.unitOfMeasureId,
-                                }
-                              : row,
-                          ),
-                        }));
-                      }}
-                      className="surface-input-soft"
-                      disabled={metaQuery.isLoading || itemLoadFailed || itemOptions.length === 0}
-                    >
-                      <option value="">
-                        {metaQuery.isLoading
-                          ? 'Loading items...'
-                          : itemLoadFailed
-                            ? 'Items unavailable'
-                            : itemOptions.length === 0
-                              ? 'No items found'
-                              : 'Select item'}
-                      </option>
-                      {item.itemId &&
-                      !itemOptions.some((candidate) => candidate.id === item.itemId) ? (
-                        <option value={item.itemId}>Saved item selection</option>
-                      ) : null}
-                      {itemOptions.map((row) => (
-                        <option key={row.id} value={row.id}>
-                          {row.label ?? (row.code ? `${row.code} - ${row.name}` : row.name)}
+            {formState.items.map((item, index) => {
+              const selectedItem = selectedItems[index];
+
+              return (
+                <article
+                  key={item.rowId}
+                  className="space-y-4 rounded-3xl border border-border/70 bg-white/90 p-5 shadow-sm"
+                >
+                  <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                    <div className="min-w-0 flex-1 space-y-2">
+                      <label className="block text-xs font-semibold uppercase tracking-[0.18em] text-muted">
+                        Item
+                      </label>
+                      <select
+                        value={item.itemId}
+                        onChange={(event) => {
+                          const nextSelectedItem = itemOptions.find((candidate) => candidate.id === event.target.value);
+                          setFormState((current) => ({
+                            ...current,
+                            items: current.items.map((row, rowIndex) =>
+                              rowIndex === index
+                                ? {
+                                    ...row,
+                                    itemId: event.target.value,
+                                    unitOfMeasureId: nextSelectedItem?.unitOfMeasureId ?? row.unitOfMeasureId,
+                                  }
+                                : row,
+                            ),
+                          }));
+                        }}
+                        className="surface-input-soft min-w-0"
+                        disabled={metaQuery.isLoading || itemLoadFailed || itemOptions.length === 0}
+                      >
+                        <option value="">
+                          {metaQuery.isLoading
+                            ? 'Loading items...'
+                            : itemLoadFailed
+                              ? 'Items unavailable'
+                              : itemOptions.length === 0
+                                ? 'No items found'
+                                : 'Select item'}
                         </option>
-                      ))}
-                    </select>
-                    {itemLoadFailed ? (
-                      <div className="flex items-center justify-between gap-3 rounded-xl border border-border/60 bg-white/90 px-3 py-2 text-xs text-muted">
-                        <span>Unable to load items right now. Please refresh and try again.</span>
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="outline"
-                          className="h-7 px-2 text-[11px]"
-                          onClick={() => void metaQuery.refetch()}
-                        >
-                          Retry
-                        </Button>
-                      </div>
-                    ) : !metaQuery.isLoading && itemOptions.length === 0 ? (
-                      <div className="rounded-xl border border-border/60 bg-white/90 px-3 py-2 text-xs text-muted">
-                        No items found. Create an item first.
-                      </div>
-                    ) : null}
-                    <div className="rounded-xl border border-border/60 bg-cream/50 px-3 py-2 text-xs text-muted">
-                      {selectedItems[index]
-                        ? `${selectedItems[index]?.itemType?.replace(/_/g, ' ') ?? 'Item'}${selectedItems[index]?.description ? ` • ${selectedItems[index]?.description}` : ''}`
-                        : 'Select an item to show its type and description.'}
+                        {item.itemId && !itemOptions.some((candidate) => candidate.id === item.itemId) ? (
+                          <option value={item.itemId}>Saved item selection</option>
+                        ) : null}
+                        {itemOptions.map((row) => (
+                          <option key={row.id} value={row.id}>
+                            {row.label ?? (row.code ? `${row.code} - ${row.name}` : row.name)}
+                          </option>
+                        ))}
+                      </select>
                     </div>
-                    <div className="rounded-xl border border-border/60 bg-white/90 px-3 py-2 text-xs text-muted">
-                      {selectedItems[index] ? (
-                        <div className="grid gap-1 sm:grid-cols-2">
-                          <span>Current: {selectedItems[index].inventory.currentStock.toFixed(3)}</span>
-                          <span>Reorder: {selectedItems[index].inventory.reorderLevel.toFixed(3)}</span>
-                          <span>On Order: {selectedItems[index].inventory.quantityOnOrder.toFixed(3)}</span>
-                          <span>Received Today: {selectedItems[index].inventory.quantityReceivedToday.toFixed(3)}</span>
-                          <span>
-                            Last Receipt: {selectedItems[index].inventory.lastReceivedDate ? new Date(selectedItems[index].inventory.lastReceivedDate).toLocaleDateString() : 'None'}
-                          </span>
-                          <span className={selectedItems[index].inventory.isLowStock ? 'font-semibold text-rose-700' : ''}>
-                            Store: {selectedItems[index].inventory.primaryWarehouseName ?? 'No balance'}
-                          </span>
-                        </div>
-                      ) : (
-                        'Live stock, reorder, and receipt context appears here after item selection.'
-                      )}
+                    <div className="flex flex-wrap items-center gap-2 lg:justify-end">
+                      {selectedItem?.code ? (
+                        <span className="rounded-full border border-border/70 bg-cream/70 px-3 py-1 text-xs font-semibold text-brown">
+                          {selectedItem.code}
+                        </span>
+                      ) : null}
+                      {selectedItem?.itemType ? (
+                        <span className="rounded-full border border-border/70 bg-white px-3 py-1 text-xs text-muted">
+                          {formatItemTypeLabel(selectedItem.itemType)}
+                        </span>
+                      ) : null}
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() =>
+                          setFormState((current) => ({
+                            ...current,
+                            items:
+                              current.items.length === 1
+                                ? current.items
+                                : current.items.filter((_, rowIndex) => rowIndex !== index),
+                          }))
+                        }
+                      >
+                        Remove
+                      </Button>
                     </div>
                   </div>
-                  <input
-                    min="0.001"
-                    step="0.001"
-                    type="number"
-                    value={item.quantityRequested}
-                    onChange={(event) =>
-                      setFormState((current) => ({
-                        ...current,
-                        items: current.items.map((row, rowIndex) =>
-                          rowIndex === index ? { ...row, quantityRequested: event.target.value } : row,
-                        ),
-                      }))
-                    }
-                    className="surface-input-soft"
-                    placeholder="Qty"
-                  />
-                  <select
-                    value={item.unitOfMeasureId}
-                    onChange={(event) =>
-                      setFormState((current) => ({
-                        ...current,
-                        items: current.items.map((row, rowIndex) =>
-                          rowIndex === index ? { ...row, unitOfMeasureId: event.target.value } : row,
-                        ),
-                      }))
-                    }
-                    className="surface-input-soft"
-                    disabled={metaQuery.isLoading || unitLoadFailed || unitOptions.length === 0}
-                  >
-                    <option value="">
-                      {metaQuery.isLoading
-                        ? 'Loading units...'
-                        : unitLoadFailed
-                          ? 'Units unavailable'
-                          : unitOptions.length === 0
-                            ? 'No units found'
-                            : 'UOM'}
-                    </option>
-                    {unitOptions.map((row) => (
-                      <option key={row.id} value={row.id}>
-                        {row.label ?? row.symbol ?? row.code ?? row.name}
-                      </option>
-                    ))}
-                  </select>
-                  {unitLoadFailed ? (
-                    <div className="text-xs text-muted">Unable to load units of measurement right now. Please refresh and try again.</div>
-                  ) : !metaQuery.isLoading && unitOptions.length === 0 ? (
-                    <div className="text-xs text-muted">No units of measurement found. Create units first.</div>
+
+                  {itemLoadFailed ? (
+                    <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-border/60 bg-white px-3 py-3 text-sm text-muted">
+                      <span>Unable to load items right now. Please refresh and try again.</span>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={() => void metaQuery.refetch()}
+                      >
+                        Retry
+                      </Button>
+                    </div>
+                  ) : !metaQuery.isLoading && itemOptions.length === 0 ? (
+                    <div className="rounded-2xl border border-border/60 bg-white px-3 py-3 text-sm text-muted">
+                      No items found. Create an item first.
+                    </div>
                   ) : null}
-                  <input
-                    min="0"
-                    step="0.01"
-                    type="number"
-                    value={item.estimatedUnitCost}
-                    onChange={(event) =>
-                      setFormState((current) => ({
-                        ...current,
-                        items: current.items.map((row, rowIndex) =>
-                          rowIndex === index ? { ...row, estimatedUnitCost: event.target.value } : row,
-                        ),
-                      }))
-                    }
-                    className="surface-input-soft"
-                    placeholder="Unit Cost"
-                  />
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() =>
-                      setFormState((current) => ({
-                        ...current,
-                        items:
-                          current.items.length === 1
-                            ? current.items
-                            : current.items.filter((_, rowIndex) => rowIndex !== index),
-                      }))
-                    }
-                  >
-                    Remove
-                  </Button>
-                </div>
-              </div>
-            ))}
+
+                  <div className="grid gap-4 md:grid-cols-3">
+                    <label className="space-y-2 text-sm text-muted">
+                      <span>Quantity</span>
+                      <input
+                        min="0.001"
+                        step="0.001"
+                        type="number"
+                        value={item.quantityRequested}
+                        onChange={(event) =>
+                          setFormState((current) => ({
+                            ...current,
+                            items: current.items.map((row, rowIndex) =>
+                              rowIndex === index ? { ...row, quantityRequested: event.target.value } : row,
+                            ),
+                          }))
+                        }
+                        className="surface-input-soft"
+                        placeholder="Qty"
+                      />
+                    </label>
+                    <label className="space-y-2 text-sm text-muted">
+                      <span>Unit of Measure</span>
+                      <select
+                        value={item.unitOfMeasureId}
+                        onChange={(event) =>
+                          setFormState((current) => ({
+                            ...current,
+                            items: current.items.map((row, rowIndex) =>
+                              rowIndex === index ? { ...row, unitOfMeasureId: event.target.value } : row,
+                            ),
+                          }))
+                        }
+                        className="surface-input-soft"
+                        disabled={metaQuery.isLoading || unitLoadFailed || unitOptions.length === 0}
+                      >
+                        <option value="">
+                          {metaQuery.isLoading
+                            ? 'Loading units...'
+                            : unitLoadFailed
+                              ? 'Units unavailable'
+                              : unitOptions.length === 0
+                                ? 'No units found'
+                                : 'Select UOM'}
+                        </option>
+                        {unitOptions.map((row) => (
+                          <option key={row.id} value={row.id}>
+                            {row.label ?? row.symbol ?? row.code ?? row.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="space-y-2 text-sm text-muted">
+                      <span>Estimated Unit Price</span>
+                      <input
+                        min="0"
+                        step="0.01"
+                        type="number"
+                        value={item.estimatedUnitCost}
+                        onChange={(event) =>
+                          setFormState((current) => ({
+                            ...current,
+                            items: current.items.map((row, rowIndex) =>
+                              rowIndex === index ? { ...row, estimatedUnitCost: event.target.value } : row,
+                            ),
+                          }))
+                        }
+                        className="surface-input-soft"
+                        placeholder="Unit Cost"
+                      />
+                    </label>
+                  </div>
+
+                  {unitLoadFailed ? (
+                    <div className="rounded-2xl border border-border/60 bg-white px-3 py-3 text-sm text-muted">
+                      Unable to load units of measurement right now. Please refresh and try again.
+                    </div>
+                  ) : !metaQuery.isLoading && unitOptions.length === 0 ? (
+                    <div className="rounded-2xl border border-border/60 bg-white px-3 py-3 text-sm text-muted">
+                      No units of measurement found. Create units first.
+                    </div>
+                  ) : null}
+
+                  <section className="space-y-3 rounded-2xl border border-border/60 bg-cream/40 p-4">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-orange">Item Details</p>
+                      <p className="mt-1 text-sm text-muted">
+                        {selectedItem
+                          ? 'Review the selected item description, unit, and warehouse context before saving the requisition.'
+                          : 'Select an item to view stock, unit, and warehouse details.'}
+                      </p>
+                    </div>
+
+                    {selectedItem ? (
+                      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                        <div className="min-w-0 rounded-2xl border border-border/60 bg-white px-3 py-3">
+                          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted">Description</p>
+                          <p className="mt-2 break-words text-sm text-foreground">
+                            {selectedItem.description || 'Not set'}
+                          </p>
+                        </div>
+                        <div className="rounded-2xl border border-border/60 bg-white px-3 py-3">
+                          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted">Item Type</p>
+                          <p className="mt-2 text-sm text-foreground">{formatItemTypeLabel(selectedItem.itemType)}</p>
+                        </div>
+                        <div className="rounded-2xl border border-border/60 bg-white px-3 py-3">
+                          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted">Unit Of Measure</p>
+                          <p className="mt-2 text-sm text-foreground">
+                            {selectedItem.unitOfMeasureName ?? selectedItem.uomName ?? selectedItem.unit_of_measure_name ?? 'Not set'}
+                          </p>
+                        </div>
+                        <div className="rounded-2xl border border-border/60 bg-white px-3 py-3">
+                          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted">Estimated Price</p>
+                          <p className="mt-2 text-sm text-foreground">{item.estimatedUnitCost || '0'}</p>
+                        </div>
+                        <div className="rounded-2xl border border-border/60 bg-white px-3 py-3">
+                          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted">Stock On Hand</p>
+                          <p className="mt-2 text-sm text-foreground">{formatQuantityLabel(selectedItem.inventory.currentStock)}</p>
+                        </div>
+                        <div className="rounded-2xl border border-border/60 bg-white px-3 py-3">
+                          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted">On Order</p>
+                          <p className="mt-2 text-sm text-foreground">{formatQuantityLabel(selectedItem.inventory.quantityOnOrder)}</p>
+                        </div>
+                        <div className="rounded-2xl border border-border/60 bg-white px-3 py-3">
+                          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted">Received Today</p>
+                          <p className="mt-2 text-sm text-foreground">{formatQuantityLabel(selectedItem.inventory.quantityReceivedToday)}</p>
+                        </div>
+                        <div className="rounded-2xl border border-border/60 bg-white px-3 py-3">
+                          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted">Reorder Level</p>
+                          <p className="mt-2 text-sm text-foreground">{formatQuantityLabel(selectedItem.inventory.reorderLevel)}</p>
+                        </div>
+                        <div className="rounded-2xl border border-border/60 bg-white px-3 py-3">
+                          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted">Store / Warehouse</p>
+                          <p className={`mt-2 break-words text-sm ${selectedItem.inventory.isLowStock ? 'font-semibold text-rose-700' : 'text-foreground'}`}>
+                            {selectedItem.inventory.primaryWarehouseName ?? 'Not set'}
+                          </p>
+                        </div>
+                        <div className="rounded-2xl border border-border/60 bg-white px-3 py-3 md:col-span-2 xl:col-span-3">
+                          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted">Last Receipt</p>
+                          <p className="mt-2 text-sm text-foreground">
+                            {selectedItem.inventory.lastReceivedDate
+                              ? new Date(selectedItem.inventory.lastReceivedDate).toLocaleDateString()
+                              : 'Not set'}
+                          </p>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="rounded-2xl border border-dashed border-border bg-white px-4 py-4 text-sm text-muted">
+                        Select an item to view stock, unit, and warehouse details.
+                      </div>
+                    )}
+                  </section>
+                </article>
+              );
+            })}
           </section>
 
           <section className="rounded-2xl border border-border/70 bg-white/80 p-4">
