@@ -1,8 +1,11 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.idNumberPattern = exports.registrationPasswordPolicy = void 0;
+exports.idNumberPattern = exports.registrationPasswordPolicy = exports.REGISTRATION_WORK_ID_UNAVAILABLE_MESSAGE = exports.REGISTRATION_BRANCH_UNAVAILABLE_MESSAGE = exports.REGISTRATION_ROLE_UNAVAILABLE_MESSAGE = exports.REGISTRATION_ACCOUNT_FAILURE_MESSAGE = void 0;
 exports.isMissingPendingRegistrationStorage = isMissingPendingRegistrationStorage;
 exports.sanitizeIdNumber = sanitizeIdNumber;
+exports.getSafeRegistrationErrorDetails = getSafeRegistrationErrorDetails;
+exports.getRegistrationClientErrorMessage = getRegistrationClientErrorMessage;
+exports.buildRegistrationUserAccountRecord = buildRegistrationUserAccountRecord;
 exports.validateRegistrationPayload = validateRegistrationPayload;
 exports.passwordMeetsPolicy = passwordMeetsPolicy;
 exports.generateOtpCode = generateOtpCode;
@@ -24,11 +27,16 @@ exports.getPublicRegistrationRoles = getPublicRegistrationRoles;
 exports.resolveRegistrationRole = resolveRegistrationRole;
 exports.getPrimaryOrganizationId = getPrimaryOrganizationId;
 exports.generateNextWorkId = generateNextWorkId;
+exports.generateAvailableWorkId = generateAvailableWorkId;
 exports.assignUserRole = assignUserRole;
 exports.syncUserBranchAssignment = syncUserBranchAssignment;
 const crypto_1 = require("crypto");
 const auth_roles_1 = require("./auth-roles");
 const server_1 = require("./supabase/server");
+exports.REGISTRATION_ACCOUNT_FAILURE_MESSAGE = 'Account creation failed. Please try again.';
+exports.REGISTRATION_ROLE_UNAVAILABLE_MESSAGE = 'Selected role is no longer available. Please refresh and try again.';
+exports.REGISTRATION_BRANCH_UNAVAILABLE_MESSAGE = 'Selected branch is no longer available. Please refresh and try again.';
+exports.REGISTRATION_WORK_ID_UNAVAILABLE_MESSAGE = 'Work ID is already registered.';
 exports.registrationPasswordPolicy = {
     minLength: 8,
     requireDigit: true,
@@ -51,9 +59,99 @@ function deriveKey() {
 function normalizeRoleName(roleName) {
     return roleName.trim().toLowerCase();
 }
+function isTruthyBoolean(value) {
+    if (typeof value === 'boolean')
+        return value;
+    if (typeof value === 'string') {
+        const normalized = value.trim().toLowerCase();
+        return normalized === 'true' || normalized === '1' || normalized === 'yes';
+    }
+    if (typeof value === 'number')
+        return value === 1;
+    return false;
+}
+function isActiveRoleRecord(row) {
+    if ('is_active' in row) {
+        return isTruthyBoolean(row.is_active);
+    }
+    if ('status' in row) {
+        const status = String(row.status ?? '').trim().toUpperCase();
+        if (status) {
+            return status === 'ACTIVE';
+        }
+    }
+    return true;
+}
+function hasColumnSelectionError(error) {
+    const message = error instanceof Error
+        ? error.message
+        : typeof error === 'object' && error !== null && 'message' in error
+            ? String(error.message ?? '')
+            : '';
+    const normalized = message.toLowerCase();
+    return normalized.includes('column') && (normalized.includes('roles.') ||
+        normalized.includes('icecream_erp.roles') ||
+        normalized.includes("could not find the '") ||
+        normalized.includes('does not exist'));
+}
+async function queryPublicRegistrationRoles(service, selectClause) {
+    const { data, error } = await service
+        .from('roles')
+        .select(selectClause)
+        .order('name', { ascending: true });
+    if (error) {
+        throw error;
+    }
+    return (data ?? []).map((role) => role);
+}
+async function fetchPublicRegistrationRoleRows(service) {
+    const selectVariants = [
+        'id, name, code, description, is_active',
+        'id, name, code, is_active',
+        'id, name, description, is_active',
+        'id, name, is_active',
+        'id, name, code, description, status',
+        'id, name, code, status',
+        'id, name, description, status',
+        'id, name, status',
+        'id, name, code, description',
+        'id, name, code',
+        'id, name, description',
+        'id, name',
+    ];
+    let lastError = null;
+    for (const selectClause of selectVariants) {
+        try {
+            return await queryPublicRegistrationRoles(service, selectClause);
+        }
+        catch (error) {
+            lastError = error;
+            if (!hasColumnSelectionError(error)) {
+                throw error;
+            }
+        }
+    }
+    throw lastError instanceof Error ? lastError : new Error('Unable to load registration roles.');
+}
 function isMissingRelation(error, table) {
     const message = error instanceof Error ? error.message : typeof error === 'object' && error !== null && 'message' in error ? String(error.message ?? '') : '';
     return message.includes(`Could not find the table 'icecream_erp.${table}'`) || message.toLowerCase().includes(`${table.toLowerCase()} does not exist`);
+}
+function safeErrorString(value, fallback) {
+    if (typeof value !== 'string') {
+        return fallback;
+    }
+    const trimmed = value.trim();
+    if (!trimmed) {
+        return fallback;
+    }
+    return trimmed.slice(0, 300);
+}
+function extractErrorField(error, field) {
+    if (typeof error !== 'object' || error === null || !(field in error)) {
+        return null;
+    }
+    return safeErrorString(error[field], '');
 }
 function isMissingPendingRegistrationStorage(error) {
     return isMissingRelation(error, 'registration_otps');
@@ -80,6 +178,52 @@ async function findAuthUserByEmail(email) {
 }
 function sanitizeIdNumber(value) {
     return value.toUpperCase().replace(/[^0-9A-Z]/g, '');
+}
+function getSafeRegistrationErrorDetails(error, input) {
+    return {
+        code: extractErrorField(error, 'code') || 'UNKNOWN',
+        detail: extractErrorField(error, 'details') || null,
+        message: extractErrorField(error, 'message') || safeErrorString(error instanceof Error ? error.message : '', 'Unknown registration error'),
+        step: input.step,
+        table: input.table ?? null,
+    };
+}
+function getRegistrationClientErrorMessage(error) {
+    const code = extractErrorField(error, 'code') || '';
+    const message = `${extractErrorField(error, 'message') || ''} ${extractErrorField(error, 'details') || ''}`.toLowerCase();
+    if (code === '23505') {
+        if (message.includes('email')) {
+            return 'Email is already registered.';
+        }
+        if (message.includes('work_id') || message.includes('work id')) {
+            return exports.REGISTRATION_WORK_ID_UNAVAILABLE_MESSAGE;
+        }
+        if (message.includes('id_number') || message.includes('id number')) {
+            return 'An account with this ID number already exists.';
+        }
+    }
+    if (message.includes('role') && message.includes('available')) {
+        return exports.REGISTRATION_ROLE_UNAVAILABLE_MESSAGE;
+    }
+    if (message.includes('branch') && message.includes('available')) {
+        return exports.REGISTRATION_BRANCH_UNAVAILABLE_MESSAGE;
+    }
+    return exports.REGISTRATION_ACCOUNT_FAILURE_MESSAGE;
+}
+function buildRegistrationUserAccountRecord(input) {
+    return {
+        id: input.userProfileId,
+        email: input.email.trim().toLowerCase(),
+        first_name: input.firstName,
+        id_number: sanitizeIdNumber(input.idNumber),
+        is_active: true,
+        last_name: input.lastName,
+        organization_id: input.organizationId,
+        password_hash: 'SUPABASE_AUTH_MANAGED',
+        role_id: input.roleId,
+        updated_at: new Date().toISOString(),
+        work_id: input.workId,
+    };
 }
 function validateRegistrationPayload(input) {
     const fieldErrors = {};
@@ -353,48 +497,25 @@ function toStoredUserRole(role) {
     return 'manager';
 }
 async function getPublicRegistrationRoles(service) {
-    const { data, error } = await service
-        .from('roles')
-        .select('id, name, description')
-        .order('name', { ascending: true });
-    const staticRoles = auth_roles_1.ROLES.map((role) => ({
-        id: role.id,
-        name: role.name,
-        description: role.description,
-        legacyRole: role.id,
-        requiresBranch: role.id !== 'super_admin',
-    }));
-    if (error || !data?.length) {
-        return staticRoles;
-    }
-    const merged = new Map();
-    for (const role of staticRoles) {
-        merged.set(normalizeRoleName(role.name), role);
-        merged.set(normalizeRoleName(role.id), role);
-    }
-    for (const role of data) {
-        const legacyRole = deriveLegacyRole(String(role.name), String(role.id));
-        const entry = {
-            id: String(role.id),
-            name: String(role.name),
-            description: role.description ? String(role.description) : null,
+    return (await fetchPublicRegistrationRoleRows(service))
+        .map((role) => role)
+        .filter((role) => role.id && role.name)
+        .filter(isActiveRoleRecord)
+        .map((role) => {
+        const id = String(role.id);
+        const name = String(role.name);
+        const legacyRole = deriveLegacyRole(name, id);
+        const code = typeof role.code === 'string' && role.code.trim() ? role.code.trim() : legacyRole;
+        return {
+            code,
+            id,
+            name,
+            description: typeof role.description === 'string' && role.description.trim() ? String(role.description) : null,
             legacyRole,
             requiresBranch: legacyRole !== 'super_admin',
         };
-        merged.set(normalizeRoleName(entry.name), entry);
-        merged.set(normalizeRoleName(entry.id), entry);
-        if (!merged.has(normalizeRoleName(legacyRole))) {
-            merged.set(normalizeRoleName(legacyRole), entry);
-        }
-    }
-    const seen = new Set();
-    return Array.from(merged.values()).filter((role) => {
-        const key = normalizeRoleName(role.name);
-        if (seen.has(key))
-            return false;
-        seen.add(key);
-        return true;
-    });
+    })
+        .sort((left, right) => left.name.localeCompare(right.name));
 }
 async function resolveRegistrationRole(service, selectedRole) {
     const normalizedRole = selectedRole.trim();
@@ -420,6 +541,31 @@ async function generateNextWorkId(service) {
         .maybeSingle();
     const lastSeq = lastUser?.work_id ? parseInt(String(lastUser.work_id).slice(-4), 10) : 0;
     return (0, auth_roles_1.generateWorkId)(Number.isFinite(lastSeq) ? lastSeq : 0);
+}
+async function generateAvailableWorkId(service, maxAttempts = 25) {
+    const year = new Date().getFullYear();
+    const { data: lastUser } = await service
+        .from('users')
+        .select('work_id')
+        .like('work_id', `AQI-${year}%`)
+        .order('work_id', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+    let nextSequence = lastUser?.work_id ? parseInt(String(lastUser.work_id).slice(-4), 10) : 0;
+    nextSequence = Number.isFinite(nextSequence) ? nextSequence : 0;
+    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+        const workId = (0, auth_roles_1.generateWorkId)(nextSequence + attempt);
+        const syntheticEmail = (0, auth_roles_1.workIdToEmail)(workId);
+        const [{ data: existingUser }, { data: existingAccount }, existingAuthUser] = await Promise.all([
+            service.from('users').select('id').eq('work_id', workId).maybeSingle(),
+            service.from('user_accounts').select('id').eq('work_id', workId).maybeSingle(),
+            findAuthUserByEmail(syntheticEmail),
+        ]);
+        if (!existingUser && !existingAccount && !existingAuthUser) {
+            return workId;
+        }
+    }
+    throw new Error('Unable to generate an available work ID.');
 }
 async function assignUserRole(input) {
     const { data: roleRecord, error: roleLookupError } = await input.service

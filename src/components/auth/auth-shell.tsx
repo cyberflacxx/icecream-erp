@@ -21,7 +21,7 @@ export function AuthShell({ eyebrow, title, description, children }: AuthShellPr
       <div className="mx-auto grid min-h-[calc(100vh-4rem)] max-w-6xl gap-8 lg:grid-cols-[0.92fr_1.08fr] lg:items-center">
         <section className="order-2 rounded-[32px] border border-[color:var(--app-border)] bg-[color:var(--app-surface)] p-6 shadow-[var(--app-shadow-md)] sm:p-8 lg:order-1 lg:p-9">
           <div className="inline-flex items-center gap-2 rounded-full border border-[color:var(--app-border)] bg-[color:var(--app-bg-subtle)] px-4 py-2 text-sm font-semibold text-[color:var(--app-text)]">
-            <Sparkles className="h-4 w-4 text-orange" />
+            <Sparkles className="h-4 w-4 text-[color:var(--app-accent)]" />
             {eyebrow}
           </div>
 
@@ -59,7 +59,7 @@ export function AuthShell({ eyebrow, title, description, children }: AuthShellPr
                 className="flex items-center gap-3 rounded-2xl border border-[color:var(--app-border-muted)] bg-[color:var(--app-bg-default)] px-4 py-3"
               >
                 <div className="flex h-9 w-9 items-center justify-center rounded-xl border border-[color:var(--app-border)] bg-[color:var(--app-bg-canvas)]">
-                  <ShieldCheck className="h-4 w-4 text-orange" />
+                  <ShieldCheck className="h-4 w-4 text-[color:var(--app-accent)]" />
                 </div>
                 <span className="text-sm text-[color:var(--app-text)]">{item}</span>
               </div>

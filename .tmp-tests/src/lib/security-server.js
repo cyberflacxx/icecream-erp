@@ -18,8 +18,10 @@ exports.incrementFailedLogin = incrementFailedLogin;
 exports.clearFailedLogin = clearFailedLogin;
 exports.ensureActiveSession = ensureActiveSession;
 exports.createPasswordResetToken = createPasswordResetToken;
+exports.validatePasswordResetPassword = validatePasswordResetPassword;
 exports.createPasswordResetRequest = createPasswordResetRequest;
 exports.consumePasswordResetToken = consumePasswordResetToken;
+exports.markPasswordResetTokenUsed = markPasswordResetTokenUsed;
 exports.assertLoginAllowed = assertLoginAllowed;
 const crypto_1 = require("crypto");
 const auth_roles_1 = require("./auth-roles");
@@ -27,6 +29,7 @@ const registration_1 = require("./registration");
 const server_1 = require("./supabase/server");
 const user_access_profile_1 = require("./user-access-profile");
 const security_1 = require("./security");
+const PASSWORD_RESET_TOKEN_TTL_MS = 60 * 60000;
 function securityService() {
     return (0, server_1.createServiceRoleClient)().schema('icecream_erp');
 }
@@ -64,28 +67,6 @@ async function getFallbackOrganizationId() {
     }
     catch { }
     return 'absolute-ice-cream';
-}
-function passwordResetSecret() {
-    return (process.env.PASSWORD_RESET_SECRET ||
-        process.env.SUPABASE_SERVICE_ROLE_KEY ||
-        process.env.ADMIN_REGISTRATION_KEY ||
-        process.env.IMPERSONATE_KEY ||
-        'password-reset-secret');
-}
-function base64UrlEncode(value) {
-    return Buffer.from(value)
-        .toString('base64')
-        .replace(/\+/g, '-')
-        .replace(/\//g, '_')
-        .replace(/=+$/g, '');
-}
-function base64UrlDecode(value) {
-    const normalized = value.replace(/-/g, '+').replace(/_/g, '/');
-    const padded = normalized + '='.repeat((4 - (normalized.length % 4 || 4)) % 4);
-    return Buffer.from(padded, 'base64').toString('utf8');
-}
-function signPasswordResetToken(payload) {
-    return base64UrlEncode((0, crypto_1.createHmac)('sha256', passwordResetSecret()).update(payload).digest());
 }
 function mapBoolean(value, fallback) {
     if (typeof value === 'boolean')
@@ -527,39 +508,131 @@ async function ensureActiveSession(profile, accessToken) {
 function createPasswordResetToken() {
     return (0, crypto_1.randomBytes)(24).toString('hex');
 }
-async function createPasswordResetRequest(profile) {
-    const expiresAt = new Date(Date.now() + 60 * 60000).toISOString();
-    const payload = base64UrlEncode(JSON.stringify({
-        authId: profile.authId,
-        expiresAt,
-        organizationId: profile.organizationId,
-        userAccountId: profile.userAccountId ?? profile.id,
-        userProfileId: profile.id,
-        workId: profile.workId,
-    }));
-    const signature = signPasswordResetToken(payload);
-    return { token: `${payload}.${signature}`, expiresAt };
+function hashPasswordResetToken(token) {
+    return (0, crypto_1.createHash)('sha256').update(token).digest('hex');
 }
-async function consumePasswordResetToken(token) {
-    const [payload, signature] = token.split('.');
-    if (!payload || !signature)
-        return null;
-    if (signPasswordResetToken(payload) !== signature)
-        return null;
-    const decoded = JSON.parse(base64UrlDecode(payload));
-    if (!decoded.authId || !decoded.userAccountId || !decoded.userProfileId || !decoded.organizationId || !decoded.expiresAt) {
+async function findSecurityUserProfileById(profileId) {
+    const organizationId = await getFallbackOrganizationId();
+    const selectClause = await selectFirstAvailableUserColumns([
+        'id, auth_id, email, phone, avatar_url, full_name, first_name, last_name, work_id, status, branch_id, role, failed_login_attempts, locked_until, last_login, user_account_id',
+        'id, auth_id, email, phone, avatar_url, full_name, first_name, last_name, work_id, status, branch_id, role, last_login, user_account_id',
+        'id, auth_id, email, phone, avatar_url, full_name, first_name, last_name, work_id, status, branch_id, role',
+    ]);
+    const service = securityService();
+    const withDeletedAtFilter = await service
+        .from('users')
+        .select(selectClause)
+        .eq('id', profileId)
+        .is('deleted_at', null)
+        .maybeSingle();
+    if (!withDeletedAtFilter.error) {
+        const row = withDeletedAtFilter.data;
+        return row ? normalizeProfileRow(row, organizationId) : null;
+    }
+    if (!withDeletedAtFilter.error.message.toLowerCase().includes('deleted_at')) {
         return null;
     }
-    if (new Date(decoded.expiresAt).getTime() < Date.now()) {
+    const fallback = await service
+        .from('users')
+        .select(selectClause)
+        .eq('id', profileId)
+        .maybeSingle();
+    const row = fallback.data;
+    return row ? normalizeProfileRow(row, organizationId) : null;
+}
+function validatePasswordResetPassword(password, settings) {
+    if (password.length < settings.passwordMinLength) {
+        return `Password must be at least ${settings.passwordMinLength} characters long.`;
+    }
+    if (settings.requireUppercase && !/[A-Z]/.test(password)) {
+        return 'Password must include at least one uppercase letter.';
+    }
+    if (settings.requireLowercase && !/[a-z]/.test(password)) {
+        return 'Password must include at least one lowercase letter.';
+    }
+    if (settings.requireNumber && !/[0-9]/.test(password)) {
+        return 'Password must include at least one number.';
+    }
+    if (settings.requireSpecialCharacter && !/[^A-Za-z0-9]/.test(password)) {
+        return 'Password must include at least one special character.';
+    }
+    return null;
+}
+async function createPasswordResetRequest(profile) {
+    const service = securityService();
+    const token = createPasswordResetToken();
+    const expiresAt = new Date(Date.now() + PASSWORD_RESET_TOKEN_TTL_MS).toISOString();
+    const hashedToken = hashPasswordResetToken(token);
+    const now = new Date().toISOString();
+    const invalidateResult = await service
+        .from('password_reset_tokens')
+        .update({ updated_at: now, used_at: now })
+        .eq('user_account_id', profile.id)
+        .is('used_at', null);
+    if (invalidateResult.error) {
+        throw invalidateResult.error;
+    }
+    const tokenId = crypto.randomUUID();
+    const insertResult = await service.from('password_reset_tokens').insert({
+        id: tokenId,
+        user_account_id: profile.id,
+        token: hashedToken,
+        expires_at: expiresAt,
+        updated_at: now,
+    });
+    if (insertResult.error) {
+        throw insertResult.error;
+    }
+    return { expiresAt, id: tokenId, token };
+}
+async function consumePasswordResetToken(token) {
+    const service = securityService();
+    const hashedToken = hashPasswordResetToken(token);
+    const { data, error } = await service
+        .from('password_reset_tokens')
+        .select('id, user_account_id, expires_at, used_at')
+        .eq('token', hashedToken)
+        .maybeSingle();
+    if (error) {
+        throw error;
+    }
+    if (!data) {
+        return null;
+    }
+    const tokenRow = data;
+    if (!tokenRow.id || !tokenRow.user_account_id || tokenRow.used_at) {
+        return null;
+    }
+    if (!tokenRow.expires_at || new Date(tokenRow.expires_at).getTime() < Date.now()) {
+        await service
+            .from('password_reset_tokens')
+            .update({ updated_at: new Date().toISOString(), used_at: new Date().toISOString() })
+            .eq('id', tokenRow.id)
+            .is('used_at', null);
+        return null;
+    }
+    const profile = await findSecurityUserProfileById(String(tokenRow.user_account_id));
+    if (!profile?.authId) {
         return null;
     }
     return {
-        authId: decoded.authId,
-        id: createPasswordResetToken(),
-        organizationId: decoded.organizationId,
-        userAccountId: decoded.userAccountId,
-        userProfileId: decoded.userProfileId,
+        authId: profile.authId,
+        id: String(tokenRow.id),
+        organizationId: profile.organizationId,
+        userAccountId: String(tokenRow.user_account_id),
+        userProfileId: profile.id,
     };
+}
+async function markPasswordResetTokenUsed(resetTokenId) {
+    const service = securityService();
+    const { error } = await service
+        .from('password_reset_tokens')
+        .update({ updated_at: new Date().toISOString(), used_at: new Date().toISOString() })
+        .eq('id', resetTokenId)
+        .is('used_at', null);
+    if (error) {
+        throw error;
+    }
 }
 function assertLoginAllowed(profile) {
     return (0, security_1.isLoginAllowed)(profile.status, profile.lockedUntil);

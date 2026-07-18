@@ -9,6 +9,7 @@ const security_1 = require("../src/lib/security");
 const admin_delete_server_1 = require("../src/lib/admin-delete-server");
 const email_1 = require("../src/lib/email");
 const registration_1 = require("../src/lib/registration");
+const security_server_1 = require("../src/lib/security-server");
 (0, node_test_1.default)('normalizeUserStatus maps unknown values to INACTIVE', () => {
     strict_1.default.equal((0, security_1.normalizeUserStatus)('unknown'), 'INACTIVE');
     strict_1.default.equal((0, security_1.normalizeUserStatus)('active'), 'ACTIVE');
@@ -151,14 +152,29 @@ const registration_1 = require("../src/lib/registration");
         process.env = originalEnv;
     }
 });
-(0, node_test_1.default)('public registration role metadata keeps Super Admin branchless and branch roles branch-required', async () => {
+(0, node_test_1.default)('public registration role metadata loads only active database roles and excludes stale lead roles', async () => {
     const fakeService = {
         from() {
             return {
-                select() {
+                select(selectClause) {
                     return {
                         order() {
-                            return Promise.resolve({ data: null, error: new Error('offline') });
+                            if (selectClause.includes('is_active')) {
+                                return Promise.resolve({
+                                    data: null,
+                                    error: {
+                                        message: 'column icecream_erp.roles.is_active does not exist',
+                                    },
+                                });
+                            }
+                            return Promise.resolve({
+                                data: [
+                                    { code: 'super_admin', description: 'Full system access', id: 'super-admin-db', name: 'Super Admin', status: 'ACTIVE' },
+                                    { code: 'branch_manager', description: 'Branch operations', id: 'branch-manager-db', name: 'Branch Manager', status: 'ACTIVE' },
+                                    { code: 'procurement_lead', description: 'Legacy lead role', id: 'procurement-lead-db', name: 'Procurement Lead', status: 'INACTIVE' },
+                                ],
+                                error: null,
+                            });
                         },
                     };
                 },
@@ -166,8 +182,112 @@ const registration_1 = require("../src/lib/registration");
         },
     };
     const roles = await (0, registration_1.getPublicRegistrationRoles)(fakeService);
-    const superAdmin = roles.find((role) => role.id === 'super_admin');
-    const branchManager = roles.find((role) => role.id === 'branch_manager');
+    const superAdmin = roles.find((role) => role.id === 'super-admin-db');
+    const branchManager = roles.find((role) => role.id === 'branch-manager-db');
+    const procurementLead = roles.find((role) => role.name === 'Procurement Lead');
     strict_1.default.equal(superAdmin?.requiresBranch, false);
+    strict_1.default.equal(superAdmin?.code, 'super_admin');
     strict_1.default.equal(branchManager?.requiresBranch, true);
+    strict_1.default.equal(procurementLead, undefined);
+});
+(0, node_test_1.default)('public registration role metadata falls back safely when active columns are absent', async () => {
+    const fakeService = {
+        from() {
+            return {
+                select(selectClause) {
+                    return {
+                        order() {
+                            if (selectClause.includes('is_active') ||
+                                selectClause.includes('status') ||
+                                selectClause.includes('description')) {
+                                return Promise.resolve({
+                                    data: null,
+                                    error: {
+                                        message: `column ${selectClause.split(',').slice(-1)[0]?.trim() ?? 'roles.unknown'} does not exist`,
+                                    },
+                                });
+                            }
+                            return Promise.resolve({
+                                data: [
+                                    { code: 'super_admin', id: 'super-admin-db', name: 'Super Admin' },
+                                    { code: 'branch_manager', id: 'branch-manager-db', name: 'Branch Manager' },
+                                ],
+                                error: null,
+                            });
+                        },
+                    };
+                },
+            };
+        },
+    };
+    const roles = await (0, registration_1.getPublicRegistrationRoles)(fakeService);
+    strict_1.default.deepEqual(roles.map((role) => ({ code: role.code, name: role.name })), [
+        { code: 'branch_manager', name: 'Branch Manager' },
+        { code: 'super_admin', name: 'Super Admin' },
+    ]);
+});
+(0, node_test_1.default)('registration user account payload matches live icecream_erp.user_accounts columns', () => {
+    const record = (0, registration_1.buildRegistrationUserAccountRecord)({
+        email: ' ADMIN@EXAMPLE.COM ',
+        firstName: 'Ada',
+        idNumber: '12-345678x90',
+        lastName: 'Lovelace',
+        organizationId: 'org-1',
+        roleId: 'role-1',
+        userProfileId: 'profile-1',
+        workId: 'AQI-20260001',
+    });
+    strict_1.default.deepEqual(record, {
+        email: 'admin@example.com',
+        first_name: 'Ada',
+        id: 'profile-1',
+        id_number: '12345678X90',
+        is_active: true,
+        last_name: 'Lovelace',
+        organization_id: 'org-1',
+        password_hash: 'SUPABASE_AUTH_MANAGED',
+        role_id: 'role-1',
+        updated_at: record.updated_at,
+        work_id: 'AQI-20260001',
+    });
+    strict_1.default.equal('user_profile_id' in record, false);
+});
+(0, node_test_1.default)('registration error helpers keep server logs structured and frontend messages safe', () => {
+    const duplicateEmailError = {
+        code: '23505',
+        details: 'Key (email)=(admin@example.com) already exists.',
+        message: 'duplicate key value violates unique constraint "user_accounts_email_key"',
+    };
+    strict_1.default.deepEqual((0, registration_1.getSafeRegistrationErrorDetails)(duplicateEmailError, {
+        step: 'create_user_account',
+        table: 'user_accounts',
+    }), {
+        code: '23505',
+        detail: 'Key (email)=(admin@example.com) already exists.',
+        message: 'duplicate key value violates unique constraint "user_accounts_email_key"',
+        step: 'create_user_account',
+        table: 'user_accounts',
+    });
+    strict_1.default.equal((0, registration_1.getRegistrationClientErrorMessage)(duplicateEmailError), 'Email is already registered.');
+    strict_1.default.equal((0, registration_1.getRegistrationClientErrorMessage)({
+        code: '23505',
+        details: 'Key (work_id)=(AQI-20260001) already exists.',
+        message: 'duplicate key value violates unique constraint "users_work_id_key"',
+    }), 'Work ID is already registered.');
+    strict_1.default.equal((0, registration_1.getRegistrationClientErrorMessage)(new Error('unexpected failure')), registration_1.REGISTRATION_ACCOUNT_FAILURE_MESSAGE);
+});
+(0, node_test_1.default)('validatePasswordResetPassword enforces the configured password policy', () => {
+    const strictPolicy = {
+        passwordMinLength: 10,
+        requireLowercase: true,
+        requireNumber: true,
+        requireSpecialCharacter: true,
+        requireUppercase: true,
+    };
+    strict_1.default.equal((0, security_server_1.validatePasswordResetPassword)('Short1!', strictPolicy), 'Password must be at least 10 characters long.');
+    strict_1.default.equal((0, security_server_1.validatePasswordResetPassword)('longpassword1!', strictPolicy), 'Password must include at least one uppercase letter.');
+    strict_1.default.equal((0, security_server_1.validatePasswordResetPassword)('LONGPASSWORD1!', strictPolicy), 'Password must include at least one lowercase letter.');
+    strict_1.default.equal((0, security_server_1.validatePasswordResetPassword)('LongPassword!', strictPolicy), 'Password must include at least one number.');
+    strict_1.default.equal((0, security_server_1.validatePasswordResetPassword)('LongPassword1', strictPolicy), 'Password must include at least one special character.');
+    strict_1.default.equal((0, security_server_1.validatePasswordResetPassword)('LongPassword1!', strictPolicy), null);
 });
