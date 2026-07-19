@@ -79,6 +79,103 @@ export function normalizePurchaseOrderSupplierId(input: {
   return supplierId ?? '';
 }
 
+export function normalizePurchaseOrderRequisitionId(input: {
+  requisitionId?: unknown;
+  requisition_id?: unknown;
+}) {
+  const requisitionId = [input.requisition_id, input.requisitionId]
+    .map((value) => String(value ?? '').trim())
+    .find(Boolean);
+
+  return requisitionId ?? '';
+}
+
+export function normalizePurchaseOrderItemId(input: {
+  itemId?: unknown;
+  item_id?: unknown;
+}) {
+  const itemId = [input.item_id, input.itemId]
+    .map((value) => String(value ?? '').trim())
+    .find(Boolean);
+
+  return itemId ?? '';
+}
+
+export function normalizePurchaseOrderUnitOfMeasureId(input: {
+  unitOfMeasureId?: unknown;
+  unit_of_measure_id?: unknown;
+  uomId?: unknown;
+  uom_id?: unknown;
+}) {
+  const unitOfMeasureId = [input.unit_of_measure_id, input.unitOfMeasureId, input.uom_id, input.uomId]
+    .map((value) => String(value ?? '').trim())
+    .find(Boolean);
+
+  return unitOfMeasureId ?? '';
+}
+
+export function normalizePurchaseOrderUnitPrice(input: {
+  unitCost?: unknown;
+  unit_cost?: unknown;
+  unitPrice?: unknown;
+  unit_price?: unknown;
+  price?: unknown;
+}) {
+  const rawValue = [
+    input.unit_price,
+    input.unitPrice,
+    input.unit_cost,
+    input.unitCost,
+    input.price,
+  ].find((value) => value !== undefined && value !== null && String(value).trim() !== '');
+
+  const parsed = Number(rawValue ?? 0);
+  return Number.isFinite(parsed) ? parsed : NaN;
+}
+
+export function normalizePurchaseOrderQuantity(input: {
+  quantityOrdered?: unknown;
+  quantity_ordered?: unknown;
+  quantity?: unknown;
+  qty?: unknown;
+}) {
+  const rawValue = [input.quantity, input.qty, input.quantity_ordered, input.quantityOrdered]
+    .find((value) => value !== undefined && value !== null && String(value).trim() !== '');
+
+  const parsed = Number(rawValue ?? 0);
+  return Number.isFinite(parsed) ? parsed : NaN;
+}
+
+export function resolvePurchaseOrderItemUnitPrice(input: Record<string, unknown> | null | undefined) {
+  const raw = input ?? {};
+  const priceFields = [
+    raw.unit_price,
+    raw.unitPrice,
+    raw.purchase_price,
+    raw.purchasePrice,
+    raw.cost_price,
+    raw.costPrice,
+    raw.unit_cost,
+    raw.unitCost,
+    raw.standard_cost,
+    raw.standardCost,
+    raw.default_purchase_price,
+    raw.defaultPurchasePrice,
+    raw.price,
+    raw.selling_price,
+    raw.sellingPrice,
+  ];
+
+  for (const value of priceFields) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+
+  return 0;
+}
+
 interface PurchaseOrderDraftPayloadInput {
   approverEmail?: string | null;
   approverName?: string | null;
@@ -87,14 +184,26 @@ interface PurchaseOrderDraftPayloadInput {
   discountAmount: number;
   expectedDeliveryDate?: string | null;
   items: Array<{
-    itemId: string;
-    quantityOrdered: number;
-    unitCost: number;
-    unitOfMeasureId: string;
+    itemId?: string | null;
+    item_id?: string | null;
+    quantityOrdered?: number;
+    quantity_ordered?: number;
+    quantity?: number;
+    qty?: number;
+    unitCost?: number;
+    unit_cost?: number;
+    unitPrice?: number;
+    unit_price?: number;
+    price?: number;
+    unitOfMeasureId?: string | null;
+    unit_of_measure_id?: string | null;
+    uomId?: string | null;
+    uom_id?: string | null;
   }>;
   notes?: string | null;
   orderDate?: string | null;
   requisitionId?: string | null;
+  requisition_id?: string | null;
   supplierId?: string | null;
   supplier_id?: string | null;
   taxAmount: number;
@@ -102,6 +211,7 @@ interface PurchaseOrderDraftPayloadInput {
 
 export function buildPurchaseOrderDraftPayload(input: PurchaseOrderDraftPayloadInput) {
   const supplierId = normalizePurchaseOrderSupplierId(input);
+  const requisitionId = normalizePurchaseOrderRequisitionId(input);
 
   return {
     approverEmail: input.approverEmail?.trim() || null,
@@ -110,10 +220,33 @@ export function buildPurchaseOrderDraftPayload(input: PurchaseOrderDraftPayloadI
     approvalNotes: input.approvalNotes?.trim() || null,
     discountAmount: input.discountAmount,
     expectedDeliveryDate: input.expectedDeliveryDate ?? null,
-    items: input.items,
+    items: input.items.map((item) => {
+      const itemId = normalizePurchaseOrderItemId(item);
+      const unitOfMeasureId = normalizePurchaseOrderUnitOfMeasureId(item);
+      const quantityOrdered = normalizePurchaseOrderQuantity(item);
+      const unitPrice = normalizePurchaseOrderUnitPrice(item);
+
+      return {
+        itemId,
+        item_id: itemId,
+        quantity: quantityOrdered,
+        quantityOrdered,
+        quantity_ordered: quantityOrdered,
+        qty: quantityOrdered,
+        unitCost: unitPrice,
+        unitPrice,
+        unit_cost: unitPrice,
+        unit_price: unitPrice,
+        unitOfMeasureId: unitOfMeasureId || null,
+        unit_of_measure_id: unitOfMeasureId || null,
+        uomId: unitOfMeasureId || null,
+        uom_id: unitOfMeasureId || null,
+      };
+    }),
     notes: input.notes ?? null,
     orderDate: input.orderDate ?? null,
-    requisitionId: input.requisitionId ?? null,
+    requisitionId: requisitionId || null,
+    requisition_id: requisitionId || null,
     supplierId,
     supplier_id: supplierId,
     taxAmount: input.taxAmount,

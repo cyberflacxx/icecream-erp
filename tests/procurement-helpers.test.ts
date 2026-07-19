@@ -13,7 +13,13 @@ import {
 } from '../src/lib/procurement';
 import {
   buildPurchaseOrderDraftPayload as buildPurchaseOrderDraftPayloadForOrders,
+  normalizePurchaseOrderItemId as normalizePurchaseOrderItemIdForOrders,
+  normalizePurchaseOrderQuantity as normalizePurchaseOrderQuantityForOrders,
+  normalizePurchaseOrderRequisitionId as normalizePurchaseOrderRequisitionIdForOrders,
   normalizePurchaseOrderSupplierId as normalizePurchaseOrderSupplierIdForOrders,
+  normalizePurchaseOrderUnitOfMeasureId as normalizePurchaseOrderUnitOfMeasureIdForOrders,
+  normalizePurchaseOrderUnitPrice as normalizePurchaseOrderUnitPriceForOrders,
+  resolvePurchaseOrderItemUnitPrice,
 } from '../src/lib/procurement-purchase-orders';
 import {
   buildGoodsReceivedDraftPayload,
@@ -185,6 +191,24 @@ test('normalizePurchaseOrderSupplierId accepts supplier_id and supplierId', () =
   assert.equal(normalizePurchaseOrderSupplierIdForOrders({}), '');
 });
 
+test('purchase order helpers normalize requisition, item, uom, quantity, and price aliases', () => {
+  assert.equal(normalizePurchaseOrderRequisitionIdForOrders({ requisition_id: ' req-1 ' }), 'req-1');
+  assert.equal(normalizePurchaseOrderItemIdForOrders({ item_id: ' item-1 ' }), 'item-1');
+  assert.equal(normalizePurchaseOrderUnitOfMeasureIdForOrders({ uom_id: ' uom-1 ' }), 'uom-1');
+  assert.equal(normalizePurchaseOrderQuantityForOrders({ quantity: '4' }), 4);
+  assert.equal(normalizePurchaseOrderQuantityForOrders({ quantityOrdered: 3 }), 3);
+  assert.equal(normalizePurchaseOrderUnitPriceForOrders({ unit_price: '12.5' }), 12.5);
+  assert.equal(normalizePurchaseOrderUnitPriceForOrders({ unitCost: 9 }), 9);
+});
+
+test('resolvePurchaseOrderItemUnitPrice follows purchase price fallback order', () => {
+  assert.equal(resolvePurchaseOrderItemUnitPrice({ purchase_price: 17, cost_price: 12 }), 17);
+  assert.equal(resolvePurchaseOrderItemUnitPrice({ cost_price: 12, unit_cost: 10 }), 12);
+  assert.equal(resolvePurchaseOrderItemUnitPrice({ unit_cost: 10, default_purchase_price: 8 }), 10);
+  assert.equal(resolvePurchaseOrderItemUnitPrice({ default_purchase_price: 8, selling_price: 7 }), 8);
+  assert.equal(resolvePurchaseOrderItemUnitPrice({}), 0);
+});
+
 test('buildPurchaseOrderDraftPayload stores supplier_id canonically', () => {
   const payload = buildPurchaseOrderDraftPayloadForOrders({
     approverEmail: 'approver@example.com',
@@ -193,22 +217,31 @@ test('buildPurchaseOrderDraftPayload stores supplier_id canonically', () => {
     discountAmount: 0,
     items: [
       {
-        itemId: 'item-1',
-        quantityOrdered: 2,
-        unitCost: 10,
-        unitOfMeasureId: 'uom-1',
+        item_id: 'item-1',
+        quantity: 2,
+        unit_price: 10,
+        uom_id: 'uom-1',
       },
     ],
+    requisition_id: 'req-1',
     supplierId: 'sup-1',
     taxAmount: 0,
   });
 
   assert.equal(payload.supplierId, 'sup-1');
   assert.equal(payload.supplier_id, 'sup-1');
+  assert.equal(payload.requisitionId, 'req-1');
+  assert.equal(payload.requisition_id, 'req-1');
   assert.equal(payload.approverName, 'Jane Approver');
   assert.equal(payload.approverEmail, 'approver@example.com');
   assert.equal(payload.approvalNotes, 'Route through HQ buyer');
   assert.equal(payload.items[0]?.itemId, 'item-1');
+  assert.equal(payload.items[0]?.item_id, 'item-1');
+  assert.equal(payload.items[0]?.quantityOrdered, 2);
+  assert.equal(payload.items[0]?.quantity, 2);
+  assert.equal(payload.items[0]?.unitCost, 10);
+  assert.equal(payload.items[0]?.unit_price, 10);
+  assert.equal(payload.items[0]?.unitOfMeasureId, 'uom-1');
 });
 
 test('normalizeRequisitionItemId accepts item_id and itemId', () => {

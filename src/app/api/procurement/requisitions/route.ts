@@ -9,7 +9,7 @@ const LEGACY_REQUISITION_ITEM_COLUMNS = ['pr_id', 'quantity', 'estimated_cost', 
 const REQUISITION_SELECT_BASE =
   'id, requisition_number, department, request_date, needed_by_date, status, approval_status, requested_by, approver_user_id, approved_by, approved_at, rejected_by, rejected_at, remarks';
 const REQUISITION_SELECT_WITH_APPROVER_DETAILS = `${REQUISITION_SELECT_BASE}, approver_name, approver_email, approval_notes`;
-const APPROVED_REQUISITION_STATUSES = ['approved', 'level1_approved'] as const;
+const APPROVED_REQUISITION_STATUSES = ['approved', 'level1_approved', 'submitted', 'pending_approval'] as const;
 
 function stripMissingLegacyRequisitionItemColumn<T extends Record<string, unknown>>(payload: T, error: unknown) {
   const column = LEGACY_REQUISITION_ITEM_COLUMNS.find((entry) =>
@@ -47,6 +47,7 @@ export async function GET(request: NextRequest) {
   const pageSize = Math.min(100, parseInt(searchParams.get('pageSize') ?? '20'));
   const status = searchParams.get('status');
   const picker = searchParams.get('picker') === 'true';
+  const forPurchaseOrder = searchParams.get('forPurchaseOrder') === 'true';
   const department = searchParams.get('department');
   const startDate = searchParams.get('startDate');
   const endDate = searchParams.get('endDate');
@@ -61,7 +62,7 @@ export async function GET(request: NextRequest) {
       .order('created_at', { ascending: false });
 
     const normalizedStatus = sanitizeStatusFilter(status);
-    if (normalizedStatus === 'approved') {
+    if (forPurchaseOrder || normalizedStatus === 'approved') {
       query = applyApprovedRequisitionFilter(query);
     } else if (normalizedStatus) {
       query = query.or(`status.eq.${normalizedStatus},approval_status.eq.${normalizedStatus}`);
@@ -90,7 +91,7 @@ export async function GET(request: NextRequest) {
         .order('created_at', { ascending: false });
 
       const fallbackApplied =
-        normalizedStatus === 'approved'
+        forPurchaseOrder || normalizedStatus === 'approved'
           ? applyApprovedRequisitionFilter(fallbackQuery)
           : normalizedStatus
             ? fallbackQuery.or(`status.eq.${normalizedStatus},approval_status.eq.${normalizedStatus}`)

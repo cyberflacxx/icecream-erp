@@ -46,6 +46,8 @@ async function loadItems(service: ReturnType<typeof createServiceRoleClient>, or
     'type',
     'unit_of_measure_id',
     'unit_id',
+    'purchase_price',
+    'cost_price',
     'unit_cost',
     'standard_cost',
     'selling_price',
@@ -69,7 +71,7 @@ async function loadItems(service: ReturnType<typeof createServiceRoleClient>, or
     }
 
     lastError = result.error;
-    const removable = ['deleted_at', 'item_type', 'unit_of_measure_id', 'unit_cost', 'reorder_level', 'selling_price']
+    const removable = ['deleted_at', 'item_type', 'unit_of_measure_id', 'purchase_price', 'cost_price', 'unit_cost', 'reorder_level', 'selling_price']
       .find((column) => isMissingColumnError(result.error, 'items', column));
 
     if (!removable) {
@@ -388,12 +390,21 @@ export async function GET(_request: NextRequest) {
           const unitId = String(item.unit_of_measure_id ?? item.unit_id ?? '') || null;
           const unit = unitId ? unitById.get(unitId) ?? null : null;
           const inventory = itemInventory.get(id);
-          const unitCost = toNumber(item.unit_cost ?? item.standard_cost);
+          const purchasePrice = toNumber(
+            item.purchase_price ??
+              item.cost_price ??
+              item.unit_cost ??
+              item.standard_cost ??
+              item.default_purchase_price ??
+              item.price ??
+              item.selling_price,
+          );
+          const unitCost = toNumber(item.unit_cost ?? item.cost_price ?? item.purchase_price ?? item.standard_cost);
 
           return {
             code: String(item.code ?? ''),
             cost_price: unitCost,
-            default_purchase_price: unitCost,
+            default_purchase_price: purchasePrice,
             description: item.description ? String(item.description) : null,
             id,
             inventory: {
@@ -409,13 +420,14 @@ export async function GET(_request: NextRequest) {
             itemType: mapItemType(item.item_type ?? item.type),
             label: item.code ? `${String(item.code)} - ${String(item.name ?? item.code)}` : String(item.name ?? 'Unnamed item'),
             name: String(item.name ?? item.code ?? 'Unnamed item'),
-            purchase_price: unitCost,
+            purchase_price: purchasePrice,
             uomName: unit ? mapUnitLabel(unit) : null,
             unit_of_measure_id: unitId,
             unit_of_measure_name: unit ? mapUnitLabel(unit) : null,
             unitOfMeasureId: unitId,
             unitOfMeasureName: unit ? mapUnitLabel(unit) : null,
             unit_cost: unitCost,
+            selling_price: toNumber(item.selling_price ?? item.price),
           };
         }),
       purchaseOrders: receivablePurchaseOrders.map((row) => {

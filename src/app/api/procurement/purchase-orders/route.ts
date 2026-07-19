@@ -2,7 +2,12 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { badRequest, can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
 import {
+  normalizePurchaseOrderItemId,
+  normalizePurchaseOrderQuantity,
+  normalizePurchaseOrderRequisitionId,
   normalizePurchaseOrderSupplierId,
+  normalizePurchaseOrderUnitOfMeasureId,
+  normalizePurchaseOrderUnitPrice,
   derivePurchaseOrderStatus,
   normalizePurchaseOrderStatus,
 } from '@/lib/procurement-purchase-orders';
@@ -181,6 +186,7 @@ export async function POST(request: NextRequest) {
     supplierId?: string;
     supplier_id?: string;
     requisitionId?: string | null;
+    requisition_id?: string | null;
     orderDate?: string | null;
     expectedDeliveryDate?: string | null;
     notes?: string | null;
@@ -191,10 +197,21 @@ export async function POST(request: NextRequest) {
     approverUserId?: string | null;
     approvalNotes?: string | null;
     items: Array<{
-      itemId: string;
-      unitOfMeasureId: string;
-      quantityOrdered: number;
-      unitCost: number;
+      itemId?: string;
+      item_id?: string;
+      unitOfMeasureId?: string;
+      unit_of_measure_id?: string;
+      uomId?: string;
+      uom_id?: string;
+      quantityOrdered?: number;
+      quantity_ordered?: number;
+      quantity?: number;
+      qty?: number;
+      unitCost?: number;
+      unit_cost?: number;
+      unitPrice?: number;
+      unit_price?: number;
+      price?: number;
     }>;
   };
 
@@ -205,9 +222,20 @@ export async function POST(request: NextRequest) {
   }
 
   const supplierId = normalizePurchaseOrderSupplierId(body);
+  const requisitionId = normalizePurchaseOrderRequisitionId(body);
+  const normalizedItems = (body.items ?? []).map((item) => ({
+    itemId: normalizePurchaseOrderItemId(item),
+    quantityOrdered: normalizePurchaseOrderQuantity(item),
+    unitCost: normalizePurchaseOrderUnitPrice(item),
+    unitOfMeasureId: normalizePurchaseOrderUnitOfMeasureId(item),
+  }));
 
-  if (!supplierId || !body.items?.length) {
-    return badRequest('supplier_id and items are required');
+  if (!supplierId) {
+    return badRequest('Please select a supplier.');
+  }
+
+  if (!normalizedItems.length) {
+    return badRequest('Please select a requisition or add items manually.');
   }
 
   try {
@@ -236,27 +264,39 @@ export async function POST(request: NextRequest) {
     }
 
     // Validate requisition if provided
-    if (body.requisitionId) {
+    if (requisitionId) {
       const { data: req, error: reqErr } = await service
         .from('purchase_requisitions')
         .select('id, status, approval_status')
         .is('deleted_at', null)
         .eq('organization_id', ctx.organizationId)
-        .eq('id', body.requisitionId)
+        .eq('id', requisitionId)
         .single();
 
-      if (reqErr || !req) return badRequest('Purchase requisition not found.');
+      if (reqErr || !req) return badRequest('Selected requisition is no longer available. Please refresh and try again.');
       if (!isApprovedRequisitionStatus((req as Record<string, unknown>).status, (req as Record<string, unknown>).approval_status)) {
-        return badRequest('Purchase order can only be created from approved requisitions.');
+        return badRequest('Selected requisition is no longer available. Please refresh and try again.');
       }
     }
 
     // Validate items
-    const itemIds = [...new Set(body.items.map((i) => i.itemId))];
-    const unitIds = [...new Set(body.items.map((i) => i.unitOfMeasureId))];
+    if (normalizedItems.some((item) => !item.itemId)) {
+      return badRequest('Please select an item for every PO line.');
+    }
+    if (normalizedItems.some((item) => Number.isNaN(item.quantityOrdered) || item.quantityOrdered <= 0)) {
+      return badRequest('Please enter a valid quantity.');
+    }
+    if (normalizedItems.some((item) => Number.isNaN(item.unitCost) || item.unitCost < 0)) {
+      return badRequest('Purchase order could not be created. Please check the required fields and try again.');
+    }
+
+    const itemIds = [...new Set(normalizedItems.map((i) => i.itemId))];
+    const unitIds = [...new Set(normalizedItems.map((i) => i.unitOfMeasureId).filter(Boolean))];
     const [itemsPrimary, unitsCheck] = await Promise.all([
       service.from('items').select('id').is('deleted_at', null).eq('organization_id', ctx.organizationId).in('id', itemIds),
-      service.from('units_of_measure').select('id').eq('organization_id', ctx.organizationId).in('id', unitIds),
+      unitIds.length
+        ? service.from('units_of_measure').select('id').eq('organization_id', ctx.organizationId).in('id', unitIds)
+        : Promise.resolve({ data: [], error: null }),
     ]);
 
     const itemsCheck =
@@ -264,8 +304,11 @@ export async function POST(request: NextRequest) {
         ? await service.from('items').select('id').eq('organization_id', ctx.organizationId).in('id', itemIds)
         : itemsPrimary;
 
-    if ((itemsCheck.data?.length ?? 0) !== itemIds.length || (unitsCheck.data?.length ?? 0) !== unitIds.length) {
-      return badRequest('One or more purchase order items are invalid.');
+    if ((itemsCheck.data?.length ?? 0) !== itemIds.length) {
+      return badRequest('Selected item is no longer available. Please refresh and try again.');
+    }
+    if ((unitsCheck.data?.length ?? 0) !== unitIds.length) {
+      return badRequest('Selected unit of measurement is no longer available. Please refresh and try again.');
     }
 
     if (body.approverUserId) {
@@ -291,13 +334,13 @@ export async function POST(request: NextRequest) {
     const poNumber = `PO-${String((poCount ?? 0) + 1).padStart(5, '0')}`;
     const taxAmount = body.taxAmount ?? 0;
     const discountAmount = body.discountAmount ?? 0;
-    const subtotal = body.items.reduce((sum, i) => sum + i.quantityOrdered * i.unitCost, 0);
+    const subtotal = normalizedItems.reduce((sum, i) => sum + i.quantityOrdered * i.unitCost, 0);
     const total = subtotal + taxAmount - discountAmount;
 
     let orderPayload: Record<string, unknown> = {
       po_number: poNumber,
       supplier_id: supplierId,
-      requisition_id: body.requisitionId ?? null,
+      requisition_id: requisitionId || null,
       order_date: body.orderDate ?? new Date().toISOString(),
       expected_delivery_date: body.expectedDeliveryDate ?? null,
       notes: body.notes ?? null,
@@ -330,11 +373,11 @@ export async function POST(request: NextRequest) {
 
     const orderId = (order as Record<string, unknown>).id as string;
 
-    let itemPayload = body.items.map((item) => ({
+    let itemPayload = normalizedItems.map((item) => ({
       po_id: orderId,
       purchase_order_id: orderId,
       item_id: item.itemId,
-      unit_of_measure_id: item.unitOfMeasureId,
+      unit_of_measure_id: item.unitOfMeasureId || null,
       quantity: item.quantityOrdered,
       quantity_ordered: item.quantityOrdered,
       received_qty: 0,
@@ -360,11 +403,11 @@ export async function POST(request: NextRequest) {
     if (itemsErr) return serverError(itemsErr.message);
 
     // Update requisition status if linked
-    if (body.requisitionId) {
+    if (requisitionId) {
       await service
         .from('purchase_requisitions')
         .update({ status: 'po_created' })
-        .eq('id', body.requisitionId);
+        .eq('id', requisitionId);
     }
 
     const { data: full } = await service
@@ -373,7 +416,18 @@ export async function POST(request: NextRequest) {
       .eq('id', orderId)
       .single();
 
-    return NextResponse.json(full, { status: 201 });
+    return NextResponse.json({
+      success: true,
+      data: {
+        id: orderId,
+        purchase_order_id: orderId,
+        purchaseOrderId: orderId,
+        po_number: String((full as Record<string, unknown> | null)?.po_number ?? poNumber),
+        poNumber: String((full as Record<string, unknown> | null)?.po_number ?? poNumber),
+        requisition_id: requisitionId || null,
+        requisitionId: requisitionId || null,
+      },
+    }, { status: 201 });
   } catch (err) {
     return serverError((err as Error).message);
   }

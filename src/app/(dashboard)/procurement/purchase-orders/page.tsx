@@ -32,6 +32,7 @@ import {
   isPurchaseOrderRejectable,
   isPurchaseOrderSentLike,
   normalizePurchaseOrderStatus,
+  resolvePurchaseOrderItemUnitPrice,
 } from '@/lib/procurement-purchase-orders';
 import {
   useProcurementMeta,
@@ -82,6 +83,8 @@ interface PurchaseOrderItemOption {
   itemType: string | null;
   name: string;
   purchasePrice?: number;
+  sellingPrice?: number;
+  standardCost?: number;
   unitOfMeasureId: string | null;
   unitOfMeasureName?: string | null;
 }
@@ -123,13 +126,15 @@ function normalizePurchaseOrderItemsResponse(payload: unknown): PurchaseOrderIte
 
       return {
         code: String(row.code ?? ''),
-        costPrice: Number(row.cost_price ?? row.unitCost ?? row.standard_cost ?? 0),
-        defaultPurchasePrice: Number(row.default_purchase_price ?? row.unitCost ?? row.standard_cost ?? 0),
-        description: typeof row.description === 'string' ? row.description : null,
+        costPrice: Number(row.cost_price ?? row.costPrice ?? row.unit_cost ?? row.unitCost ?? row.standard_cost ?? row.standardCost ?? 0),
+        defaultPurchasePrice: Number(row.default_purchase_price ?? row.defaultPurchasePrice ?? row.purchase_price ?? row.purchasePrice ?? row.cost_price ?? row.costPrice ?? row.unit_cost ?? row.unitCost ?? row.standard_cost ?? row.standardCost ?? row.price ?? row.selling_price ?? row.sellingPrice ?? 0),
+        description: typeof row.description === 'string' ? row.description : typeof row.item_name === 'string' ? row.item_name : typeof row.name === 'string' ? row.name : null,
         id: String(row.id ?? ''),
         itemType,
         name: String(row.name ?? row.code ?? 'Unnamed item'),
-        purchasePrice: Number(row.purchase_price ?? row.unitCost ?? row.standard_cost ?? 0),
+        purchasePrice: Number(row.purchase_price ?? row.purchasePrice ?? row.cost_price ?? row.costPrice ?? row.unit_cost ?? row.unitCost ?? row.standard_cost ?? row.standardCost ?? row.default_purchase_price ?? row.defaultPurchasePrice ?? row.price ?? row.selling_price ?? row.sellingPrice ?? 0),
+        sellingPrice: Number(row.selling_price ?? row.sellingPrice ?? row.price ?? 0),
+        standardCost: Number(row.standard_cost ?? row.standardCost ?? 0),
         unitOfMeasureId: String(row.unitOfMeasureId ?? unitOfMeasure?.id ?? row.unit_of_measure_id ?? row.unit_id ?? '') || null,
         unitOfMeasureName: String(row.unitOfMeasureName ?? row.uomName ?? unitOfMeasure?.name ?? ''),
       };
@@ -266,7 +271,7 @@ export default function PurchaseOrdersPage() {
     queryKey: ['procurement', 'purchase-order-requisition-picker'],
     queryFn: async () => {
       const response = await request<{ data?: RequisitionPickerOption[]; success?: boolean }>(
-        '/api/procurement/requisitions?picker=true&status=approved&pageSize=100',
+        '/api/procurement/requisitions?picker=true&forPurchaseOrder=true&pageSize=100',
       );
       return response.data ?? [];
     },
@@ -323,7 +328,7 @@ export default function PurchaseOrdersPage() {
                 itemId: item.itemId ?? item.item_id ?? '',
                 quantityOrdered: String(item.quantity_requested ?? 1),
                 rowId: item.id,
-                unitCost: String(item.estimated_unit_cost ?? 0),
+                unitCost: String(resolvePurchaseOrderItemUnitPrice({ unit_cost: item.estimated_unit_cost })),
                 unitOfMeasureId: item.unitOfMeasureId ?? item.unit_of_measure_id ?? '',
               }))
             : [createLineItemDraft()],
@@ -352,14 +357,16 @@ export default function PurchaseOrdersPage() {
 
       merged.set(item.id, {
         code: item.code,
-        costPrice: Number(item.cost_price ?? item.unit_cost ?? 0),
-        defaultPurchasePrice: Number(item.default_purchase_price ?? item.cost_price ?? item.unit_cost ?? 0),
-        description: item.description,
+        costPrice: Number(item.cost_price ?? item.costPrice ?? item.unit_cost ?? item.unitCost ?? item.standard_cost ?? item.standardCost ?? 0),
+        defaultPurchasePrice: Number(item.default_purchase_price ?? item.defaultPurchasePrice ?? item.purchase_price ?? item.purchasePrice ?? item.cost_price ?? item.costPrice ?? item.unit_cost ?? item.unitCost ?? item.standard_cost ?? item.standardCost ?? item.price ?? item.selling_price ?? item.sellingPrice ?? 0),
+        description: item.description ?? item.name,
         id: item.id,
         inventory: item.inventory,
         itemType,
         name: item.name,
-        purchasePrice: Number(item.purchase_price ?? item.cost_price ?? item.unit_cost ?? 0),
+        purchasePrice: Number(item.purchase_price ?? item.purchasePrice ?? item.cost_price ?? item.costPrice ?? item.unit_cost ?? item.unitCost ?? item.standard_cost ?? item.standardCost ?? item.default_purchase_price ?? item.defaultPurchasePrice ?? item.price ?? item.selling_price ?? item.sellingPrice ?? 0),
+        sellingPrice: Number(item.selling_price ?? item.sellingPrice ?? 0),
+        standardCost: Number(item.standard_cost ?? item.standardCost ?? 0),
         unitOfMeasureId: item.unitOfMeasureId,
         unitOfMeasureName: item.unitOfMeasureName ?? item.uomName ?? item.unit_of_measure_name ?? null,
       });
@@ -416,16 +423,21 @@ export default function PurchaseOrdersPage() {
   async function handleCreate(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const items = formState.items
-      .filter((item) => item.itemId && item.unitOfMeasureId)
+      .filter((item) => item.itemId)
       .map((item) => ({
         itemId: item.itemId,
         quantityOrdered: Number(item.quantityOrdered),
         unitCost: Number(item.unitCost),
-        unitOfMeasureId: item.unitOfMeasureId
+        unitOfMeasureId: item.unitOfMeasureId || ''
       }));
 
-    if (!formState.supplierId || !items.length) {
-      setFormError('Supplier and at least one line item are required.');
+    if (!formState.supplierId) {
+      setFormError('Please select a supplier.');
+      return;
+    }
+
+    if (!items.length) {
+      setFormError(formState.requisitionId ? 'Please select an item for every PO line.' : 'Please select a requisition or add items manually.');
       return;
     }
 
@@ -438,7 +450,7 @@ export default function PurchaseOrdersPage() {
           item.unitCost < 0,
       )
     ) {
-      setFormError('All quantities and unit costs must be valid positive values.');
+      setFormError('Please enter a valid quantity.');
       return;
     }
 
@@ -522,10 +534,7 @@ export default function PurchaseOrdersPage() {
 
         if (field === 'itemId') {
           const matchedItem = purchaseOrderItems.find((item) => item.id === value);
-          const derivedUnitCost = matchedItem?.costPrice
-            ?? matchedItem?.purchasePrice
-            ?? matchedItem?.defaultPurchasePrice
-            ?? 0;
+          const derivedUnitCost = resolvePurchaseOrderItemUnitPrice(matchedItem as unknown as Record<string, unknown> | null);
 
           return {
             ...row,
@@ -1162,7 +1171,7 @@ export default function PurchaseOrdersPage() {
                   <div className="mt-3 rounded-2xl border border-border/60 bg-white/90 px-3 py-2 text-xs text-muted">
                     {selectedMetaItem ? (
                       <div className="grid gap-1 sm:grid-cols-2 xl:grid-cols-3">
-                        <span>Default Price: {currencyFormatter.format(selectedMetaItem.costPrice ?? selectedMetaItem.purchasePrice ?? selectedMetaItem.defaultPurchasePrice ?? 0)}</span>
+                        <span>Default Price: {currencyFormatter.format(resolvePurchaseOrderItemUnitPrice(selectedMetaItem as unknown as Record<string, unknown> | null))}</span>
                         <span>Current: {Number(selectedMetaItem.inventory?.currentStock ?? 0).toFixed(3)}</span>
                         <span>Reorder: {Number(selectedMetaItem.inventory?.reorderLevel ?? 0).toFixed(3)}</span>
                         <span>On Order: {Number(selectedMetaItem.inventory?.quantityOnOrder ?? 0).toFixed(3)}</span>
