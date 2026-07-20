@@ -149,7 +149,7 @@ export default function GoodsReceivedPage() {
         quantityRejected: '0',
         reason: '',
         rowId: createGrnRowId(),
-        unitCost: '0',
+        unitCost: String(item.unitCost ?? 0),
         unitOfMeasureId: item.unitOfMeasure?.id ?? '',
       })),
     );
@@ -703,6 +703,13 @@ export default function GoodsReceivedPage() {
                           ? {
                               ...row,
                               itemId: event.target.value,
+                              unitCost: String(
+                                selectedItem?.purchase_price ??
+                                  selectedItem?.cost_price ??
+                                  selectedItem?.unit_cost ??
+                                  selectedItem?.default_purchase_price ??
+                                  0,
+                              ),
                               unitOfMeasureId: selectedItem?.unitOfMeasureId ?? row.unitOfMeasureId,
                             }
                           : row,

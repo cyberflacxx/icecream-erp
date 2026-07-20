@@ -5,7 +5,7 @@ import { recordAuditLog } from '@/lib/security-server';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
 export async function POST(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
   const ctx = await getAuthContext();
@@ -14,6 +14,16 @@ export async function POST(
 
   const { id } = await params;
   const service = createServiceRoleClient();
+  let approvalNotes: string | null = null;
+
+  try {
+    const body = await request.json();
+    approvalNotes = typeof body?.approvalNotes === 'string'
+      ? body.approvalNotes.trim() || null
+      : typeof body?.remarks === 'string'
+        ? body.remarks.trim() || null
+        : null;
+  } catch {}
 
   try {
     const { data: existing, error: fetchErr } = await service
@@ -54,7 +64,13 @@ export async function POST(
 
     const { data: updated, error: updateErr } = await service
       .from('goods_received_notes')
-      .update({ quality_status: 'APPROVED' })
+      .update({
+        approval_notes: approvalNotes,
+        approved_at: new Date().toISOString(),
+        approved_by: ctx.userId,
+        quality_status: 'APPROVED',
+        status: 'APPROVED',
+      })
       .eq('id', id)
       .select()
       .single();
@@ -65,11 +81,11 @@ export async function POST(
       action: 'GRN_APPROVED',
       entityId: id,
       entityType: 'goods_received_note',
-      newValues: { qualityStatus: 'APPROVED' },
+      newValues: { approvalNotes, qualityStatus: 'APPROVED', status: 'APPROVED' },
       organizationId: ctx.organizationId,
       userProfileId: ctx.userId,
-      ipAddress: _request.headers.get('x-forwarded-for'),
-      userAgent: _request.headers.get('user-agent'),
+      ipAddress: request.headers.get('x-forwarded-for'),
+      userAgent: request.headers.get('user-agent'),
     });
 
     return NextResponse.json(updated);

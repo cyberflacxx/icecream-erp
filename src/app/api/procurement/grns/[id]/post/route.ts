@@ -27,7 +27,9 @@ export async function POST(
   try {
     const grn = await loadGrnForPosting(service, ctx.organizationId, id);
     if (!grn) return notFound('Goods received note not found.');
-    if (grn.status === 'POSTED') return badRequest('This GRN has already been posted.');
+    if (grn.status === 'POSTED' || grn.stock_posted === true) {
+      return badRequest('This GRN has already been posted.');
+    }
     if (grn.status === 'REJECTED' || grn.quality_status !== 'APPROVED') {
       return badRequest('Only approved GRNs can be posted.');
     }
@@ -111,6 +113,7 @@ export async function POST(
         itemId: item.item_id,
         organizationId: ctx.organizationId,
         quantityDelta: acceptedQuantity,
+        unitCost: Number(item.unit_cost ?? 0),
         warehouseId: String(grn.warehouse_id),
       });
 
@@ -124,6 +127,7 @@ export async function POST(
         quantity: acceptedQuantity,
         referenceId: id,
         referenceType: 'goods_received_note',
+        unitCost: Number(item.unit_cost ?? 0),
         warehouseId: String(grn.warehouse_id),
       });
     }
@@ -151,6 +155,10 @@ export async function POST(
     const { data: updated, error: updateError } = await service
       .from('goods_received_notes')
       .update({
+        approval_notes: grn.approval_notes ?? null,
+        posted_at: new Date().toISOString(),
+        posted_by: ctx.userId,
+        stock_posted: true,
         status: 'POSTED',
         quality_status: 'POSTED',
       })
@@ -191,7 +199,7 @@ async function loadGrnForPosting(
 ) {
   const primary = await service
     .from('goods_received_notes')
-    .select('id, grn_number, status, quality_status, warehouse_id, purchase_order_id, notes')
+    .select('id, grn_number, status, quality_status, warehouse_id, purchase_order_id, notes, stock_posted, approval_notes')
     .eq('organization_id', organizationId)
     .eq('id', grnId)
     .maybeSingle();
@@ -206,7 +214,7 @@ async function loadGrnForPosting(
 
   const fallback = await service
     .from('goods_received_notes')
-    .select('id, grn_number, status, quality_status, warehouse_id, po_id, notes')
+    .select('id, grn_number, status, quality_status, warehouse_id, po_id, notes, approval_notes')
     .eq('organization_id', organizationId)
     .eq('id', grnId)
     .maybeSingle();

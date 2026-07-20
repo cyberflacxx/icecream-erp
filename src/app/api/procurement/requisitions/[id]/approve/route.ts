@@ -60,8 +60,10 @@ export async function POST(
     const { data: updated, error: updateErr } = await service
       .from('purchase_requisitions')
       .update({
-        status: 'level1_approved',
-        approval_status: 'level1_approved',
+        approval_notes: remarks ?? null,
+        approver_id: req.approver_user_id ? String(req.approver_user_id) : null,
+        status: 'approved',
+        approval_status: 'approved',
         approved_by: ctx.userId,
         approved_at: new Date().toISOString(),
         remarks: remarks ?? (req.remarks as string | null),

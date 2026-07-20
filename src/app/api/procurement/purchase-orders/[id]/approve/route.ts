@@ -8,7 +8,7 @@ import {
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
 export async function POST(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
   const ctx = await getAuthContext();
@@ -17,6 +17,16 @@ export async function POST(
 
   const { id } = await params;
   const service = createServiceRoleClient();
+  let approvalNotes: string | null = null;
+
+  try {
+    const body = await request.json();
+    approvalNotes = typeof body?.approvalNotes === 'string'
+      ? body.approvalNotes.trim() || null
+      : typeof body?.remarks === 'string'
+        ? body.remarks.trim() || null
+        : null;
+  } catch {}
 
   try {
     const { data: existing, error: fetchErr } = await service
@@ -39,8 +49,11 @@ export async function POST(
     const { data: updated, error: updateErr } = await service
       .from('purchase_orders')
       .update({
+        approval_notes: approvalNotes,
+        approval_status: 'APPROVED',
         approved_by: ctx.userId,
         approved_at: new Date().toISOString(),
+        approver_id: order.approver_user_id ? String(order.approver_user_id) : null,
         status: formatPurchaseOrderDbStatus('approved', order.status),
       })
       .eq('id', id)

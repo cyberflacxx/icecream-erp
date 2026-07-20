@@ -4,7 +4,7 @@ import { Plus, WalletCards } from 'lucide-react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { type FormEvent, useEffect, useMemo, useState } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { PageHeader } from '@/components/dashboard/page-header';
 import { ProcurementNav } from '@/components/procurement/procurement-nav';
@@ -24,8 +24,11 @@ const paymentSources = [
 
 const initialFormState = {
   amountPaid: '',
+  bankAccountId: '',
+  cashAccountId: '',
   paymentDate: '',
   paymentMethod: 'BANK',
+  pettyCashRequestId: '',
   referenceNumber: '',
   remarks: '',
   supplierInvoiceId: '',
@@ -57,6 +60,27 @@ export default function ProcurementPaymentsPage() {
     () => (invoicesQuery.data ?? []).filter((invoice) => invoice.balance > 0),
     [invoicesQuery.data],
   );
+  const bankAccountsQuery = useQuery({
+    queryKey: ['finance', 'bank-accounts', 'active'],
+    queryFn: () =>
+      request<Array<{ account_name?: string | null; bank_name?: string | null; id: string }>>(
+        '/api/finance/bank-accounts?activeOnly=true',
+      ),
+    enabled: isDrawerOpen,
+  });
+  const cashAccountsQuery = useQuery({
+    queryKey: ['finance', 'cash-accounts'],
+    queryFn: () => request<Array<{ id: string; name?: string | null }>>('/api/finance/cash-accounts'),
+    enabled: isDrawerOpen,
+  });
+  const pettyCashQuery = useQuery({
+    queryKey: ['finance', 'petty-cash'],
+    queryFn: () =>
+      request<Array<{ id: string; purpose?: string | null; requestNumber?: string | null; request_number?: string | null }>>(
+        '/api/finance/petty-cash',
+      ),
+    enabled: isDrawerOpen,
+  });
   const selectedInvoice = payableInvoices.find((invoice) => invoice.id === formState.supplierInvoiceId) ?? null;
 
   useEffect(() => {
@@ -93,8 +117,13 @@ export default function ProcurementPaymentsPage() {
       await request('/api/procurement/supplier-payments', {
         body: JSON.stringify({
           amountPaid,
+          bankAccountId: formState.paymentMethod === 'BANK' ? formState.bankAccountId || null : null,
+          cashAccountId: formState.paymentMethod === 'CASH' ? formState.cashAccountId || null : null,
+          goodsReceivedNoteId: selectedInvoice.goodsReceivedNoteId,
           paymentDate: formState.paymentDate || undefined,
           paymentMethod: formState.paymentMethod,
+          pettyCashRequestId: formState.paymentMethod === 'PETTY_CASH' ? formState.pettyCashRequestId || null : null,
+          purchaseOrderId: selectedInvoice.purchaseOrderId,
           referenceNumber: formState.referenceNumber || null,
           remarks: formState.remarks || null,
           supplierId: selectedInvoice.supplierId,
@@ -286,7 +315,15 @@ export default function ProcurementPaymentsPage() {
               <select
                 required
                 value={formState.paymentMethod}
-                onChange={(event) => setFormState((current) => ({ ...current, paymentMethod: event.target.value }))}
+                onChange={(event) =>
+                  setFormState((current) => ({
+                    ...current,
+                    bankAccountId: '',
+                    cashAccountId: '',
+                    paymentMethod: event.target.value,
+                    pettyCashRequestId: '',
+                  }))
+                }
                 className="surface-input-soft"
               >
                 {paymentSources.map((source) => (
@@ -296,6 +333,60 @@ export default function ProcurementPaymentsPage() {
                 ))}
               </select>
             </label>
+            {formState.paymentMethod === 'BANK' ? (
+              <label className="space-y-2 text-sm text-muted">
+                <span>Bank Account</span>
+                <select
+                  required
+                  value={formState.bankAccountId}
+                  onChange={(event) => setFormState((current) => ({ ...current, bankAccountId: event.target.value }))}
+                  className="surface-input-soft"
+                >
+                  <option value="">{bankAccountsQuery.isLoading ? 'Loading bank accounts...' : 'Select bank account'}</option>
+                  {(bankAccountsQuery.data ?? []).map((account) => (
+                    <option key={account.id} value={account.id}>
+                      {[account.bank_name, account.account_name].filter(Boolean).join(' - ')}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
+            {formState.paymentMethod === 'CASH' ? (
+              <label className="space-y-2 text-sm text-muted">
+                <span>Cash Account</span>
+                <select
+                  required
+                  value={formState.cashAccountId}
+                  onChange={(event) => setFormState((current) => ({ ...current, cashAccountId: event.target.value }))}
+                  className="surface-input-soft"
+                >
+                  <option value="">{cashAccountsQuery.isLoading ? 'Loading cash accounts...' : 'Select cash account'}</option>
+                  {(cashAccountsQuery.data ?? []).map((account) => (
+                    <option key={account.id} value={account.id}>
+                      {account.name ?? 'Cash account'}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
+            {formState.paymentMethod === 'PETTY_CASH' ? (
+              <label className="space-y-2 text-sm text-muted">
+                <span>Petty Cash Request</span>
+                <select
+                  required
+                  value={formState.pettyCashRequestId}
+                  onChange={(event) => setFormState((current) => ({ ...current, pettyCashRequestId: event.target.value }))}
+                  className="surface-input-soft"
+                >
+                  <option value="">{pettyCashQuery.isLoading ? 'Loading petty cash requests...' : 'Select petty cash request'}</option>
+                  {(pettyCashQuery.data ?? []).map((requestRow) => (
+                    <option key={requestRow.id} value={requestRow.id}>
+                      {requestRow.requestNumber ?? requestRow.request_number ?? requestRow.purpose ?? 'Petty cash request'}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
             <label className="space-y-2 text-sm text-muted">
               <span>Payment Date</span>
               <input

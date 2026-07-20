@@ -35,6 +35,7 @@ export async function POST(
       .update({
         approval_status: 'submitted',
         status: 'submitted',
+        submitted_at: new Date().toISOString(),
       })
       .eq('id', id)
       .select()

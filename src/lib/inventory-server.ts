@@ -124,6 +124,7 @@ export async function applyInventoryDelta(
     itemId: string;
     organizationId?: string;
     quantityDelta: number;
+    unitCost?: number | null;
     warehouseId: string;
   },
 ) {
@@ -138,17 +139,29 @@ export async function applyInventoryDelta(
   const quantityReserved = toNumber(current?.quantity_reserved);
   const nextOnHand = toNumber(current?.quantity_on_hand) + quantityDelta;
   const nextAvailable = nextOnHand - quantityReserved;
+  const currentLegacyQuantity = toNumber(current?.quantity ?? current?.quantity_on_hand);
+  const nextLegacyQuantity = currentLegacyQuantity + quantityDelta;
+  const currentAverageCost = toNumber(current?.avg_cost);
+  const incomingUnitCost = params.unitCost == null ? null : toNumber(params.unitCost);
+  const nextAverageCost =
+    quantityDelta > 0 && incomingUnitCost !== null && nextOnHand > 0
+      ? (((toNumber(current?.quantity_on_hand) * currentAverageCost) + (quantityDelta * incomingUnitCost)) / nextOnHand)
+      : currentAverageCost;
 
   ensureNonNegative(nextOnHand, 'stock balance');
   ensureNonNegative(nextAvailable, 'available stock');
+  ensureNonNegative(nextLegacyQuantity, 'legacy stock balance');
 
   if (current) {
     const { data, error } = await service
       .from('stock_balances')
       .update({
+        avg_cost: nextAverageCost,
+        quantity: nextLegacyQuantity,
         quantity_on_hand: nextOnHand,
         quantity_available: nextAvailable,
         quantity_reserved: quantityReserved,
+        reserved_qty: quantityReserved,
         last_updated: new Date().toISOString(),
       })
       .eq('id', current.id)
@@ -165,12 +178,15 @@ export async function applyInventoryDelta(
   const { data, error } = await service
     .from('stock_balances')
     .insert({
+      avg_cost: incomingUnitCost ?? 0,
       organization_id: organizationId,
       item_id: params.itemId,
+      quantity: nextLegacyQuantity,
       warehouse_id: params.warehouseId,
       quantity_on_hand: nextOnHand,
       quantity_available: nextAvailable,
       quantity_reserved: quantityReserved,
+      reserved_qty: quantityReserved,
       last_updated: new Date().toISOString(),
     })
     .select()
@@ -198,13 +214,14 @@ export async function recordStockMovement(
     referenceId?: string | null;
     referenceType?: string | null;
     sourceWarehouseId?: string | null;
+    unitCost?: number | null;
     warehouseId: string;
   },
 ) {
   const item = await requireItem(service, params.itemId);
   const balance = await getBalance(service, params.itemId, params.warehouseId);
   const quantity = ensurePositiveQuantity(params.quantity);
-  const unitCost = toNumber(item.unit_cost);
+  const unitCost = params.unitCost == null ? toNumber(item.unit_cost) : toNumber(params.unitCost);
   const totalCost = unitCost * quantity;
   const organizationId = await resolveInventoryOrganizationId(service, {
     explicitOrganizationId: params.organizationId,
