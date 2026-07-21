@@ -257,7 +257,7 @@ export default function PurchaseOrderDetailPage({ params }: PurchaseOrderDetailP
     if (!formState) return;
 
     const items = formState.items
-      .filter((item) => item.itemId && item.unitOfMeasureId)
+      .filter((item) => item.itemId)
       .map((item) => ({
         itemId: item.itemId,
         quantityOrdered: Number(item.quantityOrdered),
@@ -354,6 +354,21 @@ export default function PurchaseOrderDetailPage({ params }: PurchaseOrderDetailP
                 return {
                   ...row,
                   itemId: value,
+                  unitCost: String(
+                    matchedItem?.purchase_price ??
+                      matchedItem?.purchasePrice ??
+                      matchedItem?.cost_price ??
+                      matchedItem?.costPrice ??
+                      matchedItem?.unit_cost ??
+                      matchedItem?.unitCost ??
+                      matchedItem?.standard_cost ??
+                      matchedItem?.standardCost ??
+                      matchedItem?.default_purchase_price ??
+                      matchedItem?.defaultPurchasePrice ??
+                      matchedItem?.selling_price ??
+                      matchedItem?.sellingPrice ??
+                      0,
+                  ),
                   unitOfMeasureId: row.unitOfMeasureId || matchedItem?.unitOfMeasureId || '',
                 };
               }

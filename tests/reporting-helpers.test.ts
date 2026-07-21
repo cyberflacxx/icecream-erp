@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { createBrandedPdfDocument } from '../src/lib/pdf';
+import { createBrandedPdfDocument, createPurchaseOrderPdfDocument } from '../src/lib/pdf';
 import { REPORT_DEFINITIONS, findReportDefinition, toReportCsv, validateReportDateRange } from '../src/lib/reporting';
 
 test('report registry exposes inventory valuation definition', () => {
@@ -68,4 +68,45 @@ test('createBrandedPdfDocument includes branded header, footer, and table conten
   assert.match(pdf, /Powered by Nexatech/);
   assert.match(pdf, /Report Data/);
   assert.match(pdf, /\/Subtype \/Image/);
+});
+
+test('createPurchaseOrderPdfDocument tolerates missing optional fields and empty items', () => {
+  const pdf = Buffer.from(createPurchaseOrderPdfDocument({
+    authorization: {
+      approvedBy: '',
+      date: '',
+    },
+    buyer: {
+      address: '',
+      companyName: 'Absolute Ice Cream',
+      preparedFor: '',
+    },
+    currency: 'USD',
+    deliveryTerms: ['Payment method: -'],
+    footerText: 'Generated Purchase Order | Absolute Ice Cream',
+    items: [],
+    metadata: [
+      { label: 'PO No', value: 'PO-00001' },
+      { label: 'PO Date', value: '' },
+      { label: 'Supplier Quote', value: '' },
+      { label: 'Currency', value: 'USD' },
+    ],
+    supplier: {
+      address: '',
+      email: '',
+      name: 'Test Supplier',
+      phone: '',
+    },
+    title: 'PURCHASE ORDER',
+    totals: [
+      { label: 'Total Net Price', value: '$0.00' },
+      { label: 'Discount', value: '$0.00' },
+      { label: 'Tax', value: '$0.00' },
+      { label: 'TOTAL', value: '$0.00' },
+    ],
+  })).toString('latin1');
+
+  assert.match(pdf, /PURCHASE ORDER/);
+  assert.match(pdf, /PO-00001/);
+  assert.match(pdf, /Test Supplier/);
 });

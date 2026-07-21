@@ -38,6 +38,24 @@ function stripMissingLegacyPurchaseOrderItemColumn<T extends Record<string, unkn
   return nextPayload;
 }
 
+function logPurchaseOrderFailure(
+  step: string,
+  details: {
+    header?: Record<string, unknown>;
+    firstLine?: Record<string, unknown> | null;
+    lineCount?: number;
+    message: string;
+  },
+) {
+  console.error('Purchase order create failed.', {
+    firstLine: details.firstLine,
+    header: details.header,
+    lineCount: details.lineCount,
+    message: details.message,
+    step,
+  });
+}
+
 function stripMissingOptionalHeaderColumn<T extends Record<string, unknown>>(payload: T, error: unknown) {
   for (const column of ['approver_name', 'approver_email', 'approval_notes'] as const) {
     if (isMissingColumnError(error, 'purchase_orders', column)) {
@@ -429,7 +447,25 @@ export async function POST(request: NextRequest) {
       orderInsert = await service.from('purchase_orders').insert(orderPayload).select().single();
     }
 
-    if (orderInsert.error) return serverError(orderInsert.error.message);
+    if (orderInsert.error) {
+      logPurchaseOrderFailure('purchase_orders.insert', {
+        firstLine: resolvedItems[0] ?? null,
+        header: {
+          order_date: orderPayload.order_date,
+          requisition_id: orderPayload.requisition_id,
+          supplier_id: orderPayload.supplier_id,
+          subtotal: orderPayload.subtotal,
+          total: orderPayload.total,
+        },
+        lineCount: resolvedItems.length,
+        message: orderInsert.error.message,
+      });
+      return NextResponse.json({
+        success: false,
+        message: 'Purchase order could not be created. Please check required fields and try again.',
+        code: 'PO_CREATE_FAILED',
+      }, { status: 500 });
+    }
     const order = orderInsert.data;
 
     const orderId = (order as Record<string, unknown>).id as string;
@@ -465,7 +501,23 @@ export async function POST(request: NextRequest) {
       itemsErr = retry.error;
     }
 
-    if (itemsErr) return serverError(itemsErr.message);
+    if (itemsErr) {
+      logPurchaseOrderFailure('purchase_order_items.insert', {
+        firstLine: itemPayload[0] ?? null,
+        header: {
+          purchase_order_id: orderId,
+          requisition_id: requisitionId || null,
+          supplier_id: supplierId,
+        },
+        lineCount: itemPayload.length,
+        message: itemsErr.message,
+      });
+      return NextResponse.json({
+        success: false,
+        message: 'Purchase order could not be created. Please check required fields and try again.',
+        code: 'PO_CREATE_FAILED',
+      }, { status: 500 });
+    }
 
     // Update requisition status if linked
     if (requisitionId) {
@@ -491,6 +543,19 @@ export async function POST(request: NextRequest) {
         poNumber: String((full as Record<string, unknown> | null)?.po_number ?? poNumber),
         requisition_id: requisitionId || null,
         requisitionId: requisitionId || null,
+        items: resolvedItems.map((item, index) => ({
+          description: item.description || '',
+          item_id: item.itemId,
+          itemId: item.itemId,
+          quantity: item.quantityOrdered,
+          requisition_item_id: item.requisitionItemId || null,
+          requisitionItemId: item.requisitionItemId || null,
+          rowId: itemPayload[index]?.requisition_item_id ?? item.requisitionItemId ?? `${index}`,
+          unit_of_measure_id: item.unitOfMeasureId || null,
+          unitOfMeasureId: item.unitOfMeasureId || null,
+          unit_price: item.unitCost,
+          unitPrice: item.unitCost,
+        })),
       },
     }, { status: 201 });
   } catch (err) {

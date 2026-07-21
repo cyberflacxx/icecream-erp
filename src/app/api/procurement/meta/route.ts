@@ -404,7 +404,9 @@ export async function GET(_request: NextRequest) {
           return {
             code: String(item.code ?? ''),
             cost_price: unitCost,
+            costPrice: unitCost,
             default_purchase_price: purchasePrice,
+            defaultPurchasePrice: purchasePrice,
             description: item.description ? String(item.description) : null,
             id,
             inventory: {
@@ -421,13 +423,19 @@ export async function GET(_request: NextRequest) {
             label: item.code ? `${String(item.code)} - ${String(item.name ?? item.code)}` : String(item.name ?? 'Unnamed item'),
             name: String(item.name ?? item.code ?? 'Unnamed item'),
             purchase_price: purchasePrice,
+            purchasePrice,
+            standard_cost: toNumber(item.standard_cost ?? item.unit_cost ?? item.cost_price ?? item.purchase_price),
+            standardCost: toNumber(item.standard_cost ?? item.unit_cost ?? item.cost_price ?? item.purchase_price),
             uomName: unit ? mapUnitLabel(unit) : null,
             unit_of_measure_id: unitId,
             unit_of_measure_name: unit ? mapUnitLabel(unit) : null,
             unitOfMeasureId: unitId,
             unitOfMeasureName: unit ? mapUnitLabel(unit) : null,
+            uomId: unitId,
             unit_cost: unitCost,
+            unitCost: unitCost,
             selling_price: toNumber(item.selling_price ?? item.price),
+            sellingPrice: toNumber(item.selling_price ?? item.price),
           };
         }),
       purchaseOrders: receivablePurchaseOrders.map((row) => {

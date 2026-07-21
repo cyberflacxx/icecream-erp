@@ -17,8 +17,8 @@ export async function GET(request: NextRequest) {
   let query = service
     .from('stock_balances')
     .select(
-      `quantity_on_hand, quantity_available,
-       items!item_id(id, code, name, item_type, unit_cost),
+      `quantity_on_hand, quantity_available, quantity, total_value, average_cost, avg_cost,
+       items!item_id(id, code, name, item_type, unit_cost, purchase_price, cost_price),
        warehouses!warehouse_id(id, code, name, branch_id, branches!branch_id(id, code, name))`,
     )
     .order('warehouses(name)', { ascending: true })
@@ -35,8 +35,9 @@ export async function GET(request: NextRequest) {
     const item = Array.isArray(row.items) ? row.items[0] : row.items;
     const warehouse = Array.isArray(row.warehouses) ? row.warehouses[0] : row.warehouses;
     const branch = Array.isArray(warehouse?.branches) ? warehouse.branches[0] : warehouse?.branches;
-    const quantityOnHand = toNumber(row.quantity_on_hand);
-    const unitCost = toNumber(item?.unit_cost);
+    const quantityOnHand = toNumber(row.quantity_on_hand ?? row.quantity);
+    const unitCost = toNumber(row.average_cost ?? row.avg_cost ?? item?.unit_cost ?? item?.cost_price ?? item?.purchase_price);
+    const stockValue = toNumber(row.total_value ?? (quantityOnHand * unitCost));
 
     return {
       branchName: branch?.name ?? null,
@@ -45,7 +46,7 @@ export async function GET(request: NextRequest) {
       itemType: item?.item_type ?? '',
       quantityAvailable: toNumber(row.quantity_available),
       quantityOnHand,
-      stockValue: quantityOnHand * unitCost,
+      stockValue,
       unitCost,
       warehouseCode: warehouse?.code ?? '',
       warehouseName: warehouse?.name ?? 'Unknown warehouse',

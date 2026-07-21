@@ -263,6 +263,28 @@ test('buildPurchaseOrderDraftPayload stores supplier_id canonically', () => {
   assert.equal(payload.items[0]?.unitOfMeasureId, 'uom-1');
 });
 
+test('buildPurchaseOrderDraftPayload preserves requisition line ids and descriptions', () => {
+  const payload = buildPurchaseOrderDraftPayloadForOrders({
+    discountAmount: 0,
+    items: [
+      {
+        description: 'Vanilla Mix 20L bucket',
+        itemId: 'item-1',
+        quantity: 50,
+        requisitionItemId: 'req-item-1',
+        unitPrice: 2,
+      },
+    ],
+    supplierId: 'sup-1',
+    taxAmount: 0,
+  });
+
+  assert.equal(payload.items[0]?.description, 'Vanilla Mix 20L bucket');
+  assert.equal(payload.items[0]?.requisitionItemId, 'req-item-1');
+  assert.equal(payload.items[0]?.requisition_item_id, 'req-item-1');
+  assert.equal(payload.items[0]?.unit_price, 2);
+});
+
 test('normalizeRequisitionItemId accepts item_id and itemId', () => {
   assert.equal(normalizeRequisitionItemId({ item_id: ' item-1 ' }), 'item-1');
   assert.equal(normalizeRequisitionItemId({ itemId: 'item-2' }), 'item-2');

@@ -30,6 +30,7 @@
     "audit:live-schema-contract": "node scripts/audit-live-schema-contract.mjs .tmp-schema-inventory .tmp-schema-audit.json",
     "smoke:dashboard-pages": "node scripts/smoke-all-dashboard-pages.mjs",
     "smoke:api-contract": "node scripts/smoke-api-contract.mjs",
+    "smoke:procurement:e2e": "node scripts/smoke-procurement-e2e.mjs",
     "smoke:live-pages": "node scripts/smoke-live-pages.mjs",
     "smoke:frontend-agent": "node scripts/frontend-agent-smoke.mjs --mode=pages",
     "verify:production-workflow": "node scripts/verify-production-workflow.mjs",

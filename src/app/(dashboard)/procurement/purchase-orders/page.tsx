@@ -146,7 +146,9 @@ function normalizePurchaseOrderItemsResponse(payload: unknown): PurchaseOrderIte
 
 function createLineItemDraft() {
   return {
+    description: '',
     itemId: '',
+    requisitionItemId: '',
     quantityOrdered: '1',
     rowId:
       typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
@@ -220,6 +222,8 @@ interface RequisitionPickerOption {
 
 interface RequisitionDetailResponse {
   id: string;
+  requisition_id?: string | null;
+  requisitionId?: string | null;
   needed_by_date: string | null;
   approver_user_id: string | null;
   approver_name?: string | null;
@@ -228,12 +232,38 @@ interface RequisitionDetailResponse {
   approverEmail?: string | null;
   approval_notes?: string | null;
   approvalNotes?: string | null;
+  items?: Array<{
+    id: string;
+    requisition_item_id?: string | null;
+    requisitionItemId?: string | null;
+    item_id?: string | null;
+    itemId?: string | null;
+    item_code?: string | null;
+    itemCode?: string | null;
+    item_name?: string | null;
+    itemName?: string | null;
+    description?: string | null;
+    quantity?: number | string;
+    unit_of_measure_id?: string | null;
+    unitOfMeasureId?: string | null;
+    unit_of_measure_name?: string | null;
+    uomName?: string | null;
+    unit_price?: number | string | null;
+    unitPrice?: number | string | null;
+  }>;
   purchase_requisition_items: Array<{
     id: string;
     item_id: string;
     itemId?: string | null;
+    item_code?: string | null;
+    itemCode?: string | null;
+    item_name?: string | null;
+    itemName?: string | null;
+    description?: string | null;
     unit_of_measure_id: string;
     unitOfMeasureId?: string | null;
+    unit_of_measure_name?: string | null;
+    uomName?: string | null;
     quantity_requested: number | string;
     estimated_unit_cost?: number | string | null;
   }>;
@@ -315,6 +345,22 @@ export default function PurchaseOrdersPage() {
 
     try {
       const detail = await request<RequisitionDetailResponse>(`/api/procurement/requisitions/${requisitionId}`);
+      const requisitionItems = detail.items?.length
+        ? detail.items
+        : detail.purchase_requisition_items.map((item) => ({
+            description: item.description ?? item.itemName ?? item.item_name ?? '',
+            id: item.id,
+            item_id: item.itemId ?? item.item_id ?? '',
+            itemId: item.itemId ?? item.item_id ?? '',
+            quantity: item.quantity_requested,
+            requisition_item_id: item.id,
+            requisitionItemId: item.id,
+            unit_of_measure_id: item.unitOfMeasureId ?? item.unit_of_measure_id ?? '',
+            unitOfMeasureId: item.unitOfMeasureId ?? item.unit_of_measure_id ?? '',
+            unit_price: item.estimated_unit_cost ?? 0,
+            unitPrice: item.estimated_unit_cost ?? 0,
+          }));
+
       setFormState((current) => ({
         ...current,
         approverEmail: current.approverEmail || detail.approverEmail || detail.approver_email || '',
@@ -323,12 +369,17 @@ export default function PurchaseOrdersPage() {
         approvalNotes: current.approvalNotes || detail.approvalNotes || detail.approval_notes || '',
         expectedDeliveryDate: current.expectedDeliveryDate || (detail.needed_by_date ? String(detail.needed_by_date).slice(0, 10) : ''),
         items:
-          detail.purchase_requisition_items.length > 0
-            ? detail.purchase_requisition_items.map((item) => ({
+          requisitionItems.length > 0
+            ? requisitionItems.map((item) => ({
                 itemId: item.itemId ?? item.item_id ?? '',
-                quantityOrdered: String(item.quantity_requested ?? 1),
-                rowId: item.id,
-                unitCost: String(resolvePurchaseOrderItemUnitPrice({ unit_cost: item.estimated_unit_cost })),
+                quantityOrdered: String(item.quantity ?? 1),
+                rowId: item.requisitionItemId ?? item.requisition_item_id ?? item.id,
+                unitCost: String(
+                  resolvePurchaseOrderItemUnitPrice({
+                    purchase_price: item.unit_price,
+                    unit_cost: item.unitPrice,
+                  }),
+                ),
                 unitOfMeasureId: item.unitOfMeasureId ?? item.unit_of_measure_id ?? '',
               }))
             : [createLineItemDraft()],
@@ -425,7 +476,9 @@ export default function PurchaseOrdersPage() {
     const items = formState.items
       .filter((item) => item.itemId)
       .map((item) => ({
+        description: item.description || '',
         itemId: item.itemId,
+        requisitionItemId: item.requisitionItemId || null,
         quantityOrdered: Number(item.quantityOrdered),
         unitCost: Number(item.unitCost),
         unitOfMeasureId: item.unitOfMeasureId || ''
@@ -538,6 +591,7 @@ export default function PurchaseOrdersPage() {
 
           return {
             ...row,
+            description: matchedItem?.description ?? matchedItem?.name ?? '',
             itemId: value,
             unitCost: String(derivedUnitCost),
             unitOfMeasureId: matchedItem?.unitOfMeasureId || row.unitOfMeasureId || '',
@@ -881,6 +935,7 @@ export default function PurchaseOrdersPage() {
                         rowIndex === current.items.length - 1 && !row.itemId
                           ? {
                               ...row,
+                              description: createdItem.description ?? createdItem.name ?? '',
                               itemId: createdItem.id,
                               unitCost: String(createdItem.unitCost ?? 0),
                               unitOfMeasureId: createdItem.unitOfMeasureId,

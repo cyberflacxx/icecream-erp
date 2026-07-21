@@ -17,6 +17,10 @@ function sanitizeFileToken(value: string, fallback: string) {
   return normalized || fallback;
 }
 
+function isMissingColumnError(error: { message?: string } | null | undefined, table: string, columnName: string) {
+  return (error?.message ?? '').includes(`column ${table}.${columnName} does not exist`);
+}
+
 export async function GET(
   _request: Request,
   { params }: { params: Promise<{ id: string }> },
@@ -29,7 +33,7 @@ export async function GET(
   const service = createServiceRoleClient();
 
   try {
-    const [company, orderRes] = await Promise.all([
+    const [company, orderPrimary] = await Promise.all([
       getCompanyProfile().catch(() => null),
       service
         .from('purchase_orders')
@@ -44,14 +48,43 @@ export async function GET(
         .maybeSingle(),
     ]);
 
+    const orderRes =
+      orderPrimary.error &&
+      ['supplier_quote', 'currency', 'delivery_address', 'payment_terms', 'delivery_terms', 'prepared_for'].some((column) =>
+        isMissingColumnError(orderPrimary.error, 'purchase_orders', column),
+      )
+        ? await service
+            .from('purchase_orders')
+            .select(
+              `id, po_number, requisition_id, order_date, expected_delivery_date, notes, subtotal, tax_amount, discount_amount, total,
+               approval_notes, approved_at, approved_by,
+               suppliers(name, email, phone, address)`,
+            )
+            .is('deleted_at', null)
+            .eq('organization_id', ctx.organizationId)
+            .eq('id', id)
+            .maybeSingle()
+        : orderPrimary;
+
     if (orderRes.error) return serverError(orderRes.error.message);
     if (!orderRes.data) return notFound('Purchase order not found.');
 
-    const itemsRes = await service
+    const itemsPrimary = await service
       .from('purchase_order_items')
       .select('quantity_ordered, unit_cost, unit_price, tax_rate, tax_amount, total_cost, total_ex_vat, description, unit_of_measure_id, items(code, name, description, unit_of_measure_id)')
       .eq('purchase_order_id', id)
       .order('created_at', { ascending: true });
+    const itemsRes =
+      itemsPrimary.error &&
+      ['unit_price', 'tax_rate', 'tax_amount', 'total_ex_vat', 'description'].some((column) =>
+        isMissingColumnError(itemsPrimary.error, 'purchase_order_items', column),
+      )
+        ? await service
+            .from('purchase_order_items')
+            .select('quantity_ordered, unit_cost, total_cost, unit_of_measure_id, items(code, name, description, unit_of_measure_id)')
+            .eq('purchase_order_id', id)
+            .order('created_at', { ascending: true })
+        : itemsPrimary;
     if (itemsRes.error) return serverError(itemsRes.error.message);
 
     const unitIds = [

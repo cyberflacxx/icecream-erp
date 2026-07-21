@@ -227,6 +227,7 @@ interface PurchaseOrderDraftPayloadInput {
   discountAmount: number;
   expectedDeliveryDate?: string | null;
   items: Array<{
+    description?: string | null;
     itemId?: string | null;
     item_id?: string | null;
     quantityOrdered?: number;
@@ -242,6 +243,8 @@ interface PurchaseOrderDraftPayloadInput {
     unit_of_measure_id?: string | null;
     uomId?: string | null;
     uom_id?: string | null;
+    requisitionItemId?: string | null;
+    requisition_item_id?: string | null;
   }>;
   notes?: string | null;
   orderDate?: string | null;
@@ -272,10 +275,13 @@ export function buildPurchaseOrderDraftPayload(input: PurchaseOrderDraftPayloadI
       return {
         itemId,
         item_id: itemId,
+        description: item.description ?? null,
         quantity: quantityOrdered,
         quantityOrdered,
         quantity_ordered: quantityOrdered,
         qty: quantityOrdered,
+        requisitionItemId: item.requisitionItemId ?? item.requisition_item_id ?? null,
+        requisition_item_id: item.requisitionItemId ?? item.requisition_item_id ?? null,
         unitCost: unitPrice,
         unitPrice,
         unit_cost: unitPrice,

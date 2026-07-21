@@ -71,7 +71,7 @@ export async function GET(
     const [itemsRes, grnsPrimary] = await Promise.all([
       service
         .from('purchase_order_items')
-        .select('id, quantity_ordered, quantity_received, unit_cost, total_cost, unit_of_measure_id, items(id, code, name, unit_of_measure_id)')
+        .select('id, description, quantity_ordered, quantity_received, unit_cost, unit_price, total_cost, total_ex_vat, tax_rate, unit_of_measure_id, items(id, code, name, description, unit_of_measure_id)')
         .eq('purchase_order_id', id)
         .order('created_at', { ascending: true }),
       service
@@ -166,14 +166,18 @@ export async function GET(
         const unit = unitsById.get(resolvedUnitId);
         return {
           id: item.id,
+          description: item.description ? String(item.description) : product?.description ? String((product as Record<string, unknown>).description ?? '') : product?.name ? String((product as Record<string, unknown>).name ?? '') : '',
           quantityOrdered: Number(item.quantity_ordered ?? 0),
           quantityReceived: Number(item.quantity_received ?? 0),
-          unitCost: Number(item.unit_cost ?? 0),
-          totalCost: Number(item.total_cost ?? 0),
+          outstandingQuantity: Math.max(0, Number(item.quantity_ordered ?? 0) - Number(item.quantity_received ?? 0)),
+          taxRate: Number(item.tax_rate ?? 0),
+          totalCost: Number(item.total_ex_vat ?? item.total_cost ?? 0),
+          unitCost: Number(item.unit_price ?? item.unit_cost ?? 0),
           item: product
             ? {
                 id: (product as Record<string, unknown>).id,
                 code: (product as Record<string, unknown>).code,
+                description: (product as Record<string, unknown>).description ?? null,
                 name: (product as Record<string, unknown>).name,
               }
             : null,

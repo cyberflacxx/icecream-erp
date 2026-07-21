@@ -16,7 +16,9 @@ export interface ProcurementMetaResponse {
   items: Array<{
     id: string;
     code: string;
+    costPrice?: number;
     cost_price?: number;
+    defaultPurchasePrice?: number;
     default_purchase_price?: number;
     description: string | null;
     itemType: string | null;
@@ -37,13 +39,20 @@ export interface ProcurementMetaResponse {
       }>;
     };
     name: string;
+    price?: number;
+    purchasePrice?: number;
     purchase_price?: number;
+    sellingPrice?: number;
+    selling_price?: number;
+    standardCost?: number;
+    standard_cost?: number;
     unit_of_measure_id?: string | null;
     unit_of_measure_name?: string | null;
     unitOfMeasureId: string | null;
     unitOfMeasureName?: string | null;
     uomName?: string | null;
     uomId?: string | null;
+    unitCost?: number;
     unit_cost?: number;
   }>;
   purchaseOrders: Array<{
