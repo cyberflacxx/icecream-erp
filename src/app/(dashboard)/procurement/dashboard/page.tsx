@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { FileClock, ShieldAlert, Truck, Wallet } from 'lucide-react';
 
 import { PageHeader } from '@/components/dashboard/page-header';
@@ -72,6 +73,24 @@ export default function ProcurementDashboardPage() {
             )}
           </div>
         </div>
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-3">
+        <WorkflowLinkCard
+          description="Submit drafts, clear pending approvals, and move approved demand into PO creation."
+          href="/procurement/requisitions"
+          label="Requisitions"
+        />
+        <WorkflowLinkCard
+          description="Review open purchase orders, dispatch supplier emails, and open the receiving path."
+          href="/procurement/purchase-orders"
+          label="Purchase Orders"
+        />
+        <WorkflowLinkCard
+          description="Approve GRNs, post receipts into stock, and verify the resulting inventory movement."
+          href="/procurement/goods-received"
+          label="Goods Received"
+        />
       </div>
 
       <div className="dashboard-blue-card p-4">
@@ -152,5 +171,15 @@ function CountTile({ label, value }: { label: string; value: number }) {
       <p className="dashboard-blue-copy text-sm">{label}</p>
       <p className="dashboard-blue-value mt-2 text-lg font-semibold">{value}</p>
     </div>
+  );
+}
+
+function WorkflowLinkCard({ description, href, label }: { description: string; href: string; label: string }) {
+  return (
+    <Link href={href} className="dashboard-blue-card p-4 transition-transform hover:-translate-y-0.5">
+      <p className="dashboard-blue-label text-sm font-semibold uppercase tracking-[0.18em]">{label}</p>
+      <p className="dashboard-blue-copy mt-3 text-sm">{description}</p>
+      <p className="dashboard-blue-value mt-4 text-sm font-semibold">Open workspace</p>
+    </Link>
   );
 }

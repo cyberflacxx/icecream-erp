@@ -34,6 +34,8 @@ export async function POST(
 
     const order = existing as Record<string, unknown>;
     const workflowStatus = derivePurchaseOrderStatus({
+      approvedAt: order.approved_at,
+      approvedBy: order.approved_by,
       rejectedAt: order.rejected_at,
       sentAt: order.sent_at,
       status: order.status,

@@ -40,12 +40,14 @@ export async function POST(
 
     const order = existing as Record<string, unknown>;
     const workflowStatus = derivePurchaseOrderStatus({
+      approvedAt: order.approved_at,
+      approvedBy: order.approved_by,
       rejectedAt: order.rejected_at,
       sentAt: order.sent_at,
       status: order.status,
     });
     if (!isPurchaseOrderRejectable(workflowStatus)) {
-      return badRequest('Only draft or approved purchase orders can be rejected.');
+      return badRequest('Only draft, pending approval, or approved purchase orders can be rejected.');
     }
     if (order.approver_user_id && String(order.approver_user_id) !== ctx.userId) {
       return forbidden();

@@ -2,8 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { badRequest, can, forbidden, getAuthContext, notFound, serverError, unauthorized } from '@/lib/api-auth';
 import {
+  derivePurchaseOrderStatus,
   formatPurchaseOrderDbStatus,
-  isPurchaseOrderApprovable,
 } from '@/lib/procurement-purchase-orders';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
@@ -31,7 +31,7 @@ export async function POST(
   try {
     const { data: existing, error: fetchErr } = await service
       .from('purchase_orders')
-      .select('id, status, approver_user_id')
+      .select('id, status, approval_status, approver_user_id, approved_at, approved_by, rejected_at, sent_at')
       .is('deleted_at', null)
       .eq('organization_id', ctx.organizationId)
       .eq('id', id)
@@ -39,8 +39,18 @@ export async function POST(
 
     if (fetchErr || !existing) return notFound('Purchase order not found.');
     const order = existing as Record<string, unknown>;
-    if (!isPurchaseOrderApprovable(order.status)) {
-      return badRequest('Only draft purchase orders can be approved.');
+    if (
+      !['DRAFT', 'PENDING_APPROVAL'].includes(
+        derivePurchaseOrderStatus({
+          approvedAt: order.approved_at,
+          approvedBy: order.approved_by,
+          rejectedAt: order.rejected_at,
+          sentAt: order.sent_at,
+          status: order.approval_status ?? order.status,
+        }),
+      )
+    ) {
+      return badRequest('Only draft or pending approval purchase orders can be approved.');
     }
     if (order.approver_user_id && String(order.approver_user_id) !== ctx.userId) {
       return forbidden();

@@ -1,5 +1,6 @@
 ﻿'use client';
 
+import Link from 'next/link';
 import { Plus } from 'lucide-react';
 import { type FormEvent, useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
@@ -16,6 +17,7 @@ import { ProcurementNav } from '@/components/procurement/procurement-nav';
 import { SupplierSelect } from '@/components/procurement/supplier-select';
 import { TransactionShortcuts } from '@/components/procurement/transaction-shortcuts';
 import { Button } from '@/components/ui/button';
+import { useUserContext } from '@/contexts/UserContext';
 import {
   useGRNs,
   useProcurementMeta,
@@ -23,6 +25,11 @@ import {
   usePurchaseOrder,
   type GRNRow,
 } from '@/hooks/procurement';
+import {
+  formatProcurementWorkflowStatusLabel,
+  getGoodsReceivedActionState,
+  getGoodsReceivedWorkflowCopy,
+} from '@/lib/procurement-workflow';
 import { usePermission } from '@/hooks/usePermission';
 
 const initialFormState = {
@@ -80,6 +87,7 @@ export default function GoodsReceivedPage() {
   const canCreate = usePermission([PERMISSIONS.goodsReceived.create, 'procurement.write']);
   const canApprove = usePermission(['stores.grn.approve', 'procurement.approve']);
   const canPost = usePermission(['stores.grn.post', 'procurement.grn.post', 'inventory.write']);
+  const { currentUser } = useUserContext();
   const [filters, setFilters] = useState({
     page: 1,
     pageSize: 10,
@@ -109,6 +117,13 @@ export default function GoodsReceivedPage() {
   const purchaseOrderLoadFailed = metaQuery.isError && purchaseOrderOptions.length === 0;
   const itemLoadFailed = metaQuery.isError && itemOptions.length === 0;
   const unitLoadFailed = metaQuery.isError && unitOptions.length === 0;
+  const workflowAccess = {
+    canApprove,
+    canCreate,
+    canPost,
+    role: currentUser?.profile.role ?? null,
+    roleNames: currentUser?.roles.map((role) => role.name) ?? [],
+  };
 
   useEffect(() => {
     if (!purchaseOrderIdParam) {
@@ -422,31 +437,30 @@ export default function GoodsReceivedPage() {
           {
             key: 'status',
             header: 'Status',
-            render: (row) => (
-              <div className="space-y-1">
-                <StatusBadge status={row.status} />
-                <p className="text-xs text-muted">
-                  {row.status === 'PENDING_APPROVAL'
-                    ? 'Waiting for supervisor sign-off.'
-                    : row.status === 'APPROVED'
-                      ? 'Approved and ready to post into HQ inventory.'
-                      : row.status === 'POSTED'
-                        ? 'Inventory posted.'
-                        : row.status === 'REJECTED'
-                          ? 'Rejected and not posted.'
-                          : 'Draft receipt.'}
-                </p>
-              </div>
-            )
+            render: (row) => {
+              const actionState = getGoodsReceivedActionState(row, workflowAccess);
+
+              return (
+                <div className="space-y-1">
+                  <StatusBadge
+                    status={formatProcurementWorkflowStatusLabel(actionState.normalizedStatus)}
+                    variant={actionState.statusVariant}
+                  />
+                  <p className="text-xs text-muted">{getGoodsReceivedWorkflowCopy(row)}</p>
+                </div>
+              );
+            }
           },
           {
             key: 'actions',
             header: 'Actions',
             render: (row) => {
-              if (row.status === 'PENDING_APPROVAL') {
+              const actionState = getGoodsReceivedActionState(row, workflowAccess);
+
+              if (actionState.canApprove || actionState.canReject || actionState.canOpenPurchaseOrder) {
                 return (
                   <div className="flex flex-wrap gap-2">
-                    {canApprove ? (
+                    {actionState.canApprove ? (
                       <>
                         <Button
                           size="sm"
@@ -476,31 +490,43 @@ export default function GoodsReceivedPage() {
                         </Button>
                       </>
                     ) : null}
+                    {actionState.canOpenPurchaseOrder && row.purchaseOrder?.id ? (
+                      <Button asChild size="sm" variant="outline">
+                        <Link href={`/procurement/purchase-orders/${row.purchaseOrder.id}`}>Open PO</Link>
+                      </Button>
+                    ) : null}
                   </div>
                 );
               }
 
-              if (row.status === 'APPROVED') {
+              if (actionState.canPost || actionState.canOpenPurchaseOrder) {
                 return (
-                  canPost ? (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      disabled={pendingAction === `post:${row.id}`}
-                      onClick={() =>
-                        void runRowAction(`post:${row.id}`, 'GRN posted into HQ inventory.', async () => {
-                          await request(`/api/procurement/grns/${row.id}/post`, { body: JSON.stringify({}), method: 'POST' });
-                          await refresh();
-                        })
-                      }
-                    >
-                      {pendingAction === `post:${row.id}` ? 'Posting...' : 'Post to HQ Inventory'}
-                    </Button>
-                  ) : null
+                  <div className="flex flex-wrap gap-2">
+                    {actionState.canPost ? (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={pendingAction === `post:${row.id}`}
+                        onClick={() =>
+                          void runRowAction(`post:${row.id}`, 'GRN posted into HQ inventory.', async () => {
+                            await request(`/api/procurement/grns/${row.id}/post`, { body: JSON.stringify({}), method: 'POST' });
+                            await refresh();
+                          })
+                        }
+                      >
+                        {pendingAction === `post:${row.id}` ? 'Posting...' : 'Post to HQ Inventory'}
+                      </Button>
+                    ) : null}
+                    {actionState.canOpenPurchaseOrder && row.purchaseOrder?.id ? (
+                      <Button asChild size="sm" variant="outline">
+                        <Link href={`/procurement/purchase-orders/${row.purchaseOrder.id}`}>Open PO</Link>
+                      </Button>
+                    ) : null}
+                  </div>
                 );
               }
 
-              return <span className="text-sm text-muted">No actions</span>;
+              return <span className="text-sm text-muted">{getGoodsReceivedWorkflowCopy(row)}</span>;
             }
           }
         ]}

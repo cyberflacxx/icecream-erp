@@ -10,16 +10,18 @@ import { PageHeader } from '@/components/dashboard/page-header';
 import { ProcurementNav } from '@/components/procurement/procurement-nav';
 import { SupplierSelect } from '@/components/procurement/supplier-select';
 import { Button } from '@/components/ui/button';
+import { useUserContext } from '@/contexts/UserContext';
 import { useProcurementMeta, useProcurementRequest, usePurchaseOrder } from '@/hooks/procurement';
 import { downloadFromUrl } from '@/lib/export';
+import {
+  formatProcurementWorkflowStatusLabel,
+  getGoodsReceivedActionState,
+  getPurchaseOrderActionState,
+  getPurchaseOrderWorkflowCopy,
+} from '@/lib/procurement-workflow';
 import { API_ROUTES, PERMISSIONS } from '@/lib/shared';
 import {
   buildPurchaseOrderDraftPayload,
-  formatPurchaseOrderStatusLabel,
-  isPurchaseOrderApprovable,
-  isPurchaseOrderRejectable,
-  isPurchaseOrderSentLike,
-  normalizePurchaseOrderStatus,
 } from '@/lib/procurement-purchase-orders';
 import { usePermission } from '@/hooks/usePermission';
 
@@ -130,17 +132,6 @@ function createLineDraft(): EditLine {
   };
 }
 
-function statusVariant(status: string) {
-  const normalized = normalizePurchaseOrderStatus(status);
-
-  if (normalized === 'FULLY_RECEIVED') return 'success' as const;
-  if (normalized === 'PARTIAL_RECEIVED') return 'warning' as const;
-  if (normalized === 'REJECTED' || normalized === 'CANCELLED') return 'error' as const;
-  if (normalized === 'APPROVED' || normalized === 'SENT_TO_SUPPLIER') return 'info' as const;
-
-  return 'neutral' as const;
-}
-
 const actionButtonClassNames = {
   approve:
     'border border-emerald-200 bg-emerald-50 text-emerald-700 hover:border-emerald-600 hover:bg-emerald-600 hover:text-white',
@@ -179,6 +170,7 @@ export default function PurchaseOrderDetailPage({ params }: PurchaseOrderDetailP
   const canApprove = usePermission([PERMISSIONS.purchaseOrder.approve, 'procurement.approve']);
   const canSend = usePermission([PERMISSIONS.purchaseOrder.create, 'procurement.write']);
   const canEdit = usePermission([PERMISSIONS.purchaseOrder.create, 'procurement.write']);
+  const { currentUser } = useUserContext();
   const request = useProcurementRequest();
   const queryClient = useQueryClient();
   const orderQuery = usePurchaseOrder(params.id);
@@ -412,7 +404,14 @@ export default function PurchaseOrderDetailPage({ params }: PurchaseOrderDetailP
     );
   }
 
-  const normalizedStatus = normalizePurchaseOrderStatus(order?.status ?? '');
+  const actionState = getPurchaseOrderActionState(order ?? {}, {
+    canApprove,
+    canCreate: canEdit,
+    canEdit,
+    canSend,
+    role: currentUser?.profile.role ?? null,
+    roleNames: currentUser?.roles.map((role) => role.name) ?? [],
+  });
 
   return (
     <div className="space-y-6">
@@ -428,7 +427,7 @@ export default function PurchaseOrderDetailPage({ params }: PurchaseOrderDetailP
               </Link>
             </Button>
 
-            {order && isPurchaseOrderApprovable(normalizedStatus) && canEdit ? (
+            {order && actionState.canEdit ? (
               <Button
                 size="sm"
                 variant="outline"
@@ -441,7 +440,7 @@ export default function PurchaseOrderDetailPage({ params }: PurchaseOrderDetailP
               </Button>
             ) : null}
 
-            {order && isPurchaseOrderApprovable(normalizedStatus) && canApprove ? (
+            {order && actionState.canApprove ? (
               <Button
                 size="sm"
                 variant="outline"
@@ -454,7 +453,7 @@ export default function PurchaseOrderDetailPage({ params }: PurchaseOrderDetailP
               </Button>
             ) : null}
 
-            {order && normalizedStatus === 'APPROVED' && canSend ? (
+            {order && actionState.canSend ? (
               <Button
                 size="sm"
                 variant="outline"
@@ -467,7 +466,7 @@ export default function PurchaseOrderDetailPage({ params }: PurchaseOrderDetailP
               </Button>
             ) : null}
 
-            {order && isPurchaseOrderRejectable(normalizedStatus) && canApprove ? (
+            {order && actionState.canReject ? (
               <Button
                 size="sm"
                 variant="outline"
@@ -512,8 +511,8 @@ export default function PurchaseOrderDetailPage({ params }: PurchaseOrderDetailP
                 <div className="flex flex-wrap items-center gap-3">
                   <h2 className="text-2xl font-semibold text-brown">{order.poNumber}</h2>
                   <StatusBadge
-                    status={formatPurchaseOrderStatusLabel(order.status)}
-                    variant={statusVariant(order.status)}
+                    status={formatProcurementWorkflowStatusLabel(actionState.normalizedStatus)}
+                    variant={actionState.statusVariant}
                   />
                 </div>
                 <div className="space-y-1 text-sm text-muted">
@@ -541,16 +540,14 @@ export default function PurchaseOrderDetailPage({ params }: PurchaseOrderDetailP
                 label="Approval Date"
                 value={order.approvedAt ? new Date(order.approvedAt).toLocaleDateString() : 'Pending'}
               />
-              <DetailCard
-                label="Dispatch Status"
-                value={
-                  order.sentAt
-                    ? `Sent ${new Date(order.sentAt).toLocaleDateString()}`
-                    : isPurchaseOrderSentLike(order.status)
-                      ? 'Sent'
-                      : 'Not sent yet'
-                }
-              />
+                <DetailCard
+                  label="Dispatch Status"
+                  value={
+                    order.sentAt
+                      ? `Sent ${new Date(order.sentAt).toLocaleDateString()}`
+                      : getPurchaseOrderWorkflowCopy(order)
+                  }
+                />
             </div>
 
             <div className="mt-6 grid gap-4 md:grid-cols-3">
@@ -620,7 +617,7 @@ export default function PurchaseOrderDetailPage({ params }: PurchaseOrderDetailP
                 <h3 className="text-lg font-semibold text-brown">Goods Received Notes</h3>
                 <p className="mt-1 text-sm text-muted">Track receiving documents linked to this purchase order.</p>
               </div>
-              {isPurchaseOrderSentLike(order.status) ? (
+              {actionState.canRecordGrn ? (
                 <Button asChild size="sm" variant="outline" className={actionButtonClassNames.send}>
                   <Link href={`/procurement/goods-received?purchaseOrderId=${order.id}`}>
                     <Truck className="mr-2 h-4 w-4" />
@@ -644,9 +641,12 @@ export default function PurchaseOrderDetailPage({ params }: PurchaseOrderDetailP
                       </p>
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
-                      <StatusBadge status={formatPurchaseOrderStatusLabel(grn.status)} variant={statusVariant(grn.status)} />
+                      <StatusBadge
+                        status={formatProcurementWorkflowStatusLabel(getGoodsReceivedActionState(grn, {}).normalizedStatus)}
+                        variant={getGoodsReceivedActionState(grn, {}).statusVariant}
+                      />
                       <span className="rounded-full bg-white/80 px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-muted">
-                        {formatPurchaseOrderStatusLabel(grn.qualityStatus)}
+                        {formatProcurementWorkflowStatusLabel(String(grn.qualityStatus ?? 'draft'))}
                       </span>
                     </div>
                   </div>

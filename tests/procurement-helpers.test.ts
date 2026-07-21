@@ -39,6 +39,15 @@ import {
   normalizeRequisitionUnitOfMeasureId,
 } from '../src/lib/procurement-requisitions';
 import { filterSupplierOptions, isSupplierActive, mapSupplierOption } from '../src/lib/procurement-suppliers';
+import {
+  deriveGoodsReceivedWorkflowStatus,
+  derivePurchaseOrderWorkflowStatus,
+  deriveRequisitionWorkflowStatus,
+  getGoodsReceivedActionState,
+  getPurchaseOrderActionState,
+  getRequisitionActionState,
+  normalizeProcurementRoleName,
+} from '../src/lib/procurement-workflow';
 
 test('validateSupplierCodeUniqueness blocks duplicate supplier codes', () => {
   assert.equal(validateSupplierCodeUniqueness(['SUP-001', 'SUP-002'], 'SUP-003'), true);
@@ -459,4 +468,76 @@ test('buildGoodsReceivedDraftPayload stores purchase order, item, and UOM ids ca
   assert.equal(payload.items[0]?.unitOfMeasureId, 'uom-1');
   assert.equal(payload.items[0]?.unit_of_measure_id, 'uom-1');
   assert.equal(payload.items[0]?.uomId, 'uom-1');
+});
+
+test('workflow helper normalizes live role names for procurement access fallbacks', () => {
+  assert.equal(normalizeProcurementRoleName(' Super_Admin '), 'super admin');
+  assert.equal(normalizeProcurementRoleName('SYSTEM-ADMIN'), 'system admin');
+  assert.equal(normalizeProcurementRoleName('Procurement_Manager'), 'procurement manager');
+});
+
+test('requisition workflow helper prefers approval status over stale draft status', () => {
+  const status = deriveRequisitionWorkflowStatus({
+    approvalStatus: 'PENDING_APPROVAL',
+    status: 'DRAFT',
+  });
+  const actions = getRequisitionActionState(
+    {
+      approvalStatus: 'PENDING_APPROVAL',
+      approverName: 'HQ Buyer',
+      status: 'DRAFT',
+    },
+    {
+      roleNames: ['Super Admin'],
+    },
+  );
+
+  assert.equal(status, 'PENDING_APPROVAL');
+  assert.equal(actions.canApprove, true);
+  assert.equal(actions.canReject, true);
+  assert.equal(actions.canSubmit, false);
+});
+
+test('purchase order workflow helper upgrades legacy draft rows with approval timestamps', () => {
+  const status = derivePurchaseOrderWorkflowStatus({
+    approvedAt: '2026-07-20T10:00:00Z',
+    status: 'DRAFT',
+  });
+  const actions = getPurchaseOrderActionState(
+    {
+      approvedAt: '2026-07-20T10:00:00Z',
+      status: 'DRAFT',
+    },
+    {
+      roleNames: ['Procurement Lead'],
+    },
+  );
+
+  assert.equal(status, 'APPROVED');
+  assert.equal(actions.canSend, true);
+  assert.equal(actions.canRecordGrn, true);
+  assert.equal(actions.canApprove, false);
+});
+
+test('goods received workflow helper derives pending approval from quality status and exposes open PO', () => {
+  const status = deriveGoodsReceivedWorkflowStatus({
+    qualityStatus: 'PENDING_APPROVAL',
+    status: 'DRAFT',
+  });
+  const actions = getGoodsReceivedActionState(
+    {
+      purchaseOrder: { id: 'po-1' },
+      qualityStatus: 'PENDING_APPROVAL',
+      status: 'DRAFT',
+    },
+    {
+      roleNames: ['Stores Supervisor'],
+    },
+  );
+
+  assert.equal(status, 'PENDING_APPROVAL');
+  assert.equal(actions.canApprove, true);
+  assert.equal(actions.canReject, true);
+  assert.equal(actions.canOpenPurchaseOrder, true);
+  assert.equal(actions.canPost, false);
 });

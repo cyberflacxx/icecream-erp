@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { badRequest, can, forbidden, getAuthContext, notFound, serverError, unauthorized } from '@/lib/api-auth';
 import { emitOperationalNotifications } from '@/lib/notifications-server';
+import { deriveRequisitionWorkflowStatus } from '@/lib/procurement-workflow';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 import { submitWorkflowApproval } from '@/lib/workflow-server';
 
@@ -19,14 +20,22 @@ export async function POST(
   try {
     const { data: existing, error: fetchErr } = await service
       .from('purchase_requisitions')
-      .select('id, requisition_number, status')
+      .select('id, requisition_number, status, approval_status, approved_at, approved_by, rejected_at')
       .is('deleted_at', null)
       .eq('organization_id', ctx.organizationId)
       .eq('id', id)
       .single();
 
     if (fetchErr || !existing) return notFound('Purchase requisition not found.');
-    if ((existing as Record<string, unknown>).status !== 'draft') {
+    if (
+      deriveRequisitionWorkflowStatus({
+        approvalStatus: (existing as Record<string, unknown>).approval_status,
+        approvedAt: (existing as Record<string, unknown>).approved_at,
+        approvedBy: (existing as Record<string, unknown>).approved_by,
+        rejectedAt: (existing as Record<string, unknown>).rejected_at,
+        status: (existing as Record<string, unknown>).status,
+      }) !== 'DRAFT'
+    ) {
       return badRequest('Only draft requisitions can be submitted.');
     }
 

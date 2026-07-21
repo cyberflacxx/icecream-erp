@@ -11,12 +11,18 @@ import { PaginationControls } from '@/components/inventory/pagination-controls';
 import { ProcurementNav } from '@/components/procurement/procurement-nav';
 import { TransactionShortcuts } from '@/components/procurement/transaction-shortcuts';
 import { Button } from '@/components/ui/button';
+import { useUserContext } from '@/contexts/UserContext';
 import {
   useProcurementMeta,
   useProcurementRequest,
   useRequisitions,
   type RequisitionRow,
 } from '@/hooks/procurement';
+import {
+  formatProcurementWorkflowStatusLabel,
+  getRequisitionActionState,
+  getRequisitionWorkflowCopy,
+} from '@/lib/procurement-workflow';
 import { buildRequisitionDraftPayload } from '@/lib/procurement-requisitions';
 import { API_ROUTES, PERMISSIONS } from '@/lib/shared';
 import { usePermission } from '@/hooks/usePermission';
@@ -74,26 +80,6 @@ const initialFormState: RequisitionFormState = {
   remarks: '',
 };
 
-function statusVariant(status: string) {
-  const normalized = status.toLowerCase();
-
-  if (normalized === 'draft') return 'warning' as const;
-  if (normalized === 'submitted') return 'info' as const;
-  if (['approved', 'level1_approved', 'po_created'].includes(normalized)) return 'success' as const;
-  if (normalized === 'rejected') return 'error' as const;
-
-  return 'neutral' as const;
-}
-
-function isApprovedStatus(status: string) {
-  return ['approved', 'level1_approved', 'po_created'].includes(status.toLowerCase());
-}
-
-function formatDateLabel(value: string | null) {
-  if (!value) return null;
-  return new Date(value).toLocaleDateString();
-}
-
 function formatItemTypeLabel(value: string | null | undefined) {
   if (!value) return 'Item';
   return value.replaceAll('_', ' ').toLowerCase().replace(/\b\w/g, (character) => character.toUpperCase());
@@ -101,30 +87,6 @@ function formatItemTypeLabel(value: string | null | undefined) {
 
 function formatQuantityLabel(value: number | null | undefined) {
   return Number(value ?? 0).toFixed(3);
-}
-
-function getWorkflowCopy(row: RequisitionRow) {
-  const normalizedStatus = (row.approvalStatus || row.status).toLowerCase();
-
-  if (normalizedStatus === 'rejected') {
-    return row.rejectedBy
-      ? `Rejected by ${row.rejectedBy}${row.rejectedAt ? ` on ${formatDateLabel(row.rejectedAt)}` : ''}`
-      : 'Rejected and waiting for revision.';
-  }
-
-  if (isApprovedStatus(normalizedStatus)) {
-    return row.approvedBy
-      ? `Approved by ${row.approvedBy}${row.approvedAt ? ` on ${formatDateLabel(row.approvedAt)}` : ''}`
-      : 'Approved and ready for PO conversion.';
-  }
-
-  if (normalizedStatus === 'submitted') {
-    return row.approverName
-      ? `Waiting on ${row.approverName}`
-      : 'Submitted and waiting for assigned approver.';
-  }
-
-  return row.approverName ? `Draft assigned to ${row.approverName}` : 'Draft waiting to be submitted.';
 }
 
 function buildEmptyLine(): RequisitionFormItem {
@@ -143,6 +105,7 @@ function buildEmptyLine(): RequisitionFormItem {
 export default function RequisitionsPage() {
   const canCreate = usePermission([PERMISSIONS.purchaseRequisition.create, 'procurement.write']);
   const canApprove = usePermission([PERMISSIONS.purchaseRequisition.approve, 'procurement.approve']);
+  const { currentUser } = useUserContext();
   const [filters, setFilters] = useState({
     department: '',
     endDate: '',
@@ -180,6 +143,13 @@ export default function RequisitionsPage() {
   const selectedItems = formState.items.map(
     (item) => itemOptions.find((candidate) => candidate.id === item.itemId) ?? null,
   );
+  const workflowAccess = {
+    canApprove,
+    canCreate,
+    canEdit: canCreate,
+    role: currentUser?.profile.role ?? null,
+    roleNames: currentUser?.roles.map((role) => role.name) ?? [],
+  };
 
   function resetForm() {
     setEditingRequisitionId(null);
@@ -437,77 +407,89 @@ export default function RequisitionsPage() {
             render: (row) => (
               <div className="space-y-1">
                 <p className="text-sm font-medium text-foreground">{row.approverName ?? 'Auto route to supervisor'}</p>
-                <p className="text-xs text-muted">{getWorkflowCopy(row)}</p>
+                <p className="text-xs text-muted">{getRequisitionWorkflowCopy(row)}</p>
               </div>
             ),
           },
           {
             key: 'status',
             header: 'Status',
-            render: (row) => (
-              <div className="space-y-2">
-                <StatusBadge
-                  status={row.approvalStatus || row.status}
-                  variant={statusVariant(row.approvalStatus || row.status)}
-                />
+            render: (row) => {
+              const actionState = getRequisitionActionState(row, workflowAccess);
+
+              return (
+                <div className="space-y-2">
+                  <StatusBadge
+                    status={formatProcurementWorkflowStatusLabel(actionState.normalizedStatus)}
+                    variant={actionState.statusVariant}
+                  />
                 {row.remarks ? <p className="max-w-[240px] text-xs text-muted">{row.remarks}</p> : null}
-              </div>
-            ),
+                </div>
+              );
+            },
           },
           {
             key: 'actions',
             header: 'Actions',
             render: (row) => {
-              const status = row.status.toLowerCase();
+              const actionState = getRequisitionActionState(row, workflowAccess);
               const isBusy = activeActionId === row.id;
 
-              if (status === 'draft') {
+              if (actionState.canEditDraft || actionState.canSubmit) {
                 return (
                   <div className="flex flex-wrap gap-2">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => void openEditDrawer(row)}
-                      disabled={isLoadingDraft || isBusy}
-                    >
-                      Edit Draft
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => void runRowAction(row.id, 'submit')}
-                      disabled={isBusy}
-                    >
-                      {isBusy ? 'Submitting...' : 'Submit for Approval'}
-                    </Button>
+                    {actionState.canEditDraft ? (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => void openEditDrawer(row)}
+                        disabled={isLoadingDraft || isBusy}
+                      >
+                        Edit Draft
+                      </Button>
+                    ) : null}
+                    {actionState.canSubmit ? (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => void runRowAction(row.id, 'submit')}
+                        disabled={isBusy}
+                      >
+                        {isBusy ? 'Submitting...' : 'Submit for Approval'}
+                      </Button>
+                    ) : null}
                   </div>
                 );
               }
 
-              if (status === 'submitted' && canApprove) {
+              if (actionState.canApprove || actionState.canReject) {
                 return (
                   <div className="flex flex-wrap gap-2">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => void runRowAction(row.id, 'approve')}
-                      disabled={isBusy}
-                    >
-                      {isBusy ? 'Working...' : 'Approve'}
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => void runRowAction(row.id, 'reject')}
-                      disabled={isBusy}
-                    >
-                      {isBusy ? 'Working...' : 'Reject'}
-                    </Button>
+                    {actionState.canApprove ? (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => void runRowAction(row.id, 'approve')}
+                        disabled={isBusy}
+                      >
+                        {isBusy ? 'Working...' : 'Approve'}
+                      </Button>
+                    ) : null}
+                    {actionState.canReject ? (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => void runRowAction(row.id, 'reject')}
+                        disabled={isBusy}
+                      >
+                        {isBusy ? 'Working...' : 'Reject'}
+                      </Button>
+                    ) : null}
                   </div>
                 );
               }
 
-              if (isApprovedStatus(status)) {
+              if (actionState.canCreatePo) {
                 return (
                   <Button asChild size="sm" variant="outline">
                     <Link href={`/procurement/purchase-orders?requisitionId=${row.id}`}>Create PO</Link>
@@ -515,7 +497,7 @@ export default function RequisitionsPage() {
                 );
               }
 
-              return <span className="text-sm text-muted">No actions</span>;
+              return <span className="text-sm text-muted">{getRequisitionWorkflowCopy(row)}</span>;
             },
           },
         ]}

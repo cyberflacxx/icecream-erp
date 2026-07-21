@@ -14,14 +14,18 @@ const STATUS_LABELS: Record<string, string> = {
   APPROVED: 'Approved',
   AWAITING_APPROVAL: 'Awaiting Approval',
   CANCELLED: 'Cancelled',
+  CREATED: 'Created',
   DRAFT: 'Draft',
   FULLY_RECEIVED: 'Fully Received',
   LEVEL1_APPROVED: 'Level 1 Approved',
   LEVEL2_APPROVED: 'Level 2 Approved',
+  OPEN: 'Open',
   PARTIAL_RECEIVED: 'Partial Received',
+  PENDING_APPROVAL: 'Pending Approval',
   REJECTED: 'Rejected',
   SENT: 'Sent',
   SENT_TO_SUPPLIER: 'Sent to Supplier',
+  SUBMITTED: 'Submitted',
 };
 
 export function normalizePurchaseOrderStatus(status: unknown) {
@@ -39,6 +43,8 @@ export function isApprovedRequisitionStatus(status: unknown, approvalStatus?: un
 }
 
 export function derivePurchaseOrderStatus(input: {
+  approvedAt?: unknown;
+  approvedBy?: unknown;
   rejectedAt?: unknown;
   sentAt?: unknown;
   status?: unknown;
@@ -53,8 +59,20 @@ export function derivePurchaseOrderStatus(input: {
     return 'SENT_TO_SUPPLIER';
   }
 
+  if ((input.approvedAt || input.approvedBy) && ['DRAFT', 'OPEN', 'CREATED', 'SUBMITTED', 'PENDING_APPROVAL'].includes(normalized)) {
+    return 'APPROVED';
+  }
+
+  if (['SENT', 'SENT_TO_SUPPLIER'].includes(normalized)) {
+    return 'SENT_TO_SUPPLIER';
+  }
+
   if (normalized === 'RECEIVED') {
     return 'FULLY_RECEIVED';
+  }
+
+  if (normalized === 'PARTIALLY_RECEIVED') {
+    return 'PARTIAL_RECEIVED';
   }
 
   return normalized || 'DRAFT';
@@ -88,11 +106,13 @@ export function isPurchaseOrderSentLike(status: unknown) {
 
 export function isPurchaseOrderRejectable(status: unknown) {
   const normalized = normalizePurchaseOrderStatus(status);
-  return normalized === 'DRAFT' || normalized === 'APPROVED';
+  return ['DRAFT', 'CREATED', 'OPEN', 'SUBMITTED', 'PENDING_APPROVAL', 'AWAITING_APPROVAL', 'APPROVED'].includes(normalized);
 }
 
 export function isPurchaseOrderApprovable(status: unknown) {
-  return normalizePurchaseOrderStatus(status) === 'DRAFT';
+  return ['DRAFT', 'CREATED', 'OPEN', 'SUBMITTED', 'PENDING_APPROVAL', 'AWAITING_APPROVAL'].includes(
+    normalizePurchaseOrderStatus(status),
+  );
 }
 
 export function normalizePurchaseOrderSupplierId(input: {

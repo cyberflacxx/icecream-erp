@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { badRequest, can, forbidden, getAuthContext, notFound, serverError, unauthorized } from '@/lib/api-auth';
+import { deriveRequisitionWorkflowStatus } from '@/lib/procurement-workflow';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
 export async function POST(
@@ -25,7 +26,7 @@ export async function POST(
   try {
     const { data: existing, error: fetchErr } = await service
       .from('purchase_requisitions')
-      .select('id, status, remarks, approver_user_id')
+      .select('id, status, approval_status, approved_at, approved_by, rejected_at, remarks, approver_user_id')
       .is('deleted_at', null)
       .eq('organization_id', ctx.organizationId)
       .eq('id', id)
@@ -34,8 +35,16 @@ export async function POST(
     if (fetchErr || !existing) return notFound('Purchase requisition not found.');
 
     const req = existing as Record<string, unknown>;
-    if (req.status !== 'submitted') {
-      return badRequest('Only submitted requisitions can be approved.');
+    if (
+      deriveRequisitionWorkflowStatus({
+        approvalStatus: req.approval_status,
+        approvedAt: req.approved_at,
+        approvedBy: req.approved_by,
+        rejectedAt: req.rejected_at,
+        status: req.status,
+      }) !== 'PENDING_APPROVAL'
+    ) {
+      return badRequest('Only pending approval requisitions can be approved.');
     }
     if (req.approver_user_id && String(req.approver_user_id) !== ctx.userId) {
       return forbidden();
