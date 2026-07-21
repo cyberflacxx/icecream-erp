@@ -9,7 +9,11 @@ import {
   normalizePurchaseOrderUnitOfMeasureId,
   normalizePurchaseOrderUnitPrice,
   derivePurchaseOrderStatus,
+  isApprovedRequisitionStatus,
   normalizePurchaseOrderStatus,
+  resolvePurchaseOrderItemDescription,
+  resolvePurchaseOrderItemUnitOfMeasureId,
+  resolvePurchaseOrderItemUnitPrice,
 } from '@/lib/procurement-purchase-orders';
 import { isMissingColumnError } from '@/lib/postgrest-compat';
 import { createServiceRoleClient } from '@/lib/supabase/server';
@@ -23,8 +27,6 @@ const PURCHASE_ORDER_SELECT_WITH_APPROVER_DETAILS = `id, po_number, order_date, 
          requisition_id,
          suppliers(id, name),
          purchase_order_items(id)`;
-const APPROVED_REQUISITION_STATUSES = ['approved', 'level1_approved'] as const;
-
 function stripMissingLegacyPurchaseOrderItemColumn<T extends Record<string, unknown>>(payload: T, error: unknown) {
   const column = LEGACY_PURCHASE_ORDER_ITEM_COLUMNS.find((entry) =>
     isMissingColumnError(error, 'purchase_order_items', entry),
@@ -48,11 +50,6 @@ function stripMissingOptionalHeaderColumn<T extends Record<string, unknown>>(pay
   return null;
 }
 
-function isApprovedRequisitionStatus(status: unknown, approvalStatus: unknown) {
-  const candidates = [status, approvalStatus].map((value) => String(value ?? '').trim().toLowerCase());
-  return candidates.some((value) => APPROVED_REQUISITION_STATUSES.includes(value as (typeof APPROVED_REQUISITION_STATUSES)[number]));
-}
-
 export async function GET(request: NextRequest) {
   const ctx = await getAuthContext();
   if (!ctx) return unauthorized();
@@ -65,10 +62,45 @@ export async function GET(request: NextRequest) {
   const pageSize = Math.min(100, parseInt(searchParams.get('pageSize') ?? '20'));
   const status = searchParams.get('status');
   const supplierId = searchParams.get('supplierId');
+  const picker = searchParams.get('picker') === 'true';
+  const forGrn = searchParams.get('forGrn') === 'true';
   const startDate = searchParams.get('startDate');
   const endDate = searchParams.get('endDate');
 
   try {
+    if (picker && forGrn) {
+      const pickerRows = await service
+        .from('purchase_orders')
+        .select('id, po_number, supplier_id, status, suppliers(id, name)')
+        .eq('organization_id', ctx.organizationId)
+        .is('deleted_at', null)
+        .order('created_at', { ascending: false })
+        .limit(pageSize);
+
+      if (pickerRows.error) return serverError(pickerRows.error.message);
+
+      return NextResponse.json({
+        success: true,
+        data: (pickerRows.data ?? [])
+          .filter((row) => ['APPROVED', 'OPEN', 'SENT', 'SENT_TO_SUPPLIER', 'PARTIAL_RECEIVED', 'PARTIALLY_RECEIVED'].includes(normalizePurchaseOrderStatus(row.status)))
+          .map((row) => {
+            const supplier = Array.isArray(row.suppliers) ? row.suppliers[0] : row.suppliers;
+            const supplierName = String(supplier?.name ?? 'Unknown supplier');
+            return {
+              id: String(row.id),
+              po_number: String(row.po_number ?? ''),
+              poNumber: String(row.po_number ?? ''),
+              status: normalizePurchaseOrderStatus(row.status),
+              supplier_id: row.supplier_id ? String(row.supplier_id) : supplier?.id ? String(supplier.id) : null,
+              supplierId: row.supplier_id ? String(row.supplier_id) : supplier?.id ? String(supplier.id) : null,
+              supplier_name: supplierName,
+              supplierName,
+              label: `${String(row.po_number ?? 'Purchase order')} - ${supplierName}`,
+            };
+          }),
+      });
+    }
+
     let query = service
       .from('purchase_orders')
       .select(PURCHASE_ORDER_SELECT_WITH_APPROVER_DETAILS, { count: 'exact' })
@@ -223,12 +255,13 @@ export async function POST(request: NextRequest) {
 
   const supplierId = normalizePurchaseOrderSupplierId(body);
   const requisitionId = normalizePurchaseOrderRequisitionId(body);
-  const normalizedItems = (body.items ?? []).map((item) => ({
-    itemId: normalizePurchaseOrderItemId(item),
-    quantityOrdered: normalizePurchaseOrderQuantity(item),
-    unitCost: normalizePurchaseOrderUnitPrice(item),
-    unitOfMeasureId: normalizePurchaseOrderUnitOfMeasureId(item),
-  }));
+    const normalizedItems = (body.items ?? []).map((item) => ({
+      itemId: normalizePurchaseOrderItemId(item),
+      quantityOrdered: normalizePurchaseOrderQuantity(item),
+      unitCost: normalizePurchaseOrderUnitPrice(item),
+      unitOfMeasureId: normalizePurchaseOrderUnitOfMeasureId(item),
+      raw: item,
+    }));
 
   if (!supplierId) {
     return badRequest('Please select a supplier.');
@@ -293,7 +326,12 @@ export async function POST(request: NextRequest) {
     const itemIds = [...new Set(normalizedItems.map((i) => i.itemId))];
     const unitIds = [...new Set(normalizedItems.map((i) => i.unitOfMeasureId).filter(Boolean))];
     const [itemsPrimary, unitsCheck] = await Promise.all([
-      service.from('items').select('id').is('deleted_at', null).eq('organization_id', ctx.organizationId).in('id', itemIds),
+      service
+        .from('items')
+        .select('id, code, name, description, purchase_price, cost_price, unit_cost, standard_cost, default_purchase_price, price, selling_price, unit_of_measure_id, uom_id')
+        .is('deleted_at', null)
+        .eq('organization_id', ctx.organizationId)
+        .in('id', itemIds),
       unitIds.length
         ? service.from('units_of_measure').select('id').eq('organization_id', ctx.organizationId).in('id', unitIds)
         : Promise.resolve({ data: [], error: null }),
@@ -301,7 +339,11 @@ export async function POST(request: NextRequest) {
 
     const itemsCheck =
       itemsPrimary.error && isMissingColumnError(itemsPrimary.error, 'items', 'deleted_at')
-        ? await service.from('items').select('id').eq('organization_id', ctx.organizationId).in('id', itemIds)
+        ? await service
+            .from('items')
+            .select('id, code, name, description, purchase_price, cost_price, unit_cost, standard_cost, default_purchase_price, price, selling_price, unit_of_measure_id, uom_id')
+            .eq('organization_id', ctx.organizationId)
+            .in('id', itemIds)
         : itemsPrimary;
 
     if ((itemsCheck.data?.length ?? 0) !== itemIds.length) {
@@ -325,6 +367,25 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    const itemsById = new Map(
+      (itemsCheck.data ?? []).map((row) => [String(row.id), row as Record<string, unknown>]),
+    );
+
+    const resolvedItems = normalizedItems.map((item) => {
+      const itemRow = itemsById.get(item.itemId);
+      const resolvedUnitCost =
+        item.unitCost > 0 || !itemRow ? item.unitCost : resolvePurchaseOrderItemUnitPrice(itemRow);
+      const resolvedUnitId = item.unitOfMeasureId || resolvePurchaseOrderItemUnitOfMeasureId(itemRow) || null;
+      return {
+        description: resolvePurchaseOrderItemDescription(item.raw as Record<string, unknown>) || resolvePurchaseOrderItemDescription(itemRow),
+        itemId: item.itemId,
+        quantityOrdered: item.quantityOrdered,
+        requisitionItemId: String((item.raw as Record<string, unknown>).requisition_item_id ?? (item.raw as Record<string, unknown>).requisitionItemId ?? ''),
+        unitCost: resolvedUnitCost,
+        unitOfMeasureId: resolvedUnitId,
+      };
+    });
+
     // Generate PO number
     const { count: poCount } = await service
       .from('purchase_orders')
@@ -334,7 +395,7 @@ export async function POST(request: NextRequest) {
     const poNumber = `PO-${String((poCount ?? 0) + 1).padStart(5, '0')}`;
     const taxAmount = body.taxAmount ?? 0;
     const discountAmount = body.discountAmount ?? 0;
-    const subtotal = normalizedItems.reduce((sum, i) => sum + i.quantityOrdered * i.unitCost, 0);
+    const subtotal = resolvedItems.reduce((sum, i) => sum + i.quantityOrdered * i.unitCost, 0);
     const total = subtotal + taxAmount - discountAmount;
 
     let orderPayload: Record<string, unknown> = {
@@ -373,11 +434,13 @@ export async function POST(request: NextRequest) {
 
     const orderId = (order as Record<string, unknown>).id as string;
 
-    let itemPayload = normalizedItems.map((item) => ({
+    let itemPayload = resolvedItems.map((item) => ({
       po_id: orderId,
       purchase_order_id: orderId,
+      requisition_item_id: item.requisitionItemId || null,
       item_id: item.itemId,
       unit_of_measure_id: item.unitOfMeasureId || null,
+      description: item.description || null,
       quantity: item.quantityOrdered,
       quantity_ordered: item.quantityOrdered,
       received_qty: 0,
@@ -385,6 +448,8 @@ export async function POST(request: NextRequest) {
       unit_price: item.unitCost,
       unit_cost: item.unitCost,
       tax_rate: 0,
+      tax_amount: 0,
+      total_ex_vat: item.quantityOrdered * item.unitCost,
       line_total: item.quantityOrdered * item.unitCost,
       total_cost: item.quantityOrdered * item.unitCost,
     }));

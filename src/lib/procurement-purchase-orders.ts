@@ -1,5 +1,14 @@
 type RawStatus = 'approved' | 'cancelled' | 'draft' | 'sent_to_supplier';
 
+const APPROVED_REQUISITION_STATUSES = [
+  'APPROVED',
+  'APPROVED_FOR_PO',
+  'LEVEL1_APPROVED',
+  'LEVEL2_APPROVED',
+  'PENDING_APPROVAL',
+  'SUBMITTED',
+] as const;
+
 const STATUS_LABELS: Record<string, string> = {
   APPROVED: 'Approved',
   AWAITING_APPROVAL: 'Awaiting Approval',
@@ -19,6 +28,13 @@ export function normalizePurchaseOrderStatus(status: unknown) {
     .trim()
     .replace(/\s+/g, '_')
     .toUpperCase();
+}
+
+export function isApprovedRequisitionStatus(status: unknown, approvalStatus?: unknown) {
+  const candidates = [status, approvalStatus].map(normalizePurchaseOrderStatus);
+  return candidates.some((value) =>
+    APPROVED_REQUISITION_STATUSES.includes(value as (typeof APPROVED_REQUISITION_STATUSES)[number]),
+  );
 }
 
 export function derivePurchaseOrderStatus(input: {
@@ -56,7 +72,14 @@ export function formatPurchaseOrderDbStatus(target: RawStatus, sampleStatus: unk
 
 export function isPurchaseOrderSentLike(status: unknown) {
   const normalized = normalizePurchaseOrderStatus(status);
-  return normalized === 'SENT' || normalized === 'SENT_TO_SUPPLIER' || normalized === 'PARTIAL_RECEIVED';
+  return (
+    normalized === 'APPROVED' ||
+    normalized === 'OPEN' ||
+    normalized === 'SENT' ||
+    normalized === 'SENT_TO_SUPPLIER' ||
+    normalized === 'PARTIAL_RECEIVED' ||
+    normalized === 'PARTIALLY_RECEIVED'
+  );
 }
 
 export function isPurchaseOrderRejectable(status: unknown) {
@@ -174,6 +197,26 @@ export function resolvePurchaseOrderItemUnitPrice(input: Record<string, unknown>
   }
 
   return 0;
+}
+
+export function resolvePurchaseOrderItemUnitOfMeasureId(input: Record<string, unknown> | null | undefined) {
+  const raw = input ?? {};
+  const aliases = [raw.unit_of_measure_id, raw.unitOfMeasureId, raw.uom_id, raw.uomId];
+  for (const value of aliases) {
+    const normalized = String(value ?? '').trim();
+    if (normalized) return normalized;
+  }
+  return null;
+}
+
+export function resolvePurchaseOrderItemDescription(input: Record<string, unknown> | null | undefined) {
+  const raw = input ?? {};
+  const aliases = [raw.description, raw.item_description, raw.name, raw.item_name];
+  for (const value of aliases) {
+    const normalized = String(value ?? '').trim();
+    if (normalized) return normalized;
+  }
+  return '';
 }
 
 interface PurchaseOrderDraftPayloadInput {

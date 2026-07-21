@@ -13,12 +13,15 @@ import {
 } from '../src/lib/procurement';
 import {
   buildPurchaseOrderDraftPayload as buildPurchaseOrderDraftPayloadForOrders,
+  isApprovedRequisitionStatus,
   normalizePurchaseOrderItemId as normalizePurchaseOrderItemIdForOrders,
   normalizePurchaseOrderQuantity as normalizePurchaseOrderQuantityForOrders,
   normalizePurchaseOrderRequisitionId as normalizePurchaseOrderRequisitionIdForOrders,
   normalizePurchaseOrderSupplierId as normalizePurchaseOrderSupplierIdForOrders,
   normalizePurchaseOrderUnitOfMeasureId as normalizePurchaseOrderUnitOfMeasureIdForOrders,
   normalizePurchaseOrderUnitPrice as normalizePurchaseOrderUnitPriceForOrders,
+  resolvePurchaseOrderItemDescription,
+  resolvePurchaseOrderItemUnitOfMeasureId,
   resolvePurchaseOrderItemUnitPrice,
 } from '../src/lib/procurement-purchase-orders';
 import {
@@ -207,6 +210,22 @@ test('resolvePurchaseOrderItemUnitPrice follows purchase price fallback order', 
   assert.equal(resolvePurchaseOrderItemUnitPrice({ unit_cost: 10, default_purchase_price: 8 }), 10);
   assert.equal(resolvePurchaseOrderItemUnitPrice({ default_purchase_price: 8, selling_price: 7 }), 8);
   assert.equal(resolvePurchaseOrderItemUnitPrice({}), 0);
+});
+
+test('purchase order item helpers resolve requisition-ready aliases', () => {
+  assert.equal(resolvePurchaseOrderItemDescription({ item_description: 'Chocolate cone' }), 'Chocolate cone');
+  assert.equal(resolvePurchaseOrderItemDescription({ name: 'Vanilla mix' }), 'Vanilla mix');
+  assert.equal(resolvePurchaseOrderItemUnitOfMeasureId({ uom_id: 'uom-1' }), 'uom-1');
+  assert.equal(resolvePurchaseOrderItemUnitOfMeasureId({ unitOfMeasureId: 'uom-2' }), 'uom-2');
+  assert.equal(resolvePurchaseOrderItemUnitOfMeasureId({}), null);
+});
+
+test('approved requisition status helper accepts live procurement variants', () => {
+  assert.equal(isApprovedRequisitionStatus('approved', null), true);
+  assert.equal(isApprovedRequisitionStatus('submitted', null), true);
+  assert.equal(isApprovedRequisitionStatus('draft', 'approved_for_po'), true);
+  assert.equal(isApprovedRequisitionStatus('draft', 'pending_approval'), true);
+  assert.equal(isApprovedRequisitionStatus('draft', null), false);
 });
 
 test('buildPurchaseOrderDraftPayload stores supplier_id canonically', () => {

@@ -240,7 +240,7 @@ export async function POST(request: NextRequest) {
   }
 
   await recordAuditLog({
-    action: body.purchaseOrderId ? 'SUPPLIER_INVOICE_LINKED_TO_PO' : 'SUPPLIER_INVOICE_CREATED',
+    action: 'SUPPLIER_INVOICE_LINKED',
     entityId: String(invoice.id),
     entityType: 'supplier_invoice',
     newValues: {

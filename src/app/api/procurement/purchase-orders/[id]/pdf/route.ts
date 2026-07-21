@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 
 import { can, forbidden, getAuthContext, notFound, serverError, unauthorized } from '@/lib/api-auth';
-import { createBrandedPdfDocument } from '@/lib/pdf';
+import { createPurchaseOrderPdfDocument } from '@/lib/pdf';
 import { getCompanyProfile } from '@/lib/settings-server';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
@@ -35,6 +35,7 @@ export async function GET(
         .from('purchase_orders')
         .select(
           `id, po_number, requisition_id, order_date, expected_delivery_date, notes, subtotal, tax_amount, discount_amount, total,
+           supplier_quote, currency, delivery_address, payment_terms, delivery_terms, prepared_for, approval_notes, approved_at, approved_by,
            suppliers(name, email, phone, address)`,
         )
         .is('deleted_at', null)
@@ -48,7 +49,7 @@ export async function GET(
 
     const itemsRes = await service
       .from('purchase_order_items')
-      .select('quantity_ordered, unit_cost, total_cost, unit_of_measure_id, items(code, name, unit_of_measure_id)')
+      .select('quantity_ordered, unit_cost, unit_price, tax_rate, tax_amount, total_cost, total_ex_vat, description, unit_of_measure_id, items(code, name, description, unit_of_measure_id)')
       .eq('purchase_order_id', id)
       .order('created_at', { ascending: true });
     if (itemsRes.error) return serverError(itemsRes.error.message);
@@ -77,7 +78,7 @@ export async function GET(
 
     const supplier = Array.isArray(orderRes.data.suppliers) ? orderRes.data.suppliers[0] : orderRes.data.suppliers;
     const unitsById = new Map((unitsRes.data ?? []).map((unit) => [String(unit.id), unit]));
-    const itemRows = (itemsRes.data ?? []).map((item, index) => {
+    const itemRows = (itemsRes.data ?? []).map((item) => {
       const product = Array.isArray(item.items) ? item.items[0] : item.items;
       const resolvedUnitId = String(
         item.unit_of_measure_id ?? (product as Record<string, unknown> | null)?.unit_of_measure_id ?? '',
@@ -86,75 +87,66 @@ export async function GET(
 
       return {
         code: String(product?.code ?? ''),
-        description: String(product?.name ?? ''),
-        line_number: index + 1,
-        line_total: Number(item.total_cost ?? 0),
+        description: String(item.description ?? product?.description ?? product?.name ?? ''),
+        line_total: Number(item.total_ex_vat ?? item.total_cost ?? Number(item.quantity_ordered ?? 0) * Number(item.unit_price ?? item.unit_cost ?? 0)),
         qty: Number(item.quantity_ordered ?? 0),
-        unit_price: Number(item.unit_cost ?? 0),
+        tax_rate: Number(item.tax_rate ?? 0),
+        unit_price: Number(item.unit_price ?? item.unit_cost ?? 0),
         uom: String(unit?.abbreviation ?? ''),
       };
     });
 
-    const generatedAt = new Date().toISOString();
-    const pdf = Buffer.from(createBrandedPdfDocument({
-      footerNote: 'Purchase order generated from Absolute Ice Cream ERP.',
-      generatedAt,
-      generatedBy: ctx.workId,
-      metadata: [
-        { label: 'PO Number', value: String(orderRes.data.po_number ?? '-') },
-        { label: 'Requisition Ref', value: String(orderRes.data.requisition_id ?? '-') },
-        { label: 'Order Date', value: formatDate(orderRes.data.order_date) },
-        { label: 'Expected Delivery', value: formatDate(orderRes.data.expected_delivery_date) },
-        { label: 'Currency', value: companyCurrency },
-        { label: 'Supplier', value: String(supplier?.name ?? '-') },
-      ],
-      sections: [
-        {
-          lines: [
-            companyAddress || 'No company address configured.',
-            companyPhone ? `Phone: ${companyPhone}` : '',
-            companyEmail ? `Email: ${companyEmail}` : '',
-            companyTaxNumber ? `Tax No: ${companyTaxNumber}` : '',
-          ].filter(Boolean),
-          title: companyName,
-        },
-        {
-          lines: [
-            `Address: ${String(supplier?.address ?? '-')}`,
-            `Phone: ${String(supplier?.phone ?? '-')}`,
-            `Email: ${String(supplier?.email ?? '-')}`,
-          ],
-          title: 'Supplier Details',
-        },
-        {
-          lines: [
-            String(orderRes.data.notes ?? 'No additional delivery or supplier instructions were provided.'),
-            'Please reference the purchase order number on all delivery notes, invoices, and correspondence.',
-          ],
-          title: 'Notes',
-        },
-      ],
-      subtitle: 'Procurement purchase order document',
-      summary: [
-        { label: 'Subtotal', value: currencyFormatter.format(Number(orderRes.data.subtotal ?? 0)) },
-        { label: 'Tax', value: currencyFormatter.format(Number(orderRes.data.tax_amount ?? 0)) },
-        { label: 'Discount', value: currencyFormatter.format(Number(orderRes.data.discount_amount ?? 0)) },
-        { label: 'Total', value: currencyFormatter.format(Number(orderRes.data.total ?? 0)) },
-      ],
-      table: {
-        columns: [
-          { align: 'center', header: '#', key: 'line_number', width: 28 },
-          { header: 'Code', key: 'code', width: 72 },
-          { header: 'Description', key: 'description', width: 170 },
-          { align: 'right', header: 'Qty', key: 'qty', width: 48 },
-          { align: 'center', header: 'UOM', key: 'uom', width: 40 },
-          { align: 'right', header: 'Unit Price', key: 'unit_price', width: 74 },
-          { align: 'right', header: 'Line Total', key: 'line_total', width: 85 },
-        ],
-        rows: itemRows,
-        title: 'Ordered Items',
+    const pdf = Buffer.from(createPurchaseOrderPdfDocument({
+      authorization: {
+        approvedBy: String(orderRes.data.approved_by ?? '____________________'),
+        date: formatDate(orderRes.data.approved_at ?? orderRes.data.order_date),
       },
-      title: `Purchase Order ${String(orderRes.data.po_number ?? '')}`,
+      buyer: {
+        address: String(orderRes.data.delivery_address ?? companyAddress ?? '-'),
+        companyName,
+        preparedFor: String(orderRes.data.prepared_for ?? orderRes.data.notes ?? 'Procurement / Operations'),
+      },
+      currency: String(orderRes.data.currency ?? companyCurrency ?? 'USD'),
+      deliveryTerms: [
+        `Payment method: ${String(orderRes.data.payment_terms ?? 'As agreed with supplier')}`,
+        `Delivery address: ${String(orderRes.data.delivery_address ?? companyAddress ?? '-')}`,
+        `Delivery terms: ${String(
+          orderRes.data.delivery_terms ??
+            (orderRes.data.expected_delivery_date
+              ? `Expected by ${formatDate(orderRes.data.expected_delivery_date)}`
+              : 'Standard supplier delivery'),
+        )}`,
+        `Supplier quote / proforma: ${String(orderRes.data.supplier_quote ?? '-')}`,
+      ],
+      footerText: `Generated Purchase Order | ${companyName}`,
+      items: itemRows.map((item) => ({
+        code: item.code,
+        description: item.description,
+        qty: String(item.qty),
+        tax: `${item.tax_rate.toFixed(2)}%`,
+        totalExVat: currencyFormatter.format(item.line_total),
+        unitPrice: currencyFormatter.format(item.unit_price),
+        uom: item.uom || '-',
+      })),
+      metadata: [
+        { label: 'PO No', value: String(orderRes.data.po_number ?? '-') },
+        { label: 'PO Date', value: formatDate(orderRes.data.order_date) },
+        { label: 'Supplier Quote', value: String(orderRes.data.supplier_quote ?? '-') },
+        { label: 'Currency', value: String(orderRes.data.currency ?? companyCurrency ?? 'USD') },
+      ],
+      supplier: {
+        address: String(supplier?.address ?? '-'),
+        email: String(supplier?.email ?? '-'),
+        name: String(supplier?.name ?? '-'),
+        phone: String(supplier?.phone ?? '-'),
+      },
+      title: 'PURCHASE ORDER',
+      totals: [
+        { label: 'Total Net Price', value: currencyFormatter.format(Number(orderRes.data.subtotal ?? 0)) },
+        { label: 'Discount', value: currencyFormatter.format(Number(orderRes.data.discount_amount ?? 0)) },
+        { label: 'Tax', value: currencyFormatter.format(Number(orderRes.data.tax_amount ?? 0)) },
+        { label: 'TOTAL', value: currencyFormatter.format(Number(orderRes.data.total ?? 0)) },
+      ],
     }));
     const fileName = `purchase-order-${sanitizeFileToken(String(orderRes.data.po_number ?? id), 'purchase-order')}.pdf`;
 

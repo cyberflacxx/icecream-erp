@@ -1,3 +1,5 @@
+import { applyInventoryDelta, recordStockMovement } from './inventory-server';
+
 export function normalizeGoodsReceivedPurchaseOrderId(input: {
   purchase_order_id?: unknown;
   purchaseOrderId?: unknown;
@@ -163,4 +165,208 @@ export function buildGoodsReceivedDraftPayload(input: GoodsReceivedDraftPayloadI
     receivingWarehouseId: warehouseId || null,
     receiving_warehouse_id: warehouseId || null,
   };
+}
+
+function toNumber(value: unknown) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function getErrorMessage(error: unknown) {
+  if (error instanceof Error) return error.message;
+  if (error && typeof error === 'object' && 'message' in error) return String((error as { message?: unknown }).message ?? '');
+  return '';
+}
+
+function isMissingColumnError(error: unknown, table: string, columnName: string) {
+  return getErrorMessage(error).includes(`column ${table}.${columnName} does not exist`);
+}
+
+export async function postGoodsReceivedNoteToInventory(
+  service: {
+    from: (table: string) => any;
+  },
+  input: {
+    grnId: string;
+    organizationId: string;
+    userId: string;
+  },
+) {
+  const primary = await service
+    .from('goods_received_notes')
+    .select('id, grn_number, status, quality_status, warehouse_id, receiving_warehouse_id, purchase_order_id, po_id, notes, approval_notes, stock_posted')
+    .eq('organization_id', input.organizationId)
+    .eq('id', input.grnId)
+    .maybeSingle();
+
+  const grn =
+    primary.error && isMissingColumnError(primary.error, 'goods_received_notes', 'purchase_order_id')
+      ? (
+          await service
+            .from('goods_received_notes')
+            .select('id, grn_number, status, quality_status, warehouse_id, po_id, notes, approval_notes')
+            .eq('organization_id', input.organizationId)
+            .eq('id', input.grnId)
+            .maybeSingle()
+        ).data
+      : primary.data;
+
+  if (!grn) {
+    throw new Error('Goods received note not found.');
+  }
+
+  const warehouseId = String(grn.receiving_warehouse_id ?? grn.warehouse_id ?? '').trim();
+  if (!warehouseId) {
+    throw new Error('Please select a receiving warehouse before posting GRN.');
+  }
+
+  if (grn.stock_posted === true || String(grn.status ?? '').toUpperCase() === 'POSTED') {
+    throw new Error('GRN has already been posted to stock.');
+  }
+
+  const existingMovement = await service
+    .from('stock_movements')
+    .select('id')
+    .or(`reference_type.eq.goods_received_note,source_document_type.eq.GRN`)
+    .eq('reference_id', input.grnId)
+    .limit(1);
+
+  if (!existingMovement.error && (existingMovement.data ?? []).length > 0) {
+    await service
+      .from('goods_received_notes')
+      .update({
+        posted_at: new Date().toISOString(),
+        posted_by: input.userId,
+        stock_posted: true,
+      })
+      .eq('id', input.grnId);
+    throw new Error('GRN has already been posted to stock.');
+  }
+
+  const itemsPrimary = await service
+    .from('goods_received_note_items')
+    .select('id, item_id, purchase_order_item_id, po_item_id, quantity_ordered, quantity_expected, quantity_received, quantity_rejected, unit_cost, warehouse_id, batch_number')
+    .eq('grn_id', input.grnId);
+
+  const items =
+    itemsPrimary.error && getErrorMessage(itemsPrimary.error).includes('goods_received_note_items')
+      ? (
+          await service
+            .from('grn_items')
+            .select('id, item_id, po_item_id, ordered_qty, received_qty, rejected_qty, unit_cost, warehouse_id, batch_number')
+            .eq('grn_id', input.grnId)
+        ).data?.map((item: Record<string, unknown>) => ({
+          ...item,
+          purchase_order_item_id: item.po_item_id,
+          quantity_ordered: item.ordered_qty,
+          quantity_received: item.received_qty,
+          quantity_rejected: item.rejected_qty,
+        }))
+      : itemsPrimary.data;
+
+  if (!items || items.length === 0) {
+    throw new Error('Goods received note could not update inventory. Please check warehouse and item details.');
+  }
+
+  for (const rawItem of items as Array<Record<string, unknown>>) {
+    const itemId = String(rawItem.item_id ?? '').trim();
+    if (!itemId) continue;
+    const quantityReceived = toNumber(rawItem.quantity_received);
+    const quantityRejected = toNumber(rawItem.quantity_rejected);
+    const quantity = Math.max(0, quantityReceived - quantityRejected);
+    if (quantity <= 0) continue;
+
+    const unitCost = toNumber(rawItem.unit_cost);
+    const lineWarehouseId = String(rawItem.warehouse_id ?? warehouseId).trim() || warehouseId;
+
+    await applyInventoryDelta(service, {
+      itemId,
+      organizationId: input.organizationId,
+      quantityDelta: quantity,
+      unitCost,
+      warehouseId: lineWarehouseId,
+    });
+
+    await recordStockMovement(service, {
+      batchNumber: rawItem.batch_number ? String(rawItem.batch_number) : null,
+      createdBy: input.userId,
+      itemId,
+      movementType: 'GRN_RECEIPT',
+      notes: String(grn.notes ?? grn.approval_notes ?? ''),
+      organizationId: input.organizationId,
+      quantity,
+      referenceId: input.grnId,
+      referenceType: 'goods_received_note',
+      unitCost,
+      warehouseId: lineWarehouseId,
+    });
+
+    const purchaseOrderItemId = String(rawItem.purchase_order_item_id ?? rawItem.po_item_id ?? '').trim();
+    if (purchaseOrderItemId) {
+      const poItem = await service
+        .from('purchase_order_items')
+        .select('id, quantity_received')
+        .eq('id', purchaseOrderItemId)
+        .maybeSingle();
+      if (!poItem.error && poItem.data) {
+        await service
+          .from('purchase_order_items')
+          .update({
+            quantity_received: toNumber(poItem.data.quantity_received) + quantity,
+          })
+          .eq('id', purchaseOrderItemId);
+      }
+    }
+  }
+
+  const purchaseOrderId = String(grn.purchase_order_id ?? grn.po_id ?? '').trim();
+  if (purchaseOrderId) {
+    const poItemsPrimary = await service
+      .from('purchase_order_items')
+      .select('quantity_ordered, quantity_received')
+      .eq('purchase_order_id', purchaseOrderId);
+    const poItems =
+      poItemsPrimary.error && isMissingColumnError(poItemsPrimary.error, 'purchase_order_items', 'purchase_order_id')
+        ? (
+            await service
+              .from('purchase_order_items')
+              .select('quantity_ordered, received_qty')
+              .eq('po_id', purchaseOrderId)
+          ).data?.map((item: Record<string, unknown>) => ({
+            ...item,
+            quantity_received: item.received_qty,
+          }))
+        : poItemsPrimary.data;
+
+    const allReceived = (poItems ?? []).length > 0 && (poItems ?? []).every((item: Record<string, unknown>) => toNumber(item.quantity_received) >= toNumber(item.quantity_ordered));
+    const anyReceived = (poItems ?? []).some((item: Record<string, unknown>) => toNumber(item.quantity_received) > 0);
+    await service
+      .from('purchase_orders')
+      .update({
+        status: allReceived ? 'FULLY_RECEIVED' : anyReceived ? 'PARTIAL_RECEIVED' : 'APPROVED',
+      })
+      .eq('id', purchaseOrderId);
+  }
+
+  const postedAt = new Date().toISOString();
+  const { data: updated, error: updateError } = await service
+    .from('goods_received_notes')
+    .update({
+      approved_at: postedAt,
+      approved_by: input.userId,
+      posted_at: postedAt,
+      posted_by: input.userId,
+      quality_status: 'APPROVED',
+      status: 'POSTED',
+      stock_posted: true,
+    })
+    .eq('id', input.grnId)
+    .select()
+    .single();
+
+  if (updateError || !updated) {
+    throw new Error(updateError?.message ?? 'Goods received note could not update inventory. Please check warehouse and item details.');
+  }
+
+  return updated;
 }

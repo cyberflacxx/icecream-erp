@@ -4,6 +4,7 @@ import { badRequest, can, forbidden, getAuthContext, serverError, unauthorized }
 import { buildFinanceSourceReference } from '@/lib/finance';
 import { createLinkedFinanceTransaction, postFinanceDocument } from '@/lib/finance-server';
 import { canPayInvoice } from '@/lib/procurement';
+import { recordAuditLog } from '@/lib/security-server';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
 const PAYMENT_SOURCES = new Set(['BANK', 'CASH', 'PETTY_CASH']);
@@ -252,6 +253,23 @@ export async function POST(request: NextRequest) {
       status: amountPaid >= balance ? 'PAID' : 'PARTIAL_PAID',
     })
     .eq('id', supplierInvoiceId);
+
+  await recordAuditLog({
+    action: 'SUPPLIER_PAYMENT_CREATED',
+    entityId: String(data.id),
+    entityType: 'supplier_payment',
+    newValues: {
+      amount: amountPaid,
+      goodsReceivedNoteId: linkedGrnId,
+      paymentSourceType,
+      purchaseOrderId: linkedPurchaseOrderId,
+      supplierId,
+      supplierInvoiceId,
+    },
+    organizationId: ctx.organizationId,
+    userAgent: request.headers.get('user-agent'),
+    userProfileId: ctx.userAccountId ?? ctx.userId,
+  });
 
   return NextResponse.json({ ...data, journal, linkedTransaction }, { status: 201 });
 }

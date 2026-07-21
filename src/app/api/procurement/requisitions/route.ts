@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { badRequest, can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
+import { normalizePurchaseOrderStatus } from '@/lib/procurement-purchase-orders';
 import { normalizeRequisitionItemId, normalizeRequisitionUnitOfMeasureId } from '@/lib/procurement-requisitions';
 import { isMissingColumnError } from '@/lib/postgrest-compat';
 import { createServiceRoleClient } from '@/lib/supabase/server';
@@ -9,8 +10,6 @@ const LEGACY_REQUISITION_ITEM_COLUMNS = ['pr_id', 'quantity', 'estimated_cost', 
 const REQUISITION_SELECT_BASE =
   'id, requisition_number, department, request_date, needed_by_date, status, approval_status, requested_by, approver_user_id, approved_by, approved_at, rejected_by, rejected_at, remarks';
 const REQUISITION_SELECT_WITH_APPROVER_DETAILS = `${REQUISITION_SELECT_BASE}, approver_name, approver_email, approval_notes`;
-const APPROVED_REQUISITION_STATUSES = ['approved', 'level1_approved', 'submitted', 'pending_approval'] as const;
-
 function stripMissingLegacyRequisitionItemColumn<T extends Record<string, unknown>>(payload: T, error: unknown) {
   const column = LEGACY_REQUISITION_ITEM_COLUMNS.find((entry) =>
     isMissingColumnError(error, 'purchase_requisition_items', entry),
@@ -31,7 +30,8 @@ function sanitizeStatusFilter(value: string | null) {
 
 function applyApprovedRequisitionFilter<T extends { or: (filters: string) => T }>(query: T) {
   return query.or(
-    `status.in.(${APPROVED_REQUISITION_STATUSES.join(',')}),approval_status.in.(${APPROVED_REQUISITION_STATUSES.join(',')})`,
+    'status.in.(approved,approved_for_po,level1_approved,level2_approved,submitted,pending_approval),' +
+      'approval_status.in.(approved,approved_for_po,level1_approved,level2_approved,submitted,pending_approval)',
   );
 }
 
@@ -130,8 +130,8 @@ export async function GET(request: NextRequest) {
         createdAt: r.request_date,
         requestDate: r.request_date,
         neededByDate: r.needed_by_date,
-        status: r.approval_status ?? r.status,
-        approvalStatus: r.approval_status ?? r.status,
+        status: normalizePurchaseOrderStatus(r.approval_status ?? r.status),
+        approvalStatus: normalizePurchaseOrderStatus(r.approval_status ?? r.status),
         requested_by: r.requested_by ? String(r.requested_by) : null,
         requestedBy: usersById.get(String(r.requested_by ?? '')) ?? 'Unknown',
         requestedById: r.requested_by ? String(r.requested_by) : null,
@@ -144,7 +144,7 @@ export async function GET(request: NextRequest) {
         rejectedBy: usersById.get(String(r.rejected_by ?? '')) ?? null,
         rejectedAt: r.rejected_at ? String(r.rejected_at) : null,
         remarks: r.remarks ? String(r.remarks) : null,
-        label: `${String(r.requisition_number ?? 'Requisition')} - ${usersById.get(String(r.requested_by ?? '')) ?? 'Unknown'} - ${String(r.approval_status ?? r.status ?? 'draft').replace(/_/g, ' ')}`,
+        label: `${String(r.requisition_number ?? 'Requisition')} - ${normalizePurchaseOrderStatus(r.approval_status ?? r.status ?? 'DRAFT')}`,
       }));
 
       if (picker) {
@@ -183,8 +183,8 @@ export async function GET(request: NextRequest) {
       createdAt: r.request_date,
       requestDate: r.request_date,
       neededByDate: r.needed_by_date,
-      status: r.approval_status ?? r.status,
-      approvalStatus: r.approval_status ?? r.status,
+      status: normalizePurchaseOrderStatus(r.approval_status ?? r.status),
+      approvalStatus: normalizePurchaseOrderStatus(r.approval_status ?? r.status),
       requested_by: r.requested_by ? String(r.requested_by) : null,
       requestedBy: usersById.get(String(r.requested_by ?? '')) ?? 'Unknown',
       requestedById: r.requested_by ? String(r.requested_by) : null,
@@ -197,7 +197,7 @@ export async function GET(request: NextRequest) {
       rejectedBy: usersById.get(String(r.rejected_by ?? '')) ?? null,
       rejectedAt: r.rejected_at ? String(r.rejected_at) : null,
       remarks: r.remarks ? String(r.remarks) : null,
-      label: `${String(r.requisition_number ?? 'Requisition')} - ${usersById.get(String(r.requested_by ?? '')) ?? 'Unknown'} - ${String(r.approval_status ?? r.status ?? 'draft').replace(/_/g, ' ')}`,
+      label: `${String(r.requisition_number ?? 'Requisition')} - ${normalizePurchaseOrderStatus(r.approval_status ?? r.status ?? 'DRAFT')}`,
     }));
 
     if (picker) {

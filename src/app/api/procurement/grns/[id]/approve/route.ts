@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { badRequest, can, forbidden, getAuthContext, notFound, serverError, unauthorized } from '@/lib/api-auth';
+import { postGoodsReceivedNoteToInventory } from '@/lib/procurement-goods-received';
 import { recordAuditLog } from '@/lib/security-server';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
@@ -62,7 +63,7 @@ export async function POST(
       return badRequest('Only submitted GRNs can be approved.');
     }
 
-    const { data: updated, error: updateErr } = await service
+    const { data: updatedApproval, error: updateErr } = await service
       .from('goods_received_notes')
       .update({
         approval_notes: approvalNotes,
@@ -77,11 +78,29 @@ export async function POST(
 
     if (updateErr) return serverError(updateErr.message);
 
+    let updated = updatedApproval;
+    try {
+      updated = await postGoodsReceivedNoteToInventory(service, {
+        grnId: id,
+        organizationId: ctx.organizationId,
+        userId: ctx.userId,
+      });
+    } catch (postingError) {
+      const message = postingError instanceof Error ? postingError.message : 'Failed to post GRN to inventory.';
+      if (message === 'GRN has already been posted to stock.') {
+        return badRequest(message);
+      }
+      if (message === 'Please select a receiving warehouse before posting GRN.') {
+        return badRequest(message);
+      }
+      return serverError('Goods received note could not update inventory. Please check warehouse and item details.');
+    }
+
     await recordAuditLog({
-      action: 'GRN_APPROVED',
+      action: 'GRN_POSTED_TO_STOCK',
       entityId: id,
       entityType: 'goods_received_note',
-      newValues: { approvalNotes, qualityStatus: 'APPROVED', status: 'APPROVED' },
+      newValues: { approvalNotes, qualityStatus: 'APPROVED', status: 'POSTED' },
       organizationId: ctx.organizationId,
       userProfileId: ctx.userId,
       ipAddress: request.headers.get('x-forwarded-for'),

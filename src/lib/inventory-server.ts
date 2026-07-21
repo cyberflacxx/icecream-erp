@@ -5,7 +5,7 @@ import {
   normalizeDate,
   normalizeStockMovementType,
   toNumber,
-} from '@/lib/inventory';
+} from './inventory';
 
 type ServiceClient = {
   from: (table: string) => any;
@@ -106,7 +106,7 @@ export async function getBalance(
 ) {
   const { data, error } = await service
     .from('stock_balances')
-    .select('id, organization_id, item_id, warehouse_id, quantity_on_hand, quantity_available, quantity_reserved, last_updated')
+    .select('id, organization_id, item_id, warehouse_id, quantity, quantity_on_hand, quantity_available, quantity_reserved, avg_cost, average_cost, total_value, updated_at, last_updated')
     .eq('item_id', itemId)
     .eq('warehouse_id', warehouseId)
     .maybeSingle();
@@ -141,12 +141,17 @@ export async function applyInventoryDelta(
   const nextAvailable = nextOnHand - quantityReserved;
   const currentLegacyQuantity = toNumber(current?.quantity ?? current?.quantity_on_hand);
   const nextLegacyQuantity = currentLegacyQuantity + quantityDelta;
-  const currentAverageCost = toNumber(current?.avg_cost);
+  const currentAverageCost = toNumber(current?.average_cost ?? current?.avg_cost);
+  const currentTotalValue = toNumber(current?.total_value ?? (toNumber(current?.quantity_on_hand) * currentAverageCost));
   const incomingUnitCost = params.unitCost == null ? null : toNumber(params.unitCost);
   const nextAverageCost =
     quantityDelta > 0 && incomingUnitCost !== null && nextOnHand > 0
       ? (((toNumber(current?.quantity_on_hand) * currentAverageCost) + (quantityDelta * incomingUnitCost)) / nextOnHand)
       : currentAverageCost;
+  const nextTotalValue =
+    quantityDelta > 0 && incomingUnitCost !== null
+      ? currentTotalValue + (quantityDelta * incomingUnitCost)
+      : currentTotalValue;
 
   ensureNonNegative(nextOnHand, 'stock balance');
   ensureNonNegative(nextAvailable, 'available stock');
@@ -157,11 +162,14 @@ export async function applyInventoryDelta(
       .from('stock_balances')
       .update({
         avg_cost: nextAverageCost,
+        average_cost: nextAverageCost,
         quantity: nextLegacyQuantity,
         quantity_on_hand: nextOnHand,
         quantity_available: nextAvailable,
         quantity_reserved: quantityReserved,
         reserved_qty: quantityReserved,
+        total_value: nextTotalValue,
+        updated_at: new Date().toISOString(),
         last_updated: new Date().toISOString(),
       })
       .eq('id', current.id)
@@ -179,6 +187,7 @@ export async function applyInventoryDelta(
     .from('stock_balances')
     .insert({
       avg_cost: incomingUnitCost ?? 0,
+      average_cost: incomingUnitCost ?? 0,
       organization_id: organizationId,
       item_id: params.itemId,
       quantity: nextLegacyQuantity,
@@ -187,6 +196,8 @@ export async function applyInventoryDelta(
       quantity_available: nextAvailable,
       quantity_reserved: quantityReserved,
       reserved_qty: quantityReserved,
+      total_value: Math.max(0, quantityDelta * toNumber(incomingUnitCost)),
+      updated_at: new Date().toISOString(),
       last_updated: new Date().toISOString(),
     })
     .select()
@@ -243,8 +254,12 @@ export async function recordStockMovement(
     running_balance: toNumber(balance?.quantity_on_hand),
     unit_cost: unitCost || null,
     total_cost: totalCost || null,
+    total_value: totalCost || null,
     reference_id: params.referenceId ?? null,
     reference_type: params.referenceType ?? null,
+    source_document_id: params.referenceId ?? null,
+    source_document_type: params.referenceType === 'goods_received_note' ? 'GRN' : params.referenceType ?? null,
+    reference_number: params.referenceType === 'goods_received_note' ? params.referenceId ?? null : params.referenceId ?? null,
     batch_number: params.batchNumber ?? null,
     source_warehouse_id: params.sourceWarehouseId ?? null,
     destination_warehouse_id: params.destinationWarehouseId ?? null,

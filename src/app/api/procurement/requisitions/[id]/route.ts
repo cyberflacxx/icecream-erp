@@ -7,9 +7,9 @@ import { createServiceRoleClient } from '@/lib/supabase/server';
 
 const LEGACY_REQUISITION_ITEM_COLUMNS = ['pr_id', 'quantity', 'estimated_cost', 'notes'] as const;
 const REQUISITION_DETAIL_SELECT_BASE =
-  'id, requisition_number, department, needed_by_date, remarks, status, approval_status, approver_user_id, requested_by, approved_by, approved_at, rejected_by, rejected_at, purchase_requisition_items(id, item_id, unit_of_measure_id, quantity_requested, quantity_approved, estimated_unit_cost, remarks)';
+  'id, requisition_number, department, needed_by_date, remarks, status, approval_status, approver_user_id, requested_by, approved_by, approved_at, rejected_by, rejected_at, purchase_requisition_items(id, item_id, unit_of_measure_id, quantity_requested, quantity_approved, estimated_unit_cost, remarks, items(id, code, name, description, purchase_price, cost_price, unit_cost, standard_cost, default_purchase_price, price, selling_price), units_of_measure(id, name, abbreviation))';
 const REQUISITION_DETAIL_SELECT_WITH_APPROVER_DETAILS =
-  'id, requisition_number, department, needed_by_date, remarks, status, approval_status, approver_user_id, approver_name, approver_email, approval_notes, requested_by, approved_by, approved_at, rejected_by, rejected_at, purchase_requisition_items(id, item_id, unit_of_measure_id, quantity_requested, quantity_approved, estimated_unit_cost, remarks)';
+  'id, requisition_number, department, needed_by_date, remarks, status, approval_status, approver_user_id, approver_name, approver_email, approval_notes, requested_by, approved_by, approved_at, rejected_by, rejected_at, purchase_requisition_items(id, item_id, unit_of_measure_id, quantity_requested, quantity_approved, estimated_unit_cost, remarks, items(id, code, name, description, purchase_price, cost_price, unit_cost, standard_cost, default_purchase_price, price, selling_price), units_of_measure(id, name, abbreviation))';
 
 function stripMissingLegacyRequisitionItemColumn<T extends Record<string, unknown>>(payload: T, error: unknown) {
   const column = LEGACY_REQUISITION_ITEM_COLUMNS.find((entry) =>
@@ -69,7 +69,27 @@ export async function GET(
       purchase_requisition_items: (requisition.purchase_requisition_items ?? []).map((item) => ({
         ...item,
         itemId: item.item_id ? String(item.item_id) : null,
+        itemCode: item.items?.code ? String(item.items.code) : null,
+        itemName: item.items?.name ? String(item.items.name) : null,
+        description: item.items?.description ? String(item.items.description) : item.items?.name ? String(item.items.name) : '',
+        purchasePrice:
+          item.items?.purchase_price ??
+          item.items?.cost_price ??
+          item.items?.unit_cost ??
+          item.items?.standard_cost ??
+          item.items?.default_purchase_price ??
+          item.items?.price ??
+          item.items?.selling_price ??
+          item.estimated_unit_cost ??
+          0,
         unitOfMeasureId: item.unit_of_measure_id ? String(item.unit_of_measure_id) : null,
+        unitOfMeasureName: item.units_of_measure?.name ? String(item.units_of_measure.name) : null,
+        uomName:
+          item.units_of_measure?.abbreviation
+            ? String(item.units_of_measure.abbreviation)
+            : item.units_of_measure?.name
+              ? String(item.units_of_measure.name)
+              : null,
       })),
     });
   } catch (err) {

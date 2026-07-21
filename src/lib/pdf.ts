@@ -48,6 +48,40 @@ export interface BrandedPdfDocumentOptions {
   title: string;
 }
 
+export interface PurchaseOrderPdfOptions {
+  authorization: {
+    approvedBy: string;
+    date: string;
+  };
+  buyer: {
+    address: string;
+    companyName: string;
+    preparedFor: string;
+  };
+  currency: string;
+  deliveryTerms: string[];
+  footerText: string;
+  items: Array<{
+    code: string;
+    description: string;
+    qty: string;
+    tax: string;
+    totalExVat: string;
+    unitPrice: string;
+    uom: string;
+  }>;
+  logoPath?: string;
+  metadata: Array<{ label: string; value: string }>;
+  supplier: {
+    address: string;
+    email: string;
+    name: string;
+    phone: string;
+  };
+  title: string;
+  totals: Array<{ label: string; value: string }>;
+}
+
 const PDF_PAGE_WIDTH = 595;
 const PDF_PAGE_HEIGHT = 842;
 const PAGE_MARGIN = 36;
@@ -773,5 +807,250 @@ export function createBrandedPdfDocument(options: BrandedPdfDocumentOptions): Ui
   return buildPdfDocument({
     image: logo,
     pageStreams: pages.map((page) => page.join('\n')),
+  });
+}
+
+export function createPurchaseOrderPdfDocument(options: PurchaseOrderPdfOptions): Uint8Array {
+  const page: string[] = [];
+  const logo = loadPdfLogo(options.logoPath);
+  const topY = PDF_PAGE_HEIGHT - PAGE_MARGIN;
+  const titleY = topY - 22;
+  const leftX = PAGE_MARGIN;
+  const rightX = 360;
+  const contentWidth = PDF_PAGE_WIDTH - PAGE_MARGIN * 2;
+  const itemTableTop = 520;
+  const lineHeight = 12;
+
+  page.push(
+    'BT',
+    `/F2 24 Tf`,
+    `${rgb(TEXT_DARK)} rg`,
+    `1 0 0 1 ${220} ${titleY} Tm`,
+    `(${escapePdfText(options.title)}) Tj`,
+    'ET',
+  );
+
+  if (logo) {
+    const maxHeight = 54;
+    const scale = maxHeight / logo.height;
+    const drawWidth = logo.width * scale;
+    page.push(
+      'q',
+      `${drawWidth.toFixed(2)} 0 0 ${maxHeight.toFixed(2)} ${leftX.toFixed(2)} ${(topY - 60).toFixed(2)} cm`,
+      `/${logo.alias} Do`,
+      'Q',
+    );
+  }
+
+  page.push(
+    `${rgb(BRAND_BORDER)} RG`,
+    `${rightX} ${(topY - 70).toFixed(2)} 199 72 re S`,
+  );
+  options.metadata.forEach((entry, index) => {
+    const y = topY - 18 - index * 16;
+    page.push(
+      'BT',
+      `/F2 9 Tf`,
+      `${rgb(TEXT_DARK)} rg`,
+      `1 0 0 1 ${rightX + 8} ${y} Tm`,
+      `(${escapePdfText(entry.label)}) Tj`,
+      'ET',
+      'BT',
+      `/F1 9 Tf`,
+      `${rgb(TEXT_MUTED)} rg`,
+      `1 0 0 1 ${rightX + 96} ${y} Tm`,
+      `(${escapePdfText(fitText(entry.value, 92, 9))}) Tj`,
+      'ET',
+    );
+  });
+
+  const boxTop = topY - 112;
+  const boxHeight = 95;
+  const boxWidth = (contentWidth - 12) / 2;
+  page.push(
+    `${rgb(BRAND_BORDER)} RG`,
+    `${leftX} ${boxTop - boxHeight} ${boxWidth} ${boxHeight} re S`,
+    `${(leftX + boxWidth + 12).toFixed(2)} ${boxTop - boxHeight} ${boxWidth} ${boxHeight} re S`,
+  );
+
+  const drawBox = (title: string, lines: string[], x: number) => {
+    page.push(
+      'BT',
+      `/F2 10 Tf`,
+      `${rgb(TEXT_DARK)} rg`,
+      `1 0 0 1 ${x + 8} ${boxTop - 14} Tm`,
+      `(${escapePdfText(title)}) Tj`,
+      'ET',
+    );
+    lines.forEach((line, index) => {
+      page.push(
+        'BT',
+        `/F1 9 Tf`,
+        `${rgb(TEXT_MUTED)} rg`,
+        `1 0 0 1 ${x + 8} ${boxTop - 30 - index * 13} Tm`,
+        `(${escapePdfText(fitText(line || '-', boxWidth - 16, 9))}) Tj`,
+        'ET',
+      );
+    });
+  };
+
+  drawBox('BUYER', [options.buyer.companyName, options.buyer.address, options.buyer.preparedFor], leftX);
+  drawBox(
+    'SUPPLIER',
+    [options.supplier.name, options.supplier.address, options.supplier.phone, options.supplier.email],
+    leftX + boxWidth + 12,
+  );
+
+  page.push(
+    `${rgb(TEXT_DARK)} rg`,
+    `${rgb(TEXT_DARK)} RG`,
+    `${leftX} ${itemTableTop} ${contentWidth} 22 re B`,
+  );
+  const columns = [
+    { key: 'code', label: 'Code', width: 58 },
+    { key: 'description', label: 'Description', width: 168 },
+    { key: 'qty', label: 'Qty', width: 42 },
+    { key: 'uom', label: 'UoM', width: 44 },
+    { key: 'unitPrice', label: 'Unit Price', width: 72 },
+    { key: 'tax', label: 'Tax', width: 48 },
+    { key: 'totalExVat', label: 'Total Ex VAT', width: 83 },
+  ] as const;
+  let columnX = leftX;
+  for (const column of columns) {
+    page.push(
+      'BT',
+      `/F2 8 Tf`,
+      `${rgb(TEXT_LIGHT)} rg`,
+      `1 0 0 1 ${columnX + 4} ${itemTableTop + 7} Tm`,
+      `(${escapePdfText(column.label)}) Tj`,
+      'ET',
+    );
+    columnX += column.width;
+  }
+
+  let rowY = itemTableTop - 22;
+  for (const row of options.items.slice(0, 11)) {
+    const wrappedDescription = wrapTextToWidth(row.description, 160, 8);
+    const rowHeight = Math.max(20, wrappedDescription.length * 10 + 6);
+    page.push(
+      `${rgb(BRAND_BORDER)} RG`,
+      `${leftX} ${rowY - rowHeight} ${contentWidth} ${rowHeight} re S`,
+    );
+    let x = leftX;
+    const cellValues = [
+      row.code,
+      wrappedDescription.join(' | '),
+      row.qty,
+      row.uom,
+      row.unitPrice,
+      row.tax,
+      row.totalExVat,
+    ];
+    columns.forEach((column, index) => {
+      const value = cellValues[index] ?? '-';
+      page.push(
+        'BT',
+        `/F1 8 Tf`,
+        `${rgb(TEXT_DARK)} rg`,
+        `1 0 0 1 ${x + 4} ${rowY - 12} Tm`,
+        `(${escapePdfText(fitText(value, column.width - 8, 8))}) Tj`,
+        'ET',
+      );
+      x += column.width;
+    });
+    rowY -= rowHeight;
+  }
+
+  const termsTop = rowY - 16;
+  page.push(
+    `${rgb(BRAND_BORDER)} RG`,
+    `${leftX} ${termsTop - 78} 330 78 re S`,
+    `${402} ${termsTop - 78} 157 78 re S`,
+    'BT',
+    `/F2 10 Tf`,
+    `${rgb(TEXT_DARK)} rg`,
+    `1 0 0 1 ${leftX + 8} ${termsTop - 14} Tm`,
+    '(Payment And Delivery Terms) Tj',
+    'ET',
+  );
+  options.deliveryTerms.slice(0, 5).forEach((line, index) => {
+    page.push(
+      'BT',
+      `/F1 8 Tf`,
+      `${rgb(TEXT_MUTED)} rg`,
+      `1 0 0 1 ${leftX + 8} ${termsTop - 28 - index * 11} Tm`,
+      `(${escapePdfText(fitText(line, 314, 8))}) Tj`,
+      'ET',
+    );
+  });
+  page.push(
+    'BT',
+    `/F2 10 Tf`,
+    `${rgb(TEXT_DARK)} rg`,
+    `1 0 0 1 ${410} ${termsTop - 14} Tm`,
+    '(Totals) Tj',
+    'ET',
+  );
+  options.totals.forEach((entry, index) => {
+    page.push(
+      'BT',
+      `/F2 8 Tf`,
+      `${rgb(TEXT_DARK)} rg`,
+      `1 0 0 1 ${410} ${termsTop - 28 - index * 12} Tm`,
+      `(${escapePdfText(entry.label)}) Tj`,
+      'ET',
+      'BT',
+      `/F1 8 Tf`,
+      `${rgb(TEXT_MUTED)} rg`,
+      `1 0 0 1 ${492} ${termsTop - 28 - index * 12} Tm`,
+      `(${escapePdfText(fitText(entry.value, 58, 8))}) Tj`,
+      'ET',
+    );
+  });
+
+  const authTop = termsTop - 96;
+  page.push(
+    `${rgb(BRAND_BORDER)} RG`,
+    `${leftX} ${authTop - 48} ${contentWidth} 48 re S`,
+    'BT',
+    `/F2 10 Tf`,
+    `${rgb(TEXT_DARK)} rg`,
+    `1 0 0 1 ${leftX + 8} ${authTop - 14} Tm`,
+    '(Authorization) Tj',
+    'ET',
+    'BT',
+    `/F1 8 Tf`,
+    `${rgb(TEXT_MUTED)} rg`,
+    `1 0 0 1 ${leftX + 8} ${authTop - 29} Tm`,
+    `(${escapePdfText(`Approved by: ${options.authorization.approvedBy}`)}) Tj`,
+    'ET',
+    'BT',
+    `/F1 8 Tf`,
+    `${rgb(TEXT_MUTED)} rg`,
+    `1 0 0 1 ${leftX + 220} ${authTop - 29} Tm`,
+    '(Signature: ____________________) Tj',
+    'ET',
+    'BT',
+    `/F1 8 Tf`,
+    `${rgb(TEXT_MUTED)} rg`,
+    `1 0 0 1 ${leftX + 430} ${authTop - 29} Tm`,
+    `(${escapePdfText(`Date: ${options.authorization.date}`)}) Tj`,
+    'ET',
+  );
+
+  page.push(
+    `${rgb(BRAND_BORDER)} RG`,
+    `${leftX} 42 m ${PDF_PAGE_WIDTH - PAGE_MARGIN} 42 l S`,
+    'BT',
+    `/F1 8 Tf`,
+    `${rgb(TEXT_MUTED)} rg`,
+    `1 0 0 1 ${leftX} 28 Tm`,
+    `(${escapePdfText(fitText(options.footerText, 500, 8))}) Tj`,
+    'ET',
+  );
+
+  return buildPdfDocument({
+    image: logo,
+    pageStreams: [page.join('\n')],
   });
 }

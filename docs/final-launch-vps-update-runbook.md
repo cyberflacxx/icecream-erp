@@ -23,7 +23,7 @@ If `/root/icecream-erp` is not the app repo, locate the correct checkout before 
 cd /root/icecream-erp
 git status -sb
 git fetch origin master
-git pull origin master
+git pull --ff-only origin master
 ```
 
 ### 4. Back up only the `icecream_erp` schema
@@ -39,8 +39,10 @@ docker exec supabase-db pg_dump -U supabase_admin -d postgres -n icecream_erp \
 
 ```bash
 docker exec -i supabase-db psql -U supabase_admin -d postgres -v ON_ERROR_STOP=1 \
-  < migrations/032_procurement_launch_workflow_compatibility.sql
+  < migrations/033_final_procurement_stock_and_po_template_compatibility.sql
 ```
+
+If `033` has already been applied, do not reapply it. If only `032` exists on the target host and has not been applied yet, apply `032` once and then stop.
 
 ### 6. Reload PostgREST safely
 
@@ -61,7 +63,7 @@ WHERE table_schema='icecream_erp'
   AND table_name='purchase_requisitions'
   AND column_name IN (
     'approval_notes','approver_id','approver_name','approver_email',
-    'approval_status','approved_by','approved_at','submitted_at'
+    'approval_status','approved_by','approved_at'
   )
 ORDER BY column_name;
 "
@@ -72,8 +74,8 @@ FROM information_schema.columns
 WHERE table_schema='icecream_erp'
   AND table_name='purchase_orders'
   AND column_name IN (
-    'requisition_id','approval_notes','approver_id','approver_name',
-    'approver_email','approval_status','approved_by','approved_at'
+    'requisition_id','supplier_quote','currency','delivery_address',
+    'payment_terms','delivery_terms','prepared_for'
   )
 ORDER BY column_name;
 "
@@ -84,14 +86,14 @@ FROM information_schema.columns
 WHERE table_schema='icecream_erp'
   AND table_name='purchase_order_items'
   AND column_name IN (
-    'requisition_item_id','unit_of_measure_id','description',
-    'unit_price','line_total'
+    'requisition_item_id','item_id','unit_of_measure_id','description',
+    'quantity','unit_price','tax_rate','tax_amount','line_total','total_ex_vat'
   )
 ORDER BY column_name;
 "
 ```
 
-### 8. Verify GRN, supplier invoice, supplier payment, and petty cash compatibility columns
+### 8. Verify GRN, stock, supplier invoice, supplier payment, and petty cash compatibility columns
 
 ```bash
 docker exec supabase-db psql -U supabase_admin -d postgres -P pager=off -c "
@@ -102,23 +104,34 @@ WHERE table_schema='icecream_erp'
     (table_name='goods_received_notes' AND column_name IN (
       'purchase_order_id','supplier_invoice_id','receiving_warehouse_id',
       'approved_by','approved_at','approval_notes','posted_at',
-      'posted_by','stock_posted'
+      'posted_by','stock_posted','inventory_value_posted'
     ))
     OR
     (table_name='goods_received_note_items' AND column_name IN (
-      'purchase_order_item_id','unit_of_measure_id','quantity_ordered',
+      'purchase_order_item_id','item_id','unit_of_measure_id','quantity_ordered',
       'quantity_received','unit_cost','line_total','warehouse_id'
+    ))
+    OR
+    (table_name='stock_balances' AND column_name IN (
+      'item_id','warehouse_id','quantity_on_hand','quantity_available',
+      'average_cost','total_value','updated_at'
+    ))
+    OR
+    (table_name='stock_movements' AND column_name IN (
+      'item_id','warehouse_id','quantity','unit_cost','total_value',
+      'movement_type','source_document_type','source_document_id',
+      'reference_number','created_by','created_at'
     ))
     OR
     (table_name='supplier_invoices' AND column_name IN (
       'purchase_order_id','grn_id','goods_received_note_id',
-      'approval_notes','approved_by','approved_at','outstanding_amount'
+      'supplier_id','invoice_total','outstanding_amount'
     ))
     OR
     (table_name='supplier_payments' AND column_name IN (
       'supplier_invoice_id','purchase_order_id','grn_id','goods_received_note_id',
       'payment_source_type','bank_account_id','cash_account_id',
-      'petty_cash_request_id','approval_notes','approved_by','approved_at'
+      'petty_cash_request_id','supplier_id','amount','payment_date'
     ))
     OR
     (table_name='petty_cash_requests' AND column_name IN (
@@ -150,12 +163,13 @@ ORDER BY table_name;
 ### 10. Safe live verification checklist
 
 1. Open requisitions and confirm no `approval_notes` schema-cache error.
-2. Create or load an approved requisition and confirm it appears in the PO picker.
-3. Confirm PO lines inherit item, UOM, and price.
-4. Confirm GRN lines inherit PO item cost instead of `0`.
-5. Post a GRN once only and confirm inventory quantity changes without duplicate posting.
-6. Create a supplier invoice linked to PO and GRN.
-7. Create a supplier payment with a valid bank, cash, or petty cash source.
+2. Create or load an approved or submitted requisition and confirm it appears in the PO picker.
+3. Confirm PO lines inherit item, UOM, description, and price.
+4. Export the PO PDF and verify the title, metadata block, buyer/supplier boxes, item table, terms, totals, authorization, and footer.
+5. Confirm GRN lines inherit PO item cost instead of `0`.
+6. Approve or post a GRN once only and confirm inventory quantity and value change without duplicate posting.
+7. Create a supplier invoice linked to PO and GRN.
+8. Create a supplier payment with a valid bank, cash, or petty cash source.
 
 ### 11. Do not do any of the following
 
