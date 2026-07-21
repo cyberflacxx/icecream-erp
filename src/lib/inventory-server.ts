@@ -14,7 +14,11 @@ type ServiceClient = {
 const OPTIONAL_STOCK_MOVEMENT_COLUMNS = new Set([
   'batch_number',
   'destination_warehouse_id',
+  'reference_number',
+  'source_document_id',
+  'source_document_type',
   'source_warehouse_id',
+  'total_value',
 ]);
 
 export async function generateDocumentNumber(

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
+import { isMissingTableColumnError } from '@/lib/inventory';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
 export async function GET(request: NextRequest) {
@@ -30,7 +31,7 @@ export async function GET(request: NextRequest) {
 
   let query = service
     .from('stock_balances')
-    .select('id, item_id, warehouse_id, quantity_on_hand, quantity_reserved, quantity_available, last_updated', { count: 'exact' })
+    .select('id, item_id, warehouse_id, quantity, quantity_on_hand, quantity_reserved, quantity_available, average_cost, avg_cost, total_value, last_updated', { count: 'exact' })
     .eq('organization_id', ctx.organizationId);
 
   if (itemId) query = query.eq('item_id', itemId);
@@ -44,7 +45,32 @@ export async function GET(request: NextRequest) {
   // Fetch without range first if lowStock filter is needed (post-filter)
   // For lowStock we must fetch all and filter in memory then paginate
   if (lowStock) {
-    const { data, error } = await query.order('updated_at', { ascending: false });
+    let { data, error } = await query.order('updated_at', { ascending: false });
+
+    if (
+      error &&
+      (
+        isMissingTableColumnError(error, 'stock_balances', 'quantity') ||
+        isMissingTableColumnError(error, 'stock_balances', 'average_cost') ||
+        isMissingTableColumnError(error, 'stock_balances', 'avg_cost') ||
+        isMissingTableColumnError(error, 'stock_balances', 'total_value')
+      )
+    ) {
+      let fallbackQuery = service
+        .from('stock_balances')
+        .select('id, item_id, warehouse_id, quantity_on_hand, quantity_reserved, quantity_available, last_updated')
+        .eq('organization_id', ctx.organizationId);
+      if (itemId) fallbackQuery = fallbackQuery.eq('item_id', itemId);
+      if (warehouseId) fallbackQuery = fallbackQuery.eq('warehouse_id', warehouseId);
+      if (scopedWarehouseIds) {
+        fallbackQuery = scopedWarehouseIds.length
+          ? fallbackQuery.in('warehouse_id', scopedWarehouseIds)
+          : fallbackQuery.in('warehouse_id', ['00000000-0000-0000-0000-000000000000']);
+      }
+      const fallback = await fallbackQuery.order('updated_at', { ascending: false });
+      data = fallback.data;
+      error = fallback.error;
+    }
 
     if (error) return serverError(error.message);
 
@@ -78,9 +104,45 @@ export async function GET(request: NextRequest) {
   }
 
   const from = (page - 1) * pageSize;
-  const { data, count, error } = await query
+  let { data, count, error } = await query
     .order('updated_at', { ascending: false })
     .range(from, from + pageSize - 1);
+
+  if (
+    error &&
+    (
+      isMissingTableColumnError(error, 'stock_balances', 'quantity') ||
+      isMissingTableColumnError(error, 'stock_balances', 'average_cost') ||
+      isMissingTableColumnError(error, 'stock_balances', 'avg_cost') ||
+      isMissingTableColumnError(error, 'stock_balances', 'total_value')
+    )
+  ) {
+    let fallbackQuery = service
+      .from('stock_balances')
+      .select('id, item_id, warehouse_id, quantity_on_hand, quantity_reserved, quantity_available, last_updated', { count: 'exact' })
+      .eq('organization_id', ctx.organizationId);
+    if (itemId) fallbackQuery = fallbackQuery.eq('item_id', itemId);
+    if (warehouseId) fallbackQuery = fallbackQuery.eq('warehouse_id', warehouseId);
+    if (itemType) {
+      const { data: typeItems, error: typeItemsError } = await service
+        .from('items')
+        .select('id')
+        .eq('organization_id', ctx.organizationId)
+        .eq('item_type', itemType);
+      if (typeItemsError) return serverError(typeItemsError.message);
+      const ids = (typeItems ?? []).map((row) => row.id);
+      fallbackQuery = ids.length ? fallbackQuery.in('item_id', ids) : fallbackQuery.in('item_id', ['00000000-0000-0000-0000-000000000000']);
+    }
+    if (scopedWarehouseIds) {
+      fallbackQuery = scopedWarehouseIds.length
+        ? fallbackQuery.in('warehouse_id', scopedWarehouseIds)
+        : fallbackQuery.in('warehouse_id', ['00000000-0000-0000-0000-000000000000']);
+    }
+    const fallback = await fallbackQuery.order('updated_at', { ascending: false }).range(from, from + pageSize - 1);
+    data = fallback.data;
+    count = fallback.count;
+    error = fallback.error;
+  }
 
   if (error) return serverError(error.message);
 
@@ -119,17 +181,18 @@ async function mapBalances(service: ReturnType<typeof createServiceRoleClient>, 
     const warehouse = warehouses.get(String(row.warehouse_id ?? '')) ?? null;
     const unitOfMeasure = item ? units.get(String(item.unit_of_measure_id ?? '')) ?? null : null;
     const branch = warehouse ? branches.get(String(warehouse.branch_id ?? '')) ?? null : null;
-    const quantityOnHand = Number(row.quantity_on_hand ?? 0);
+    const quantityOnHand = Number(row.quantity_on_hand ?? row.quantity ?? 0);
     const quantityReserved = Number(row.quantity_reserved ?? 0);
     const quantityAvailable = Number(row.quantity_available ?? (quantityOnHand - quantityReserved));
-    const unitCost = Number(item?.unit_cost ?? item?.standard_cost ?? 0);
+    const unitCost = Number(row.average_cost ?? row.avg_cost ?? item?.unit_cost ?? item?.standard_cost ?? 0);
+    const stockValue = Number(row.total_value ?? (quantityOnHand * unitCost));
     return {
       id: row.id,
       lastUpdated: row.last_updated,
       quantityOnHand,
       quantityAvailable,
       quantityReserved,
-      stockValue: quantityOnHand * unitCost,
+      stockValue,
       item: item
         ? {
             id: item.id,

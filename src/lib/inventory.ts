@@ -356,8 +356,10 @@ export function summarizeInventoryByType(
     const quantityOnHand = toNumber(row.quantity_on_hand ?? row.quantity);
     const item = asObject(row.items);
     const itemType = String(item?.item_type ?? item?.type ?? '');
-    const unitCost = toNumber(item?.unit_cost ?? item?.standard_cost);
-    const value = quantityOnHand * unitCost;
+    const unitCost = toNumber(row.average_cost ?? row.avg_cost ?? item?.unit_cost ?? item?.standard_cost);
+    const value = row.total_value === null || row.total_value === undefined
+      ? quantityOnHand * unitCost
+      : toNumber(row.total_value);
 
     summary.totalStockValue += value;
 

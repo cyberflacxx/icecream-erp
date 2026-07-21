@@ -93,7 +93,11 @@ export async function POST(
       if (message === 'Please select a receiving warehouse before posting GRN.') {
         return badRequest(message);
       }
-      return serverError('Goods received note could not update inventory. Please check warehouse and item details.');
+      return NextResponse.json({
+        success: false,
+        message: 'Goods received note could not update inventory. Please check warehouse and item details.',
+        code: 'GRN_STOCK_POST_FAILED',
+      }, { status: 500 });
     }
 
     await recordAuditLog({
@@ -109,6 +113,14 @@ export async function POST(
 
     return NextResponse.json(updated);
   } catch (err) {
-    return serverError((err as Error).message);
+    console.error('GRN approval failed.', {
+      grnId: id,
+      message: err instanceof Error ? err.message : String(err),
+    });
+    return NextResponse.json({
+      success: false,
+      message: 'Goods received note could not update inventory. Please check warehouse and item details.',
+      code: 'GRN_STOCK_POST_FAILED',
+    }, { status: 500 });
   }
 }

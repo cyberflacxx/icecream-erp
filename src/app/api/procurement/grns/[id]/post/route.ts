@@ -52,6 +52,14 @@ export async function POST(
     if (message === 'GRN has already been posted to stock.') {
       return badRequest(message);
     }
-    return serverError('Goods received note could not update inventory. Please check warehouse and item details.');
+    console.error('GRN post failed.', {
+      grnId: id,
+      message,
+    });
+    return NextResponse.json({
+      success: false,
+      message: 'Goods received note could not update inventory. Please check warehouse and item details.',
+      code: 'GRN_STOCK_POST_FAILED',
+    }, { status: 500 });
   }
 }

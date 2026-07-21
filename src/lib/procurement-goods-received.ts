@@ -227,8 +227,7 @@ export async function postGoodsReceivedNoteToInventory(
   const existingMovement = await service
     .from('stock_movements')
     .select('id')
-    .or(`reference_type.eq.goods_received_note,source_document_type.eq.GRN`)
-    .eq('reference_id', input.grnId)
+    .or(`reference_id.eq.${input.grnId},source_document_id.eq.${input.grnId}`)
     .limit(1);
 
   if (!existingMovement.error && (existingMovement.data ?? []).length > 0) {
@@ -268,6 +267,40 @@ export async function postGoodsReceivedNoteToInventory(
     throw new Error('Goods received note could not update inventory. Please check warehouse and item details.');
   }
 
+  const purchaseOrderItemIds = [
+    ...new Set(
+      (items as Array<Record<string, unknown>>)
+        .map((item) => String(item.purchase_order_item_id ?? item.po_item_id ?? '').trim())
+        .filter(Boolean),
+    ),
+  ];
+  const itemIds = [
+    ...new Set(
+      (items as Array<Record<string, unknown>>)
+        .map((item) => String(item.item_id ?? '').trim())
+        .filter(Boolean),
+    ),
+  ];
+  const poItemRows = purchaseOrderItemIds.length
+    ? await service
+        .from('purchase_order_items')
+        .select('id, unit_price, unit_cost')
+        .in('id', purchaseOrderItemIds)
+    : { data: [], error: null };
+  const itemRows = itemIds.length
+    ? await service
+        .from('items')
+        .select('id, purchase_price, cost_price, unit_cost, standard_cost, default_purchase_price, price, selling_price')
+        .in('id', itemIds)
+    : { data: [], error: null };
+  const poItemsById = new Map(
+    (poItemRows.error ? [] : poItemRows.data ?? []).map((item: Record<string, unknown>) => [String(item.id), item]),
+  );
+  const itemsById = new Map(
+    (itemRows.error ? [] : itemRows.data ?? []).map((item: Record<string, unknown>) => [String(item.id), item]),
+  );
+  let inventoryValuePosted = 0;
+
   for (const rawItem of items as Array<Record<string, unknown>>) {
     const itemId = String(rawItem.item_id ?? '').trim();
     if (!itemId) continue;
@@ -276,7 +309,23 @@ export async function postGoodsReceivedNoteToInventory(
     const quantity = Math.max(0, quantityReceived - quantityRejected);
     if (quantity <= 0) continue;
 
-    const unitCost = toNumber(rawItem.unit_cost);
+    const purchaseOrderItemId = String(rawItem.purchase_order_item_id ?? rawItem.po_item_id ?? '').trim();
+    const poItem = (purchaseOrderItemId ? poItemsById.get(purchaseOrderItemId) : null) as Record<string, unknown> | null;
+    const itemMaster = itemsById.get(itemId) as Record<string, unknown> | undefined;
+    const unitCost = toNumber(
+      rawItem.unit_cost ??
+        poItem?.unit_price ??
+        poItem?.unit_cost ??
+        itemMaster?.purchase_price ??
+        itemMaster?.cost_price ??
+        itemMaster?.unit_cost ??
+        itemMaster?.standard_cost ??
+        itemMaster?.default_purchase_price ??
+        itemMaster?.price ??
+        itemMaster?.selling_price ??
+        0,
+    );
+    inventoryValuePosted += quantity * unitCost;
     const lineWarehouseId = String(rawItem.warehouse_id ?? warehouseId).trim() || warehouseId;
 
     await applyInventoryDelta(service, {
@@ -301,18 +350,17 @@ export async function postGoodsReceivedNoteToInventory(
       warehouseId: lineWarehouseId,
     });
 
-    const purchaseOrderItemId = String(rawItem.purchase_order_item_id ?? rawItem.po_item_id ?? '').trim();
     if (purchaseOrderItemId) {
-      const poItem = await service
+      const poItemResult = await service
         .from('purchase_order_items')
         .select('id, quantity_received')
         .eq('id', purchaseOrderItemId)
         .maybeSingle();
-      if (!poItem.error && poItem.data) {
+      if (!poItemResult.error && poItemResult.data) {
         await service
           .from('purchase_order_items')
           .update({
-            quantity_received: toNumber(poItem.data.quantity_received) + quantity,
+            quantity_received: toNumber(poItemResult.data.quantity_received) + quantity,
           })
           .eq('id', purchaseOrderItemId);
       }
@@ -349,24 +397,37 @@ export async function postGoodsReceivedNoteToInventory(
   }
 
   const postedAt = new Date().toISOString();
-  const { data: updated, error: updateError } = await service
-    .from('goods_received_notes')
-    .update({
+  let updatePayload: Record<string, unknown> = {
       approved_at: postedAt,
       approved_by: input.userId,
       posted_at: postedAt,
       posted_by: input.userId,
+      inventory_value_posted: inventoryValuePosted,
       quality_status: 'APPROVED',
       status: 'POSTED',
       stock_posted: true,
-    })
+    };
+  let updateResult = await service
+    .from('goods_received_notes')
+    .update(updatePayload)
     .eq('id', input.grnId)
     .select()
     .single();
 
-  if (updateError || !updated) {
-    throw new Error(updateError?.message ?? 'Goods received note could not update inventory. Please check warehouse and item details.');
+  if (updateResult.error && isMissingColumnError(updateResult.error, 'goods_received_notes', 'inventory_value_posted')) {
+    updatePayload = { ...updatePayload };
+    delete updatePayload.inventory_value_posted;
+    updateResult = await service
+      .from('goods_received_notes')
+      .update(updatePayload)
+      .eq('id', input.grnId)
+      .select()
+      .single();
   }
 
-  return updated;
+  if (updateResult.error || !updateResult.data) {
+    throw new Error(updateResult.error?.message ?? 'Goods received note could not update inventory. Please check warehouse and item details.');
+  }
+
+  return updateResult.data;
 }

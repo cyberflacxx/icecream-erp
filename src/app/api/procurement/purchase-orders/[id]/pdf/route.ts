@@ -190,6 +190,14 @@ export async function GET(
       },
     });
   } catch (error) {
-    return serverError(error instanceof Error ? error.message : 'Failed to render purchase order document.');
+    console.error('Purchase order PDF generation failed.', {
+      message: error instanceof Error ? error.message : String(error),
+      purchaseOrderId: id,
+    });
+    return NextResponse.json({
+      success: false,
+      message: 'Purchase order PDF could not be generated.',
+      code: 'PO_PDF_FAILED',
+    }, { status: 500 });
   }
 }

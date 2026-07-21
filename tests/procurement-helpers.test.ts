@@ -13,7 +13,9 @@ import {
 } from '../src/lib/procurement';
 import {
   buildPurchaseOrderDraftPayload as buildPurchaseOrderDraftPayloadForOrders,
+  extractRequisitionLineItems,
   isApprovedRequisitionStatus,
+  mapRequisitionItemToPurchaseOrderLine,
   normalizePurchaseOrderItemId as normalizePurchaseOrderItemIdForOrders,
   normalizePurchaseOrderQuantity as normalizePurchaseOrderQuantityForOrders,
   normalizePurchaseOrderRequisitionId as normalizePurchaseOrderRequisitionIdForOrders,
@@ -202,6 +204,7 @@ test('purchase order helpers normalize requisition, item, uom, quantity, and pri
   assert.equal(normalizePurchaseOrderQuantityForOrders({ quantityOrdered: 3 }), 3);
   assert.equal(normalizePurchaseOrderUnitPriceForOrders({ unit_price: '12.5' }), 12.5);
   assert.equal(normalizePurchaseOrderUnitPriceForOrders({ unitCost: 9 }), 9);
+  assert.equal(normalizePurchaseOrderUnitPriceForOrders({ cost: 7 }), 7);
 });
 
 test('resolvePurchaseOrderItemUnitPrice follows purchase price fallback order', () => {
@@ -214,10 +217,56 @@ test('resolvePurchaseOrderItemUnitPrice follows purchase price fallback order', 
 
 test('purchase order item helpers resolve requisition-ready aliases', () => {
   assert.equal(resolvePurchaseOrderItemDescription({ item_description: 'Chocolate cone' }), 'Chocolate cone');
+  assert.equal(resolvePurchaseOrderItemDescription({ itemDescription: 'Chocolate cone spec' }), 'Chocolate cone spec');
+  assert.equal(resolvePurchaseOrderItemDescription({ specification: 'Frozen bucket spec' }), 'Frozen bucket spec');
   assert.equal(resolvePurchaseOrderItemDescription({ name: 'Vanilla mix' }), 'Vanilla mix');
   assert.equal(resolvePurchaseOrderItemUnitOfMeasureId({ uom_id: 'uom-1' }), 'uom-1');
   assert.equal(resolvePurchaseOrderItemUnitOfMeasureId({ unitOfMeasureId: 'uom-2' }), 'uom-2');
   assert.equal(resolvePurchaseOrderItemUnitOfMeasureId({}), null);
+});
+
+test('extractRequisitionLineItems accepts all launch response aliases', () => {
+  const row = {
+    id: 'req-line-1',
+    itemId: 'item-1',
+    itemCode: 'VAN-MIX',
+    itemName: 'Vanilla Mix',
+    quantity: 50,
+    requisitionItemId: 'req-line-1',
+    specification: '50 bucket launch order',
+    unitOfMeasureId: 'uom-1',
+    uomName: 'Bucket',
+    unitPrice: 2,
+  };
+
+  for (const key of ['items', 'line_items', 'lineItems', 'requisition_items', 'requisitionItems'] as const) {
+    const extracted = extractRequisitionLineItems({ data: { [key]: [row] } });
+    assert.equal(extracted.length, 1);
+    assert.equal(extracted[0]?.itemId, 'item-1');
+    assert.equal(extracted[0]?.requisitionItemId, 'req-line-1');
+    assert.equal(extracted[0]?.quantity, 50);
+    assert.equal(extracted[0]?.unitOfMeasureId, 'uom-1');
+    assert.equal(extracted[0]?.unitPrice, 2);
+  }
+});
+
+test('mapRequisitionItemToPurchaseOrderLine preserves item, UOM, quantity, price, and stable row id', () => {
+  const line = mapRequisitionItemToPurchaseOrderLine({
+    description: 'Vanilla Mix',
+    item_id: 'item-1',
+    quantity: 50,
+    requisition_item_id: 'req-line-1',
+    tax_rate: 0,
+    unit_of_measure_id: 'uom-1',
+    unit_price: 2,
+  });
+
+  assert.equal(line?.rowId, 'req-line-1');
+  assert.equal(line?.itemId, 'item-1');
+  assert.equal(line?.quantityOrdered, '50');
+  assert.equal(line?.unitCost, '2');
+  assert.equal(line?.unitOfMeasureId, 'uom-1');
+  assert.equal(line?.taxRate, '0');
 });
 
 test('approved requisition status helper accepts live procurement variants', () => {
@@ -272,6 +321,8 @@ test('buildPurchaseOrderDraftPayload preserves requisition line ids and descript
         itemId: 'item-1',
         quantity: 50,
         requisitionItemId: 'req-item-1',
+        taxRate: 5,
+        lineTotal: 100,
         unitPrice: 2,
       },
     ],
@@ -282,6 +333,8 @@ test('buildPurchaseOrderDraftPayload preserves requisition line ids and descript
   assert.equal(payload.items[0]?.description, 'Vanilla Mix 20L bucket');
   assert.equal(payload.items[0]?.requisitionItemId, 'req-item-1');
   assert.equal(payload.items[0]?.requisition_item_id, 'req-item-1');
+  assert.equal(payload.items[0]?.tax_rate, 5);
+  assert.equal(payload.items[0]?.line_total, 100);
   assert.equal(payload.items[0]?.unit_price, 2);
 });
 

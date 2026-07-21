@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { badRequest, can, forbidden, getAuthContext, notFound, serverError, unauthorized } from '@/lib/api-auth';
+import { normalizeRequisitionLineItem } from '@/lib/procurement-purchase-orders';
 import { normalizeRequisitionItemId, normalizeRequisitionUnitOfMeasureId } from '@/lib/procurement-requisitions';
 import { isMissingColumnError } from '@/lib/postgrest-compat';
 import { createServiceRoleClient } from '@/lib/supabase/server';
@@ -61,57 +62,23 @@ export async function GET(
 
     if (error || !requisition) return notFound('Purchase requisition not found.');
 
-    const items = (requisition.purchase_requisition_items ?? []).map((item) => ({
-      id: item.id,
-      requisition_item_id: item.id ? String(item.id) : null,
-      requisitionItemId: item.id ? String(item.id) : null,
-      item_id: item.item_id ? String(item.item_id) : null,
-      itemId: item.item_id ? String(item.item_id) : null,
-      item_code: item.items?.code ? String(item.items.code) : null,
-      itemCode: item.items?.code ? String(item.items.code) : null,
-      item_name: item.items?.name ? String(item.items.name) : null,
-      itemName: item.items?.name ? String(item.items.name) : null,
-      description: item.items?.description ? String(item.items.description) : item.items?.name ? String(item.items.name) : '',
-      quantity: Number(item.quantity_requested ?? 0),
-      unit_of_measure_id: item.unit_of_measure_id ? String(item.unit_of_measure_id) : null,
-      unitOfMeasureId: item.unit_of_measure_id ? String(item.unit_of_measure_id) : null,
-      unit_of_measure_name: item.units_of_measure?.name ? String(item.units_of_measure.name) : null,
-      uomName:
-        item.units_of_measure?.abbreviation
-          ? String(item.units_of_measure.abbreviation)
-          : item.units_of_measure?.name
-            ? String(item.units_of_measure.name)
-            : null,
-      unit_price:
-        item.items?.purchase_price ??
-        item.items?.cost_price ??
-        item.items?.unit_cost ??
-        item.items?.standard_cost ??
-        item.items?.default_purchase_price ??
-        item.items?.price ??
-        item.items?.selling_price ??
-        item.estimated_unit_cost ??
-        0,
-      unitPrice:
-        item.items?.purchase_price ??
-        item.items?.cost_price ??
-        item.items?.unit_cost ??
-        item.items?.standard_cost ??
-        item.items?.default_purchase_price ??
-        item.items?.price ??
-        item.items?.selling_price ??
-        item.estimated_unit_cost ??
-        0,
-    }));
+    const items = (requisition.purchase_requisition_items ?? [])
+      .map((item) => normalizeRequisitionLineItem(item))
+      .filter((item): item is NonNullable<ReturnType<typeof normalizeRequisitionLineItem>> => Boolean(item));
 
-    return NextResponse.json({
+    const detail = {
       ...requisition,
       requisition_id: requisition.id ? String(requisition.id) : null,
       requisitionId: requisition.id ? String(requisition.id) : null,
+      requisitionNumber: requisition.requisition_number ? String(requisition.requisition_number) : null,
       approverName: requisition.approver_name ? String(requisition.approver_name) : null,
       approverEmail: requisition.approver_email ? String(requisition.approver_email) : null,
       approvalNotes: requisition.approval_notes ? String(requisition.approval_notes) : null,
       items,
+      line_items: items,
+      lineItems: items,
+      requisition_items: items,
+      requisitionItems: items,
       purchase_requisition_items: (requisition.purchase_requisition_items ?? []).map((item) => ({
         ...item,
         itemId: item.item_id ? String(item.item_id) : null,
@@ -137,6 +104,12 @@ export async function GET(
               ? String(item.units_of_measure.name)
               : null,
       })),
+    };
+
+    return NextResponse.json({
+      ...detail,
+      success: true,
+      data: detail,
     });
   } catch (err) {
     return serverError((err as Error).message);

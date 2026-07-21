@@ -13,7 +13,7 @@ import {
   XCircle,
 } from 'lucide-react';
 import { type FormEvent, useEffect, useState } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { EmptyState, FilterBar, FormDrawer, StatusBadge } from '@/components/ui-library';
@@ -32,6 +32,8 @@ import {
   isPurchaseOrderRejectable,
   isPurchaseOrderSentLike,
   normalizePurchaseOrderStatus,
+  extractRequisitionLineItems,
+  mapRequisitionItemToPurchaseOrderLine,
   resolvePurchaseOrderItemUnitPrice,
 } from '@/lib/procurement-purchase-orders';
 import {
@@ -147,15 +149,20 @@ function normalizePurchaseOrderItemsResponse(payload: unknown): PurchaseOrderIte
 function createLineItemDraft() {
   return {
     description: '',
+    itemCode: '',
     itemId: '',
+    itemName: '',
     requisitionItemId: '',
     quantityOrdered: '1',
     rowId:
       typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
         ? crypto.randomUUID()
         : `po-item-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    specification: '',
+    taxRate: '0',
     unitCost: '0',
-    unitOfMeasureId: ''
+    unitOfMeasureId: '',
+    unitOfMeasureName: ''
   };
 }
 
@@ -221,6 +228,7 @@ interface RequisitionPickerOption {
 }
 
 interface RequisitionDetailResponse {
+  data?: RequisitionDetailResponse;
   id: string;
   requisition_id?: string | null;
   requisitionId?: string | null;
@@ -251,6 +259,10 @@ interface RequisitionDetailResponse {
     unit_price?: number | string | null;
     unitPrice?: number | string | null;
   }>;
+  line_items?: RequisitionDetailResponse['items'];
+  lineItems?: RequisitionDetailResponse['items'];
+  requisition_items?: RequisitionDetailResponse['items'];
+  requisitionItems?: RequisitionDetailResponse['items'];
   purchase_requisition_items: Array<{
     id: string;
     item_id: string;
@@ -289,6 +301,7 @@ export default function PurchaseOrdersPage() {
   const [isLoadingRequisition, setIsLoadingRequisition] = useState(false);
   const [pendingAction, setPendingAction] = useState<string | null>(null);
 
+  const router = useRouter();
   const queryClient = useQueryClient();
   const request = useProcurementRequest();
   const metaQuery = useProcurementMeta();
@@ -344,22 +357,13 @@ export default function PurchaseOrdersPage() {
     setRequisitionLoadError(null);
 
     try {
-      const detail = await request<RequisitionDetailResponse>(`/api/procurement/requisitions/${requisitionId}`);
-      const requisitionItems = detail.items?.length
-        ? detail.items
-        : detail.purchase_requisition_items.map((item) => ({
-            description: item.description ?? item.itemName ?? item.item_name ?? '',
-            id: item.id,
-            item_id: item.itemId ?? item.item_id ?? '',
-            itemId: item.itemId ?? item.item_id ?? '',
-            quantity: item.quantity_requested,
-            requisition_item_id: item.id,
-            requisitionItemId: item.id,
-            unit_of_measure_id: item.unitOfMeasureId ?? item.unit_of_measure_id ?? '',
-            unitOfMeasureId: item.unitOfMeasureId ?? item.unit_of_measure_id ?? '',
-            unit_price: item.estimated_unit_cost ?? 0,
-            unitPrice: item.estimated_unit_cost ?? 0,
-          }));
+      const response = await request<RequisitionDetailResponse>(`/api/procurement/requisitions/${requisitionId}`);
+      const detail = response.data ?? response;
+      const requisitionItems = extractRequisitionLineItems(response);
+
+      if (!requisitionItems.length) {
+        setRequisitionLoadError('Selected requisition has no items. Please check the requisition before creating a PO.');
+      }
 
       setFormState((current) => ({
         ...current,
@@ -370,18 +374,7 @@ export default function PurchaseOrdersPage() {
         expectedDeliveryDate: current.expectedDeliveryDate || (detail.needed_by_date ? String(detail.needed_by_date).slice(0, 10) : ''),
         items:
           requisitionItems.length > 0
-            ? requisitionItems.map((item) => ({
-                itemId: item.itemId ?? item.item_id ?? '',
-                quantityOrdered: String(item.quantity ?? 1),
-                rowId: item.requisitionItemId ?? item.requisition_item_id ?? item.id,
-                unitCost: String(
-                  resolvePurchaseOrderItemUnitPrice({
-                    purchase_price: item.unit_price,
-                    unit_cost: item.unitPrice,
-                  }),
-                ),
-                unitOfMeasureId: item.unitOfMeasureId ?? item.unit_of_measure_id ?? '',
-              }))
+            ? requisitionItems.map((item) => mapRequisitionItemToPurchaseOrderLine(item) ?? createLineItemDraft())
             : [createLineItemDraft()],
         requisitionId,
       }));
@@ -480,6 +473,7 @@ export default function PurchaseOrdersPage() {
         itemId: item.itemId,
         requisitionItemId: item.requisitionItemId || null,
         quantityOrdered: Number(item.quantityOrdered),
+        taxRate: Number(item.taxRate || 0),
         unitCost: Number(item.unitCost),
         unitOfMeasureId: item.unitOfMeasureId || ''
       }));
@@ -508,7 +502,16 @@ export default function PurchaseOrdersPage() {
     }
 
     try {
-      await request('/api/procurement/purchase-orders', {
+      const response = await request<{
+        data?: {
+          id?: string;
+          purchase_order_id?: string;
+          purchaseOrderId?: string;
+        };
+        id?: string;
+        purchase_order_id?: string;
+        purchaseOrderId?: string;
+      }>('/api/procurement/purchase-orders', {
         body: JSON.stringify(buildPurchaseOrderDraftPayload({
           approverEmail: formState.approverEmail || null,
           approverName: formState.approverName || null,
@@ -526,11 +529,16 @@ export default function PurchaseOrdersPage() {
         })),
         method: 'POST'
       });
+      const createdOrder = response.data ?? response;
+      const createdOrderId = createdOrder.id ?? createdOrder.purchase_order_id ?? createdOrder.purchaseOrderId ?? null;
       setFeedback({ message: 'Purchase order created successfully.', tone: 'success' });
       setFormError(null);
       setFormState(createInitialFormState());
       setIsDrawerOpen(false);
       await refresh();
+      if (createdOrderId) {
+        router.push(`/procurement/purchase-orders/${createdOrderId}`);
+      }
     } catch (error) {
       setFormError(error instanceof Error ? error.message : 'Failed to create purchase order.');
     }
@@ -592,9 +600,12 @@ export default function PurchaseOrdersPage() {
           return {
             ...row,
             description: matchedItem?.description ?? matchedItem?.name ?? '',
+            itemCode: matchedItem?.code ?? '',
             itemId: value,
+            itemName: matchedItem?.name ?? '',
             unitCost: String(derivedUnitCost),
             unitOfMeasureId: matchedItem?.unitOfMeasureId || row.unitOfMeasureId || '',
+            unitOfMeasureName: matchedItem?.unitOfMeasureName ?? '',
           };
         }
 

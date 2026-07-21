@@ -2,6 +2,8 @@ import { getSmokeConfig, login, fetchWithTimeout } from './_frontend-smoke-share
 
 const REQUIRED_ENV_VARS = ['ABSOLUTE_ERP_BASE_URL', 'SMOKE_WORK_ID', 'SMOKE_PASSWORD'];
 const TEST_QUANTITY = 50;
+const REQUIRED_ENV_COMMAND = 'ABSOLUTE_ERP_BASE_URL=https://www.absolute-erp.com SMOKE_WORK_ID=... SMOKE_PASSWORD=... npm run smoke:procurement:e2e';
+const routeResults = [];
 
 function fail(message, details) {
   const error = new Error(message);
@@ -19,7 +21,7 @@ function logStep(label, status, details = '') {
 function requireEnv(name) {
   const value = process.env[name]?.trim();
   if (!value) {
-    fail(`Missing required environment variable: ${name}`);
+    fail(`Missing required environment variable: ${name}. Run: ${REQUIRED_ENV_COMMAND}`);
   }
   return value;
 }
@@ -50,6 +52,14 @@ async function apiRequest(baseUrl, cookie, pathname, { method = 'GET', body, hea
     } catch {}
   }
 
+  routeResults.push({
+    route: pathname,
+    method,
+    status: response.status,
+    contentType,
+    failure: response.ok ? null : String(json?.message ?? json?.error ?? text).slice(0, 240),
+  });
+
   return {
     contentType,
     json,
@@ -63,6 +73,15 @@ async function apiRequest(baseUrl, cookie, pathname, { method = 'GET', body, hea
 function assertOk(result, label) {
   if (!result.ok) {
     fail(`${label} failed with HTTP ${result.status}.`, result.json ?? result.text);
+  }
+}
+
+function printRouteReport() {
+  console.log('');
+  console.log('ROUTE_REPORT');
+  for (const result of routeResults) {
+    const suffix = result.failure ? ` failure=${JSON.stringify(result.failure)}` : '';
+    console.log(`${result.method} ${result.route} status=${result.status} content-type=${result.contentType || '-'}${suffix}`);
   }
 }
 
@@ -459,8 +478,8 @@ async function main() {
   const expectedUnitCost = unitPrice;
   const expectedValueDelta = TEST_QUANTITY * expectedUnitCost;
 
-  if (quantityDelta < TEST_QUANTITY) {
-    fail(`Stock quantity did not increase by at least ${TEST_QUANTITY}.`, {
+  if (quantityDelta !== TEST_QUANTITY) {
+    fail(`Stock quantity delta must equal ${TEST_QUANTITY}.`, {
       afterBalance,
       beforeBalance,
       quantityDelta,
@@ -478,15 +497,16 @@ async function main() {
 
   const movementRows = await fetchStockMovements(baseUrl, cookie, timeoutMs, item.id);
   const grnMovement = movementRows.find((entry) => {
-    const referenceId = normalizeString(entry.reference?.id);
-    const referenceType = normalizeString(entry.reference?.type).toUpperCase();
-    return referenceId === grnId || referenceType.includes('GRN') || referenceType.includes('GOODS_RECEIVED');
+    const sourceDocumentId = normalizeString(entry.source_document_id ?? entry.sourceDocumentId ?? entry.reference?.id);
+    const sourceDocumentType = normalizeString(entry.source_document_type ?? entry.sourceDocumentType ?? entry.reference?.type).toUpperCase();
+    return sourceDocumentId === grnId && sourceDocumentType === 'GRN';
   });
   if (!grnMovement) {
-    fail('No stock movement was found for the posted GRN.', movementRows.slice(0, 10));
+    fail('No stock movement was found with source_document_type = GRN and source_document_id = posted GRN id.', movementRows.slice(0, 10));
   }
-  logStep('Stock Movement', 'PASS', `${grnMovement.type} qty=${grnMovement.quantity}`);
+  logStep('Stock Movement', 'PASS', `${grnMovement.type} qty=${grnMovement.quantity} source_document_type=${grnMovement.source_document_type ?? grnMovement.sourceDocumentType}`);
 
+  printRouteReport();
   console.log('');
   console.log('PROCUREMENT_SMOKE_PASS');
   console.log(JSON.stringify({
@@ -495,7 +515,9 @@ async function main() {
     poId,
     poNumber,
     quantityDelta,
-    referenceType: grnMovement.reference?.type ?? null,
+    routeResults,
+    sourceDocumentId: grnMovement.source_document_id ?? grnMovement.sourceDocumentId ?? grnMovement.reference?.id ?? null,
+    sourceDocumentType: grnMovement.source_document_type ?? grnMovement.sourceDocumentType ?? grnMovement.reference?.type ?? null,
     requisitionId,
     valueDelta,
     warehouseId: warehouse.id,
@@ -509,5 +531,6 @@ main().catch((error) => {
   if (error && typeof error === 'object' && 'details' in error) {
     console.error(JSON.stringify(error.details, null, 2));
   }
+  printRouteReport();
   process.exitCode = 1;
 });

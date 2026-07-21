@@ -11,6 +11,8 @@ import {
   derivePurchaseOrderStatus,
   isApprovedRequisitionStatus,
   normalizePurchaseOrderStatus,
+  normalizePurchaseOrderLineTotal,
+  normalizePurchaseOrderTaxRate,
   resolvePurchaseOrderItemDescription,
   resolvePurchaseOrderItemUnitOfMeasureId,
   resolvePurchaseOrderItemUnitPrice,
@@ -18,7 +20,23 @@ import {
 import { isMissingColumnError } from '@/lib/postgrest-compat';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
-const LEGACY_PURCHASE_ORDER_ITEM_COLUMNS = ['po_id', 'quantity', 'unit_price', 'tax_rate', 'line_total', 'received_qty'] as const;
+const LEGACY_PURCHASE_ORDER_ITEM_COLUMNS = [
+  'description',
+  'line_total',
+  'po_id',
+  'purchase_order_id',
+  'quantity',
+  'quantity_ordered',
+  'quantity_received',
+  'received_qty',
+  'requisition_item_id',
+  'tax_amount',
+  'tax_rate',
+  'total_cost',
+  'total_ex_vat',
+  'unit_of_measure_id',
+  'unit_price',
+] as const;
 const PURCHASE_ORDER_SELECT_BASE = `id, po_number, order_date, expected_delivery_date, status, total, approver_user_id, approved_by, approved_at, sent_at, rejected_at,
          requisition_id,
          suppliers(id, name),
@@ -57,7 +75,14 @@ function logPurchaseOrderFailure(
 }
 
 function stripMissingOptionalHeaderColumn<T extends Record<string, unknown>>(payload: T, error: unknown) {
-  for (const column of ['approver_name', 'approver_email', 'approval_notes'] as const) {
+  for (const column of [
+    'approver_name',
+    'approver_email',
+    'approval_notes',
+    'currency',
+    'delivery_address',
+    'supplier_quote',
+  ] as const) {
     if (isMissingColumnError(error, 'purchase_orders', column)) {
       const nextPayload = { ...payload };
       delete nextPayload[column];
@@ -66,6 +91,32 @@ function stripMissingOptionalHeaderColumn<T extends Record<string, unknown>>(pay
   }
 
   return null;
+}
+
+function firstString(...values: unknown[]) {
+  return values
+    .map((value) => String(value ?? '').trim())
+    .find(Boolean) ?? '';
+}
+
+function poCreateFailure(
+  status: number,
+  details: {
+    lineCount: number;
+    missing?: string[];
+    operation: string;
+  },
+) {
+  return NextResponse.json({
+    success: false,
+    message: 'Purchase order could not be created. Please check supplier, requisition items, quantities, and prices.',
+    code: 'PO_CREATE_FAILED',
+    details: {
+      lineCount: details.lineCount,
+      missing: details.missing ?? [],
+      operation: details.operation,
+    },
+  }, { status });
 }
 
 export async function GET(request: NextRequest) {
@@ -100,7 +151,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({
         success: true,
         data: (pickerRows.data ?? [])
-          .filter((row) => ['APPROVED', 'OPEN', 'SENT', 'SENT_TO_SUPPLIER', 'PARTIAL_RECEIVED', 'PARTIALLY_RECEIVED'].includes(normalizePurchaseOrderStatus(row.status)))
+          .filter((row) => ['APPROVED', 'CREATED', 'DRAFT', 'OPEN', 'SUBMITTED', 'SENT', 'SENT_TO_SUPPLIER', 'PARTIAL_RECEIVED', 'PARTIALLY_RECEIVED'].includes(normalizePurchaseOrderStatus(row.status)))
           .map((row) => {
             const supplier = Array.isArray(row.suppliers) ? row.suppliers[0] : row.suppliers;
             const supplierName = String(supplier?.name ?? 'Unknown supplier');
@@ -237,6 +288,15 @@ export async function POST(request: NextRequest) {
     supplier_id?: string;
     requisitionId?: string | null;
     requisition_id?: string | null;
+    warehouseId?: string | null;
+    warehouse_id?: string | null;
+    deliveryAddress?: string | null;
+    delivery_address?: string | null;
+    supplierQuote?: string | null;
+    supplier_quote?: string | null;
+    quoteReference?: string | null;
+    quote_reference?: string | null;
+    currency?: string | null;
     orderDate?: string | null;
     expectedDeliveryDate?: string | null;
     notes?: string | null;
@@ -262,6 +322,18 @@ export async function POST(request: NextRequest) {
       unitPrice?: number;
       unit_price?: number;
       price?: number;
+      cost?: number;
+      description?: string | null;
+      itemDescription?: string | null;
+      item_description?: string | null;
+      itemName?: string | null;
+      specification?: string | null;
+      requisitionItemId?: string | null;
+      requisition_item_id?: string | null;
+      taxRate?: number;
+      tax_rate?: number;
+      lineTotal?: number;
+      line_total?: number;
     }>;
   };
 
@@ -273,20 +345,33 @@ export async function POST(request: NextRequest) {
 
   const supplierId = normalizePurchaseOrderSupplierId(body);
   const requisitionId = normalizePurchaseOrderRequisitionId(body);
-    const normalizedItems = (body.items ?? []).map((item) => ({
+  const deliveryAddress = firstString(body.delivery_address, body.deliveryAddress, body.warehouse_id, body.warehouseId) || null;
+  const supplierQuote = firstString(body.supplier_quote, body.supplierQuote, body.quote_reference, body.quoteReference) || null;
+  const currency = firstString(body.currency) || 'USD';
+  const normalizedItems = (body.items ?? []).map((item) => ({
       itemId: normalizePurchaseOrderItemId(item),
       quantityOrdered: normalizePurchaseOrderQuantity(item),
+      requestedLineTotal: normalizePurchaseOrderLineTotal(item),
+      taxRate: normalizePurchaseOrderTaxRate(item),
       unitCost: normalizePurchaseOrderUnitPrice(item),
       unitOfMeasureId: normalizePurchaseOrderUnitOfMeasureId(item),
       raw: item,
     }));
 
   if (!supplierId) {
-    return badRequest('Please select a supplier.');
+    return poCreateFailure(400, {
+      lineCount: normalizedItems.length,
+      missing: ['supplier_id'],
+      operation: 'validate_purchase_order_header',
+    });
   }
 
   if (!normalizedItems.length) {
-    return badRequest('Please select a requisition or add items manually.');
+    return poCreateFailure(400, {
+      lineCount: 0,
+      missing: ['items'],
+      operation: 'validate_purchase_order_lines',
+    });
   }
 
   try {
@@ -332,13 +417,25 @@ export async function POST(request: NextRequest) {
 
     // Validate items
     if (normalizedItems.some((item) => !item.itemId)) {
-      return badRequest('Please select an item for every PO line.');
+      return poCreateFailure(400, {
+        lineCount: normalizedItems.length,
+        missing: ['item_id'],
+        operation: 'validate_purchase_order_lines',
+      });
     }
     if (normalizedItems.some((item) => Number.isNaN(item.quantityOrdered) || item.quantityOrdered <= 0)) {
-      return badRequest('Please enter a valid quantity.');
+      return poCreateFailure(400, {
+        lineCount: normalizedItems.length,
+        missing: ['quantity'],
+        operation: 'validate_purchase_order_lines',
+      });
     }
     if (normalizedItems.some((item) => Number.isNaN(item.unitCost) || item.unitCost < 0)) {
-      return badRequest('Purchase order could not be created. Please check the required fields and try again.');
+      return poCreateFailure(400, {
+        lineCount: normalizedItems.length,
+        missing: ['unit_price'],
+        operation: 'validate_purchase_order_lines',
+      });
     }
 
     const itemIds = [...new Set(normalizedItems.map((i) => i.itemId))];
@@ -356,14 +453,20 @@ export async function POST(request: NextRequest) {
     ]);
 
     const itemsCheck =
-      itemsPrimary.error && isMissingColumnError(itemsPrimary.error, 'items', 'deleted_at')
+      itemsPrimary.error
         ? await service
             .from('items')
-            .select('id, code, name, description, purchase_price, cost_price, unit_cost, standard_cost, default_purchase_price, price, selling_price, unit_of_measure_id, uom_id')
+            .select('id, code, name')
             .eq('organization_id', ctx.organizationId)
             .in('id', itemIds)
         : itemsPrimary;
 
+    if (itemsCheck.error) {
+      return poCreateFailure(500, {
+        lineCount: normalizedItems.length,
+        operation: 'validate_purchase_order_items',
+      });
+    }
     if ((itemsCheck.data?.length ?? 0) !== itemIds.length) {
       return badRequest('Selected item is no longer available. Please refresh and try again.');
     }
@@ -397,8 +500,10 @@ export async function POST(request: NextRequest) {
       return {
         description: resolvePurchaseOrderItemDescription(item.raw as Record<string, unknown>) || resolvePurchaseOrderItemDescription(itemRow),
         itemId: item.itemId,
+        lineTotal: item.requestedLineTotal ?? (item.quantityOrdered * resolvedUnitCost),
         quantityOrdered: item.quantityOrdered,
         requisitionItemId: String((item.raw as Record<string, unknown>).requisition_item_id ?? (item.raw as Record<string, unknown>).requisitionItemId ?? ''),
+        taxRate: item.taxRate,
         unitCost: resolvedUnitCost,
         unitOfMeasureId: resolvedUnitId,
       };
@@ -422,7 +527,10 @@ export async function POST(request: NextRequest) {
       requisition_id: requisitionId || null,
       order_date: body.orderDate ?? new Date().toISOString(),
       expected_delivery_date: body.expectedDeliveryDate ?? null,
+      currency,
+      delivery_address: deliveryAddress,
       notes: body.notes ?? null,
+      supplier_quote: supplierQuote,
       approver_name: body.approverName?.trim() || null,
       approver_email: body.approverEmail?.trim() || null,
       approver_user_id: body.approverUserId ?? null,
@@ -460,11 +568,10 @@ export async function POST(request: NextRequest) {
         lineCount: resolvedItems.length,
         message: orderInsert.error.message,
       });
-      return NextResponse.json({
-        success: false,
-        message: 'Purchase order could not be created. Please check required fields and try again.',
-        code: 'PO_CREATE_FAILED',
-      }, { status: 500 });
+      return poCreateFailure(500, {
+        lineCount: resolvedItems.length,
+        operation: 'insert_purchase_orders',
+      });
     }
     const order = orderInsert.data;
 
@@ -483,11 +590,11 @@ export async function POST(request: NextRequest) {
       quantity_received: 0,
       unit_price: item.unitCost,
       unit_cost: item.unitCost,
-      tax_rate: 0,
-      tax_amount: 0,
-      total_ex_vat: item.quantityOrdered * item.unitCost,
-      line_total: item.quantityOrdered * item.unitCost,
-      total_cost: item.quantityOrdered * item.unitCost,
+      tax_rate: item.taxRate,
+      tax_amount: item.lineTotal * (item.taxRate / 100),
+      total_ex_vat: item.lineTotal,
+      line_total: item.lineTotal,
+      total_cost: item.lineTotal,
     }));
     let { error: itemsErr } = await service.from('purchase_order_items').insert(itemPayload);
     while (itemsErr) {
@@ -512,11 +619,10 @@ export async function POST(request: NextRequest) {
         lineCount: itemPayload.length,
         message: itemsErr.message,
       });
-      return NextResponse.json({
-        success: false,
-        message: 'Purchase order could not be created. Please check required fields and try again.',
-        code: 'PO_CREATE_FAILED',
-      }, { status: 500 });
+      return poCreateFailure(500, {
+        lineCount: itemPayload.length,
+        operation: 'insert_purchase_order_items',
+      });
     }
 
     // Update requisition status if linked
@@ -551,6 +657,10 @@ export async function POST(request: NextRequest) {
           requisition_item_id: item.requisitionItemId || null,
           requisitionItemId: item.requisitionItemId || null,
           rowId: itemPayload[index]?.requisition_item_id ?? item.requisitionItemId ?? `${index}`,
+          tax_rate: item.taxRate,
+          taxRate: item.taxRate,
+          line_total: item.lineTotal,
+          lineTotal: item.lineTotal,
           unit_of_measure_id: item.unitOfMeasureId || null,
           unitOfMeasureId: item.unitOfMeasureId || null,
           unit_price: item.unitCost,

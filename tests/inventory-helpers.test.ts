@@ -16,6 +16,7 @@ import {
   normalizeWarehouseType,
   resolveWarehouseDisplayType,
   resolveWarehouseStorageType,
+  summarizeInventoryByType,
 } from '../src/lib/inventory';
 
 test('deriveSupplierShortages returns open shortages from ordered versus received quantities', () => {
@@ -146,4 +147,29 @@ test('legacy reorder helpers use reorder_qty and detect missing modern column er
     ),
     false,
   );
+});
+
+test('inventory valuation summaries prefer posted total_value and average_cost aliases', () => {
+  const summary = summarizeInventoryByType([
+    {
+      average_cost: 2,
+      quantity_on_hand: 50,
+      total_value: 100,
+      items: {
+        item_type: 'RAW_MATERIAL',
+        unit_cost: 0,
+      },
+    },
+    {
+      avg_cost: 3,
+      quantity: 10,
+      items: {
+        item_type: 'PACKAGING_MATERIAL',
+      },
+    },
+  ]);
+
+  assert.equal(summary.rawMaterialValue, 100);
+  assert.equal(summary.packagingMaterialValue, 30);
+  assert.equal(summary.totalStockValue, 130);
 });

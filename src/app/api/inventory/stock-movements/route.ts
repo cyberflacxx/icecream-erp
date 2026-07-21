@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
+import { isMissingTableColumnError } from '@/lib/inventory';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
 export async function GET(request: NextRequest) {
@@ -22,8 +23,8 @@ export async function GET(request: NextRequest) {
   let query = service
     .from('stock_movements')
     .select(
-      `id, movement_type, quantity, running_balance, unit_cost, total_cost,
-       reference_id, reference_type, notes, created_at,
+      `id, movement_type, quantity, running_balance, unit_cost, total_cost, total_value,
+       reference_id, reference_type, source_document_id, source_document_type, reference_number, notes, created_at,
        items!item_id(id, code, name),
        warehouses!warehouse_id(
          id, name,
@@ -43,9 +44,47 @@ export async function GET(request: NextRequest) {
   }
 
   const from = (page - 1) * pageSize;
-  const { data, count, error } = await query
+  let { data, count, error } = await query
     .order('created_at', { ascending: false })
     .range(from, from + pageSize - 1);
+
+  if (
+    error &&
+    (
+      isMissingTableColumnError(error, 'stock_movements', 'source_document_id') ||
+      isMissingTableColumnError(error, 'stock_movements', 'source_document_type') ||
+      isMissingTableColumnError(error, 'stock_movements', 'reference_number') ||
+      isMissingTableColumnError(error, 'stock_movements', 'total_value')
+    )
+  ) {
+    let fallbackQuery = service
+      .from('stock_movements')
+      .select(
+        `id, movement_type, quantity, running_balance, unit_cost, total_cost,
+         reference_id, reference_type, notes, created_at,
+         items!item_id(id, code, name),
+         warehouses!warehouse_id(
+           id, name,
+           branches!branch_id(id, name)
+         ),
+         users!created_by(id, first_name, last_name)`,
+        { count: 'exact' },
+      );
+
+    if (itemId) fallbackQuery = fallbackQuery.eq('item_id', itemId);
+    if (warehouseId) fallbackQuery = fallbackQuery.eq('warehouse_id', warehouseId);
+    if (type) fallbackQuery = fallbackQuery.eq('movement_type', type);
+    if (startDate) fallbackQuery = fallbackQuery.gte('created_at', `${startDate}T00:00:00.000Z`);
+    if (endDate) fallbackQuery = fallbackQuery.lte('created_at', `${endDate}T23:59:59.999Z`);
+    if (ctx.isBranchScoped && ctx.branchId) {
+      fallbackQuery = fallbackQuery.eq('warehouses.branch_id', ctx.branchId);
+    }
+
+    const fallback = await fallbackQuery.order('created_at', { ascending: false }).range(from, from + pageSize - 1);
+    data = fallback.data;
+    count = fallback.count;
+    error = fallback.error;
+  }
 
   if (error) return serverError(error.message);
 
@@ -69,11 +108,17 @@ export async function GET(request: NextRequest) {
       quantity: toNumber(row.quantity),
       runningBalance: toNumber(row.running_balance),
       unitCost: toNumber(row.unit_cost),
-      totalCost: toNumber(row.total_cost),
+      totalCost: toNumber(row.total_value ?? row.total_cost),
+      totalValue: toNumber(row.total_value ?? row.total_cost),
       reference: {
-        id: row.reference_id ? String(row.reference_id) : null,
-        type: row.reference_type ? String(row.reference_type) : 'UNKNOWN',
+        id: row.source_document_id ? String(row.source_document_id) : row.reference_id ? String(row.reference_id) : null,
+        number: row.reference_number ? String(row.reference_number) : null,
+        type: row.source_document_type ? String(row.source_document_type) : row.reference_type ? String(row.reference_type) : 'UNKNOWN',
       },
+      source_document_id: row.source_document_id ? String(row.source_document_id) : row.reference_id ? String(row.reference_id) : null,
+      sourceDocumentId: row.source_document_id ? String(row.source_document_id) : row.reference_id ? String(row.reference_id) : null,
+      source_document_type: row.source_document_type ? String(row.source_document_type) : row.reference_type ? String(row.reference_type) : 'UNKNOWN',
+      sourceDocumentType: row.source_document_type ? String(row.source_document_type) : row.reference_type ? String(row.reference_type) : 'UNKNOWN',
       notes: row.notes ?? null,
       item: items
         ? {
