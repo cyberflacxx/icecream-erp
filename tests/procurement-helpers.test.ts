@@ -40,6 +40,7 @@ import {
   isUuidLikeRequisitionIdentifier,
   normalizeRequisitionItemId,
   normalizeRequisitionUnitOfMeasureId,
+  safeSelectItemsByIds,
 } from '../src/lib/procurement-requisitions';
 import { filterSupplierOptions, isSupplierActive, mapSupplierOption } from '../src/lib/procurement-suppliers';
 import {
@@ -465,6 +466,84 @@ test('buildRequisitionDetailItem returns the required launch aliases', () => {
   assert.equal(item.unitPrice, 2);
   assert.equal(item.tax_rate, 5);
   assert.equal(item.taxRate, 5);
+});
+
+test('buildRequisitionDetailItem succeeds with minimal item metadata and line-level price fallback', () => {
+  const item = buildRequisitionDetailItem(
+    {
+      id: 'line-2',
+      item_id: 'item-2',
+      quantity_requested: 12,
+      unit_of_measure_id: 'uom-2',
+      unit_price: 7.5,
+    },
+    {
+      item: {
+        code: 'CHOCO',
+        id: 'item-2',
+        name: 'Chocolate Mix',
+      },
+      unit: {
+        id: 'uom-2',
+        name: 'Kg',
+      },
+    },
+  );
+
+  assert.equal(item.item_code, 'CHOCO');
+  assert.equal(item.item_name, 'Chocolate Mix');
+  assert.equal(item.description, 'Chocolate Mix');
+  assert.equal(item.unit_price, 7.5);
+  assert.equal(item.unitPrice, 7.5);
+  assert.equal(item.quantity, 12);
+});
+
+test('safeSelectItemsByIds retries smaller item selects and never requires purchase_price', async () => {
+  const selects: string[] = [];
+  const service = {
+    from(table: string) {
+      assert.equal(table, 'items');
+      return {
+        select(columns: string) {
+          selects.push(columns);
+          return {
+            eq(_column: string, _value: string) {
+              return {
+                in(_idColumn: string, _values: string[]) {
+                  if (columns.includes('unit_of_measure_id')) {
+                    return Promise.resolve({
+                      error: { message: "column items.unit_of_measure_id does not exist" },
+                    });
+                  }
+                  if (columns.includes('item_code')) {
+                    return Promise.resolve({
+                      error: { message: "column items.item_code does not exist" },
+                    });
+                  }
+                  return Promise.resolve({
+                    data: [{ id: 'item-3', code: 'VAN', name: 'Vanilla Base' }],
+                    error: null,
+                  });
+                },
+              };
+            },
+            in(_idColumn: string, _values: string[]) {
+              return Promise.resolve({
+                data: [{ id: 'item-3', code: 'VAN', name: 'Vanilla Base' }],
+                error: null,
+              });
+            },
+          };
+        },
+      };
+    },
+  };
+
+  const items = await safeSelectItemsByIds(service as any, ['item-3'], 'org-1');
+
+  assert.equal(selects.some((entry) => entry.includes('purchase_price')), false);
+  assert.equal(items.get('item-3')?.itemCode, 'VAN');
+  assert.equal(items.get('item-3')?.itemName, 'Vanilla Base');
 });
 
 test('normalizeGoodsReceivedPurchaseOrderId accepts purchase order aliases', () => {

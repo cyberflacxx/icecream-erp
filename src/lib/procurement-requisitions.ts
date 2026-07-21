@@ -1,3 +1,5 @@
+import { getErrorMessage, isMissingColumnError } from './postgrest-compat';
+
 export function normalizeRequisitionItemId(input: {
   itemId?: unknown;
   item_id?: unknown;
@@ -34,6 +36,27 @@ export interface RequisitionDetailLookupCandidate {
   value: string;
 }
 
+type ServiceLike = {
+  from: (table: string) => {
+    select: (columns: string) => {
+      eq: (column: string, value: string) => {
+        eq: (column: string, value: string) => {
+          in: (column: string, values: string[]) => Promise<{ data?: unknown[] | null; error?: unknown }>;
+        };
+        in: (column: string, values: string[]) => Promise<{ data?: unknown[] | null; error?: unknown }>;
+      };
+      in: (column: string, values: string[]) => Promise<{ data?: unknown[] | null; error?: unknown }>;
+    };
+  };
+};
+
+const SAFE_ITEM_SELECT_LEVELS = [
+  ['id', 'code', 'name', 'description', 'unit_of_measure_id'],
+  ['id', 'item_code', 'item_name', 'description'],
+  ['id', 'code', 'name'],
+  ['id'],
+] as const;
+
 export function isUuidLikeRequisitionIdentifier(value: unknown) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(value ?? '').trim());
 }
@@ -54,6 +77,99 @@ export function buildRequisitionDetailLookupCandidates(value: unknown): Requisit
     { column: 'id', value: normalized },
     { column: 'requisition_number', value: normalized },
   ];
+}
+
+function mapSafeItemMetadata(row: Record<string, unknown>) {
+  const id = String(row.id ?? '').trim();
+  const code = String(row.code ?? row.item_code ?? '').trim() || null;
+  const name = String(row.name ?? row.item_name ?? '').trim() || null;
+  const description = String(row.description ?? name ?? '').trim() || '';
+  const unitOfMeasureId = String(row.unit_of_measure_id ?? row.uom_id ?? '').trim() || null;
+
+  return {
+    code,
+    description,
+    id,
+    item_code: code,
+    item_name: name,
+    itemCode: code,
+    itemName: name,
+    name,
+    unit_of_measure_id: unitOfMeasureId,
+    unitOfMeasureId,
+    uom_id: unitOfMeasureId,
+    uomId: unitOfMeasureId,
+  };
+}
+
+export async function safeSelectItemsByIds(
+  service: ServiceLike,
+  itemIds: string[],
+  organizationId?: string | null,
+) {
+  if (!itemIds.length) {
+    return new Map<string, Record<string, unknown>>();
+  }
+
+  const uniqueIds = [...new Set(itemIds.map((value) => String(value ?? '').trim()).filter(Boolean))];
+  if (!uniqueIds.length) {
+    return new Map<string, Record<string, unknown>>();
+  }
+
+  for (const columns of SAFE_ITEM_SELECT_LEVELS) {
+    const selectClause = columns.join(', ');
+    let response: { data?: unknown[] | null; error?: unknown };
+
+    if (organizationId) {
+      response = await service
+        .from('items')
+        .select(selectClause)
+        .eq('organization_id', organizationId)
+        .in('id', uniqueIds);
+    } else {
+      response = await service
+        .from('items')
+        .select(selectClause)
+        .in('id', uniqueIds);
+    }
+
+    if (!response.error) {
+      return new Map(
+        ((response.data ?? []) as Record<string, unknown>[])
+          .map((row) => mapSafeItemMetadata(row))
+          .filter((row) => row.id)
+          .map((row) => [row.id, row]),
+      );
+    }
+
+    const missingSelectedColumn = columns.find((column) => isMissingColumnError(response.error, 'items', column));
+    if (missingSelectedColumn) {
+      console.warn('Procurement requisition item metadata fallback.', {
+        table: 'items',
+        missingColumn: missingSelectedColumn,
+        attemptedSelect: selectClause,
+      });
+      continue;
+    }
+
+    if (organizationId && isMissingColumnError(response.error, 'items', 'organization_id')) {
+      console.warn('Procurement requisition item metadata fallback.', {
+        table: 'items',
+        missingColumn: 'organization_id',
+        attemptedSelect: selectClause,
+      });
+      return safeSelectItemsByIds(service, uniqueIds, null);
+    }
+
+    console.warn('Procurement requisition item metadata lookup failed.', {
+      itemCount: uniqueIds.length,
+      message: getErrorMessage(response.error),
+      table: 'items',
+    });
+    return new Map<string, Record<string, unknown>>();
+  }
+
+  return new Map<string, Record<string, unknown>>();
 }
 
 function firstFiniteNumber(...values: unknown[]) {

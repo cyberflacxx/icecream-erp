@@ -8,6 +8,7 @@ import {
   isUuidLikeRequisitionIdentifier,
   normalizeRequisitionItemId,
   normalizeRequisitionUnitOfMeasureId,
+  safeSelectItemsByIds,
 } from '@/lib/procurement-requisitions';
 import { getErrorMessage, isMissingColumnError } from '@/lib/postgrest-compat';
 import { createServiceRoleClient } from '@/lib/supabase/server';
@@ -230,15 +231,8 @@ export async function GET(
       ...new Set(itemsResult.data.map((item) => String(item.unit_of_measure_id ?? '')).filter(Boolean)),
     ];
 
-    const [itemLookupPrimary, unitLookup] = await Promise.all([
-      itemIds.length
-        ? service
-            .from('items')
-            .select('id, code, name, description, purchase_price, cost_price, unit_cost, standard_cost, default_purchase_price, price, selling_price')
-            .is('deleted_at', null)
-            .eq('organization_id', ctx.organizationId)
-            .in('id', itemIds)
-        : Promise.resolve({ data: [], error: null }),
+    const [itemsById, unitLookup] = await Promise.all([
+      safeSelectItemsByIds(service, itemIds, ctx.organizationId),
       unitIds.length
         ? service
             .from('units_of_measure')
@@ -248,25 +242,10 @@ export async function GET(
         : Promise.resolve({ data: [], error: null }),
     ]);
 
-    const itemLookup =
-      itemLookupPrimary.error && isMissingColumnError(itemLookupPrimary.error, 'items', 'deleted_at')
-        ? await service
-            .from('items')
-            .select('id, code, name, description, purchase_price, cost_price, unit_cost, standard_cost, default_purchase_price, price, selling_price')
-            .eq('organization_id', ctx.organizationId)
-            .in('id', itemIds)
-        : itemLookupPrimary;
-
-    if (itemLookup.error) {
-      return serverError(itemLookup.error.message);
-    }
     if (unitLookup.error) {
       return serverError(unitLookup.error.message);
     }
 
-    const itemsById = new Map(
-      (itemLookup.data ?? []).map((row) => [String(row.id), row as Record<string, unknown>]),
-    );
     const unitsById = new Map(
       (unitLookup.data ?? []).map((row) => [String(row.id), row as Record<string, unknown>]),
     );
