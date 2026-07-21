@@ -1,16 +1,41 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { badRequest, can, forbidden, getAuthContext, notFound, serverError, unauthorized } from '@/lib/api-auth';
-import { normalizeRequisitionLineItem } from '@/lib/procurement-purchase-orders';
-import { normalizeRequisitionItemId, normalizeRequisitionUnitOfMeasureId } from '@/lib/procurement-requisitions';
-import { isMissingColumnError } from '@/lib/postgrest-compat';
+import { deriveRequisitionWorkflowStatus } from '@/lib/procurement-workflow';
+import {
+  buildRequisitionDetailItem,
+  buildRequisitionDetailLookupCandidates,
+  isUuidLikeRequisitionIdentifier,
+  normalizeRequisitionItemId,
+  normalizeRequisitionUnitOfMeasureId,
+} from '@/lib/procurement-requisitions';
+import { getErrorMessage, isMissingColumnError } from '@/lib/postgrest-compat';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
 const LEGACY_REQUISITION_ITEM_COLUMNS = ['pr_id', 'quantity', 'estimated_cost', 'notes'] as const;
-const REQUISITION_DETAIL_SELECT_BASE =
-  'id, requisition_number, department, needed_by_date, remarks, status, approval_status, approver_user_id, requested_by, approved_by, approved_at, rejected_by, rejected_at, purchase_requisition_items(id, item_id, unit_of_measure_id, quantity_requested, quantity_approved, estimated_unit_cost, remarks, items(id, code, name, description, purchase_price, cost_price, unit_cost, standard_cost, default_purchase_price, price, selling_price), units_of_measure(id, name, abbreviation))';
-const REQUISITION_DETAIL_SELECT_WITH_APPROVER_DETAILS =
-  'id, requisition_number, department, needed_by_date, remarks, status, approval_status, approver_user_id, approver_name, approver_email, approval_notes, requested_by, approved_by, approved_at, rejected_by, rejected_at, purchase_requisition_items(id, item_id, unit_of_measure_id, quantity_requested, quantity_approved, estimated_unit_cost, remarks, items(id, code, name, description, purchase_price, cost_price, unit_cost, standard_cost, default_purchase_price, price, selling_price), units_of_measure(id, name, abbreviation))';
+const REQUISITION_HEADER_SELECT_BASE =
+  'id, requisition_number, department, needed_by_date, remarks, status, approval_status, approver_user_id, requested_by, approved_by, approved_at, rejected_by, rejected_at';
+const REQUISITION_HEADER_SELECT_WITH_APPROVER_DETAILS =
+  `${REQUISITION_HEADER_SELECT_BASE}, approver_name, approver_email, approval_notes`;
+const REQUISITION_ITEM_SELECT_COLUMNS = [
+  'id',
+  'requisition_id',
+  'pr_id',
+  'item_id',
+  'unit_of_measure_id',
+  'quantity_requested',
+  'quantity_approved',
+  'quantity',
+  'estimated_unit_cost',
+  'estimated_cost',
+  'remarks',
+  'notes',
+  'description',
+  'specification',
+  'unit_price',
+  'tax_rate',
+] as const;
+const REQUISITION_ITEM_SELECT = REQUISITION_ITEM_SELECT_COLUMNS.join(', ');
 
 function stripMissingLegacyRequisitionItemColumn<T extends Record<string, unknown>>(payload: T, error: unknown) {
   const column = LEGACY_REQUISITION_ITEM_COLUMNS.find((entry) =>
@@ -21,6 +46,148 @@ function stripMissingLegacyRequisitionItemColumn<T extends Record<string, unknow
   const nextPayload = { ...payload };
   delete nextPayload[column];
   return nextPayload;
+}
+
+function stripMissingRequisitionItemSelectColumn(select: string, error: unknown) {
+  const column = REQUISITION_ITEM_SELECT_COLUMNS.find((entry) =>
+    isMissingColumnError(error, 'purchase_requisition_items', entry),
+  );
+  if (!column) return null;
+
+  return select
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter((entry) => entry !== column)
+    .join(', ');
+}
+
+function requisitionNotFoundResponse() {
+  return NextResponse.json(
+    {
+      success: false,
+      message: 'Purchase requisition not found.',
+      code: 'REQUISITION_NOT_FOUND',
+    },
+    { status: 404 },
+  );
+}
+
+async function fetchRequisitionHeader(
+  service: ReturnType<typeof createServiceRoleClient>,
+  organizationId: string,
+  requestedId: string,
+) {
+  const candidates = buildRequisitionDetailLookupCandidates(requestedId);
+  let lastError: unknown = null;
+
+  for (const candidate of candidates) {
+    for (const includeApproverDetails of [true, false]) {
+      for (const includeDeletedFilter of [true, false]) {
+        const select = includeApproverDetails
+          ? REQUISITION_HEADER_SELECT_WITH_APPROVER_DETAILS
+          : REQUISITION_HEADER_SELECT_BASE;
+        let query = service
+          .from('purchase_requisitions')
+          .select(select)
+          .eq('organization_id', organizationId)
+          .eq(candidate.column, candidate.value);
+
+        if (includeDeletedFilter) {
+          query = query.is('deleted_at', null);
+        }
+
+        const response = await query.maybeSingle();
+        if (response.data) {
+          return {
+            candidate,
+            data: response.data as Record<string, unknown>,
+            usedDeletedFilter: includeDeletedFilter,
+          };
+        }
+
+        if (!response.error) {
+          break;
+        }
+
+        if (
+          includeApproverDetails &&
+          ['approver_name', 'approver_email', 'approval_notes'].some((column) =>
+            isMissingColumnError(response.error, 'purchase_requisitions', column),
+          )
+        ) {
+          continue;
+        }
+
+        if (includeDeletedFilter && isMissingColumnError(response.error, 'purchase_requisitions', 'deleted_at')) {
+          continue;
+        }
+
+        if (isMissingColumnError(response.error, 'purchase_requisitions', candidate.column)) {
+          break;
+        }
+
+        if (
+          candidate.column !== 'id' &&
+          getErrorMessage(response.error).toLowerCase().includes('invalid input syntax for type uuid')
+        ) {
+          break;
+        }
+
+        lastError = response.error;
+        break;
+      }
+    }
+  }
+
+  return {
+    candidate: null,
+    data: null,
+    error: lastError,
+    usedDeletedFilter: true,
+  };
+}
+
+async function fetchRequisitionItems(
+  service: ReturnType<typeof createServiceRoleClient>,
+  requisitionId: string,
+) {
+  let lastError: unknown = null;
+
+  for (const filterColumn of ['requisition_id', 'pr_id'] as const) {
+    let select = REQUISITION_ITEM_SELECT;
+
+    for (;;) {
+      const response = await service
+        .from('purchase_requisition_items')
+        .select(select)
+        .eq(filterColumn, requisitionId);
+
+      if (!response.error) {
+        return {
+          data: (response.data ?? []) as Record<string, unknown>[],
+          filterColumn,
+        };
+      }
+
+      if (isMissingColumnError(response.error, 'purchase_requisition_items', filterColumn)) {
+        break;
+      }
+
+      const nextSelect = stripMissingRequisitionItemSelectColumn(select, response.error);
+      if (!nextSelect || nextSelect === select) {
+        lastError = response.error;
+        break;
+      }
+
+      select = nextSelect;
+    }
+  }
+
+  return {
+    data: [] as Record<string, unknown>[],
+    error: lastError,
+    filterColumn: null,
+  };
 }
 
 export async function GET(
@@ -35,42 +202,101 @@ export async function GET(
   const service = createServiceRoleClient();
 
   try {
-    let response = await service
-      .from('purchase_requisitions')
-      .select(REQUISITION_DETAIL_SELECT_WITH_APPROVER_DETAILS)
-      .is('deleted_at', null)
-      .eq('organization_id', ctx.organizationId)
-      .eq('id', id)
-      .single();
-
-    if (
-      response.error &&
-      ['approver_name', 'approver_email', 'approval_notes'].some((column) =>
-        isMissingColumnError(response.error, 'purchase_requisitions', column),
-      )
-    ) {
-      response = await service
-        .from('purchase_requisitions')
-        .select(REQUISITION_DETAIL_SELECT_BASE)
-        .is('deleted_at', null)
-        .eq('organization_id', ctx.organizationId)
-        .eq('id', id)
-        .single();
+    const headerResult = await fetchRequisitionHeader(service, ctx.organizationId, id);
+    if (headerResult.error) {
+      return serverError(getErrorMessage(headerResult.error) || 'Failed to load purchase requisition.');
     }
 
-    const { data: requisition, error } = response;
+    const requisition = headerResult.data;
+    if (!requisition) {
+      console.warn('Purchase requisition detail not found.', {
+        requestedId: id,
+        isUuid: isUuidLikeRequisitionIdentifier(id),
+        tableQueried: 'purchase_requisitions',
+        headerFound: false,
+        itemCount: 0,
+        client: 'service_role',
+      });
+      return requisitionNotFoundResponse();
+    }
 
-    if (error || !requisition) return notFound('Purchase requisition not found.');
+    const itemsResult = await fetchRequisitionItems(service, String(requisition.id ?? ''));
+    if (itemsResult.error) {
+      return serverError(getErrorMessage(itemsResult.error) || 'Failed to load purchase requisition items.');
+    }
 
-    const items = (requisition.purchase_requisition_items ?? [])
-      .map((item) => normalizeRequisitionLineItem(item))
-      .filter((item): item is NonNullable<ReturnType<typeof normalizeRequisitionLineItem>> => Boolean(item));
+    const itemIds = [...new Set(itemsResult.data.map((item) => String(item.item_id ?? '')).filter(Boolean))];
+    const unitIds = [
+      ...new Set(itemsResult.data.map((item) => String(item.unit_of_measure_id ?? '')).filter(Boolean)),
+    ];
+
+    const [itemLookupPrimary, unitLookup] = await Promise.all([
+      itemIds.length
+        ? service
+            .from('items')
+            .select('id, code, name, description, purchase_price, cost_price, unit_cost, standard_cost, default_purchase_price, price, selling_price')
+            .is('deleted_at', null)
+            .eq('organization_id', ctx.organizationId)
+            .in('id', itemIds)
+        : Promise.resolve({ data: [], error: null }),
+      unitIds.length
+        ? service
+            .from('units_of_measure')
+            .select('id, name, abbreviation')
+            .eq('organization_id', ctx.organizationId)
+            .in('id', unitIds)
+        : Promise.resolve({ data: [], error: null }),
+    ]);
+
+    const itemLookup =
+      itemLookupPrimary.error && isMissingColumnError(itemLookupPrimary.error, 'items', 'deleted_at')
+        ? await service
+            .from('items')
+            .select('id, code, name, description, purchase_price, cost_price, unit_cost, standard_cost, default_purchase_price, price, selling_price')
+            .eq('organization_id', ctx.organizationId)
+            .in('id', itemIds)
+        : itemLookupPrimary;
+
+    if (itemLookup.error) {
+      return serverError(itemLookup.error.message);
+    }
+    if (unitLookup.error) {
+      return serverError(unitLookup.error.message);
+    }
+
+    const itemsById = new Map(
+      (itemLookup.data ?? []).map((row) => [String(row.id), row as Record<string, unknown>]),
+    );
+    const unitsById = new Map(
+      (unitLookup.data ?? []).map((row) => [String(row.id), row as Record<string, unknown>]),
+    );
+
+    const items = itemsResult.data.map((item) =>
+      buildRequisitionDetailItem(item, {
+        item: itemsById.get(String(item.item_id ?? '')) ?? null,
+        unit: unitsById.get(String(item.unit_of_measure_id ?? '')) ?? null,
+      }),
+    );
+
+    const normalizedStatus = deriveRequisitionWorkflowStatus({
+      approvalStatus: requisition.approval_status,
+      approvedAt: requisition.approved_at,
+      approvedBy: requisition.approved_by,
+      rejectedAt: requisition.rejected_at,
+      status: requisition.status,
+    });
 
     const detail = {
       ...requisition,
+      id: requisition.id ? String(requisition.id) : null,
       requisition_id: requisition.id ? String(requisition.id) : null,
       requisitionId: requisition.id ? String(requisition.id) : null,
+      requisition_number: requisition.requisition_number ? String(requisition.requisition_number) : null,
       requisitionNumber: requisition.requisition_number ? String(requisition.requisition_number) : null,
+      status: normalizedStatus,
+      approval_status: normalizedStatus,
+      approvalStatus: normalizedStatus,
+      normalizedStatus,
       approverName: requisition.approver_name ? String(requisition.approver_name) : null,
       approverEmail: requisition.approver_email ? String(requisition.approver_email) : null,
       approvalNotes: requisition.approval_notes ? String(requisition.approval_notes) : null,
@@ -79,35 +305,10 @@ export async function GET(
       lineItems: items,
       requisition_items: items,
       requisitionItems: items,
-      purchase_requisition_items: (requisition.purchase_requisition_items ?? []).map((item) => ({
-        ...item,
-        itemId: item.item_id ? String(item.item_id) : null,
-        itemCode: item.items?.code ? String(item.items.code) : null,
-        itemName: item.items?.name ? String(item.items.name) : null,
-        description: item.items?.description ? String(item.items.description) : item.items?.name ? String(item.items.name) : '',
-        purchasePrice:
-          item.items?.purchase_price ??
-          item.items?.cost_price ??
-          item.items?.unit_cost ??
-          item.items?.standard_cost ??
-          item.items?.default_purchase_price ??
-          item.items?.price ??
-          item.items?.selling_price ??
-          item.estimated_unit_cost ??
-          0,
-        unitOfMeasureId: item.unit_of_measure_id ? String(item.unit_of_measure_id) : null,
-        unitOfMeasureName: item.units_of_measure?.name ? String(item.units_of_measure.name) : null,
-        uomName:
-          item.units_of_measure?.abbreviation
-            ? String(item.units_of_measure.abbreviation)
-            : item.units_of_measure?.name
-              ? String(item.units_of_measure.name)
-              : null,
-      })),
+      purchase_requisition_items: items,
     };
 
     return NextResponse.json({
-      ...detail,
       success: true,
       data: detail,
     });

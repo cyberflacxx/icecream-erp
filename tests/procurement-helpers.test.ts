@@ -34,7 +34,10 @@ import {
   normalizeGoodsReceivedWarehouseId,
 } from '../src/lib/procurement-goods-received';
 import {
+  buildRequisitionDetailItem,
+  buildRequisitionDetailLookupCandidates,
   buildRequisitionDraftPayload,
+  isUuidLikeRequisitionIdentifier,
   normalizeRequisitionItemId,
   normalizeRequisitionUnitOfMeasureId,
 } from '../src/lib/procurement-requisitions';
@@ -391,6 +394,77 @@ test('buildRequisitionDraftPayload stores item_id canonically', () => {
   assert.equal(payload.items[0]?.unitOfMeasureId, 'uom-1');
   assert.equal(payload.items[0]?.unit_of_measure_id, 'uom-1');
   assert.equal(payload.department, 'Production');
+});
+
+test('requisition detail lookup candidates prefer id for UUIDs and requisition number for human refs', () => {
+  assert.equal(isUuidLikeRequisitionIdentifier('e2122874-f414-4117-9358-6f60b333bba1'), true);
+  assert.deepEqual(
+    buildRequisitionDetailLookupCandidates('e2122874-f414-4117-9358-6f60b333bba1'),
+    [
+      { column: 'id', value: 'e2122874-f414-4117-9358-6f60b333bba1' },
+      { column: 'requisition_id', value: 'e2122874-f414-4117-9358-6f60b333bba1' },
+      { column: 'purchase_requisition_id', value: 'e2122874-f414-4117-9358-6f60b333bba1' },
+    ],
+  );
+  assert.deepEqual(
+    buildRequisitionDetailLookupCandidates('REQ-00014'),
+    [
+      { column: 'id', value: 'REQ-00014' },
+      { column: 'requisition_number', value: 'REQ-00014' },
+    ],
+  );
+});
+
+test('buildRequisitionDetailItem returns the required launch aliases', () => {
+  const item = buildRequisitionDetailItem(
+    {
+      id: 'line-1',
+      item_id: 'item-1',
+      quantity_requested: 50,
+      remarks: '50 bucket launch order',
+      tax_rate: 5,
+      unit_of_measure_id: 'uom-1',
+      estimated_unit_cost: 2,
+    },
+    {
+      item: {
+        code: 'VAN-MIX',
+        description: 'Vanilla Mix',
+        id: 'item-1',
+        name: 'Vanilla Mix',
+        purchase_price: 2,
+      },
+      unit: {
+        abbreviation: 'BKT',
+        id: 'uom-1',
+        name: 'Bucket',
+      },
+    },
+  );
+
+  assert.equal(item.id, 'line-1');
+  assert.equal(item.requisition_item_id, 'line-1');
+  assert.equal(item.requisitionItemId, 'line-1');
+  assert.equal(item.item_id, 'item-1');
+  assert.equal(item.itemId, 'item-1');
+  assert.equal(item.item_code, 'VAN-MIX');
+  assert.equal(item.itemCode, 'VAN-MIX');
+  assert.equal(item.item_name, 'Vanilla Mix');
+  assert.equal(item.itemName, 'Vanilla Mix');
+  assert.equal(item.description, '50 bucket launch order');
+  assert.equal(item.specification, '50 bucket launch order');
+  assert.equal(item.quantity, 50);
+  assert.equal(item.qty, 50);
+  assert.equal(item.unit_of_measure_id, 'uom-1');
+  assert.equal(item.unitOfMeasureId, 'uom-1');
+  assert.equal(item.uom_id, 'uom-1');
+  assert.equal(item.uomId, 'uom-1');
+  assert.equal(item.unit_of_measure_name, 'Bucket');
+  assert.equal(item.uomName, 'BKT');
+  assert.equal(item.unit_price, 2);
+  assert.equal(item.unitPrice, 2);
+  assert.equal(item.tax_rate, 5);
+  assert.equal(item.taxRate, 5);
 });
 
 test('normalizeGoodsReceivedPurchaseOrderId accepts purchase order aliases', () => {
