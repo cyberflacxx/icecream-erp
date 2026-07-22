@@ -8,7 +8,7 @@ import {
   serverError,
   unauthorized,
 } from '@/lib/api-auth';
-import { postGoodsReceivedNoteToInventory } from '@/lib/procurement-goods-received';
+import { isGrnStockPostingError, postGoodsReceivedNoteToInventory } from '@/lib/procurement-goods-received';
 import { recordAuditLog } from '@/lib/security-server';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
@@ -46,13 +46,17 @@ export async function POST(
     return NextResponse.json(updated);
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to post GRN.';
+    const details = isGrnStockPostingError(error) ? error.details : undefined;
     if (message === 'Please select a receiving warehouse before posting GRN.') {
-      return badRequest(message);
-    }
-    if (message === 'GRN has already been posted to stock.') {
-      return badRequest(message);
+      return NextResponse.json({
+        success: false,
+        message,
+        code: 'GRN_STOCK_POST_FAILED',
+        details,
+      }, { status: 400 });
     }
     console.error('GRN post failed.', {
+      details,
       grnId: id,
       message,
     });
@@ -60,6 +64,7 @@ export async function POST(
       success: false,
       message: 'Goods received note could not update inventory. Please check warehouse and item details.',
       code: 'GRN_STOCK_POST_FAILED',
+      details,
     }, { status: 500 });
   }
 }

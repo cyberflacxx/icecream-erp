@@ -1,4 +1,4 @@
-import { applyInventoryDelta, recordStockMovement } from './inventory-server';
+import { normalizeStockMovementType } from './inventory';
 
 export function normalizeGoodsReceivedPurchaseOrderId(input: {
   purchase_order_id?: unknown;
@@ -179,11 +179,50 @@ function getErrorMessage(error: unknown) {
 }
 
 const GRN_POSTED_STATUS_CANDIDATES = ['POSTED', 'RECEIVED', 'COMPLETED'] as const;
+const STOCK_MOVEMENT_TYPE_CANDIDATES = ['GRN_RECEIPT', 'IN', 'RECEIPT'] as const;
+
+export type GrnStockPostingFailureStage =
+  | 'GRN_HEADER_LOAD_FAILED'
+  | 'GRN_ITEMS_LOAD_FAILED'
+  | 'GRN_HAS_NO_ITEMS'
+  | 'GRN_WAREHOUSE_MISSING'
+  | 'GRN_ITEM_ID_MISSING'
+  | 'GRN_QUANTITY_MISSING_OR_ZERO'
+  | 'GRN_STOCK_BALANCE_READ_FAILED'
+  | 'GRN_STOCK_BALANCE_UPDATE_FAILED'
+  | 'GRN_STOCK_MOVEMENT_INSERT_FAILED'
+  | 'GRN_MARK_POSTED_FAILED';
+
+export interface GrnStockPostingFailureDetails {
+  grnId: string;
+  itemCount?: number;
+  itemId?: string | null;
+  lineId?: string | null;
+  purchaseOrderItemId?: string | null;
+  stage: GrnStockPostingFailureStage;
+  warehouseId?: string | null;
+  warehouseResolved?: boolean;
+}
+
+export class GrnStockPostingError extends Error {
+  readonly code = 'GRN_STOCK_POST_FAILED';
+  readonly details: GrnStockPostingFailureDetails;
+
+  constructor(details: GrnStockPostingFailureDetails, message?: string) {
+    super(message ?? details.stage);
+    this.name = 'GrnStockPostingError';
+    this.details = details;
+  }
+}
 
 export function resolveCompatibleGrnPostedStatus(currentStatus: unknown) {
   const normalized = String(currentStatus ?? '').trim().toUpperCase();
   return (GRN_POSTED_STATUS_CANDIDATES.find((status) => status === normalized) ?? GRN_POSTED_STATUS_CANDIDATES[0]) as
     (typeof GRN_POSTED_STATUS_CANDIDATES)[number];
+}
+
+export function isGrnStockPostingError(error: unknown): error is GrnStockPostingError {
+  return error instanceof GrnStockPostingError;
 }
 
 function isMissingColumnError(error: unknown, table: string, columnName: string) {
@@ -195,6 +234,589 @@ function isInvalidGrnStatusEnumError(error: unknown) {
   return message.includes('invalid input value for enum grn_status');
 }
 
+function isInvalidMovementTypeEnumError(error: unknown) {
+  const message = getErrorMessage(error).toLowerCase();
+  return message.includes('invalid input value for enum') && message.includes('movement');
+}
+
+function extractMissingColumnName(error: unknown, table: string) {
+  const message = getErrorMessage(error);
+  const match = message.match(new RegExp(`column\\s+${table}\\.([a-z_]+)\\s+does not exist`, 'i'));
+  return match?.[1] ?? null;
+}
+
+function buildGrnPostingFailure(
+  details: GrnStockPostingFailureDetails,
+  error?: unknown,
+  fallbackMessage?: string,
+) {
+  return new GrnStockPostingError(details, getErrorMessage(error) || fallbackMessage || details.stage);
+}
+
+function resolveGrnHeaderWarehouseId(grn: Record<string, unknown>) {
+  return normalizeGoodsReceivedWarehouseId({
+    destinationWarehouseId: grn.destinationWarehouseId,
+    destination_warehouse_id: grn.destination_warehouse_id,
+    receivingWarehouseId: grn.receivingWarehouseId,
+    receiving_warehouse_id: grn.receiving_warehouse_id,
+    warehouseId: grn.warehouseId,
+    warehouse_id: grn.warehouse_id,
+  });
+}
+
+function resolveGrnNumber(grn: Record<string, unknown>) {
+  return String(grn.grn_number ?? grn.grnNumber ?? grn.reference_number ?? grn.referenceNumber ?? '').trim() || null;
+}
+
+function resolvePurchaseOrderId(grn: Record<string, unknown>) {
+  return normalizeGoodsReceivedPurchaseOrderId({
+    po_id: grn.po_id,
+    poId: grn.poId,
+    purchase_order_id: grn.purchase_order_id,
+    purchaseOrderId: grn.purchaseOrderId,
+  });
+}
+
+function resolveGrnItemQuantity(item: Record<string, unknown>) {
+  return toNumber(item.quantity_received ?? item.received_quantity ?? item.quantity ?? item.qty);
+}
+
+function resolveGrnItemWarehouseId(item: Record<string, unknown>, headerWarehouseId: string) {
+  return (
+    normalizeGoodsReceivedWarehouseId({
+      destinationWarehouseId: item.destinationWarehouseId,
+      destination_warehouse_id: item.destination_warehouse_id,
+      receivingWarehouseId: item.receivingWarehouseId,
+      receiving_warehouse_id: item.receiving_warehouse_id,
+      warehouseId: item.warehouseId,
+      warehouse_id: item.warehouse_id,
+    }) || headerWarehouseId
+  );
+}
+
+function resolveGrnItemPurchaseOrderItemId(item: Record<string, unknown>) {
+  return String(
+    item.purchase_order_item_id ??
+      item.purchaseOrderItemId ??
+      item.po_item_id ??
+      item.poItemId ??
+      '',
+  ).trim();
+}
+
+function resolveItemMasterUnitCost(itemMaster: Record<string, unknown> | null | undefined) {
+  return toNumber(
+    itemMaster?.purchase_price ??
+      itemMaster?.purchasePrice ??
+      itemMaster?.cost_price ??
+      itemMaster?.costPrice ??
+      itemMaster?.unit_cost ??
+      itemMaster?.unitCost ??
+      itemMaster?.standard_cost ??
+      itemMaster?.standardCost ??
+      itemMaster?.default_purchase_price ??
+      itemMaster?.defaultPurchasePrice ??
+      itemMaster?.price ??
+      itemMaster?.selling_price ??
+      itemMaster?.sellingPrice ??
+      0,
+  );
+}
+
+async function loadCompatibleGrnHeader(
+  service: {
+    from: (table: string) => any;
+  },
+  input: {
+    grnId: string;
+    organizationId: string;
+  },
+) {
+  const attempts = [
+    () =>
+      service
+        .from('goods_received_notes')
+        .select('*')
+        .eq('organization_id', input.organizationId)
+        .eq('id', input.grnId)
+        .maybeSingle(),
+    () =>
+      service
+        .from('goods_received_notes')
+        .select('*')
+        .eq('id', input.grnId)
+        .maybeSingle(),
+  ];
+
+  let lastError: unknown = null;
+  for (const attempt of attempts) {
+    const result = await attempt();
+    if (result.data) {
+      return result.data as Record<string, unknown>;
+    }
+    if (!result.error) {
+      continue;
+    }
+    lastError = result.error;
+    if (isMissingColumnError(result.error, 'goods_received_notes', 'organization_id')) {
+      continue;
+    }
+    break;
+  }
+
+  throw buildGrnPostingFailure(
+    {
+      grnId: input.grnId,
+      stage: 'GRN_HEADER_LOAD_FAILED',
+      warehouseResolved: false,
+    },
+    lastError,
+    'Goods received note not found.',
+  );
+}
+
+async function loadCompatibleGrnItems(
+  service: {
+    from: (table: string) => any;
+  },
+  grnId: string,
+) {
+  const attempts = [
+    { table: 'goods_received_note_items', column: 'grn_id' },
+    { table: 'goods_received_note_items', column: 'goods_received_note_id' },
+    { table: 'goods_received_note_items', column: 'goods_received_id' },
+    { table: 'grn_items', column: 'grn_id' },
+  ] as const;
+
+  let lastError: unknown = null;
+  for (const attempt of attempts) {
+    const result = await service
+      .from(attempt.table)
+      .select('*')
+      .eq(attempt.column, grnId);
+
+    if (!result.error) {
+      const rows = (result.data ?? []) as Record<string, unknown>[];
+      if (rows.length > 0) {
+        return rows;
+      }
+      continue;
+    }
+
+    lastError = result.error;
+    if (
+      isMissingColumnError(result.error, attempt.table, attempt.column) ||
+      getErrorMessage(result.error).includes(attempt.table)
+    ) {
+      continue;
+    }
+    break;
+  }
+
+  if (lastError) {
+    throw buildGrnPostingFailure(
+      {
+        grnId,
+        stage: 'GRN_ITEMS_LOAD_FAILED',
+        warehouseResolved: false,
+      },
+      lastError,
+      'Failed to load goods received note items.',
+    );
+  }
+
+  return [] as Record<string, unknown>[];
+}
+
+async function loadCompatiblePurchaseOrderItems(
+  service: {
+    from: (table: string) => any;
+  },
+  purchaseOrderId: string,
+  purchaseOrderItemIds: string[],
+) {
+  const byId = new Map<string, Record<string, unknown>>();
+
+  if (purchaseOrderItemIds.length > 0) {
+    const rowsById = await service
+      .from('purchase_order_items')
+      .select('*')
+      .in('id', purchaseOrderItemIds);
+    if (!rowsById.error) {
+      for (const row of (rowsById.data ?? []) as Record<string, unknown>[]) {
+        const id = String(row.id ?? '').trim();
+        if (id) byId.set(id, row);
+      }
+    }
+  }
+
+  if (purchaseOrderId) {
+    for (const column of ['purchase_order_id', 'po_id'] as const) {
+      const result = await service
+        .from('purchase_order_items')
+        .select('*')
+        .eq(column, purchaseOrderId);
+      if (!result.error) {
+        for (const row of (result.data ?? []) as Record<string, unknown>[]) {
+          const id = String(row.id ?? '').trim();
+          if (id) byId.set(id, row);
+        }
+        break;
+      }
+      if (!isMissingColumnError(result.error, 'purchase_order_items', column)) {
+        break;
+      }
+    }
+  }
+
+  return byId;
+}
+
+async function loadCompatibleItemMasters(
+  service: {
+    from: (table: string) => any;
+  },
+  itemIds: string[],
+) {
+  if (!itemIds.length) return new Map<string, Record<string, unknown>>();
+
+  const result = await service.from('items').select('*').in('id', itemIds);
+  if (result.error) {
+    return new Map<string, Record<string, unknown>>();
+  }
+
+  return new Map(
+    ((result.data ?? []) as Record<string, unknown>[])
+      .map((row) => [String(row.id ?? '').trim(), row] as const)
+      .filter(([id]) => id),
+  );
+}
+
+async function loadCompatibleStockBalance(
+  service: {
+    from: (table: string) => any;
+  },
+  input: {
+    grnId: string;
+    itemId: string;
+    warehouseId: string;
+  },
+) {
+  const result = await service
+    .from('stock_balances')
+    .select('*')
+    .eq('item_id', input.itemId)
+    .eq('warehouse_id', input.warehouseId)
+    .maybeSingle();
+
+  if (result.error) {
+    throw buildGrnPostingFailure(
+      {
+        grnId: input.grnId,
+        itemId: input.itemId,
+        stage: 'GRN_STOCK_BALANCE_READ_FAILED',
+        warehouseId: input.warehouseId,
+        warehouseResolved: true,
+      },
+      result.error,
+      'Failed to read stock balance.',
+    );
+  }
+
+  return (result.data ?? null) as Record<string, unknown> | null;
+}
+
+async function insertWithMissingColumnFallback(
+  service: {
+    from: (table: string) => any;
+  },
+  table: string,
+  payload: Record<string, unknown>,
+) {
+  let nextPayload = { ...payload };
+  const removed = new Set<string>();
+
+  for (let attempt = 0; attempt <= Object.keys(payload).length; attempt += 1) {
+    const result = await service
+      .from(table)
+      .insert(nextPayload)
+      .select()
+      .single();
+
+    if (!result.error && result.data) {
+      return result;
+    }
+
+    const missingColumn = extractMissingColumnName(result.error, table);
+    if (!missingColumn || removed.has(missingColumn)) {
+      return result;
+    }
+
+    removed.add(missingColumn);
+    delete nextPayload[missingColumn];
+  }
+
+  return { data: null, error: new Error(`Failed to insert ${table} row.`) };
+}
+
+async function updateWithMissingColumnFallback(
+  service: {
+    from: (table: string) => any;
+  },
+  table: string,
+  payload: Record<string, unknown>,
+  applyFilter: (query: any) => any,
+) {
+  let nextPayload = { ...payload };
+  const removed = new Set<string>();
+
+  for (let attempt = 0; attempt <= Object.keys(payload).length; attempt += 1) {
+    let query = service.from(table).update(nextPayload);
+    query = applyFilter(query);
+    const result = await query.select().single();
+
+    if (!result.error && result.data) {
+      return result;
+    }
+
+    const missingColumn = extractMissingColumnName(result.error, table);
+    if (!missingColumn || removed.has(missingColumn)) {
+      return result;
+    }
+
+    removed.add(missingColumn);
+    delete nextPayload[missingColumn];
+  }
+
+  return { data: null, error: new Error(`Failed to update ${table} row.`) };
+}
+
+async function upsertCompatibleStockBalance(
+  service: {
+    from: (table: string) => any;
+  },
+  input: {
+    grnId: string;
+    itemId: string;
+    organizationId: string;
+    quantity: number;
+    receivedValue: number;
+    unitCost: number;
+    warehouseId: string;
+  },
+) {
+  const current = await loadCompatibleStockBalance(service, input);
+  const now = new Date().toISOString();
+
+  if (current) {
+    const quantityOnHand = toNumber(current.quantity_on_hand ?? current.quantity);
+    const quantityReserved = toNumber(current.quantity_reserved ?? current.reserved_qty);
+    const nextOnHand = quantityOnHand + input.quantity;
+    const nextAvailable = nextOnHand - quantityReserved;
+    const currentAverageCost = toNumber(current.average_cost ?? current.avg_cost ?? current.unit_cost);
+    const currentTotalValue = toNumber(
+      current.total_value ??
+        (quantityOnHand * currentAverageCost),
+    );
+    const nextTotalValue = currentTotalValue + input.receivedValue;
+    const nextAverageCost = nextOnHand > 0 ? nextTotalValue / nextOnHand : currentAverageCost;
+
+    const updatePayload: Record<string, unknown> = {
+      avg_cost: nextAverageCost,
+      average_cost: nextAverageCost,
+      quantity: toNumber(current.quantity ?? quantityOnHand) + input.quantity,
+      quantity_available: nextAvailable,
+      quantity_on_hand: nextOnHand,
+      quantity_reserved: quantityReserved,
+      reserved_qty: quantityReserved,
+      total_value: nextTotalValue,
+      unit_cost: input.unitCost,
+      updated_at: now,
+      last_updated: now,
+    };
+
+    const result = await updateWithMissingColumnFallback(service, 'stock_balances', updatePayload, (query) =>
+      query.eq('id', current.id),
+    );
+
+    if (result.error || !result.data) {
+      throw buildGrnPostingFailure(
+        {
+          grnId: input.grnId,
+          itemId: input.itemId,
+          stage: 'GRN_STOCK_BALANCE_UPDATE_FAILED',
+          warehouseId: input.warehouseId,
+          warehouseResolved: true,
+        },
+        result.error,
+        'Failed to update stock balance.',
+      );
+    }
+
+    return result.data as Record<string, unknown>;
+  }
+
+  const insertPayload: Record<string, unknown> = {
+    organization_id: input.organizationId,
+    item_id: input.itemId,
+    warehouse_id: input.warehouseId,
+    quantity: input.quantity,
+    quantity_available: input.quantity,
+    quantity_on_hand: input.quantity,
+    quantity_reserved: 0,
+    reserved_qty: 0,
+    average_cost: input.unitCost,
+    avg_cost: input.unitCost,
+    unit_cost: input.unitCost,
+    total_value: input.receivedValue,
+    created_at: now,
+    updated_at: now,
+    last_updated: now,
+  };
+
+  const result = await insertWithMissingColumnFallback(service, 'stock_balances', insertPayload);
+  if (result.error || !result.data) {
+    throw buildGrnPostingFailure(
+      {
+        grnId: input.grnId,
+        itemId: input.itemId,
+        stage: 'GRN_STOCK_BALANCE_UPDATE_FAILED',
+        warehouseId: input.warehouseId,
+        warehouseResolved: true,
+      },
+      result.error,
+      'Failed to create stock balance.',
+    );
+  }
+
+  return result.data as Record<string, unknown>;
+}
+
+async function insertCompatibleStockMovement(
+  service: {
+    from: (table: string) => any;
+  },
+  input: {
+    batchNumber?: string | null;
+    grnId: string;
+    grnNumber?: string | null;
+    itemId: string;
+    notes?: string | null;
+    organizationId: string;
+    quantity: number;
+    runningBalance: number;
+    unitCost: number;
+    userId: string;
+    warehouseId: string;
+  },
+) {
+  const basePayload: Record<string, unknown> = {
+    batch_number: input.batchNumber ?? null,
+    created_at: new Date().toISOString(),
+    created_by: input.userId,
+    item_id: input.itemId,
+    notes: input.notes ?? null,
+    organization_id: input.organizationId,
+    quantity: input.quantity,
+    reference_id: input.grnId,
+    reference_number: input.grnNumber ?? input.grnId,
+    reference_type: 'goods_received_note',
+    running_balance: input.runningBalance,
+    source_document_id: input.grnId,
+    source_document_type: 'GRN',
+    total_cost: input.quantity * input.unitCost,
+    total_value: input.quantity * input.unitCost,
+    unit_cost: input.unitCost,
+    warehouse_id: input.warehouseId,
+  };
+
+  const movementTypes = [...new Set(STOCK_MOVEMENT_TYPE_CANDIDATES.map((value) => normalizeStockMovementType(value)))];
+
+  for (const movementType of movementTypes) {
+    const result = await insertWithMissingColumnFallback(service, 'stock_movements', {
+      ...basePayload,
+      movement_type: movementType,
+    });
+
+    if (!result.error && result.data) {
+      return result.data as Record<string, unknown>;
+    }
+
+    if (isInvalidMovementTypeEnumError(result.error)) {
+      continue;
+    }
+
+    throw buildGrnPostingFailure(
+      {
+        grnId: input.grnId,
+        itemId: input.itemId,
+        stage: 'GRN_STOCK_MOVEMENT_INSERT_FAILED',
+        warehouseId: input.warehouseId,
+        warehouseResolved: true,
+      },
+      result.error,
+      'Failed to insert stock movement.',
+    );
+  }
+
+  throw buildGrnPostingFailure(
+    {
+      grnId: input.grnId,
+      itemId: input.itemId,
+      stage: 'GRN_STOCK_MOVEMENT_INSERT_FAILED',
+      warehouseId: input.warehouseId,
+      warehouseResolved: true,
+    },
+    undefined,
+    'Failed to insert stock movement.',
+  );
+}
+
+async function findExistingGrnMovement(
+  service: {
+    from: (table: string) => any;
+  },
+  grnId: string,
+) {
+  const attempts = [
+    () =>
+      service
+        .from('stock_movements')
+        .select('id')
+        .or(`reference_id.eq.${grnId},source_document_id.eq.${grnId}`)
+        .limit(1),
+    () =>
+      service
+        .from('stock_movements')
+        .select('id')
+        .eq('reference_id', grnId)
+        .limit(1),
+    () =>
+      service
+        .from('stock_movements')
+        .select('id')
+        .eq('source_document_id', grnId)
+        .limit(1),
+  ];
+
+  for (const attempt of attempts) {
+    const result = await attempt();
+    if (!result.error) {
+      const rows = (result.data ?? []) as Record<string, unknown>[];
+      return rows[0] ?? null;
+    }
+
+    if (
+      isMissingColumnError(result.error, 'stock_movements', 'source_document_id') ||
+      isMissingColumnError(result.error, 'stock_movements', 'reference_id')
+    ) {
+      continue;
+    }
+  }
+
+  return null;
+}
+
 async function updatePostedGoodsReceivedNoteState(
   service: {
     from: (table: string) => any;
@@ -203,8 +825,10 @@ async function updatePostedGoodsReceivedNoteState(
     currentStatus: unknown;
     grnId: string;
     inventoryValuePosted: number;
+    itemCount?: number;
     postedAt: string;
     userId: string;
+    warehouseResolved?: boolean;
   },
 ) {
   const basePayload: Record<string, unknown> = {
@@ -254,13 +878,29 @@ async function updatePostedGoodsReceivedNoteState(
     if (isInvalidGrnStatusEnumError(result.error)) {
       continue;
     }
-    throw new Error(result.error?.message ?? 'Goods received note could not update inventory. Please check warehouse and item details.');
+    throw buildGrnPostingFailure(
+      {
+        grnId: input.grnId,
+        itemCount: input.itemCount,
+        stage: 'GRN_MARK_POSTED_FAILED',
+        warehouseResolved: input.warehouseResolved,
+      },
+      result.error,
+      'Failed to mark goods received note as posted.',
+    );
   }
 
   const fallbackResult = await tryUpdate(basePayload);
   if (fallbackResult.error || !fallbackResult.data) {
-    throw new Error(
-      fallbackResult.error?.message ?? 'Goods received note could not update inventory. Please check warehouse and item details.',
+    throw buildGrnPostingFailure(
+      {
+        grnId: input.grnId,
+        itemCount: input.itemCount,
+        stage: 'GRN_MARK_POSTED_FAILED',
+        warehouseResolved: input.warehouseResolved,
+      },
+      fallbackResult.error,
+      'Failed to mark goods received note as posted.',
     );
   }
 
@@ -277,208 +917,221 @@ export async function postGoodsReceivedNoteToInventory(
     userId: string;
   },
 ) {
-  const primary = await service
-    .from('goods_received_notes')
-    .select('id, grn_number, status, quality_status, warehouse_id, receiving_warehouse_id, purchase_order_id, po_id, notes, approval_notes, stock_posted')
-    .eq('organization_id', input.organizationId)
-    .eq('id', input.grnId)
-    .maybeSingle();
+  const grn = await loadCompatibleGrnHeader(service, input);
+  const warehouseId = resolveGrnHeaderWarehouseId(grn);
+  const grnNumber = resolveGrnNumber(grn);
+  const purchaseOrderId = resolvePurchaseOrderId(grn);
 
-  const grn =
-    primary.error && isMissingColumnError(primary.error, 'goods_received_notes', 'purchase_order_id')
-      ? (
-          await service
-            .from('goods_received_notes')
-            .select('id, grn_number, status, quality_status, warehouse_id, po_id, notes, approval_notes')
-            .eq('organization_id', input.organizationId)
-            .eq('id', input.grnId)
-            .maybeSingle()
-        ).data
-      : primary.data;
-
-  if (!grn) {
-    throw new Error('Goods received note not found.');
-  }
-
-  const warehouseId = String(grn.receiving_warehouse_id ?? grn.warehouse_id ?? '').trim();
   if (!warehouseId) {
-    throw new Error('Please select a receiving warehouse before posting GRN.');
+    throw buildGrnPostingFailure(
+      {
+        grnId: input.grnId,
+        stage: 'GRN_WAREHOUSE_MISSING',
+        warehouseResolved: false,
+      },
+      undefined,
+      'Please select a receiving warehouse before posting GRN.',
+    );
   }
 
   if (grn.stock_posted === true || String(grn.status ?? '').toUpperCase() === 'POSTED') {
-    throw new Error('GRN has already been posted to stock.');
+    return updatePostedGoodsReceivedNoteState(service, {
+      currentStatus: grn.status,
+      grnId: input.grnId,
+      inventoryValuePosted: toNumber(grn.inventory_value_posted),
+      itemCount: 0,
+      postedAt: new Date().toISOString(),
+      userId: input.userId,
+      warehouseResolved: true,
+    });
   }
 
-  const existingMovement = await service
-    .from('stock_movements')
-    .select('id')
-    .or(`reference_id.eq.${input.grnId},source_document_id.eq.${input.grnId}`)
-    .limit(1);
-
-  if (!existingMovement.error && (existingMovement.data ?? []).length > 0) {
-    await service
-      .from('goods_received_notes')
-      .update({
-        posted_at: new Date().toISOString(),
-        posted_by: input.userId,
-        stock_posted: true,
-      })
-      .eq('id', input.grnId);
-    throw new Error('GRN has already been posted to stock.');
+  const existingMovement = await findExistingGrnMovement(service, input.grnId);
+  if (existingMovement) {
+    return updatePostedGoodsReceivedNoteState(service, {
+      currentStatus: grn.status,
+      grnId: input.grnId,
+      inventoryValuePosted: toNumber(grn.inventory_value_posted),
+      itemCount: 0,
+      postedAt: new Date().toISOString(),
+      userId: input.userId,
+      warehouseResolved: true,
+    });
   }
 
-  const itemsPrimary = await service
-    .from('goods_received_note_items')
-    .select('id, item_id, purchase_order_item_id, po_item_id, quantity_ordered, quantity_expected, quantity_received, quantity_rejected, unit_cost, warehouse_id, batch_number')
-    .eq('grn_id', input.grnId);
-
-  const items =
-    itemsPrimary.error && getErrorMessage(itemsPrimary.error).includes('goods_received_note_items')
-      ? (
-          await service
-            .from('grn_items')
-            .select('id, item_id, po_item_id, ordered_qty, received_qty, rejected_qty, unit_cost, warehouse_id, batch_number')
-            .eq('grn_id', input.grnId)
-        ).data?.map((item: Record<string, unknown>) => ({
-          ...item,
-          purchase_order_item_id: item.po_item_id,
-          quantity_ordered: item.ordered_qty,
-          quantity_received: item.received_qty,
-          quantity_rejected: item.rejected_qty,
-        }))
-      : itemsPrimary.data;
-
-  if (!items || items.length === 0) {
-    throw new Error('Goods received note could not update inventory. Please check warehouse and item details.');
+  const items = await loadCompatibleGrnItems(service, input.grnId);
+  if (items.length === 0) {
+    throw buildGrnPostingFailure(
+      {
+        grnId: input.grnId,
+        itemCount: 0,
+        stage: 'GRN_HAS_NO_ITEMS',
+        warehouseResolved: true,
+      },
+      undefined,
+      'Goods received note has no items to post.',
+    );
   }
 
   const purchaseOrderItemIds = [
+    ...new Set(items.map((item) => resolveGrnItemPurchaseOrderItemId(item)).filter(Boolean)),
+  ];
+  const poItemsById = await loadCompatiblePurchaseOrderItems(service, purchaseOrderId, purchaseOrderItemIds);
+  const resolvedItemIds = [
     ...new Set(
-      (items as Array<Record<string, unknown>>)
-        .map((item) => String(item.purchase_order_item_id ?? item.po_item_id ?? '').trim())
+      items
+        .map((item) => {
+          const purchaseOrderItemId = resolveGrnItemPurchaseOrderItemId(item);
+          const poItem = purchaseOrderItemId ? poItemsById.get(purchaseOrderItemId) ?? null : null;
+          return normalizeGoodsReceivedItemId({
+            item_id: item.item_id ?? poItem?.item_id,
+            itemId: item.itemId ?? poItem?.itemId,
+            product_id: item.product_id ?? poItem?.product_id,
+            productId: item.productId ?? poItem?.productId,
+            raw_material_id: item.raw_material_id ?? poItem?.raw_material_id,
+            rawMaterialId: item.rawMaterialId ?? poItem?.rawMaterialId,
+          });
+        })
         .filter(Boolean),
     ),
   ];
-  const itemIds = [
-    ...new Set(
-      (items as Array<Record<string, unknown>>)
-        .map((item) => String(item.item_id ?? '').trim())
-        .filter(Boolean),
-    ),
-  ];
-  const poItemRows = purchaseOrderItemIds.length
-    ? await service
-        .from('purchase_order_items')
-        .select('id, unit_price, unit_cost')
-        .in('id', purchaseOrderItemIds)
-    : { data: [], error: null };
-  const itemRows = itemIds.length
-    ? await service
-        .from('items')
-        .select('id, purchase_price, cost_price, unit_cost, standard_cost, default_purchase_price, price, selling_price')
-        .in('id', itemIds)
-    : { data: [], error: null };
-  const poItemsById = new Map(
-    (poItemRows.error ? [] : poItemRows.data ?? []).map((item: Record<string, unknown>) => [String(item.id), item]),
-  );
-  const itemsById = new Map(
-    (itemRows.error ? [] : itemRows.data ?? []).map((item: Record<string, unknown>) => [String(item.id), item]),
-  );
+  const itemsById = await loadCompatibleItemMasters(service, resolvedItemIds);
   let inventoryValuePosted = 0;
 
-  for (const rawItem of items as Array<Record<string, unknown>>) {
-    const itemId = String(rawItem.item_id ?? '').trim();
-    if (!itemId) continue;
-    const quantityReceived = toNumber(rawItem.quantity_received);
-    const quantityRejected = toNumber(rawItem.quantity_rejected);
-    const quantity = Math.max(0, quantityReceived - quantityRejected);
-    if (quantity <= 0) continue;
+  for (const rawItem of items) {
+    const purchaseOrderItemId = resolveGrnItemPurchaseOrderItemId(rawItem);
+    const poItem = purchaseOrderItemId ? poItemsById.get(purchaseOrderItemId) ?? null : null;
+    const itemId = normalizeGoodsReceivedItemId({
+      item_id: rawItem.item_id ?? poItem?.item_id,
+      itemId: rawItem.itemId ?? poItem?.itemId,
+      product_id: rawItem.product_id ?? poItem?.product_id,
+      productId: rawItem.productId ?? poItem?.productId,
+      raw_material_id: rawItem.raw_material_id ?? poItem?.raw_material_id,
+      rawMaterialId: rawItem.rawMaterialId ?? poItem?.rawMaterialId,
+    });
 
-    const purchaseOrderItemId = String(rawItem.purchase_order_item_id ?? rawItem.po_item_id ?? '').trim();
-    const poItem = (purchaseOrderItemId ? poItemsById.get(purchaseOrderItemId) : null) as Record<string, unknown> | null;
-    const itemMaster = itemsById.get(itemId) as Record<string, unknown> | undefined;
+    if (!itemId) {
+      throw buildGrnPostingFailure(
+        {
+          grnId: input.grnId,
+          itemCount: items.length,
+          lineId: String(rawItem.id ?? '').trim() || null,
+          purchaseOrderItemId: purchaseOrderItemId || null,
+          stage: 'GRN_ITEM_ID_MISSING',
+          warehouseResolved: Boolean(warehouseId),
+        },
+        undefined,
+        'Goods received note item is missing item_id.',
+      );
+    }
+
+    const quantity = resolveGrnItemQuantity(rawItem);
+    if (quantity <= 0) {
+      throw buildGrnPostingFailure(
+        {
+          grnId: input.grnId,
+          itemCount: items.length,
+          itemId,
+          lineId: String(rawItem.id ?? '').trim() || null,
+          purchaseOrderItemId: purchaseOrderItemId || null,
+          stage: 'GRN_QUANTITY_MISSING_OR_ZERO',
+          warehouseResolved: Boolean(warehouseId),
+        },
+        undefined,
+        'Goods received note item quantity is missing or zero.',
+      );
+    }
+
+    const lineWarehouseId = resolveGrnItemWarehouseId(rawItem, warehouseId);
+    if (!lineWarehouseId) {
+      throw buildGrnPostingFailure(
+        {
+          grnId: input.grnId,
+          itemCount: items.length,
+          itemId,
+          lineId: String(rawItem.id ?? '').trim() || null,
+          purchaseOrderItemId: purchaseOrderItemId || null,
+          stage: 'GRN_WAREHOUSE_MISSING',
+          warehouseResolved: false,
+        },
+        undefined,
+        'Please select a receiving warehouse before posting GRN.',
+      );
+    }
+
+    const itemMaster = itemsById.get(itemId) ?? null;
     const unitCost = toNumber(
       rawItem.unit_cost ??
+        rawItem.cost ??
+        rawItem.price ??
+        rawItem.unit_price ??
         poItem?.unit_price ??
+        poItem?.unitPrice ??
         poItem?.unit_cost ??
-        itemMaster?.purchase_price ??
-        itemMaster?.cost_price ??
-        itemMaster?.unit_cost ??
-        itemMaster?.standard_cost ??
-        itemMaster?.default_purchase_price ??
-        itemMaster?.price ??
-        itemMaster?.selling_price ??
+        poItem?.unitCost ??
+        resolveItemMasterUnitCost(itemMaster) ??
         0,
     );
-    inventoryValuePosted += quantity * unitCost;
-    const lineWarehouseId = String(rawItem.warehouse_id ?? warehouseId).trim() || warehouseId;
+    const receivedValue = toNumber(rawItem.line_total ?? rawItem.total_value) || (quantity * unitCost);
+    inventoryValuePosted += receivedValue;
 
-    await applyInventoryDelta(service, {
+    const updatedBalance = await upsertCompatibleStockBalance(service, {
+      grnId: input.grnId,
       itemId,
       organizationId: input.organizationId,
-      quantityDelta: quantity,
+      quantity,
+      receivedValue,
       unitCost,
       warehouseId: lineWarehouseId,
     });
 
-    await recordStockMovement(service, {
+    await insertCompatibleStockMovement(service, {
       batchNumber: rawItem.batch_number ? String(rawItem.batch_number) : null,
-      createdBy: input.userId,
+      grnId: input.grnId,
+      grnNumber,
       itemId,
-      movementType: 'GRN_RECEIPT',
       notes: String(grn.notes ?? grn.approval_notes ?? ''),
       organizationId: input.organizationId,
       quantity,
-      referenceId: input.grnId,
-      referenceType: 'goods_received_note',
+      runningBalance: toNumber(updatedBalance.quantity_on_hand ?? updatedBalance.quantity),
       unitCost,
+      userId: input.userId,
       warehouseId: lineWarehouseId,
     });
 
     if (purchaseOrderItemId) {
       const poItemResult = await service
         .from('purchase_order_items')
-        .select('id, quantity_received')
+        .select('*')
         .eq('id', purchaseOrderItemId)
         .maybeSingle();
       if (!poItemResult.error && poItemResult.data) {
-        await service
-          .from('purchase_order_items')
-          .update({
-            quantity_received: toNumber(poItemResult.data.quantity_received) + quantity,
-          })
-          .eq('id', purchaseOrderItemId);
+        const currentReceived = toNumber(poItemResult.data.quantity_received ?? poItemResult.data.received_qty);
+        await updateWithMissingColumnFallback(
+          service,
+          'purchase_order_items',
+          {
+            quantity_received: currentReceived + quantity,
+            received_qty: currentReceived + quantity,
+          },
+          (query) => query.eq('id', purchaseOrderItemId),
+        );
       }
     }
   }
 
-  const purchaseOrderId = String(grn.purchase_order_id ?? grn.po_id ?? '').trim();
   if (purchaseOrderId) {
-    const poItemsPrimary = await service
-      .from('purchase_order_items')
-      .select('quantity_ordered, quantity_received')
-      .eq('purchase_order_id', purchaseOrderId);
-    const poItems =
-      poItemsPrimary.error && isMissingColumnError(poItemsPrimary.error, 'purchase_order_items', 'purchase_order_id')
-        ? (
-            await service
-              .from('purchase_order_items')
-              .select('quantity_ordered, received_qty')
-              .eq('po_id', purchaseOrderId)
-          ).data?.map((item: Record<string, unknown>) => ({
-            ...item,
-            quantity_received: item.received_qty,
-          }))
-        : poItemsPrimary.data;
-
-    const allReceived = (poItems ?? []).length > 0 && (poItems ?? []).every((item: Record<string, unknown>) => toNumber(item.quantity_received) >= toNumber(item.quantity_ordered));
-    const anyReceived = (poItems ?? []).some((item: Record<string, unknown>) => toNumber(item.quantity_received) > 0);
-    await service
-      .from('purchase_orders')
-      .update({
+    const poItems = [...poItemsById.values()];
+    const allReceived = poItems.length > 0 && poItems.every((item) => toNumber(item.quantity_received ?? item.received_qty) >= toNumber(item.quantity_ordered));
+    const anyReceived = poItems.some((item) => toNumber(item.quantity_received ?? item.received_qty) > 0);
+    await updateWithMissingColumnFallback(
+      service,
+      'purchase_orders',
+      {
         status: allReceived ? 'FULLY_RECEIVED' : anyReceived ? 'PARTIAL_RECEIVED' : 'APPROVED',
-      })
-      .eq('id', purchaseOrderId);
+      },
+      (query) => query.eq('id', purchaseOrderId),
+    );
   }
 
   const postedAt = new Date().toISOString();
@@ -486,7 +1139,9 @@ export async function postGoodsReceivedNoteToInventory(
     currentStatus: grn.status,
     grnId: input.grnId,
     inventoryValuePosted,
+    itemCount: items.length,
     postedAt,
     userId: input.userId,
+    warehouseResolved: true,
   });
 }

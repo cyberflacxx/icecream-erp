@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { badRequest, can, forbidden, getAuthContext, notFound, serverError, unauthorized } from '@/lib/api-auth';
-import { postGoodsReceivedNoteToInventory } from '@/lib/procurement-goods-received';
+import { isGrnStockPostingError, postGoodsReceivedNoteToInventory } from '@/lib/procurement-goods-received';
 import { recordAuditLog } from '@/lib/security-server';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
@@ -86,16 +86,25 @@ export async function POST(
       });
     } catch (postingError) {
       const message = postingError instanceof Error ? postingError.message : 'Failed to post GRN to inventory.';
-      if (message === 'GRN has already been posted to stock.') {
-        return badRequest(message);
-      }
+      const details = isGrnStockPostingError(postingError) ? postingError.details : undefined;
       if (message === 'Please select a receiving warehouse before posting GRN.') {
-        return badRequest(message);
+        return NextResponse.json({
+          success: false,
+          message,
+          code: 'GRN_STOCK_POST_FAILED',
+          details,
+        }, { status: 400 });
       }
+      console.error('GRN inventory posting failed.', {
+        grnId: id,
+        details,
+        message,
+      });
       return NextResponse.json({
         success: false,
         message: 'Goods received note could not update inventory. Please check warehouse and item details.',
         code: 'GRN_STOCK_POST_FAILED',
+        details,
       }, { status: 500 });
     }
 
@@ -113,6 +122,7 @@ export async function POST(
     return NextResponse.json(updated);
   } catch (err) {
     console.error('GRN approval failed.', {
+      details: isGrnStockPostingError(err) ? err.details : undefined,
       grnId: id,
       message: err instanceof Error ? err.message : String(err),
     });
@@ -120,6 +130,7 @@ export async function POST(
       success: false,
       message: 'Goods received note could not update inventory. Please check warehouse and item details.',
       code: 'GRN_STOCK_POST_FAILED',
+      details: isGrnStockPostingError(err) ? err.details : undefined,
     }, { status: 500 });
   }
 }

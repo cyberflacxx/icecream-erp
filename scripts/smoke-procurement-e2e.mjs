@@ -224,6 +224,31 @@ async function fetchStockMovements(baseUrl, cookie, timeoutMs, itemId) {
   return getCollection(result.json);
 }
 
+async function fetchGrnDetailSafe(baseUrl, cookie, timeoutMs, grnId) {
+  const result = await apiRequest(baseUrl, cookie, `/api/procurement/grns/${grnId}`, { timeoutMs });
+  return result.ok ? getObject(result.json) : { status: result.status, body: result.json ?? result.text };
+}
+
+async function fetchStockBalanceSafe(baseUrl, cookie, timeoutMs, itemId, warehouseId) {
+  try {
+    return await fetchStockBalance(baseUrl, cookie, timeoutMs, itemId, warehouseId);
+  } catch (error) {
+    return {
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+async function fetchStockMovementsSafe(baseUrl, cookie, timeoutMs, itemId) {
+  try {
+    return await fetchStockMovements(baseUrl, cookie, timeoutMs, itemId);
+  } catch (error) {
+    return {
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
 async function submitRequisition(baseUrl, cookie, timeoutMs, requisitionId) {
   const result = await apiRequest(baseUrl, cookie, `/api/procurement/requisitions/${requisitionId}/submit`, {
     method: 'POST',
@@ -264,13 +289,11 @@ async function receiveGrn(baseUrl, cookie, timeoutMs, grnId, itemId, poItemId, q
 }
 
 async function approveGrn(baseUrl, cookie, timeoutMs, grnId) {
-  const result = await apiRequest(baseUrl, cookie, `/api/procurement/grns/${grnId}/approve`, {
+  return apiRequest(baseUrl, cookie, `/api/procurement/grns/${grnId}/approve`, {
     body: { approvalNotes: 'Procurement smoke approve' },
     method: 'POST',
     timeoutMs,
   });
-  assertOk(result, 'Approve GRN');
-  return result.json;
 }
 
 async function postGrn(baseUrl, cookie, timeoutMs, grnId) {
@@ -466,7 +489,31 @@ async function main() {
   );
   logStep('GRN Receive', 'PASS', `qty=${TEST_QUANTITY}`);
 
-  await approveGrn(baseUrl, cookie, timeoutMs, grnId);
+  const grnApproveResult = await approveGrn(baseUrl, cookie, timeoutMs, grnId);
+  if (!grnApproveResult.ok) {
+    const approveResponse = grnApproveResult.json ?? grnApproveResult.text;
+    const detailsStage = normalizeString(approveResponse?.details?.stage ?? null) || null;
+    const [grnDetail, stockAfterApproveFailure, movementsAfterApproveFailure] = await Promise.all([
+      fetchGrnDetailSafe(baseUrl, cookie, timeoutMs, grnId),
+      fetchStockBalanceSafe(baseUrl, cookie, timeoutMs, item.id, warehouse.id),
+      fetchStockMovementsSafe(baseUrl, cookie, timeoutMs, item.id),
+    ]);
+    fail(`Approve GRN failed with HTTP ${grnApproveResult.status}.`, {
+      approveResponse,
+      approveRouteStatus: grnApproveResult.status,
+      grnDetail,
+      grnId,
+      itemId: item.id,
+      poId,
+      stage: detailsStage,
+      stockAfter: stockAfterApproveFailure,
+      stockBefore: beforeBalance,
+      stockMovements: Array.isArray(movementsAfterApproveFailure)
+        ? movementsAfterApproveFailure.filter((entry) => normalizeString(entry.warehouse?.id ?? warehouse.id) === warehouse.id).slice(0, 10)
+        : movementsAfterApproveFailure,
+      warehouseId: warehouse.id,
+    });
+  }
   logStep('GRN Approve', 'PASS', grnId);
 
   await postGrn(baseUrl, cookie, timeoutMs, grnId);
