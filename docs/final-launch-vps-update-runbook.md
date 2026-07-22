@@ -171,7 +171,21 @@ ORDER BY table_name;
 7. Create a supplier invoice linked to PO and GRN.
 8. Create a supplier payment with a valid bank, cash, or petty cash source.
 
-### 11. Do not do any of the following
+### 11. Inspect the live `grn_status` enum when GRN posting fails
+
+```bash
+docker exec supabase-db psql -U supabase_admin -d postgres -P pager=off -c "
+SELECT e.enumlabel AS value
+FROM pg_type t
+JOIN pg_enum e ON t.oid = e.enumtypid
+JOIN pg_namespace n ON n.oid = t.typnamespace
+WHERE n.nspname = 'icecream_erp'
+  AND t.typname = 'grn_status'
+ORDER BY e.enumsortorder;
+"
+```
+
+### 12. Do not do any of the following
 
 - Do not touch `public`, `auth`, `storage`, `graphql_public`, or other project schemas.
 - Do not run `docker compose down -v`.

@@ -70,7 +70,6 @@ export async function POST(
         approved_at: new Date().toISOString(),
         approved_by: ctx.userId,
         quality_status: 'APPROVED',
-        status: 'APPROVED',
       })
       .eq('id', id)
       .select()

@@ -178,8 +178,93 @@ function getErrorMessage(error: unknown) {
   return '';
 }
 
+const GRN_POSTED_STATUS_CANDIDATES = ['POSTED', 'RECEIVED', 'COMPLETED'] as const;
+
+export function resolveCompatibleGrnPostedStatus(currentStatus: unknown) {
+  const normalized = String(currentStatus ?? '').trim().toUpperCase();
+  return (GRN_POSTED_STATUS_CANDIDATES.find((status) => status === normalized) ?? GRN_POSTED_STATUS_CANDIDATES[0]) as
+    (typeof GRN_POSTED_STATUS_CANDIDATES)[number];
+}
+
 function isMissingColumnError(error: unknown, table: string, columnName: string) {
   return getErrorMessage(error).includes(`column ${table}.${columnName} does not exist`);
+}
+
+function isInvalidGrnStatusEnumError(error: unknown) {
+  const message = getErrorMessage(error).toLowerCase();
+  return message.includes('invalid input value for enum grn_status');
+}
+
+async function updatePostedGoodsReceivedNoteState(
+  service: {
+    from: (table: string) => any;
+  },
+  input: {
+    currentStatus: unknown;
+    grnId: string;
+    inventoryValuePosted: number;
+    postedAt: string;
+    userId: string;
+  },
+) {
+  const basePayload: Record<string, unknown> = {
+    approved_at: input.postedAt,
+    approved_by: input.userId,
+    posted_at: input.postedAt,
+    posted_by: input.userId,
+    inventory_value_posted: input.inventoryValuePosted,
+    quality_status: 'APPROVED',
+    stock_posted: true,
+  };
+
+  const tryUpdate = async (payload: Record<string, unknown>) => {
+    let updatePayload = { ...payload };
+    let result = await service
+      .from('goods_received_notes')
+      .update(updatePayload)
+      .eq('id', input.grnId)
+      .select()
+      .single();
+
+    if (result.error && isMissingColumnError(result.error, 'goods_received_notes', 'inventory_value_posted')) {
+      updatePayload = { ...updatePayload };
+      delete updatePayload.inventory_value_posted;
+      result = await service
+        .from('goods_received_notes')
+        .update(updatePayload)
+        .eq('id', input.grnId)
+        .select()
+        .single();
+    }
+
+    return result;
+  };
+
+  const preferredStatus = resolveCompatibleGrnPostedStatus(input.currentStatus);
+  const statusCandidates = [
+    preferredStatus,
+    ...GRN_POSTED_STATUS_CANDIDATES.filter((status) => status !== preferredStatus),
+  ];
+
+  for (const status of statusCandidates) {
+    const result = await tryUpdate({ ...basePayload, status });
+    if (!result.error && result.data) {
+      return result.data;
+    }
+    if (isInvalidGrnStatusEnumError(result.error)) {
+      continue;
+    }
+    throw new Error(result.error?.message ?? 'Goods received note could not update inventory. Please check warehouse and item details.');
+  }
+
+  const fallbackResult = await tryUpdate(basePayload);
+  if (fallbackResult.error || !fallbackResult.data) {
+    throw new Error(
+      fallbackResult.error?.message ?? 'Goods received note could not update inventory. Please check warehouse and item details.',
+    );
+  }
+
+  return fallbackResult.data;
 }
 
 export async function postGoodsReceivedNoteToInventory(
@@ -397,37 +482,11 @@ export async function postGoodsReceivedNoteToInventory(
   }
 
   const postedAt = new Date().toISOString();
-  let updatePayload: Record<string, unknown> = {
-      approved_at: postedAt,
-      approved_by: input.userId,
-      posted_at: postedAt,
-      posted_by: input.userId,
-      inventory_value_posted: inventoryValuePosted,
-      quality_status: 'APPROVED',
-      status: 'POSTED',
-      stock_posted: true,
-    };
-  let updateResult = await service
-    .from('goods_received_notes')
-    .update(updatePayload)
-    .eq('id', input.grnId)
-    .select()
-    .single();
-
-  if (updateResult.error && isMissingColumnError(updateResult.error, 'goods_received_notes', 'inventory_value_posted')) {
-    updatePayload = { ...updatePayload };
-    delete updatePayload.inventory_value_posted;
-    updateResult = await service
-      .from('goods_received_notes')
-      .update(updatePayload)
-      .eq('id', input.grnId)
-      .select()
-      .single();
-  }
-
-  if (updateResult.error || !updateResult.data) {
-    throw new Error(updateResult.error?.message ?? 'Goods received note could not update inventory. Please check warehouse and item details.');
-  }
-
-  return updateResult.data;
+  return updatePostedGoodsReceivedNoteState(service, {
+    currentStatus: grn.status,
+    grnId: input.grnId,
+    inventoryValuePosted,
+    postedAt,
+    userId: input.userId,
+  });
 }

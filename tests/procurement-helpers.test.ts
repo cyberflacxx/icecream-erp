@@ -32,6 +32,8 @@ import {
   normalizeGoodsReceivedPurchaseOrderId,
   normalizeGoodsReceivedUnitOfMeasureId,
   normalizeGoodsReceivedWarehouseId,
+  postGoodsReceivedNoteToInventory,
+  resolveCompatibleGrnPostedStatus,
 } from '../src/lib/procurement-goods-received';
 import {
   buildRequisitionDetailItem,
@@ -693,4 +695,386 @@ test('goods received workflow helper derives pending approval from quality statu
   assert.equal(actions.canReject, true);
   assert.equal(actions.canOpenPurchaseOrder, true);
   assert.equal(actions.canPost, false);
+});
+
+test('resolveCompatibleGrnPostedStatus never returns APPROVED and prefers POSTED-compatible statuses', () => {
+  assert.equal(resolveCompatibleGrnPostedStatus('APPROVED'), 'POSTED');
+  assert.equal(resolveCompatibleGrnPostedStatus('received'), 'RECEIVED');
+  assert.equal(resolveCompatibleGrnPostedStatus('completed'), 'COMPLETED');
+  assert.equal(resolveCompatibleGrnPostedStatus('draft'), 'POSTED');
+});
+
+test('postGoodsReceivedNoteToInventory prefers POSTED, falls back safely, and records GRN stock movement', async () => {
+  const noteUpdates: Array<Record<string, unknown>> = [];
+  const movementInserts: Array<Record<string, unknown>> = [];
+  const stockBalanceInserts: Array<Record<string, unknown>> = [];
+  const poItemUpdates: Array<Record<string, unknown>> = [];
+  let stockMovementExists = false;
+
+  const service = {
+    from(table: string) {
+      return {
+        select(columns: string) {
+          return {
+            eq(column: string, value: string) {
+              if (table === 'goods_received_notes') {
+                return {
+                  eq(nextColumn: string, nextValue: string) {
+                    assert.equal(column, 'organization_id');
+                    assert.equal(nextColumn, 'id');
+                    assert.equal(nextValue, 'grn-1');
+                    return {
+                      maybeSingle() {
+                        return Promise.resolve({
+                          data: {
+                            id: 'grn-1',
+                            status: 'DRAFT',
+                            quality_status: 'APPROVED',
+                            warehouse_id: 'wh-1',
+                            receiving_warehouse_id: 'wh-1',
+                            purchase_order_id: 'po-1',
+                            notes: 'Approved',
+                            approval_notes: 'Approved',
+                            stock_posted: false,
+                          },
+                          error: null,
+                        });
+                      },
+                    };
+                  },
+                  maybeSingle() {
+                    assert.equal(value, 'grn-1');
+                    return Promise.resolve({
+                      data: {
+                        id: 'grn-1',
+                        status: 'DRAFT',
+                        quality_status: 'APPROVED',
+                        warehouse_id: 'wh-1',
+                        receiving_warehouse_id: 'wh-1',
+                        purchase_order_id: 'po-1',
+                        notes: 'Approved',
+                        approval_notes: 'Approved',
+                        stock_posted: false,
+                      },
+                      error: null,
+                    });
+                  },
+                };
+              }
+
+              if (table === 'goods_received_note_items') {
+                assert.equal(column, 'grn_id');
+                assert.equal(value, 'grn-1');
+                return Promise.resolve({
+                  data: [
+                    {
+                      id: 'grn-line-1',
+                      item_id: 'item-1',
+                      purchase_order_item_id: 'po-item-1',
+                      quantity_received: 50,
+                      quantity_rejected: 0,
+                      unit_cost: 2,
+                      warehouse_id: 'wh-1',
+                      batch_number: null,
+                    },
+                  ],
+                  error: null,
+                });
+              }
+
+              if (table === 'stock_balances') {
+                assert.equal(column, 'item_id');
+                return {
+                  eq(nextColumn: string, nextValue: string) {
+                    assert.equal(nextColumn, 'warehouse_id');
+                    assert.equal(nextValue, 'wh-1');
+                    return {
+                      maybeSingle() {
+                        return Promise.resolve({ data: null, error: null });
+                      },
+                    };
+                  },
+                };
+              }
+
+              if (table === 'items' && columns.includes('deleted_at')) {
+                assert.equal(column, 'id');
+                return {
+                  is(nextColumn: string, nextValue: null) {
+                    assert.equal(nextColumn, 'deleted_at');
+                    assert.equal(nextValue, null);
+                    return {
+                      maybeSingle() {
+                        return Promise.resolve({
+                          data: {
+                            id: 'item-1',
+                            code: 'RAW-1',
+                            name: 'Raw Item',
+                            item_type: 'RAW_MATERIAL',
+                            unit_cost: 2,
+                            organization_id: 'org-1',
+                          },
+                          error: null,
+                        });
+                      },
+                    };
+                  },
+                };
+              }
+
+              if (table === 'purchase_order_items' && columns === 'id, quantity_received') {
+                assert.equal(column, 'id');
+                assert.equal(value, 'po-item-1');
+                return {
+                  maybeSingle() {
+                    return Promise.resolve({
+                      data: { id: 'po-item-1', quantity_received: 0 },
+                      error: null,
+                    });
+                  },
+                };
+              }
+
+              if (table === 'purchase_order_items' && columns === 'quantity_ordered, quantity_received') {
+                assert.equal(column, 'purchase_order_id');
+                assert.equal(value, 'po-1');
+                return Promise.resolve({
+                  data: [{ quantity_ordered: 50, quantity_received: 50 }],
+                  error: null,
+                });
+              }
+
+              throw new Error(`Unhandled select().eq() for ${table} ${columns}`);
+            },
+            in(column: string, values: string[]) {
+              if (table === 'purchase_order_items') {
+                assert.equal(column, 'id');
+                assert.deepEqual(values, ['po-item-1']);
+                return Promise.resolve({
+                  data: [{ id: 'po-item-1', unit_price: 2, unit_cost: 2 }],
+                  error: null,
+                });
+              }
+              if (table === 'items') {
+                assert.equal(column, 'id');
+                assert.deepEqual(values, ['item-1']);
+                return Promise.resolve({
+                  data: [{ id: 'item-1', purchase_price: 2 }],
+                  error: null,
+                });
+              }
+              throw new Error(`Unhandled select().in() for ${table} ${columns}`);
+            },
+            or(filter: string) {
+              if (table !== 'stock_movements') {
+                throw new Error(`Unhandled select().or() for ${table}`);
+              }
+              assert.equal(filter, 'reference_id.eq.grn-1,source_document_id.eq.grn-1');
+              return {
+                limit(limitValue: number) {
+                  assert.equal(limitValue, 1);
+                  return Promise.resolve({
+                    data: stockMovementExists ? [{ id: 'move-1' }] : [],
+                    error: null,
+                  });
+                },
+              };
+            },
+          };
+        },
+        insert(payload: Record<string, unknown>) {
+          if (table === 'stock_balances') {
+            stockBalanceInserts.push(payload);
+            return {
+              select() {
+                return {
+                  single() {
+                    return Promise.resolve({
+                      data: { id: 'bal-1', ...payload },
+                      error: null,
+                    });
+                  },
+                };
+              },
+            };
+          }
+
+          if (table === 'stock_movements') {
+            movementInserts.push(payload);
+            stockMovementExists = true;
+            return {
+              select() {
+                return {
+                  single() {
+                    return Promise.resolve({
+                      data: { id: 'move-1', ...payload },
+                      error: null,
+                    });
+                  },
+                };
+              },
+            };
+          }
+
+          throw new Error(`Unhandled insert for ${table}`);
+        },
+        update(payload: Record<string, unknown>) {
+          if (table === 'goods_received_notes') {
+            noteUpdates.push(payload);
+            return {
+              eq(column: string, value: string) {
+                assert.equal(column, 'id');
+                assert.equal(value, 'grn-1');
+                return {
+                  select() {
+                    return {
+                      single() {
+                        if (payload.status === 'POSTED') {
+                          return Promise.resolve({
+                            data: null,
+                            error: { message: 'invalid input value for enum grn_status: "POSTED"' },
+                          });
+                        }
+                        return Promise.resolve({
+                          data: { id: 'grn-1', status: payload.status ?? 'DRAFT', stock_posted: payload.stock_posted ?? true },
+                          error: null,
+                        });
+                      },
+                    };
+                  },
+                };
+              },
+            };
+          }
+
+          if (table === 'purchase_order_items') {
+            poItemUpdates.push(payload);
+            return {
+              eq(column: string, value: string) {
+                assert.equal(column, 'id');
+                assert.equal(value, 'po-item-1');
+                return Promise.resolve({ data: null, error: null });
+              },
+            };
+          }
+
+          if (table === 'purchase_orders') {
+            return {
+              eq(column: string, value: string) {
+                assert.equal(column, 'id');
+                assert.equal(value, 'po-1');
+                return Promise.resolve({ data: null, error: null });
+              },
+            };
+          }
+
+          throw new Error(`Unhandled update for ${table}`);
+        },
+      };
+    },
+  };
+
+  const result = await postGoodsReceivedNoteToInventory(service as any, {
+    grnId: 'grn-1',
+    organizationId: 'org-1',
+    userId: 'user-1',
+  });
+
+  assert.equal(noteUpdates.some((payload) => payload.status === 'APPROVED'), false);
+  assert.equal(noteUpdates.some((payload) => payload.status === 'POSTED'), true);
+  assert.equal(noteUpdates.some((payload) => payload.status === 'RECEIVED'), true);
+  assert.equal(result.status, 'RECEIVED');
+  assert.equal(stockBalanceInserts.length, 1);
+  assert.equal(poItemUpdates.length, 1);
+  assert.equal(movementInserts.length, 1);
+  assert.equal(movementInserts[0]?.source_document_type, 'GRN');
+  assert.equal(movementInserts[0]?.source_document_id, 'grn-1');
+  assert.equal(movementInserts[0]?.reference_type, 'goods_received_note');
+});
+
+test('postGoodsReceivedNoteToInventory remains idempotent when stock movement already exists', async () => {
+  const noteUpdates: Array<Record<string, unknown>> = [];
+
+  const service = {
+    from(table: string) {
+      return {
+        select(columns: string) {
+          return {
+            eq(column: string, value: string) {
+              if (table === 'goods_received_notes') {
+                return {
+                  eq(nextColumn: string, nextValue: string) {
+                    assert.equal(column, 'organization_id');
+                    assert.equal(nextColumn, 'id');
+                    assert.equal(nextValue, 'grn-2');
+                    return {
+                      maybeSingle() {
+                        return Promise.resolve({
+                          data: {
+                            id: 'grn-2',
+                            status: 'RECEIVED',
+                            quality_status: 'APPROVED',
+                            warehouse_id: 'wh-1',
+                            receiving_warehouse_id: 'wh-1',
+                            notes: 'Approved',
+                            approval_notes: 'Approved',
+                            stock_posted: false,
+                          },
+                          error: null,
+                        });
+                      },
+                    };
+                  },
+                };
+              }
+
+              throw new Error(`Unhandled select().eq() for ${table} ${columns}`);
+            },
+            or(filter: string) {
+              if (table !== 'stock_movements') {
+                throw new Error(`Unhandled select().or() for ${table}`);
+              }
+              assert.equal(filter, 'reference_id.eq.grn-2,source_document_id.eq.grn-2');
+              return {
+                limit(limitValue: number) {
+                  assert.equal(limitValue, 1);
+                  return Promise.resolve({
+                    data: [{ id: 'move-existing' }],
+                    error: null,
+                  });
+                },
+              };
+            },
+          };
+        },
+        update(payload: Record<string, unknown>) {
+          if (table !== 'goods_received_notes') {
+            throw new Error(`Unhandled update for ${table}`);
+          }
+          noteUpdates.push(payload);
+          return {
+            eq(column: string, value: string) {
+              assert.equal(column, 'id');
+              assert.equal(value, 'grn-2');
+              return Promise.resolve({ data: null, error: null });
+            },
+          };
+        },
+      };
+    },
+  };
+
+  await assert.rejects(
+    () =>
+      postGoodsReceivedNoteToInventory(service as any, {
+        grnId: 'grn-2',
+        organizationId: 'org-1',
+        userId: 'user-1',
+      }),
+    /already been posted/,
+  );
+
+  assert.equal(noteUpdates.length, 1);
+  assert.equal(noteUpdates[0]?.stock_posted, true);
+  assert.equal(Object.prototype.hasOwnProperty.call(noteUpdates[0] ?? {}, 'status'), false);
 });
