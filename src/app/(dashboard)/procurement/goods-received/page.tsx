@@ -7,6 +7,7 @@ import { useSearchParams } from 'next/navigation';
 import { useQueryClient } from '@tanstack/react-query';
 
 import { DataTable, EmptyState, FilterBar, FormDrawer, StatusBadge } from '@/components/ui-library';
+import { calculateAcceptedQuantity, resolveInventoryValue } from '@/lib/inventory';
 import { buildGoodsReceivedDraftPayload } from '@/lib/procurement-goods-received';
 import { PERMISSIONS } from '@/lib/shared';
 
@@ -61,6 +62,12 @@ interface FeedbackState {
   tone: 'error' | 'success';
 }
 
+const currencyFormatter = new Intl.NumberFormat('en-US', {
+  style: 'currency',
+  currency: 'USD',
+  minimumFractionDigits: 2,
+});
+
 function createGrnRowId() {
   return `grn-line-${Math.random().toString(36).slice(2, 10)}`;
 }
@@ -79,6 +86,20 @@ function buildEmptyGrnLineItem(): GrnLineItem {
     unitCost: '0',
     unitOfMeasureId: '',
   };
+}
+
+function toStatusBadgeVariant(
+  variant: unknown,
+): 'error' | 'info' | 'neutral' | 'success' | 'warning' {
+  switch (variant) {
+    case 'error':
+    case 'info':
+    case 'success':
+    case 'warning':
+      return variant;
+    default:
+      return 'neutral';
+  }
 }
 
 export default function GoodsReceivedPage() {
@@ -142,6 +163,10 @@ export default function GoodsReceivedPage() {
             item: { id: string } | null;
             quantityOrdered: number;
             quantityReceived: number;
+            unitCost?: number;
+            unit_cost?: number;
+            unitPrice?: number;
+            unit_price?: number;
             unitOfMeasure?: { id: string } | null;
           }>;
         }
@@ -164,7 +189,7 @@ export default function GoodsReceivedPage() {
         quantityRejected: '0',
         reason: '',
         rowId: createGrnRowId(),
-        unitCost: String(item.unitCost ?? 0),
+        unitCost: String(item.unitCost ?? item.unit_cost ?? item.unitPrice ?? item.unit_price ?? 0),
         unitOfMeasureId: item.unitOfMeasure?.id ?? '',
       })),
     );
@@ -178,6 +203,31 @@ export default function GoodsReceivedPage() {
 
   const grns = grnsQuery.data?.data ?? [];
   const pagination = grnsQuery.data?.pagination;
+  const totalInventoryValue = grns.reduce(
+    (sum, row) => sum + resolveInventoryValue(row as unknown as Record<string, unknown>, row.inventoryValue ?? 0),
+    0,
+  );
+  const postedCount = grns.filter((row) => row.stockPosted).length;
+
+  function formatCurrency(value: unknown) {
+    return currencyFormatter.format(Number(value ?? 0));
+  }
+
+  function getSelectedItemMeta(itemId: string) {
+    return itemOptions.find((candidate) => candidate.id === itemId) ?? null;
+  }
+
+  function getAcceptedLineQuantity(item: GrnLineItem) {
+    return calculateAcceptedQuantity({
+      damagedQuantity: 0,
+      receivedQuantity: Number(item.quantityReceived || 0),
+      rejectedQuantity: Number(item.quantityRejected || 0),
+    });
+  }
+
+  function getLineValue(item: GrnLineItem) {
+    return getAcceptedLineQuantity(item) * Number(item.unitCost || 0);
+  }
 
   async function refresh() {
     await queryClient.invalidateQueries({
@@ -355,6 +405,24 @@ export default function GoodsReceivedPage() {
 
       <ProcurementNav />
 
+      <section className="grid gap-4 md:grid-cols-3">
+        <div className="surface-card">
+          <p className="text-sm font-semibold uppercase tracking-[0.18em] text-orange">GRN Summary</p>
+          <p className="mt-3 text-3xl font-semibold text-brown">{pagination?.total ?? grns.length}</p>
+          <p className="mt-2 text-sm text-muted">Goods Received Notes in the current filter set.</p>
+        </div>
+        <div className="surface-card">
+          <p className="text-sm font-semibold uppercase tracking-[0.18em] text-orange">Stock Posted</p>
+          <p className="mt-3 text-3xl font-semibold text-brown">{postedCount}</p>
+          <p className="mt-2 text-sm text-muted">GRNs already posted into inventory.</p>
+        </div>
+        <div className="surface-card">
+          <p className="text-sm font-semibold uppercase tracking-[0.18em] text-orange">Inventory Value</p>
+          <p className="mt-3 text-3xl font-semibold text-brown">{formatCurrency(totalInventoryValue)}</p>
+          <p className="mt-2 text-sm text-muted">Posted value currently visible across these GRNs.</p>
+        </div>
+      </section>
+
       {feedback ? (
         <div
           className={`rounded-2xl border px-4 py-3 text-sm ${
@@ -407,11 +475,10 @@ export default function GoodsReceivedPage() {
         loading={grnsQuery.isLoading}
         pagination={pagination}
         columns={[
-          { key: 'grnNumber', header: 'GRN #' },
-          { key: 'entryMode', header: 'Mode' },
+          { key: 'grnNumber', header: 'GRN No.' },
           {
             key: 'poNumber',
-            header: 'PO #',
+            header: 'PO No.',
             render: (row) => row.purchaseOrder?.poNumber ?? 'Manual'
           },
           {
@@ -420,19 +487,14 @@ export default function GoodsReceivedPage() {
             render: (row) => row.supplier?.name ?? 'Unknown supplier'
           },
           {
+            key: 'warehouse',
+            header: 'Warehouse',
+            render: (row) => row.warehouse?.name ?? 'Unassigned'
+          },
+          {
             key: 'receivedDate',
             header: 'Received Date',
             render: (row) => new Date(row.receivedDate).toLocaleDateString()
-          },
-          {
-            key: 'itemsCount',
-            header: 'Items',
-            render: (row) => String(row.itemsCount)
-          },
-          {
-            key: 'qualityStatus',
-            header: 'Quality Status',
-            render: (row) => <StatusBadge status={row.qualityStatus} />
           },
           {
             key: 'status',
@@ -444,12 +506,26 @@ export default function GoodsReceivedPage() {
                 <div className="space-y-1">
                   <StatusBadge
                     status={formatProcurementWorkflowStatusLabel(actionState.normalizedStatus)}
-                    variant={actionState.statusVariant}
+                    variant={toStatusBadgeVariant(actionState.statusVariant)}
                   />
-                  <p className="text-xs text-muted">{getGoodsReceivedWorkflowCopy(row)}</p>
+                  <p className="text-xs text-muted">
+                    Quality: {row.qualityStatus ?? 'Pending'}
+                  </p>
                 </div>
               );
             }
+          },
+          {
+            key: 'stockPosted',
+            header: 'Stock Posted',
+            render: (row) => (
+              <StatusBadge status={row.stockPosted ? 'Posted' : 'Pending'} variant={row.stockPosted ? 'success' : 'warning'} />
+            )
+          },
+          {
+            key: 'inventoryValue',
+            header: 'Inventory Value',
+            render: (row) => formatCurrency(resolveInventoryValue(row as unknown as Record<string, unknown>, row.inventoryValue ?? 0))
           },
           {
             key: 'actions',
@@ -553,7 +629,7 @@ export default function GoodsReceivedPage() {
         />
       ) : null}
 
-      <FormDrawer title="New Goods Received Note" open={isDrawerOpen} onClose={() => setIsDrawerOpen(false)}>
+      <FormDrawer title="Create / Receive Goods" open={isDrawerOpen} onClose={() => setIsDrawerOpen(false)}>
         <form className="space-y-5" onSubmit={handleSubmit}>
           {formError ? (
             <div className="rounded-2xl border border-error/20 bg-error/5 px-4 py-3 text-sm text-error">
@@ -562,12 +638,13 @@ export default function GoodsReceivedPage() {
           ) : null}
 
           <div className="rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-800">
-            This GRN workflow posts accepted stock into an HQ warehouse only after supervisor approval and inventory posting.
+            <p className="font-semibold text-sky-900">Stock Posting Status</p>
+            <p className="mt-1">This GRN workflow posts accepted stock into an HQ warehouse only after supervisor approval and inventory posting.</p>
           </div>
 
           <section className="space-y-4 rounded-2xl border border-border/70 bg-white/80 p-4">
             <div>
-              <p className="text-sm font-semibold uppercase tracking-[0.18em] text-orange">Supplier / Purchase Order Details</p>
+              <p className="text-sm font-semibold uppercase tracking-[0.18em] text-orange">Purchase Order Details</p>
               <p className="mt-1 text-xs text-muted">Choose whether the receipt is PO-linked or manual, then confirm the supplier and receiving warehouse before quantity capture.</p>
             </div>
             <div className="grid gap-5 sm:grid-cols-2">
@@ -638,15 +715,24 @@ export default function GoodsReceivedPage() {
                 </div>
               ) : null}
             </label>
-            <label className="space-y-2 text-sm text-muted">
-              <span>Supplier</span>
+            <div className="space-y-2 text-sm text-muted">
+              <span>Supplier Details</span>
               <SupplierSelect
                 required={formState.entryMode === 'MANUAL'}
                 disabled={formState.entryMode !== 'MANUAL'}
                 value={formState.supplierId}
                 onChange={(supplierId) => setFormState((current) => ({ ...current, supplierId }))}
               />
-            </label>
+            </div>
+            <div className="space-y-2 text-sm text-muted">
+              <span>Receiving Warehouse</span>
+              <WarehouseSelect
+                required
+                value={formState.warehouseId}
+                onChange={(warehouseId) => setFormState((current) => ({ ...current, warehouseId }))}
+                placeholder="Select receiving warehouse"
+              />
+            </div>
             <div className="space-y-2 text-sm text-muted">
               <span>Quick Actions</span>
               <TransactionShortcuts
@@ -678,22 +764,13 @@ export default function GoodsReceivedPage() {
                 }
               />
             </div>
-            <label className="space-y-2 text-sm text-muted">
-              <span>Receiving Warehouse</span>
-              <WarehouseSelect
-                required
-                value={formState.warehouseId}
-                onChange={(warehouseId) => setFormState((current) => ({ ...current, warehouseId }))}
-                placeholder="Select receiving warehouse"
-              />
-            </label>
             </div>
           </section>
 
           <section className="space-y-4 rounded-2xl border border-border/70 bg-white/80 p-4">
             <div>
-              <p className="text-sm font-semibold uppercase tracking-[0.18em] text-orange">Approval / Posting</p>
-              <p className="mt-1 text-xs text-muted">Quality notes and posting safeguards stay with the GRN until approval and warehouse posting are completed.</p>
+              <p className="text-sm font-semibold uppercase tracking-[0.18em] text-orange">Quality / Acceptance Details</p>
+              <p className="mt-1 text-xs text-muted">Quality notes and acceptance controls stay with the GRN until approval and warehouse posting are completed.</p>
             </div>
             <label className="space-y-2 text-sm text-muted">
             <span>Quality Notes</span>
@@ -715,166 +792,190 @@ export default function GoodsReceivedPage() {
                 PO-linked receipts inherit the selected PO lines. Manual receipts let you capture stock even when no PO was used.
               </p>
             </div>
+            <div className="hidden gap-3 px-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-muted md:grid md:grid-cols-[minmax(0,1.2fr)_120px_120px_120px_120px_120px_120px_120px]">
+              <span>Item Name</span>
+              <span>UOM</span>
+              <span>Ordered Qty</span>
+              <span>Received Qty</span>
+              <span>Rejected/Damaged Qty</span>
+              <span>Unit Cost</span>
+              <span>Batch No.</span>
+              <span>Expiry Date</span>
+            </div>
             {lineItems.map((item, index) => (
-              <div key={item.rowId} className="grid gap-3 md:grid-cols-[1fr_120px_140px_120px_120px_120px_1fr_1fr]">
-                <select
-                  value={item.itemId}
-                  disabled={formState.entryMode === 'PO_LINKED' || metaQuery.isLoading || itemLoadFailed || itemOptions.length === 0}
-                  onChange={(event) =>
-                    setLineItems((current) => {
-                      const selectedItem = itemOptions.find((row) => row.id === event.target.value) ?? null;
+              <div key={item.rowId} className="space-y-3 rounded-2xl border border-border/70 bg-white/90 p-3">
+                <div className="grid gap-3 md:grid-cols-[1.2fr_120px_120px_120px_120px_120px_120px_120px]">
+                  <div className="space-y-2">
+                    <select
+                      value={item.itemId}
+                      disabled={formState.entryMode === 'PO_LINKED' || metaQuery.isLoading || itemLoadFailed || itemOptions.length === 0}
+                      onChange={(event) =>
+                        setLineItems((current) => {
+                          const selectedItem = itemOptions.find((row) => row.id === event.target.value) ?? null;
 
-                      return current.map((row, rowIndex) =>
-                        rowIndex === index
-                          ? {
-                              ...row,
-                              itemId: event.target.value,
-                              unitCost: String(
-                                selectedItem?.purchase_price ??
-                                  selectedItem?.cost_price ??
-                                  selectedItem?.unit_cost ??
-                                  selectedItem?.default_purchase_price ??
-                                  0,
-                              ),
-                              unitOfMeasureId: selectedItem?.unitOfMeasureId ?? row.unitOfMeasureId,
-                            }
-                          : row,
-                      );
-                    })
-                  }
-                  className="surface-input-soft"
-                >
-                  <option value="">
-                    {metaQuery.isLoading
-                      ? 'Loading items...'
-                      : itemLoadFailed
-                        ? 'Items unavailable'
-                        : itemOptions.length === 0
-                          ? 'No items found'
-                          : 'Select item'}
-                  </option>
-                  {item.itemId &&
-                  !itemOptions.some((candidate) => candidate.id === item.itemId) ? (
-                    <option value={item.itemId}>Saved item selection</option>
-                  ) : null}
-                  {itemOptions.map((row) => (
-                    <option key={row.id} value={row.id}>
-                      {row.label ?? (row.code ? `${row.code} - ${row.name}` : row.name)}
+                          return current.map((row, rowIndex) =>
+                            rowIndex === index
+                              ? {
+                                  ...row,
+                                  itemId: event.target.value,
+                                  unitCost: String(
+                                    selectedItem?.purchase_price ??
+                                      selectedItem?.cost_price ??
+                                      selectedItem?.unit_cost ??
+                                      selectedItem?.default_purchase_price ??
+                                      0,
+                                  ),
+                                  unitOfMeasureId: selectedItem?.unitOfMeasureId ?? row.unitOfMeasureId,
+                                }
+                              : row,
+                          );
+                        })
+                      }
+                      className="surface-input-soft"
+                    >
+                      <option value="">
+                        {metaQuery.isLoading
+                          ? 'Loading items...'
+                          : itemLoadFailed
+                            ? 'Items unavailable'
+                            : itemOptions.length === 0
+                              ? 'No items found'
+                              : 'Select item'}
+                      </option>
+                      {item.itemId &&
+                      !itemOptions.some((candidate) => candidate.id === item.itemId) ? (
+                        <option value={item.itemId}>Saved item selection</option>
+                      ) : null}
+                      {itemOptions.map((row) => (
+                        <option key={row.id} value={row.id}>
+                          {row.label ?? (row.code ? `${row.code} - ${row.name}` : row.name)}
+                        </option>
+                      ))}
+                    </select>
+                    <div className="grid gap-2 text-xs text-muted sm:grid-cols-2">
+                      <span>Item Code: {getSelectedItemMeta(item.itemId)?.code ?? 'Pending'}</span>
+                      <span>Item Name: {getSelectedItemMeta(item.itemId)?.name ?? 'Select an item'}</span>
+                    </div>
+                  </div>
+                  <select
+                    value={item.unitOfMeasureId}
+                    disabled={metaQuery.isLoading || unitLoadFailed || unitOptions.length === 0}
+                    className="surface-input-soft"
+                    onChange={(event) =>
+                      setLineItems((current) =>
+                        current.map((row, rowIndex) =>
+                          rowIndex === index ? { ...row, unitOfMeasureId: event.target.value } : row,
+                        ),
+                      )
+                    }
+                  >
+                    <option value="">
+                      {metaQuery.isLoading
+                        ? 'Loading units...'
+                        : unitLoadFailed
+                          ? 'Units unavailable'
+                          : unitOptions.length === 0
+                            ? 'No units found'
+                            : 'UOM'}
                     </option>
-                  ))}
-                </select>
-                <select
-                  value={item.unitOfMeasureId}
-                  disabled={metaQuery.isLoading || unitLoadFailed || unitOptions.length === 0}
-                  className="surface-input-soft"
-                  onChange={(event) =>
-                    setLineItems((current) =>
-                      current.map((row, rowIndex) =>
-                        rowIndex === index ? { ...row, unitOfMeasureId: event.target.value } : row,
-                      ),
-                    )
-                  }
-                >
-                  <option value="">
-                    {metaQuery.isLoading
-                      ? 'Loading units...'
-                      : unitLoadFailed
-                        ? 'Units unavailable'
-                        : unitOptions.length === 0
-                          ? 'No units found'
-                          : 'UOM'}
-                  </option>
-                  {item.unitOfMeasureId &&
-                  !unitOptions.some((candidate) => candidate.id === item.unitOfMeasureId) ? (
-                    <option value={item.unitOfMeasureId}>Saved unit selection</option>
-                  ) : null}
-                  {unitOptions.map((row) => (
-                    <option key={row.id} value={row.id}>
-                      {row.label ?? row.symbol ?? row.code ?? row.name}
-                    </option>
-                  ))}
-                </select>
-                <input
-                  value={item.quantityExpected}
-                  readOnly={formState.entryMode === 'PO_LINKED'}
-                  onChange={(event) =>
-                    setLineItems((current) =>
-                      current.map((row, rowIndex) =>
-                        rowIndex === index
-                          ? { ...row, quantityExpected: Number(event.target.value) || 0 }
-                          : row,
-                      ),
-                    )
-                  }
-                  className="surface-input-soft"
-                />
-                <input
-                  min="0"
-                  step="0.001"
-                  type="number"
-                  value={item.quantityReceived}
-                  onChange={(event) =>
-                    setLineItems((current) =>
-                      current.map((row, rowIndex) =>
-                        rowIndex === index ? { ...row, quantityReceived: event.target.value } : row,
-                      ),
-                    )
-                  }
-                  className="surface-input-soft"
-                />
-                <input
-                  min="0"
-                  step="0.001"
-                  type="number"
-                  value={item.quantityRejected}
-                  onChange={(event) =>
-                    setLineItems((current) =>
-                      current.map((row, rowIndex) =>
-                        rowIndex === index ? { ...row, quantityRejected: event.target.value } : row,
-                      ),
-                    )
-                  }
-                  className="surface-input-soft"
-                />
-                <input
-                  min="0"
-                  step="0.01"
-                  type="number"
-                  placeholder="Unit cost"
-                  value={item.unitCost}
-                  onChange={(event) =>
-                    setLineItems((current) =>
-                      current.map((row, rowIndex) =>
-                        rowIndex === index ? { ...row, unitCost: event.target.value } : row,
-                      ),
-                    )
-                  }
-                  className="surface-input-soft"
-                />
-                <input
-                  placeholder="Batch #"
-                  value={item.batchNumber}
-                  onChange={(event) =>
-                    setLineItems((current) =>
-                      current.map((row, rowIndex) =>
-                        rowIndex === index ? { ...row, batchNumber: event.target.value } : row,
-                      ),
-                    )
-                  }
-                  className="surface-input-soft"
-                />
-                <input
-                  type="date"
-                  value={item.expiryDate}
-                  onChange={(event) =>
-                    setLineItems((current) =>
-                      current.map((row, rowIndex) =>
-                        rowIndex === index ? { ...row, expiryDate: event.target.value } : row,
-                      ),
-                    )
-                  }
-                  className="surface-input-soft"
-                />
+                    {item.unitOfMeasureId &&
+                    !unitOptions.some((candidate) => candidate.id === item.unitOfMeasureId) ? (
+                      <option value={item.unitOfMeasureId}>Saved unit selection</option>
+                    ) : null}
+                    {unitOptions.map((row) => (
+                      <option key={row.id} value={row.id}>
+                        {row.label ?? row.symbol ?? row.code ?? row.name}
+                      </option>
+                    ))}
+                  </select>
+                  <input
+                    value={item.quantityExpected}
+                    readOnly={formState.entryMode === 'PO_LINKED'}
+                    onChange={(event) =>
+                      setLineItems((current) =>
+                        current.map((row, rowIndex) =>
+                          rowIndex === index
+                            ? { ...row, quantityExpected: Number(event.target.value) || 0 }
+                            : row,
+                        ),
+                      )
+                    }
+                    className="surface-input-soft"
+                  />
+                  <input
+                    min="0"
+                    step="0.001"
+                    type="number"
+                    value={item.quantityReceived}
+                    onChange={(event) =>
+                      setLineItems((current) =>
+                        current.map((row, rowIndex) =>
+                          rowIndex === index ? { ...row, quantityReceived: event.target.value } : row,
+                        ),
+                      )
+                    }
+                    className="surface-input-soft"
+                  />
+                  <input
+                    min="0"
+                    step="0.001"
+                    type="number"
+                    value={item.quantityRejected}
+                    onChange={(event) =>
+                      setLineItems((current) =>
+                        current.map((row, rowIndex) =>
+                          rowIndex === index ? { ...row, quantityRejected: event.target.value } : row,
+                        ),
+                      )
+                    }
+                    className="surface-input-soft"
+                  />
+                  <input
+                    min="0"
+                    step="0.01"
+                    type="number"
+                    placeholder="Unit cost"
+                    value={item.unitCost}
+                    onChange={(event) =>
+                      setLineItems((current) =>
+                        current.map((row, rowIndex) =>
+                          rowIndex === index ? { ...row, unitCost: event.target.value } : row,
+                        ),
+                      )
+                    }
+                    className="surface-input-soft"
+                  />
+                  <input
+                    placeholder="Batch #"
+                    value={item.batchNumber}
+                    onChange={(event) =>
+                      setLineItems((current) =>
+                        current.map((row, rowIndex) =>
+                          rowIndex === index ? { ...row, batchNumber: event.target.value } : row,
+                        ),
+                      )
+                    }
+                    className="surface-input-soft"
+                  />
+                  <input
+                    type="date"
+                    value={item.expiryDate}
+                    onChange={(event) =>
+                      setLineItems((current) =>
+                        current.map((row, rowIndex) =>
+                          rowIndex === index ? { ...row, expiryDate: event.target.value } : row,
+                        ),
+                      )
+                    }
+                    className="surface-input-soft"
+                  />
+                </div>
+                <div className="grid gap-2 text-xs text-muted md:grid-cols-4">
+                  <span>Accepted Qty: {getAcceptedLineQuantity(item).toFixed(3)}</span>
+                  <span>Line Value: {formatCurrency(getLineValue(item))}</span>
+                  <span>Batch No.: {item.batchNumber || 'Pending'}</span>
+                  <span>Expiry Date: {item.expiryDate || 'Not set'}</span>
+                </div>
                 <input
                   placeholder="Over-receive reason (required if over ordered)"
                   value={item.reason}
@@ -885,7 +986,7 @@ export default function GoodsReceivedPage() {
                       ),
                     )
                   }
-                  className="surface-input-soft md:col-span-5"
+                  className="surface-input-soft"
                 />
               </div>
             ))}
@@ -930,7 +1031,7 @@ export default function GoodsReceivedPage() {
 
           <section className="space-y-4 rounded-2xl border border-border/70 bg-white/80 p-4">
             <div>
-              <p className="text-sm font-semibold uppercase tracking-[0.18em] text-orange">Audit Trail</p>
+              <p className="text-sm font-semibold uppercase tracking-[0.18em] text-orange">Approval / Posting Actions</p>
               <p className="mt-1 text-xs text-muted">Approval, rejection, and posting events are logged on the server and remain linked to the GRN and resulting stock movement.</p>
             </div>
             <label className="space-y-2 text-sm text-muted">

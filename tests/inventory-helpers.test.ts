@@ -14,6 +14,7 @@ import {
   normalizeTransferStatus,
   normalizeWarehouseCode,
   normalizeWarehouseType,
+  resolveInventoryValue,
   resolveWarehouseDisplayType,
   resolveWarehouseStorageType,
   summarizeInventoryByType,
@@ -177,6 +178,16 @@ test('inventory valuation summaries prefer posted total_value and average_cost a
   assert.equal(summary.rawMaterialValue, 100);
   assert.equal(summary.packagingMaterialValue, 30);
   assert.equal(summary.totalStockValue, 130);
+});
+
+test('resolveInventoryValue accepts live alias fields and preserves zero values', () => {
+  assert.equal(resolveInventoryValue({ total_value: 125 }), 125);
+  assert.equal(resolveInventoryValue({ stock_value: 85 }), 85);
+  assert.equal(resolveInventoryValue({ inventory_value_posted: 42.5 }), 42.5);
+  assert.equal(resolveInventoryValue({ line_total: 12.25 }), 12.25);
+  assert.equal(resolveInventoryValue({ totalValue: 9.5 }), 9.5);
+  assert.equal(resolveInventoryValue({ stockValue: 0 }), 0);
+  assert.equal(resolveInventoryValue({}, 7), 7);
 });
 
 test('buildStockMovementListSelectClause keeps source document fields and never embeds users', () => {

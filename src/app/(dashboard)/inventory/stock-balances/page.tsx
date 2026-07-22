@@ -5,6 +5,7 @@ import { useState } from 'react';
 import { format } from 'date-fns';
 
 import { DataTable, EmptyState, FilterBar, StatusBadge } from '@/components/ui-library';
+import { resolveInventoryValue } from '@/lib/inventory';
 
 import { InventoryNav } from '@/components/inventory/inventory-nav';
 import { PaginationControls } from '@/components/inventory/pagination-controls';
@@ -187,7 +188,10 @@ export default function StockBalancesPage() {
           {
             key: 'stockValue',
             header: 'Stock Value',
-            render: (row) => currencyFormatter.format(row.stockValue ?? 0)
+            render: (row) =>
+              currencyFormatter.format(
+                resolveInventoryValue(row as unknown as Record<string, unknown>, row.stockValue ?? 0),
+              )
           },
           {
             key: 'reorderLevel',

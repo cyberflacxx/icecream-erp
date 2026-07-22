@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
-import { isMissingTableColumnError } from '@/lib/inventory';
+import { isMissingTableColumnError, resolveInventoryValue } from '@/lib/inventory';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
 export async function GET(request: NextRequest) {
@@ -185,7 +185,7 @@ async function mapBalances(service: ReturnType<typeof createServiceRoleClient>, 
     const quantityReserved = Number(row.quantity_reserved ?? 0);
     const quantityAvailable = Number(row.quantity_available ?? (quantityOnHand - quantityReserved));
     const unitCost = Number(row.average_cost ?? row.avg_cost ?? item?.unit_cost ?? item?.standard_cost ?? 0);
-    const stockValue = Number(row.total_value ?? (quantityOnHand * unitCost));
+    const stockValue = resolveInventoryValue(row, quantityOnHand * unitCost);
     return {
       id: row.id,
       lastUpdated: row.last_updated,

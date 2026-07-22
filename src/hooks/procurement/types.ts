@@ -116,6 +116,7 @@ export interface GRNRow {
   id: string;
   grnNumber: string;
   entryMode: string;
+  inventoryValue?: number;
   purchaseOrder: {
     id: string;
     poNumber: string;
@@ -127,7 +128,12 @@ export interface GRNRow {
   receivedDate: string;
   qualityStatus: string;
   status: string;
+  stockPosted?: boolean;
   itemsCount: number;
+  warehouse?: {
+    id: string;
+    name: string;
+  } | null;
 }
 
 export interface GRNFilters {

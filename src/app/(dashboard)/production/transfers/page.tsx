@@ -155,7 +155,15 @@ export default function ProductionTransfersPage() {
       setFeedback({ message: 'Raw materials received into production inventory.', tone: 'success' });
       await refresh();
     } catch (error) {
-      setFormError(error instanceof Error ? error.message : 'Failed to receive raw materials into production.');
+      const message = error instanceof Error ? error.message : 'Failed to receive raw materials into production.';
+      console.error('Production raw material receive failed.', {
+        destinationWarehouseId: rawDestinationWarehouseId,
+        items,
+        message,
+        sourceWarehouseId: rawSourceWarehouseId,
+        transferDate: rawTransferDate,
+      });
+      setFormError(message);
     }
   }
 

@@ -1109,7 +1109,7 @@ test('postGoodsReceivedNoteToInventory prefers POSTED, falls back safely, and re
                       purchase_order_item_id: 'po-item-1',
                       quantity_received: 50,
                       quantity_rejected: 0,
-                      unit_cost: 2,
+                      unit_cost: 2.5,
                       warehouse_id: 'wh-1',
                       batch_number: null,
                     },
@@ -1179,7 +1179,7 @@ test('postGoodsReceivedNoteToInventory prefers POSTED, falls back safely, and re
                             code: 'RAW-1',
                             name: 'Raw Item',
                             item_type: 'RAW_MATERIAL',
-                            unit_cost: 2,
+                            unit_cost: 2.5,
                             organization_id: 'org-1',
                           },
                           error: null,
@@ -1206,17 +1206,17 @@ test('postGoodsReceivedNoteToInventory prefers POSTED, falls back safely, and re
               if (table === 'purchase_order_items' && columns === 'quantity_ordered, quantity_received') {
                 assert.equal(column, 'purchase_order_id');
                 assert.equal(value, 'po-1');
-                return Promise.resolve({
-                  data: [{ quantity_ordered: 50, quantity_received: 50 }],
-                  error: null,
-                });
+                    return Promise.resolve({
+                      data: [{ quantity_ordered: 50, quantity_received: 50 }],
+                      error: null,
+                    });
               }
 
               if (table === 'purchase_order_items' && columns === '*') {
                 if (column === 'purchase_order_id') {
                   assert.equal(value, 'po-1');
                   return Promise.resolve({
-                    data: [{ id: 'po-item-1', unit_price: 2, unit_cost: 2, quantity_ordered: 50, quantity_received: 50 }],
+                    data: [{ id: 'po-item-1', unit_price: 2.5, unit_cost: 2.5, quantity_ordered: 50, quantity_received: 50 }],
                     error: null,
                   });
                 }
@@ -1240,7 +1240,7 @@ test('postGoodsReceivedNoteToInventory prefers POSTED, falls back safely, and re
                 assert.equal(column, 'id');
                 assert.deepEqual(values, ['po-item-1']);
                 return Promise.resolve({
-                  data: [{ id: 'po-item-1', unit_price: 2, unit_cost: 2 }],
+                  data: [{ id: 'po-item-1', unit_price: 2.5, unit_cost: 2.5 }],
                   error: null,
                 });
               }
@@ -1248,7 +1248,7 @@ test('postGoodsReceivedNoteToInventory prefers POSTED, falls back safely, and re
                 assert.equal(column, 'id');
                 assert.deepEqual(values, ['item-1']);
                 return Promise.resolve({
-                  data: [{ id: 'item-1', purchase_price: 2 }],
+                  data: [{ id: 'item-1', purchase_price: 2.5 }],
                   error: null,
                 });
               }
@@ -1399,10 +1399,14 @@ test('postGoodsReceivedNoteToInventory prefers POSTED, falls back safely, and re
   assert.equal(poItemUpdates.length, 1);
   assert.equal(movementInserts.length, 1);
   assert.equal(stockBalanceInserts[0]?.organization_id, 'org-header-1');
+  assert.equal(stockBalanceInserts[0]?.total_value, 125);
   assert.equal(movementInserts[0]?.organization_id, 'org-header-1');
   assert.equal(movementInserts[0]?.source_document_type, 'GRN');
   assert.equal(movementInserts[0]?.source_document_id, 'grn-1');
   assert.equal(movementInserts[0]?.reference_type, 'goods_received_note');
+  assert.equal(movementInserts[0]?.unit_cost, 2.5);
+  assert.equal(movementInserts[0]?.total_value, 125);
+  assert.equal(noteUpdates.some((payload) => payload.inventory_value_posted === 125), true);
 });
 
 test('postGoodsReceivedNoteToInventory remains idempotent when stock movement already exists', async () => {

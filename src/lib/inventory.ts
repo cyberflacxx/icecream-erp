@@ -128,6 +128,33 @@ export function toNumber(value: unknown, fallback = 0): number {
   return Number.isFinite(numberValue) ? numberValue : fallback;
 }
 
+export function resolveInventoryValue(
+  row: Record<string, unknown> | null | undefined,
+  fallback = 0,
+) {
+  if (!row) {
+    return toNumber(fallback);
+  }
+
+  for (const candidate of [
+    row.total_value,
+    row.stock_value,
+    row.inventory_value,
+    row.inventory_value_posted,
+    row.line_total,
+    row.totalCost,
+    row.totalValue,
+    row.stockValue,
+    row.total_cost,
+  ]) {
+    if (candidate !== null && candidate !== undefined && candidate !== '') {
+      return toNumber(candidate, toNumber(fallback));
+    }
+  }
+
+  return toNumber(fallback);
+}
+
 export function getItemReorderQuantity(row: Record<string, unknown> | null | undefined) {
   return toNumber(row?.reorder_quantity ?? row?.reorder_qty, 0);
 }

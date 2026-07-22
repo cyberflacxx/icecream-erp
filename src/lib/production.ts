@@ -123,6 +123,90 @@ export type ImportValidationResult<T extends Record<string, unknown>> = {
   rows: T[];
 };
 
+export type ProductionStockReceiveLineInput = {
+  itemId?: string | null;
+  quantity?: number | string | null;
+  unitCost?: number | string | null;
+};
+
+export type ProductionStockReceiveFailure = {
+  success: false;
+  code: 'PRODUCTION_STOCK_RECEIVE_FAILED';
+  stage: string;
+  message: string;
+  details: {
+    productionOrderId: string | null;
+    itemId: string | null;
+    sourceWarehouseId: string | null;
+    destinationWarehouseId: string | null;
+    quantity: number | null;
+    dbMessage: string | null;
+  };
+};
+
+export function normalizeProductionStockReceiveItems(
+  items: ProductionStockReceiveLineInput[],
+) {
+  return items
+    .map((item) => ({
+      itemId: String(item.itemId ?? '').trim(),
+      quantity: toNumber(item.quantity, 0),
+      unitCost: toNumber(item.unitCost, 0),
+    }))
+    .filter((item) => item.itemId && item.quantity > 0)
+    .sort((left, right) => {
+      if (left.itemId === right.itemId) {
+        return left.quantity - right.quantity;
+      }
+
+      return left.itemId.localeCompare(right.itemId);
+    });
+}
+
+export function buildProductionStockReceiveSignature(input: {
+  destinationWarehouseId?: string | null;
+  items: ProductionStockReceiveLineInput[];
+  notes?: string | null;
+  productionOrderId?: string | null;
+  sourceWarehouseId?: string | null;
+  transferDate?: string | null;
+}) {
+  return JSON.stringify({
+    destinationWarehouseId: String(input.destinationWarehouseId ?? '').trim(),
+    items: normalizeProductionStockReceiveItems(input.items),
+    notes: String(input.notes ?? '').trim(),
+    productionOrderId: String(input.productionOrderId ?? '').trim(),
+    sourceWarehouseId: String(input.sourceWarehouseId ?? '').trim(),
+    transferDate: String(input.transferDate ?? '').trim(),
+  });
+}
+
+export function buildProductionStockReceiveFailure(input: {
+  dbMessage?: string | null;
+  destinationWarehouseId?: string | null;
+  itemId?: string | null;
+  message: string;
+  productionOrderId?: string | null;
+  quantity?: number | null;
+  sourceWarehouseId?: string | null;
+  stage: string;
+}): ProductionStockReceiveFailure {
+  return {
+    success: false,
+    code: 'PRODUCTION_STOCK_RECEIVE_FAILED',
+    stage: input.stage,
+    message: `${input.stage}: ${input.message}`,
+    details: {
+      productionOrderId: input.productionOrderId ? String(input.productionOrderId) : null,
+      itemId: input.itemId ? String(input.itemId) : null,
+      sourceWarehouseId: input.sourceWarehouseId ? String(input.sourceWarehouseId) : null,
+      destinationWarehouseId: input.destinationWarehouseId ? String(input.destinationWarehouseId) : null,
+      quantity: input.quantity == null ? null : toNumber(input.quantity),
+      dbMessage: input.dbMessage ? String(input.dbMessage) : null,
+    },
+  };
+}
+
 export function calculateScalingFactor(plannedQuantity: number, standardOutputQuantity: number) {
   const normalizedPlanned = ensurePositiveQuantity(plannedQuantity, 'plannedQuantity');
   const normalizedStandardOutput = ensurePositiveQuantity(standardOutputQuantity, 'standardOutputQuantity');

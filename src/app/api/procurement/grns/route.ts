@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { badRequest, can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
+import { resolveInventoryValue } from '@/lib/inventory';
 import {
   normalizeGoodsReceivedItemId,
   normalizeGoodsReceivedPurchaseOrderId,
@@ -34,7 +35,7 @@ export async function GET(request: NextRequest) {
     let query = service
       .from('goods_received_notes')
       .select(
-        `id, grn_number, received_date, status, quality_status, warehouse_id, supplier_id, entry_mode,
+        `id, grn_number, received_date, status, quality_status, warehouse_id, supplier_id, entry_mode, stock_posted, inventory_value_posted,
          purchase_orders(id, po_number, supplier_id, suppliers(id, name))`,
         { count: 'exact' },
       )
@@ -77,7 +78,7 @@ export async function GET(request: NextRequest) {
       let fallbackQuery = service
         .from('goods_received_notes')
         .select(
-          `id, grn_number, received_date, status, warehouse_id,
+          `id, grn_number, received_date, status, warehouse_id, stock_posted, inventory_value_posted,
            purchase_orders:purchase_orders!goods_received_notes_po_id_fkey(id, po_number, supplier_id, suppliers(id, name))`,
           { count: 'exact' },
         )
@@ -100,15 +101,37 @@ export async function GET(request: NextRequest) {
       const fallback = await fallbackQuery.range(from, from + pageSize - 1);
       if (fallback.error) return serverError(fallback.error.message);
 
+      const warehouseIds = [
+        ...new Set(
+          (fallback.data ?? [])
+            .map((row: Record<string, unknown>) => String(row.warehouse_id ?? ''))
+            .filter(Boolean),
+        ),
+      ];
+      const warehouseLookup = warehouseIds.length
+        ? await service.from('warehouses').select('id, name').in('id', warehouseIds)
+        : { data: [], error: null };
+      if (warehouseLookup.error) return serverError(warehouseLookup.error.message);
+      const warehousesById = new Map((warehouseLookup.data ?? []).map((row) => [String(row.id), String(row.name ?? 'Unknown warehouse')]));
+
       const mappedFallback = (fallback.data ?? []).map((r: Record<string, unknown>) => {
         const po = r.purchase_orders as Record<string, unknown> | null;
         const supplier = po?.suppliers as Record<string, unknown> | null;
+        const warehouseId = String(r.warehouse_id ?? '').trim();
         return {
           id: r.id,
           grnNumber: r.grn_number,
           receivedDate: r.received_date,
           status: String(r.status ?? '').toUpperCase(),
           qualityStatus: null,
+          stockPosted: r.stock_posted === true || String(r.status ?? '').toUpperCase() === 'POSTED',
+          inventoryValue: resolveInventoryValue(r, 0),
+          warehouse: warehouseId
+            ? {
+                id: warehouseId,
+                name: warehousesById.get(warehouseId) ?? 'Unknown warehouse',
+              }
+            : null,
           purchaseOrder: po ? { id: po.id, poNumber: po.po_number } : null,
           supplier: supplier ? { id: supplier.id, name: supplier.name } : null,
           itemsCount: 0,
@@ -150,10 +173,23 @@ export async function GET(request: NextRequest) {
       : { data: [], error: null };
     if (supplierLookup.error) return serverError(supplierLookup.error.message);
     const suppliersById = new Map((supplierLookup.data ?? []).map((row) => [String(row.id), String(row.name ?? 'Unknown supplier')]));
+    const warehouseIds = [
+      ...new Set(
+        (primary.data ?? [])
+          .map((row: Record<string, unknown>) => String(row.warehouse_id ?? ''))
+          .filter(Boolean),
+      ),
+    ];
+    const warehouseLookup = warehouseIds.length
+      ? await service.from('warehouses').select('id, name').in('id', warehouseIds)
+      : { data: [], error: null };
+    if (warehouseLookup.error) return serverError(warehouseLookup.error.message);
+    const warehousesById = new Map((warehouseLookup.data ?? []).map((row) => [String(row.id), String(row.name ?? 'Unknown warehouse')]));
 
     const mapped = (primary.data ?? []).map((r: Record<string, unknown>) => {
       const po = r.purchase_orders as Record<string, unknown> | null;
       const supplierId = String(r.supplier_id ?? po?.supplier_id ?? '');
+      const warehouseId = String(r.warehouse_id ?? '').trim();
       const supplier = supplierId
         ? {
             id: supplierId,
@@ -167,6 +203,14 @@ export async function GET(request: NextRequest) {
         receivedDate: r.received_date,
         status: String(r.status ?? '').toUpperCase(),
         qualityStatus: r.quality_status ? String(r.quality_status).toUpperCase() : null,
+        stockPosted: r.stock_posted === true || String(r.status ?? '').toUpperCase() === 'POSTED',
+        inventoryValue: resolveInventoryValue(r, 0),
+        warehouse: warehouseId
+          ? {
+              id: warehouseId,
+              name: warehousesById.get(warehouseId) ?? 'Unknown warehouse',
+            }
+          : null,
         purchaseOrder: po ? { id: po.id, poNumber: po.po_number } : null,
         supplier,
         itemsCount: itemCounts.get(String(r.id)) ?? 0,

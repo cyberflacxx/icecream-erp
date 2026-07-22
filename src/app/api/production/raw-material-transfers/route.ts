@@ -1,6 +1,7 @@
+import { createHash } from 'crypto';
 import { NextRequest, NextResponse } from 'next/server';
 
-import { badRequest, can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
+import { can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
 import { ensurePositiveQuantity } from '@/lib/inventory';
 import {
   applyInventoryDelta,
@@ -10,9 +11,131 @@ import {
   requireItem,
   requireWarehouseAccess,
 } from '@/lib/inventory-server';
+import {
+  buildProductionStockReceiveFailure,
+  buildProductionStockReceiveSignature,
+} from '@/lib/production';
 import { productionService, writeProductionAuditLog } from '@/lib/production-server';
 
 const RAW_MATERIAL_TRANSFER_NOTE = '[production_raw_material_transfer]';
+const PRODUCTION_RECEIVE_CODE = 'PRODUCTION_STOCK_RECEIVE_FAILED';
+
+type ReceiveFailureContext = {
+  destinationWarehouseId: string | null;
+  itemId: string | null;
+  productionOrderId: string | null;
+  quantity: number | null;
+  sourceWarehouseId: string | null;
+};
+
+type ValidatedTransferItem = {
+  item: Awaited<ReturnType<typeof requireItem>>;
+  quantity: number;
+  unitCost: number;
+};
+
+function buildReceiveFailureResponse(
+  stage: string,
+  message: string,
+  details: ReceiveFailureContext,
+  status: number,
+  dbMessage?: string | null,
+) {
+  return NextResponse.json(
+    buildProductionStockReceiveFailure({
+      dbMessage,
+      destinationWarehouseId: details.destinationWarehouseId,
+      itemId: details.itemId,
+      message,
+      productionOrderId: details.productionOrderId,
+      quantity: details.quantity,
+      sourceWarehouseId: details.sourceWarehouseId,
+      stage,
+    }),
+    { status },
+  );
+}
+
+function createReceiveIdempotencyKey(input: {
+  destinationWarehouseId: string;
+  items: Array<{ itemId: string; quantity: number; unitCost?: number | null }>;
+  notes?: string | null;
+  sourceWarehouseId: string;
+  transferDate?: string;
+}) {
+  return createHash('sha256')
+    .update(
+      buildProductionStockReceiveSignature({
+        destinationWarehouseId: input.destinationWarehouseId,
+        items: input.items,
+        notes: input.notes ?? null,
+        sourceWarehouseId: input.sourceWarehouseId,
+        transferDate: input.transferDate ?? null,
+      }),
+    )
+    .digest('hex')
+    .slice(0, 24);
+}
+
+async function loadExistingReceiveTransfer(
+  service: ReturnType<typeof productionService>,
+  ctx: Awaited<ReturnType<typeof getAuthContext>>,
+  input: {
+    destinationWarehouseId: string;
+    idempotencyMarker: string;
+    sourceWarehouseId: string;
+    transferDate: string;
+    validatedItems: ValidatedTransferItem[];
+  },
+) {
+  if (!ctx) {
+    return null;
+  }
+
+  const { data: transfer, error: transferError } = await service
+    .from('stock_transfers')
+    .select('id, transfer_number, transfer_date, status, notes')
+    .eq('organization_id', ctx.organizationId)
+    .eq('from_warehouse_id', input.sourceWarehouseId)
+    .eq('to_warehouse_id', input.destinationWarehouseId)
+    .eq('transfer_date', input.transferDate)
+    .ilike('notes', `%${input.idempotencyMarker}%`)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (transferError || !transfer) {
+    return null;
+  }
+
+  const { data: transferItems, error: itemError } = await service
+    .from('stock_transfer_items')
+    .select('item_id, quantity_requested, quantity_received')
+    .eq('transfer_id', transfer.id);
+
+  if (itemError) {
+    return null;
+  }
+
+  const existingItems = new Map<string, number>();
+  for (const line of transferItems ?? []) {
+    const itemId = String(line.item_id ?? '').trim();
+    const quantity = Number(line.quantity_received ?? line.quantity_requested ?? 0);
+    if (itemId) {
+      existingItems.set(itemId, (existingItems.get(itemId) ?? 0) + quantity);
+    }
+  }
+
+  const matchesEveryLine =
+    existingItems.size === input.validatedItems.length &&
+    input.validatedItems.every((line) => Math.abs((existingItems.get(line.item.id) ?? 0) - line.quantity) < 0.0001);
+
+  if (!matchesEveryLine) {
+    return null;
+  }
+
+  return transfer;
+}
 
 export async function GET() {
   const ctx = await getAuthContext();
@@ -77,6 +200,15 @@ export async function POST(request: NextRequest) {
   if (!ctx) return unauthorized();
   if (!can(ctx, 'production.write', 'inventory.write', 'stock_transfer.create')) return forbidden();
 
+  let stage = 'READ_REQUEST';
+  const failureContext: ReceiveFailureContext = {
+    destinationWarehouseId: null,
+    itemId: null,
+    productionOrderId: null,
+    quantity: null,
+    sourceWarehouseId: null,
+  };
+
   try {
     const body = await request.json() as {
       destinationWarehouseId: string;
@@ -85,43 +217,102 @@ export async function POST(request: NextRequest) {
       sourceWarehouseId: string;
       transferDate?: string;
     };
+    stage = 'VALIDATE_REQUEST';
+    failureContext.sourceWarehouseId = body.sourceWarehouseId ? String(body.sourceWarehouseId) : null;
+    failureContext.destinationWarehouseId = body.destinationWarehouseId ? String(body.destinationWarehouseId) : null;
 
     if (!body.sourceWarehouseId || !body.destinationWarehouseId) {
-      return badRequest('sourceWarehouseId and destinationWarehouseId are required.');
+      return buildReceiveFailureResponse(
+        stage,
+        'sourceWarehouseId and destinationWarehouseId are required.',
+        failureContext,
+        400,
+      );
     }
     if (body.sourceWarehouseId === body.destinationWarehouseId) {
-      return badRequest('Source and production warehouses must be different.');
+      return buildReceiveFailureResponse(
+        stage,
+        'Source and production warehouses must be different.',
+        failureContext,
+        400,
+      );
     }
     if (!Array.isArray(body.items) || body.items.length === 0) {
-      return badRequest('At least one raw material is required.');
+      return buildReceiveFailureResponse(
+        stage,
+        'At least one raw material is required.',
+        failureContext,
+        400,
+      );
     }
 
     const service = productionService();
+    stage = 'LOAD_WAREHOUSES';
     const [sourceWarehouse, destinationWarehouse] = await Promise.all([
-      requireWarehouseAccess(service, body.sourceWarehouseId, ctx.branchId, ctx.isBranchScoped),
-      requireWarehouseAccess(service, body.destinationWarehouseId, ctx.branchId, ctx.isBranchScoped),
+      requireWarehouseAccess(service, body.sourceWarehouseId, ctx.branchId, ctx.isBranchScoped, ctx.warehouseAssignments),
+      requireWarehouseAccess(service, body.destinationWarehouseId, ctx.branchId, ctx.isBranchScoped, ctx.warehouseAssignments),
     ]);
 
-    const validatedItems = [];
+    const validatedItems: ValidatedTransferItem[] = [];
     for (const line of body.items) {
+      failureContext.itemId = line.itemId ? String(line.itemId) : null;
+      failureContext.quantity = Number(line.quantity ?? 0);
+      stage = 'VALIDATE_ITEM';
       const quantity = ensurePositiveQuantity(line.quantity, 'transfer quantity');
+      stage = 'LOAD_ITEM';
       const item = await requireItem(service, line.itemId);
+      stage = 'CHECK_SOURCE_STOCK';
       const sourceBalance = await getBalance(service, item.id, body.sourceWarehouseId);
-      const available = Number(sourceBalance?.quantity_available ?? 0);
+      const available = Number(sourceBalance?.quantity_available ?? sourceBalance?.quantity_on_hand ?? 0);
 
       if (available < quantity) {
-        return badRequest(`Insufficient HQ/main stock for ${item.name}. Available ${available.toFixed(3)}, requested ${quantity.toFixed(3)}.`);
+        return buildReceiveFailureResponse(
+          stage,
+          `Insufficient HQ/main stock for ${item.name}. Available ${available.toFixed(3)}, requested ${quantity.toFixed(3)}.`,
+          failureContext,
+          400,
+        );
       }
 
       validatedItems.push({
         item,
         quantity,
-        unitCost: line.unitCost ?? item.unit_cost ?? null,
+        unitCost: Number(line.unitCost ?? item.unit_cost ?? 0),
       });
     }
 
+    const normalizedTransferDate = body.transferDate ?? new Date().toISOString().slice(0, 10);
+    const idempotencyKey = createReceiveIdempotencyKey({
+      destinationWarehouseId: body.destinationWarehouseId,
+      items: body.items,
+      notes: body.notes,
+      sourceWarehouseId: body.sourceWarehouseId,
+      transferDate: normalizedTransferDate,
+    });
+    const idempotencyMarker = `[production_stock_receive:${idempotencyKey}]`;
+    const existingTransfer = await loadExistingReceiveTransfer(service, ctx, {
+      destinationWarehouseId: body.destinationWarehouseId,
+      idempotencyMarker,
+      sourceWarehouseId: body.sourceWarehouseId,
+      transferDate: normalizedTransferDate,
+      validatedItems,
+    });
+    if (existingTransfer) {
+      return NextResponse.json(
+        {
+          ...existingTransfer,
+          code: PRODUCTION_RECEIVE_CODE,
+          destinationWarehouse: { id: destinationWarehouse.id, name: destinationWarehouse.name },
+          idempotentReplay: true,
+          sourceWarehouse: { id: sourceWarehouse.id, name: sourceWarehouse.name },
+        },
+        { status: 200 },
+      );
+    }
+
+    stage = 'CREATE_TRANSFER_HEADER';
     const transferNumber = await generateDocumentNumber(service, 'stock_transfers', 'PRM');
-    const notes = `${RAW_MATERIAL_TRANSFER_NOTE} ${body.notes ?? 'Raw materials moved from HQ/main stock to production inventory.'}`.trim();
+    const notes = `${RAW_MATERIAL_TRANSFER_NOTE} ${idempotencyMarker} ${body.notes ?? 'Raw materials moved from HQ/main stock to production inventory.'}`.trim();
 
     const { data: transfer, error: transferError } = await service
       .from('stock_transfers')
@@ -133,7 +324,7 @@ export async function POST(request: NextRequest) {
         requested_by: ctx.userId,
         status: 'COMPLETED',
         to_warehouse_id: body.destinationWarehouseId,
-        transfer_date: body.transferDate ?? new Date().toISOString().slice(0, 10),
+        transfer_date: normalizedTransferDate,
         transfer_number: transferNumber,
       })
       .select('id, transfer_number, transfer_date, status, notes')
@@ -141,6 +332,9 @@ export async function POST(request: NextRequest) {
     if (transferError || !transfer) throw transferError ?? new Error('Failed to create raw material transfer.');
 
     for (const line of validatedItems) {
+      stage = 'CREATE_TRANSFER_LINE';
+      failureContext.itemId = line.item.id;
+      failureContext.quantity = line.quantity;
       const { error: itemError } = await service
         .from('stock_transfer_items')
         .insert({
@@ -154,19 +348,24 @@ export async function POST(request: NextRequest) {
         });
       if (itemError) throw itemError;
 
+      stage = 'UPDATE_SOURCE_BALANCE';
       await applyInventoryDelta(service, {
         itemId: line.item.id,
         organizationId: ctx.organizationId,
         quantityDelta: -line.quantity,
+        unitCost: line.unitCost,
         warehouseId: body.sourceWarehouseId,
       });
+      stage = 'UPDATE_DESTINATION_BALANCE';
       await applyInventoryDelta(service, {
         itemId: line.item.id,
         organizationId: ctx.organizationId,
         quantityDelta: line.quantity,
+        unitCost: line.unitCost,
         warehouseId: body.destinationWarehouseId,
       });
 
+      stage = 'CREATE_SOURCE_MOVEMENT';
       await recordStockMovement(service, {
         createdBy: ctx.userId,
         destinationWarehouseId: body.destinationWarehouseId,
@@ -178,8 +377,10 @@ export async function POST(request: NextRequest) {
         referenceId: String(transfer.id),
         referenceType: 'stock_transfer',
         sourceWarehouseId: body.sourceWarehouseId,
+        unitCost: line.unitCost,
         warehouseId: body.sourceWarehouseId,
       });
+      stage = 'CREATE_DESTINATION_MOVEMENT';
       await recordStockMovement(service, {
         createdBy: ctx.userId,
         destinationWarehouseId: body.destinationWarehouseId,
@@ -191,10 +392,12 @@ export async function POST(request: NextRequest) {
         referenceId: String(transfer.id),
         referenceType: 'stock_transfer',
         sourceWarehouseId: body.sourceWarehouseId,
+        unitCost: line.unitCost,
         warehouseId: body.destinationWarehouseId,
       });
     }
 
+    stage = 'WRITE_AUDIT_LOG';
     await writeProductionAuditLog('PRODUCTION_RAW_MATERIALS_RECEIVED', String(transfer.id), ctx.userId, {
       destinationWarehouseId: destinationWarehouse.id,
       itemCount: validatedItems.length,
@@ -208,6 +411,19 @@ export async function POST(request: NextRequest) {
       sourceWarehouse: { id: sourceWarehouse.id, name: sourceWarehouse.name },
     }, { status: 201 });
   } catch (err) {
-    return serverError(err instanceof Error ? err.message : 'Failed to receive raw materials into production.');
+    const message = err instanceof Error ? err.message : 'Failed to receive raw materials into production.';
+    console.error('Production stock receive failed.', {
+      code: PRODUCTION_RECEIVE_CODE,
+      details: failureContext,
+      message,
+      stage,
+    });
+    return buildReceiveFailureResponse(
+      stage,
+      message,
+      failureContext,
+      stage === 'VALIDATE_REQUEST' || stage === 'VALIDATE_ITEM' || stage === 'CHECK_SOURCE_STOCK' ? 400 : 500,
+      message,
+    );
   }
 }

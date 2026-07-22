@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  buildProductionStockReceiveFailure,
+  buildProductionStockReceiveSignature,
   buildCostingRows,
   buildProductivityRows,
   buildShiftPerformanceRows,
@@ -13,6 +15,7 @@ import {
   calculateCostPerUnit,
   calculateProductivity,
   calculateYieldPercentage,
+  normalizeProductionStockReceiveItems,
   validateRecipeImportRows,
   validateShiftTargetImportRows,
 } from '../src/lib/production';
@@ -128,4 +131,60 @@ test('shift target import validation blocks invalid rows', () => {
 
   assert.equal(result.errors.length, 3);
   assert.equal(result.rows.length, 1);
+});
+
+test('production stock receive helpers build stable request signatures and sort normalized items', () => {
+  const normalized = normalizeProductionStockReceiveItems([
+    { itemId: ' item-b ', quantity: '2', unitCost: '1.5' },
+    { itemId: 'item-a', quantity: 5, unitCost: 2 },
+    { itemId: 'item-b', quantity: 0, unitCost: 3 },
+  ]);
+
+  assert.deepEqual(normalized, [
+    { itemId: 'item-a', quantity: 5, unitCost: 2 },
+    { itemId: 'item-b', quantity: 2, unitCost: 1.5 },
+  ]);
+
+  const left = buildProductionStockReceiveSignature({
+    destinationWarehouseId: 'prod-wh',
+    items: [
+      { itemId: 'item-b', quantity: 2, unitCost: 1.5 },
+      { itemId: 'item-a', quantity: 5, unitCost: 2 },
+    ],
+    notes: 'Launch transfer',
+    sourceWarehouseId: 'main-wh',
+    transferDate: '2026-07-22',
+  });
+  const right = buildProductionStockReceiveSignature({
+    destinationWarehouseId: 'prod-wh',
+    items: [
+      { itemId: 'item-a', quantity: 5, unitCost: 2 },
+      { itemId: 'item-b', quantity: 2, unitCost: 1.5 },
+    ],
+    notes: 'Launch transfer',
+    sourceWarehouseId: 'main-wh',
+    transferDate: '2026-07-22',
+  });
+
+  assert.equal(left, right);
+});
+
+test('production stock receive failure payload keeps stage and db diagnostics', () => {
+  const failure = buildProductionStockReceiveFailure({
+    dbMessage: 'Warehouse not found or inactive.',
+    destinationWarehouseId: 'prod-wh',
+    itemId: 'item-1',
+    message: 'Warehouse access denied.',
+    quantity: 50,
+    sourceWarehouseId: 'main-wh',
+    stage: 'LOAD_WAREHOUSES',
+  });
+
+  assert.equal(failure.success, false);
+  assert.equal(failure.code, 'PRODUCTION_STOCK_RECEIVE_FAILED');
+  assert.equal(failure.stage, 'LOAD_WAREHOUSES');
+  assert.equal(failure.message, 'LOAD_WAREHOUSES: Warehouse access denied.');
+  assert.equal(failure.details.destinationWarehouseId, 'prod-wh');
+  assert.equal(failure.details.quantity, 50);
+  assert.equal(failure.details.dbMessage, 'Warehouse not found or inactive.');
 });
