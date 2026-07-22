@@ -9,15 +9,27 @@ function getEnv(key) {
 
 const SUPABASE_URL = getEnv('NEXT_PUBLIC_SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = getEnv('SUPABASE_SERVICE_ROLE_KEY');
-const BASE_URL = process.env.SMOKE_BASE_URL || 'https://www.absolute-erp.com';
-const DEMO_PASSWORD = process.env.DEMO_PASSWORD || 'Absolute@2026!';
-const PRODUCTION_WORK_ID = process.env.PRODUCTION_WORK_ID || 'AQI-20261004';
 const SCHEMA = 'icecream_erp';
 const FETCH_TIMEOUT_MS = Number(process.env.VERIFY_TIMEOUT_MS || 30000);
 const TRANSFER_QUANTITY = Number(process.env.PRODUCTION_RECEIVE_QTY || 1);
+const PRODUCTION_WORK_ID = process.env.PRODUCTION_SMOKE_WORK_ID || process.env.SMOKE_WORK_ID || '';
+const PRODUCTION_PASSWORD = process.env.PRODUCTION_SMOKE_PASSWORD || process.env.SMOKE_PASSWORD || '';
+const LOCAL_SMOKE_ENABLED = process.env.PRODUCTION_SMOKE_LOCAL === '1' || process.env.PRODUCTION_SMOKE_LOCAL === 'true';
+const BASE_URL =
+  process.env.PRODUCTION_SMOKE_BASE_URL ||
+  process.env.ABSOLUTE_ERP_BASE_URL ||
+  (LOCAL_SMOKE_ENABLED ? 'http://127.0.0.1:3000' : '');
 
 if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
   throw new Error('Missing Supabase environment variables in .env');
+}
+
+if (!PRODUCTION_WORK_ID || !PRODUCTION_PASSWORD) {
+  throw new Error('Production receive smoke requires PRODUCTION_SMOKE_WORK_ID/PRODUCTION_SMOKE_PASSWORD or SMOKE_WORK_ID/SMOKE_PASSWORD.');
+}
+
+if (!BASE_URL) {
+  throw new Error('Production receive smoke requires PRODUCTION_SMOKE_BASE_URL or ABSOLUTE_ERP_BASE_URL. Set PRODUCTION_SMOKE_LOCAL=1 only when intentionally running local.');
 }
 
 const restHeaders = {
@@ -57,10 +69,11 @@ async function rest(table, { query = 'select=*', method = 'GET', body, prefer } 
 }
 
 async function login() {
+  console.log(`Using production smoke work ID: ${PRODUCTION_WORK_ID}`);
   const response = await fetchWithTimeout(`${BASE_URL}/api/auth/login`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ password: DEMO_PASSWORD, workId: PRODUCTION_WORK_ID }),
+    body: JSON.stringify({ password: PRODUCTION_PASSWORD, workId: PRODUCTION_WORK_ID }),
     redirect: 'manual',
   });
 
@@ -204,6 +217,9 @@ async function main() {
   });
 
   if (receiveResponse.status !== 200 && receiveResponse.status !== 201) {
+    if (receiveResponse.status === 401 || receiveResponse.status === 403) {
+      throw new Error('Login succeeded, but this account cannot perform production receiving.');
+    }
     throw new Error(receiveResponse.text || `Production receive failed with status ${receiveResponse.status}.`);
   }
 
