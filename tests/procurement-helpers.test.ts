@@ -28,6 +28,8 @@ import {
 } from '../src/lib/procurement-purchase-orders';
 import {
   buildGoodsReceivedDraftPayload,
+  createOrUpdateStockBalance,
+  fetchGoodsReceivedNoteDetail,
   isGrnStockPostingError,
   normalizeGoodsReceivedItemId,
   normalizeGoodsReceivedPurchaseOrderId,
@@ -1658,4 +1660,295 @@ test('postGoodsReceivedNoteToInventory returns stage-specific stock balance read
     assert.equal(isGrnStockPostingError(error), true);
     assert.equal((error as { details?: { stage?: string } }).details?.stage, 'GRN_STOCK_BALANCE_READ_FAILED');
   }
+});
+
+test('createOrUpdateStockBalance retries down to a minimal insert payload when optional columns fail', async () => {
+  const insertPayloads: Array<Record<string, unknown>> = [];
+
+  const service = {
+    from(table: string) {
+      assert.equal(table, 'stock_balances');
+      return {
+        select(columns?: string) {
+          if (columns !== undefined) {
+            assert.equal(columns, '*');
+          }
+          return {
+            eq(column: string, value: string) {
+              assert.equal(column, 'item_id');
+              assert.equal(value, 'item-7');
+              return {
+                eq(nextColumn: string, nextValue: string) {
+                  assert.equal(nextColumn, 'warehouse_id');
+                  assert.equal(nextValue, 'wh-7');
+                  return {
+                    maybeSingle() {
+                      return Promise.resolve({ data: null, error: null });
+                    },
+                  };
+                },
+              };
+            },
+            single() {
+              return Promise.resolve({ data: { id: 'bal-7' }, error: null });
+            },
+          };
+        },
+        insert(payload: Record<string, unknown>) {
+          insertPayloads.push({ ...payload });
+          return {
+            select() {
+              return {
+                single() {
+                  for (const optionalColumn of [
+                    'quantity_available',
+                    'available_quantity',
+                    'average_cost',
+                    'avg_cost',
+                    'total_value',
+                    'stock_value',
+                    'unit_cost',
+                    'quantity_reserved',
+                    'reserved_qty',
+                    'created_at',
+                    'updated_at',
+                    'last_updated',
+                    'organization_id',
+                    'quantity',
+                    'current_quantity',
+                    'balance_quantity',
+                    'stock_quantity',
+                  ]) {
+                    if (optionalColumn in payload) {
+                      return Promise.resolve({
+                        data: null,
+                        error: { message: `column stock_balances.${optionalColumn} does not exist` },
+                      });
+                    }
+                  }
+
+                  return Promise.resolve({
+                    data: { id: 'bal-7', ...payload },
+                    error: null,
+                  });
+                },
+              };
+            },
+          };
+        },
+      };
+    },
+  };
+
+  const result = await createOrUpdateStockBalance(service as any, {
+    grnId: 'grn-7',
+    itemId: 'item-7',
+    organizationId: 'org-7',
+    quantity: 50,
+    receivedValue: 0,
+    unitCost: 0,
+    warehouseId: 'wh-7',
+  });
+
+  assert.equal(String(result.id), 'bal-7');
+  assert.equal(insertPayloads.length > 1, true);
+  assert.deepEqual(
+    Object.keys(insertPayloads.at(-1) ?? {}).sort(),
+    ['item_id', 'quantity_on_hand', 'warehouse_id'],
+  );
+});
+
+test('createOrUpdateStockBalance surfaces operation and dbMessage when insert still fails', async () => {
+  const service = {
+    from(table: string) {
+      assert.equal(table, 'stock_balances');
+      return {
+        select(columns?: string) {
+          if (columns !== undefined) {
+            assert.equal(columns, '*');
+          }
+          return {
+            eq() {
+              return {
+                eq() {
+                  return {
+                    maybeSingle() {
+                      return Promise.resolve({ data: null, error: null });
+                    },
+                  };
+                },
+              };
+            },
+          };
+        },
+        insert() {
+          return {
+            select() {
+              return {
+                single() {
+                  return Promise.resolve({
+                    data: null,
+                    error: { message: 'null value in column "inventory_id" violates not-null constraint' },
+                  });
+                },
+              };
+            },
+          };
+        },
+      };
+    },
+  };
+
+  await assert.rejects(
+    () =>
+      createOrUpdateStockBalance(service as any, {
+        grnId: 'grn-8',
+        itemId: 'item-8',
+        organizationId: 'org-8',
+        quantity: 50,
+        receivedValue: 0,
+        unitCost: 0,
+        warehouseId: 'wh-8',
+      }),
+    (error: unknown) => {
+      assert.equal(isGrnStockPostingError(error), true);
+      assert.equal((error as { details?: { operation?: string } }).details?.operation, 'insert_stock_balance');
+      assert.match(String((error as { details?: { dbMessage?: string } }).details?.dbMessage ?? ''), /not-null constraint/);
+      assert.equal((error as { details?: { quantity?: number } }).details?.quantity, 50);
+      return true;
+    },
+  );
+});
+
+test('fetchGoodsReceivedNoteDetail loads GRN header and items separately without embed ambiguity', async () => {
+  const selects: Array<{ columns: string; table: string }> = [];
+  const detail = await fetchGoodsReceivedNoteDetail({
+    from(table: string) {
+      return {
+        select(columns: string) {
+          selects.push({ columns, table });
+          return {
+            eq(column: string, value: string) {
+              if (table === 'goods_received_notes') {
+                return {
+                  eq(nextColumn: string, nextValue: string) {
+                    assert.equal(column, 'organization_id');
+                    assert.equal(value, 'org-detail');
+                    assert.equal(nextColumn, 'id');
+                    assert.equal(nextValue, 'grn-detail');
+                    return {
+                      maybeSingle() {
+                        return Promise.resolve({
+                          data: {
+                            id: 'grn-detail',
+                            grn_number: 'GRN-00077',
+                            purchase_order_id: 'po-detail',
+                            receiving_warehouse_id: 'wh-detail',
+                            status: 'RECEIVED',
+                            stock_posted: false,
+                          },
+                          error: null,
+                        });
+                      },
+                    };
+                  },
+                };
+              }
+
+              if (table === 'goods_received_note_items') {
+                assert.equal(column, 'grn_id');
+                assert.equal(value, 'grn-detail');
+                return Promise.resolve({
+                  data: [
+                    {
+                      id: 'line-detail',
+                      goods_received_note_id: 'grn-detail',
+                      purchase_order_item_id: 'po-line-detail',
+                      item_id: 'item-detail',
+                      quantity_received: 50,
+                      unit_cost: 4,
+                      line_total: 200,
+                    },
+                  ],
+                  error: null,
+                });
+              }
+
+              throw new Error(`Unhandled select().eq() for ${table} ${columns}`);
+            },
+          };
+        },
+      };
+    },
+  } as any, {
+    grnId: 'grn-detail',
+    organizationId: 'org-detail',
+  });
+
+  assert.equal(selects[0]?.table, 'goods_received_notes');
+  assert.equal(selects[0]?.columns, '*');
+  assert.equal(selects[1]?.table, 'goods_received_note_items');
+  assert.equal(selects[1]?.columns, '*');
+  assert.equal(detail.grnNumber, 'GRN-00077');
+  assert.equal(detail.purchaseOrderId, 'po-detail');
+  assert.equal(detail.receivingWarehouseId, 'wh-detail');
+  assert.equal(detail.items.length, 1);
+  assert.equal(detail.lineItems[0]?.goods_received_note_id, 'grn-detail');
+  assert.equal(detail.lineItems[0]?.purchaseOrderItemId, 'po-line-detail');
+  assert.equal(detail.lineItems[0]?.quantityReceived, 50);
+});
+
+test('fetchGoodsReceivedNoteDetail still returns header data when item loading fails', async () => {
+  const detail = await fetchGoodsReceivedNoteDetail({
+    from(table: string) {
+      return {
+        select() {
+          return {
+            eq(column: string, value: string) {
+              if (table === 'goods_received_notes') {
+                return {
+                  eq(nextColumn: string, nextValue: string) {
+                    assert.equal(column, 'organization_id');
+                    assert.equal(value, 'org-9');
+                    assert.equal(nextColumn, 'id');
+                    assert.equal(nextValue, 'grn-9');
+                    return {
+                      maybeSingle() {
+                        return Promise.resolve({
+                          data: {
+                            id: 'grn-9',
+                            grn_number: 'GRN-00009',
+                            warehouse_id: 'wh-9',
+                            status: 'DRAFT',
+                          },
+                          error: null,
+                        });
+                      },
+                    };
+                  },
+                };
+              }
+
+              if (table === 'goods_received_note_items' || table === 'grn_items') {
+                return Promise.resolve({
+                  data: null,
+                  error: { message: `permission denied for table ${table}` },
+                });
+              }
+
+              throw new Error(`Unhandled select().eq() for ${table}`);
+            },
+          };
+        },
+      };
+    },
+  } as any, {
+    grnId: 'grn-9',
+    organizationId: 'org-9',
+  });
+
+  assert.equal((detail as Record<string, unknown>).id, 'grn-9');
+  assert.deepEqual(detail.items, []);
+  assert.deepEqual(detail.line_items, []);
+  assert.deepEqual(detail.lineItems, []);
 });

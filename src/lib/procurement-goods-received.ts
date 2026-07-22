@@ -178,6 +178,15 @@ function getErrorMessage(error: unknown) {
   return '';
 }
 
+export function sanitizeDbMessage(error: unknown) {
+  const message = getErrorMessage(error).replace(/\s+/g, ' ').trim();
+  if (!message) {
+    return null;
+  }
+
+  return message.slice(0, 400);
+}
+
 const GRN_POSTED_STATUS_CANDIDATES = ['POSTED', 'RECEIVED', 'COMPLETED'] as const;
 const STOCK_MOVEMENT_TYPE_CANDIDATES = ['GRN_RECEIPT', 'IN', 'RECEIPT'] as const;
 
@@ -194,12 +203,17 @@ export type GrnStockPostingFailureStage =
   | 'GRN_MARK_POSTED_FAILED';
 
 export interface GrnStockPostingFailureDetails {
+  dbMessage?: string | null;
   grnId: string;
   itemCount?: number;
   itemId?: string | null;
   lineId?: string | null;
+  operation?: string | null;
   purchaseOrderItemId?: string | null;
+  quantity?: number;
   stage: GrnStockPostingFailureStage;
+  totalValue?: number;
+  unitCost?: number;
   warehouseId?: string | null;
   warehouseResolved?: boolean;
 }
@@ -250,7 +264,9 @@ function buildGrnPostingFailure(
   error?: unknown,
   fallbackMessage?: string,
 ) {
-  return new GrnStockPostingError(details, getErrorMessage(error) || fallbackMessage || details.stage);
+  const dbMessage = details.dbMessage ?? sanitizeDbMessage(error);
+  const nextDetails = dbMessage ? { ...details, dbMessage } : details;
+  return new GrnStockPostingError(nextDetails, getErrorMessage(error) || fallbackMessage || details.stage);
 }
 
 function resolveGrnHeaderWarehouseId(grn: Record<string, unknown>) {
@@ -591,7 +607,55 @@ async function updateWithMissingColumnFallback(
   return { data: null, error: new Error(`Failed to update ${table} row.`) };
 }
 
-async function upsertCompatibleStockBalance(
+function buildStockBalanceInsertPayloadLevels(input: {
+  organizationId: string;
+  itemId: string;
+  quantity: number;
+  receivedValue: number;
+  unitCost: number;
+  warehouseId: string;
+}, now: string) {
+  const sharedPayload: Record<string, unknown> = {
+    item_id: input.itemId,
+    warehouse_id: input.warehouseId,
+    organization_id: input.organizationId,
+    quantity: input.quantity,
+    quantity_on_hand: input.quantity,
+    current_quantity: input.quantity,
+    balance_quantity: input.quantity,
+    stock_quantity: input.quantity,
+  };
+
+  return [
+    {
+      ...sharedPayload,
+      quantity_available: input.quantity,
+      available_quantity: input.quantity,
+      average_cost: input.unitCost,
+      avg_cost: input.unitCost,
+      total_value: input.receivedValue,
+      stock_value: input.receivedValue,
+      unit_cost: input.unitCost,
+      quantity_reserved: 0,
+      reserved_qty: 0,
+      created_at: now,
+      updated_at: now,
+      last_updated: now,
+    },
+    {
+      ...sharedPayload,
+      quantity_available: input.quantity,
+      available_quantity: input.quantity,
+      quantity_reserved: 0,
+      reserved_qty: 0,
+    },
+    {
+      ...sharedPayload,
+    },
+  ] as Array<Record<string, unknown>>;
+}
+
+export async function createOrUpdateStockBalance(
   service: {
     from: (table: string) => any;
   },
@@ -607,30 +671,51 @@ async function upsertCompatibleStockBalance(
 ) {
   const current = await loadCompatibleStockBalance(service, input);
   const now = new Date().toISOString();
+  const quantity = toNumber(input.quantity);
+  const unitCost = toNumber(input.unitCost);
+  const totalValue = toNumber(input.receivedValue);
 
   if (current) {
-    const quantityOnHand = toNumber(current.quantity_on_hand ?? current.quantity);
+    const quantityOnHand = toNumber(
+      current.quantity_on_hand ??
+        current.current_quantity ??
+        current.balance_quantity ??
+        current.stock_quantity ??
+        current.quantity,
+    );
     const quantityReserved = toNumber(current.quantity_reserved ?? current.reserved_qty);
     const nextOnHand = quantityOnHand + input.quantity;
     const nextAvailable = nextOnHand - quantityReserved;
     const currentAverageCost = toNumber(current.average_cost ?? current.avg_cost ?? current.unit_cost);
     const currentTotalValue = toNumber(
       current.total_value ??
+        current.stock_value ??
         (quantityOnHand * currentAverageCost),
     );
-    const nextTotalValue = currentTotalValue + input.receivedValue;
+    const nextTotalValue = currentTotalValue + totalValue;
     const nextAverageCost = nextOnHand > 0 ? nextTotalValue / nextOnHand : currentAverageCost;
 
     const updatePayload: Record<string, unknown> = {
       avg_cost: nextAverageCost,
       average_cost: nextAverageCost,
-      quantity: toNumber(current.quantity ?? quantityOnHand) + input.quantity,
+      available_quantity: nextAvailable,
+      balance_quantity: nextOnHand,
+      current_quantity: nextOnHand,
+      quantity: toNumber(
+        current.quantity ??
+          current.current_quantity ??
+          current.balance_quantity ??
+          current.stock_quantity ??
+          quantityOnHand,
+      ) + quantity,
       quantity_available: nextAvailable,
       quantity_on_hand: nextOnHand,
       quantity_reserved: quantityReserved,
       reserved_qty: quantityReserved,
+      stock_quantity: nextOnHand,
+      stock_value: nextTotalValue,
       total_value: nextTotalValue,
-      unit_cost: input.unitCost,
+      unit_cost: unitCost,
       updated_at: now,
       last_updated: now,
     };
@@ -642,9 +727,14 @@ async function upsertCompatibleStockBalance(
     if (result.error || !result.data) {
       throw buildGrnPostingFailure(
         {
+          dbMessage: sanitizeDbMessage(result.error),
           grnId: input.grnId,
           itemId: input.itemId,
+          operation: 'update_stock_balance',
+          quantity,
           stage: 'GRN_STOCK_BALANCE_UPDATE_FAILED',
+          totalValue,
+          unitCost,
           warehouseId: input.warehouseId,
           warehouseResolved: true,
         },
@@ -656,40 +746,38 @@ async function upsertCompatibleStockBalance(
     return result.data as Record<string, unknown>;
   }
 
-  const insertPayload: Record<string, unknown> = {
-    organization_id: input.organizationId,
-    item_id: input.itemId,
-    warehouse_id: input.warehouseId,
-    quantity: input.quantity,
-    quantity_available: input.quantity,
-    quantity_on_hand: input.quantity,
-    quantity_reserved: 0,
-    reserved_qty: 0,
-    average_cost: input.unitCost,
-    avg_cost: input.unitCost,
-    unit_cost: input.unitCost,
-    total_value: input.receivedValue,
-    created_at: now,
-    updated_at: now,
-    last_updated: now,
-  };
-
-  const result = await insertWithMissingColumnFallback(service, 'stock_balances', insertPayload);
-  if (result.error || !result.data) {
-    throw buildGrnPostingFailure(
-      {
-        grnId: input.grnId,
-        itemId: input.itemId,
-        stage: 'GRN_STOCK_BALANCE_UPDATE_FAILED',
-        warehouseId: input.warehouseId,
-        warehouseResolved: true,
-      },
-      result.error,
-      'Failed to create stock balance.',
-    );
+  let lastResult: { data: unknown; error: unknown } | null = null;
+  for (const insertPayload of buildStockBalanceInsertPayloadLevels({
+    itemId: input.itemId,
+    organizationId: input.organizationId,
+    quantity,
+    receivedValue: totalValue,
+    unitCost,
+    warehouseId: input.warehouseId,
+  }, now)) {
+    const result = await insertWithMissingColumnFallback(service, 'stock_balances', insertPayload);
+    if (!result.error && result.data) {
+      return result.data as Record<string, unknown>;
+    }
+    lastResult = result;
   }
 
-  return result.data as Record<string, unknown>;
+  throw buildGrnPostingFailure(
+    {
+      dbMessage: sanitizeDbMessage(lastResult?.error),
+      grnId: input.grnId,
+      itemId: input.itemId,
+      operation: 'insert_stock_balance',
+      quantity,
+      stage: 'GRN_STOCK_BALANCE_UPDATE_FAILED',
+      totalValue,
+      unitCost,
+      warehouseId: input.warehouseId,
+      warehouseResolved: true,
+    },
+    lastResult?.error,
+    'Failed to create stock balance.',
+  );
 }
 
 async function insertCompatibleStockMovement(
@@ -748,9 +836,14 @@ async function insertCompatibleStockMovement(
 
     throw buildGrnPostingFailure(
       {
+        dbMessage: sanitizeDbMessage(result.error),
         grnId: input.grnId,
         itemId: input.itemId,
+        operation: 'insert_stock_movement',
+        quantity: input.quantity,
         stage: 'GRN_STOCK_MOVEMENT_INSERT_FAILED',
+        totalValue: input.quantity * input.unitCost,
+        unitCost: input.unitCost,
         warehouseId: input.warehouseId,
         warehouseResolved: true,
       },
@@ -761,9 +854,14 @@ async function insertCompatibleStockMovement(
 
   throw buildGrnPostingFailure(
     {
+      dbMessage: null,
       grnId: input.grnId,
       itemId: input.itemId,
+      operation: 'insert_stock_movement',
+      quantity: input.quantity,
       stage: 'GRN_STOCK_MOVEMENT_INSERT_FAILED',
+      totalValue: input.quantity * input.unitCost,
+      unitCost: input.unitCost,
       warehouseId: input.warehouseId,
       warehouseResolved: true,
     },
@@ -905,6 +1003,106 @@ async function updatePostedGoodsReceivedNoteState(
   }
 
   return fallbackResult.data;
+}
+
+export function buildGoodsReceivedNoteDetailItem(
+  item: Record<string, unknown>,
+  grnId: string,
+) {
+  const itemId = normalizeGoodsReceivedItemId({
+    item_id: item.item_id,
+    itemId: item.itemId,
+    product_id: item.product_id,
+    productId: item.productId,
+    raw_material_id: item.raw_material_id,
+    rawMaterialId: item.rawMaterialId,
+  }) || null;
+  const purchaseOrderItemId = resolveGrnItemPurchaseOrderItemId(item) || null;
+  const goodsReceivedNoteId = String(
+    item.goods_received_note_id ??
+      item.goodsReceivedNoteId ??
+      item.goods_received_id ??
+      item.grn_id ??
+      item.grnId ??
+      grnId,
+  ).trim() || grnId;
+  const quantityReceived = toNumber(item.quantity_received ?? item.received_quantity ?? item.received_qty ?? item.quantity ?? item.qty);
+  const receivedQuantity = toNumber(item.received_quantity ?? item.quantity_received ?? item.received_qty ?? quantityReceived);
+  const quantity = toNumber(item.quantity ?? item.qty ?? quantityReceived);
+  const unitCost = toNumber(item.unit_cost ?? item.unitCost ?? item.cost ?? item.unit_price ?? item.unitPrice);
+  const lineTotal = toNumber(item.line_total ?? item.lineTotal ?? item.total_value ?? (quantityReceived * unitCost));
+
+  return {
+    ...item,
+    goods_received_note_id: goodsReceivedNoteId,
+    goodsReceivedNoteId: goodsReceivedNoteId,
+    grnId: goodsReceivedNoteId,
+    item_id: itemId,
+    itemId,
+    line_total: lineTotal,
+    lineTotal: lineTotal,
+    purchase_order_item_id: purchaseOrderItemId,
+    purchaseOrderItemId: purchaseOrderItemId,
+    quantity,
+    quantityReceived,
+    quantity_received: quantityReceived,
+    receivedQuantity,
+    received_quantity: receivedQuantity,
+    unit_cost: unitCost,
+    unitCost,
+  };
+}
+
+export function buildGoodsReceivedNoteDetailPayload(
+  grn: Record<string, unknown>,
+  items: Array<Record<string, unknown>>,
+) {
+  const warehouseId = String(grn.warehouse_id ?? grn.warehouseId ?? '').trim() || null;
+  const receivingWarehouseId = resolveGrnHeaderWarehouseId(grn) || warehouseId;
+  const purchaseOrderId = resolvePurchaseOrderId(grn) || null;
+  const grnNumber = resolveGrnNumber(grn);
+  const mappedItems = items.map((item) =>
+    buildGoodsReceivedNoteDetailItem(item, String(grn.id ?? '').trim() || ''),
+  );
+  const stockPosted = grn.stock_posted === true || String(grn.status ?? '').trim().toUpperCase() === 'POSTED';
+
+  return {
+    ...grn,
+    grn_number: grnNumber,
+    grnNumber,
+    items: mappedItems,
+    line_items: mappedItems,
+    lineItems: mappedItems,
+    purchase_order_id: purchaseOrderId,
+    purchaseOrderId: purchaseOrderId,
+    receiving_warehouse_id: receivingWarehouseId,
+    receivingWarehouseId,
+    stock_posted: stockPosted,
+    stockPosted: stockPosted,
+    warehouse_id: warehouseId ?? receivingWarehouseId,
+    warehouseId: warehouseId ?? receivingWarehouseId,
+  };
+}
+
+export async function fetchGoodsReceivedNoteDetail(
+  service: {
+    from: (table: string) => any;
+  },
+  input: {
+    grnId: string;
+    organizationId: string;
+  },
+) {
+  const grn = await loadCompatibleGrnHeader(service, input);
+
+  let items: Record<string, unknown>[] = [];
+  try {
+    items = await loadCompatibleGrnItems(service, input.grnId);
+  } catch {
+    items = [];
+  }
+
+  return buildGoodsReceivedNoteDetailPayload(grn, items);
 }
 
 export async function postGoodsReceivedNoteToInventory(
@@ -1075,7 +1273,7 @@ export async function postGoodsReceivedNoteToInventory(
     const receivedValue = toNumber(rawItem.line_total ?? rawItem.total_value) || (quantity * unitCost);
     inventoryValuePosted += receivedValue;
 
-    const updatedBalance = await upsertCompatibleStockBalance(service, {
+    const updatedBalance = await createOrUpdateStockBalance(service, {
       grnId: input.grnId,
       itemId,
       organizationId: input.organizationId,

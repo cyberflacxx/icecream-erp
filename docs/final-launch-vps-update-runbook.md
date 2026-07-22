@@ -185,7 +185,37 @@ ORDER BY e.enumsortorder;
 "
 ```
 
-### 12. Do not do any of the following
+### 12. Inspect live GRN and inventory schema compatibility before deciding on a migration
+
+```bash
+docker exec supabase-db psql -U supabase_admin -d postgres -P pager=off -c "
+SELECT table_name, column_name, data_type, is_nullable, column_default
+FROM information_schema.columns
+WHERE table_schema='icecream_erp'
+  AND table_name IN (
+    'stock_balances',
+    'stock_movements',
+    'goods_received_notes',
+    'goods_received_note_items'
+  )
+ORDER BY table_name, ordinal_position;
+"
+
+docker exec supabase-db psql -U supabase_admin -d postgres -P pager=off -c "
+SELECT conrelid::regclass AS table_name, conname, contype, pg_get_constraintdef(oid) AS definition
+FROM pg_constraint
+WHERE connamespace = 'icecream_erp'::regnamespace
+  AND conrelid::regclass::text IN (
+    'icecream_erp.stock_balances',
+    'icecream_erp.stock_movements',
+    'icecream_erp.goods_received_notes',
+    'icecream_erp.goods_received_note_items'
+  )
+ORDER BY table_name::text, conname;
+"
+```
+
+### 13. Do not do any of the following
 
 - Do not touch `public`, `auth`, `storage`, `graphql_public`, or other project schemas.
 - Do not run `docker compose down -v`.

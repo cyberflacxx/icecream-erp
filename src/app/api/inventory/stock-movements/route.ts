@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
-import { isMissingTableColumnError } from '@/lib/inventory';
+import { listCompatibleStockMovements, mapCompatibleStockMovementRows } from '@/lib/inventory-server';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
 export async function GET(request: NextRequest) {
@@ -19,128 +19,25 @@ export async function GET(request: NextRequest) {
   const type = searchParams.get('type') ?? '';
   const startDate = searchParams.get('startDate') ?? '';
   const endDate = searchParams.get('endDate') ?? '';
+  try {
+    const result = await listCompatibleStockMovements(service, {
+      branchId: ctx.branchId,
+      endDate,
+      isBranchScoped: ctx.isBranchScoped,
+      itemId,
+      page,
+      pageSize,
+      startDate,
+      type,
+      warehouseId,
+    });
+    const mapped = await mapCompatibleStockMovementRows(service, result.rows);
 
-  let query = service
-    .from('stock_movements')
-    .select(
-      `id, movement_type, quantity, running_balance, unit_cost, total_cost, total_value,
-       reference_id, reference_type, source_document_id, source_document_type, reference_number, notes, created_at,
-       items!item_id(id, code, name),
-       warehouses!warehouse_id(
-         id, name,
-         branches!branch_id(id, name)
-       ),
-       users!created_by(id, first_name, last_name)`,
-      { count: 'exact' },
-    );
-
-  if (itemId) query = query.eq('item_id', itemId);
-  if (warehouseId) query = query.eq('warehouse_id', warehouseId);
-  if (type) query = query.eq('movement_type', type);
-  if (startDate) query = query.gte('created_at', `${startDate}T00:00:00.000Z`);
-  if (endDate) query = query.lte('created_at', `${endDate}T23:59:59.999Z`);
-  if (ctx.isBranchScoped && ctx.branchId) {
-    query = query.eq('warehouses.branch_id', ctx.branchId);
+    return NextResponse.json({
+      data: mapped,
+      pagination: { page, pageSize, total: result.count },
+    });
+  } catch (error) {
+    return serverError(error instanceof Error ? error.message : 'Failed to load stock movements.');
   }
-
-  const from = (page - 1) * pageSize;
-  let { data, count, error } = await query
-    .order('created_at', { ascending: false })
-    .range(from, from + pageSize - 1);
-
-  if (
-    error &&
-    (
-      isMissingTableColumnError(error, 'stock_movements', 'source_document_id') ||
-      isMissingTableColumnError(error, 'stock_movements', 'source_document_type') ||
-      isMissingTableColumnError(error, 'stock_movements', 'reference_number') ||
-      isMissingTableColumnError(error, 'stock_movements', 'total_value')
-    )
-  ) {
-    let fallbackQuery = service
-      .from('stock_movements')
-      .select(
-        `id, movement_type, quantity, running_balance, unit_cost, total_cost,
-         reference_id, reference_type, notes, created_at,
-         items!item_id(id, code, name),
-         warehouses!warehouse_id(
-           id, name,
-           branches!branch_id(id, name)
-         ),
-         users!created_by(id, first_name, last_name)`,
-        { count: 'exact' },
-      );
-
-    if (itemId) fallbackQuery = fallbackQuery.eq('item_id', itemId);
-    if (warehouseId) fallbackQuery = fallbackQuery.eq('warehouse_id', warehouseId);
-    if (type) fallbackQuery = fallbackQuery.eq('movement_type', type);
-    if (startDate) fallbackQuery = fallbackQuery.gte('created_at', `${startDate}T00:00:00.000Z`);
-    if (endDate) fallbackQuery = fallbackQuery.lte('created_at', `${endDate}T23:59:59.999Z`);
-    if (ctx.isBranchScoped && ctx.branchId) {
-      fallbackQuery = fallbackQuery.eq('warehouses.branch_id', ctx.branchId);
-    }
-
-    const fallback = await fallbackQuery.order('created_at', { ascending: false }).range(from, from + pageSize - 1);
-    data = fallback.data;
-    count = fallback.count;
-    error = fallback.error;
-  }
-
-  if (error) return serverError(error.message);
-
-  type Obj = Record<string, unknown> | null;
-  const toNumber = (value: unknown) => {
-    const parsed = Number(value);
-    return Number.isFinite(parsed) ? parsed : 0;
-  };
-
-  const mapped = (data ?? []).map((row: Record<string, unknown>) => {
-    const rawItems = row.items as Obj | Obj[];
-    const items: Obj = Array.isArray(rawItems) ? (rawItems[0] ?? null) : rawItems;
-    const rawWH = row.warehouses as Obj | Obj[];
-    const warehouses: Obj = Array.isArray(rawWH) ? (rawWH[0] ?? null) : rawWH;
-    const rawUsers = row.users as Obj | Obj[];
-    const users: Obj = Array.isArray(rawUsers) ? (rawUsers[0] ?? null) : rawUsers;
-    return {
-      id: row.id,
-      date: row.created_at ?? null,
-      type: String(row.movement_type ?? 'UNKNOWN'),
-      quantity: toNumber(row.quantity),
-      runningBalance: toNumber(row.running_balance),
-      unitCost: toNumber(row.unit_cost),
-      totalCost: toNumber(row.total_value ?? row.total_cost),
-      totalValue: toNumber(row.total_value ?? row.total_cost),
-      reference: {
-        id: row.source_document_id ? String(row.source_document_id) : row.reference_id ? String(row.reference_id) : null,
-        number: row.reference_number ? String(row.reference_number) : null,
-        type: row.source_document_type ? String(row.source_document_type) : row.reference_type ? String(row.reference_type) : 'UNKNOWN',
-      },
-      source_document_id: row.source_document_id ? String(row.source_document_id) : row.reference_id ? String(row.reference_id) : null,
-      sourceDocumentId: row.source_document_id ? String(row.source_document_id) : row.reference_id ? String(row.reference_id) : null,
-      source_document_type: row.source_document_type ? String(row.source_document_type) : row.reference_type ? String(row.reference_type) : 'UNKNOWN',
-      sourceDocumentType: row.source_document_type ? String(row.source_document_type) : row.reference_type ? String(row.reference_type) : 'UNKNOWN',
-      notes: row.notes ?? null,
-      item: items
-        ? {
-            id: String(items.id ?? ''),
-            code: String(items.code ?? '--'),
-            name: String(items.name ?? 'Unknown item'),
-          }
-        : { id: '', code: '--', name: 'Unknown item' },
-      warehouse: warehouses
-        ? {
-            id: String(warehouses.id ?? ''),
-            name: String(warehouses.name ?? 'Unknown warehouse'),
-          }
-        : { id: '', name: 'Unknown warehouse' },
-      createdBy: users
-        ? { id: String(users.id ?? ''), name: `${users.first_name ?? ''} ${users.last_name ?? ''}`.trim() || 'Unknown user' }
-        : null,
-    };
-  });
-
-  return NextResponse.json({
-    data: mapped,
-    pagination: { page, pageSize, total: count ?? 0 },
-  });
 }

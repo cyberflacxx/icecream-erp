@@ -21,6 +21,30 @@ const OPTIONAL_STOCK_MOVEMENT_COLUMNS = new Set([
   'total_value',
 ]);
 
+const STOCK_MOVEMENT_LIST_COLUMNS = [
+  'id',
+  'item_id',
+  'warehouse_id',
+  'movement_type',
+  'quantity',
+  'running_balance',
+  'unit_cost',
+  'total_cost',
+  'total_value',
+  'reference_id',
+  'reference_type',
+  'source_document_id',
+  'source_document_type',
+  'reference_number',
+  'notes',
+  'created_by',
+  'created_at',
+] as const;
+
+export function buildStockMovementListSelectClause(columns: readonly string[] = STOCK_MOVEMENT_LIST_COLUMNS) {
+  return columns.join(', ');
+}
+
 export async function generateDocumentNumber(
   service: ServiceClient,
   table: string,
@@ -120,6 +144,187 @@ export async function getBalance(
   }
 
   return data;
+}
+
+function applyStockMovementListFilters(
+  query: any,
+  input: {
+    endDate?: string;
+    itemId?: string;
+    scopedWarehouseIds?: string[] | null;
+    startDate?: string;
+    type?: string;
+    warehouseId?: string;
+  },
+) {
+  let nextQuery = query;
+
+  if (input.itemId) nextQuery = nextQuery.eq('item_id', input.itemId);
+  if (input.warehouseId) nextQuery = nextQuery.eq('warehouse_id', input.warehouseId);
+  if (input.type) nextQuery = nextQuery.eq('movement_type', input.type);
+  if (input.startDate) nextQuery = nextQuery.gte('created_at', `${input.startDate}T00:00:00.000Z`);
+  if (input.endDate) nextQuery = nextQuery.lte('created_at', `${input.endDate}T23:59:59.999Z`);
+  if (input.scopedWarehouseIds) {
+    nextQuery = input.scopedWarehouseIds.length
+      ? nextQuery.in('warehouse_id', input.scopedWarehouseIds)
+      : nextQuery.in('warehouse_id', ['00000000-0000-0000-0000-000000000000']);
+  }
+
+  return nextQuery;
+}
+
+export async function listCompatibleStockMovements(
+  service: ServiceClient,
+  input: {
+    branchId?: string | null;
+    endDate?: string;
+    isBranchScoped?: boolean;
+    itemId?: string;
+    page: number;
+    pageSize: number;
+    startDate?: string;
+    type?: string;
+    warehouseId?: string;
+  },
+) {
+  let scopedWarehouseIds: string[] | null = null;
+
+  if (input.isBranchScoped && input.branchId) {
+    const warehousesResult = await service
+      .from('warehouses')
+      .select('id')
+      .eq('branch_id', input.branchId);
+
+    if (warehousesResult.error) {
+      throw new Error(warehousesResult.error.message);
+    }
+
+    scopedWarehouseIds = (warehousesResult.data ?? []).map((row: { id?: unknown }) => String(row.id ?? '')).filter(Boolean);
+  }
+
+  const from = (input.page - 1) * input.pageSize;
+  let columns = [...STOCK_MOVEMENT_LIST_COLUMNS] as string[];
+  const removedColumns = new Set<string>();
+
+  for (let attempt = 0; attempt <= STOCK_MOVEMENT_LIST_COLUMNS.length; attempt += 1) {
+    let query = service
+      .from('stock_movements')
+      .select(buildStockMovementListSelectClause(columns), { count: 'exact' });
+
+    query = applyStockMovementListFilters(query, {
+      endDate: input.endDate,
+      itemId: input.itemId,
+      scopedWarehouseIds,
+      startDate: input.startDate,
+      type: input.type,
+      warehouseId: input.warehouseId,
+    });
+
+    const result = await query
+      .order('created_at', { ascending: false })
+      .range(from, from + input.pageSize - 1);
+
+    if (!result.error) {
+      return {
+        count: result.count ?? 0,
+        rows: (result.data ?? []) as Array<Record<string, unknown>>,
+      };
+    }
+
+    const missingColumn = extractMissingColumnName(result.error, 'stock_movements');
+    if (!missingColumn || removedColumns.has(missingColumn) || !columns.includes(missingColumn)) {
+      throw new Error(result.error.message ?? 'Failed to load stock movements.');
+    }
+
+    removedColumns.add(missingColumn);
+    columns = columns.filter((column) => column !== missingColumn);
+  }
+
+  throw new Error('Failed to load stock movements.');
+}
+
+export async function mapCompatibleStockMovementRows(
+  service: ServiceClient,
+  rows: Array<Record<string, unknown>>,
+) {
+  const itemIds = [...new Set(rows.map((row) => String(row.item_id ?? '')).filter(Boolean))];
+  const warehouseIds = [...new Set(rows.map((row) => String(row.warehouse_id ?? '')).filter(Boolean))];
+  const userIds = [...new Set(rows.map((row) => String(row.created_by ?? '')).filter(Boolean))];
+
+  const [itemsResult, warehousesResult, usersResult] = await Promise.all([
+    itemIds.length
+      ? service.from('items').select('id, code, name').in('id', itemIds)
+      : Promise.resolve({ data: [], error: null }),
+    warehouseIds.length
+      ? service.from('warehouses').select('id, name').in('id', warehouseIds)
+      : Promise.resolve({ data: [], error: null }),
+    userIds.length
+      ? service.from('users').select('id, first_name, last_name').in('id', userIds)
+      : Promise.resolve({ data: [], error: null }),
+  ]);
+
+  const items = new Map<string, Record<string, unknown>>(
+    ((itemsResult.error ? [] : itemsResult.data) ?? []).map((row: Record<string, unknown>) => [String(row.id ?? ''), row] as const),
+  );
+  const warehouses = new Map<string, Record<string, unknown>>(
+    ((warehousesResult.error ? [] : warehousesResult.data) ?? []).map((row: Record<string, unknown>) => [String(row.id ?? ''), row] as const),
+  );
+  const users = new Map<string, Record<string, unknown>>(
+    ((usersResult.error ? [] : usersResult.data) ?? []).map((row: Record<string, unknown>) => [String(row.id ?? ''), row] as const),
+  );
+
+  return rows.map((row) => {
+    const itemId = String(row.item_id ?? '').trim() || null;
+    const warehouseId = String(row.warehouse_id ?? '').trim() || null;
+    const createdById = String(row.created_by ?? '').trim() || null;
+    const user = createdById ? (users.get(createdById) ?? null) as Record<string, unknown> | null : null;
+    const item = itemId ? (items.get(itemId) ?? null) as Record<string, unknown> | null : null;
+    const warehouse = warehouseId ? (warehouses.get(warehouseId) ?? null) as Record<string, unknown> | null : null;
+
+    return {
+      createdBy: createdById
+        ? {
+            id: createdById,
+            name: user ? `${user.first_name ?? ''} ${user.last_name ?? ''}`.trim() || 'Unknown user' : 'Unknown user',
+          }
+        : null,
+      date: row.created_at ?? null,
+      id: row.id,
+      item: item
+        ? {
+            code: String(item.code ?? '--'),
+            id: String(item.id ?? ''),
+            name: String(item.name ?? 'Unknown item'),
+          }
+        : { code: '--', id: itemId ?? '', name: 'Unknown item' },
+      item_id: itemId,
+      itemId,
+      notes: row.notes ?? null,
+      quantity: toNumber(row.quantity),
+      reference: {
+        id: row.source_document_id ? String(row.source_document_id) : row.reference_id ? String(row.reference_id) : null,
+        number: row.reference_number ? String(row.reference_number) : null,
+        type: row.source_document_type ? String(row.source_document_type) : row.reference_type ? String(row.reference_type) : 'UNKNOWN',
+      },
+      runningBalance: toNumber(row.running_balance),
+      source_document_id: row.source_document_id ? String(row.source_document_id) : row.reference_id ? String(row.reference_id) : null,
+      sourceDocumentId: row.source_document_id ? String(row.source_document_id) : row.reference_id ? String(row.reference_id) : null,
+      source_document_type: row.source_document_type ? String(row.source_document_type) : row.reference_type ? String(row.reference_type) : 'UNKNOWN',
+      sourceDocumentType: row.source_document_type ? String(row.source_document_type) : row.reference_type ? String(row.reference_type) : 'UNKNOWN',
+      totalCost: toNumber(row.total_value ?? row.total_cost),
+      totalValue: toNumber(row.total_value ?? row.total_cost),
+      type: String(row.movement_type ?? 'UNKNOWN'),
+      unitCost: toNumber(row.unit_cost),
+      warehouse: warehouse
+        ? {
+            id: String(warehouse.id ?? ''),
+            name: String(warehouse.name ?? 'Unknown warehouse'),
+          }
+        : { id: warehouseId ?? '', name: 'Unknown warehouse' },
+      warehouse_id: warehouseId,
+      warehouseId,
+    };
+  });
 }
 
 export async function applyInventoryDelta(
