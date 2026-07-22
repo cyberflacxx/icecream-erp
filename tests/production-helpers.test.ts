@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  buildProductionSmokeSetupFailure,
   buildProductionStockReceiveFailure,
   buildProductionStockReceiveSignature,
   buildCostingRows,
@@ -13,10 +14,12 @@ import {
   calculateScalingFactor,
   calculateRequiredMaterials,
   calculateCostPerUnit,
+  calculateProductionSmokeSeedQuantity,
   calculateProductivity,
   calculateYieldPercentage,
   getExistingWarehouseTypes,
   normalizeProductionStockReceiveItems,
+  resolveWarehouseTypeCandidatesForLive,
   resolveWarehouseTypeForLive,
   validateRecipeImportRows,
   validateShiftTargetImportRows,
@@ -216,4 +219,39 @@ test('existing warehouse types normalize live compatibility aliases', () => {
     ]),
     ['PRODUCTION', 'WIP', 'RAW_MATERIALS'],
   );
+});
+
+test('production smoke warehouse type candidates create live-safe warehouses when none exist', () => {
+  assert.deepEqual(resolveWarehouseTypeCandidatesForLive('production', []), [
+    'PRODUCTION',
+    'WIP',
+    'GENERAL',
+  ]);
+  assert.deepEqual(resolveWarehouseTypeCandidatesForLive('raw', []), [
+    'RAW_MATERIALS',
+    'RAW_MATERIAL',
+    'GENERAL',
+  ]);
+});
+
+test('production smoke seed quantity does not require pre-existing source stock', () => {
+  assert.equal(calculateProductionSmokeSeedQuantity(0, 5), 5);
+  assert.equal(calculateProductionSmokeSeedQuantity(2, 5), 3);
+  assert.equal(calculateProductionSmokeSeedQuantity(5, 5), 0);
+});
+
+test('production smoke setup failure exposes required stage codes', () => {
+  const missingWarehouse = buildProductionSmokeSetupFailure({
+    message: 'No raw warehouse could be resolved.',
+    stage: 'WAREHOUSE_OR_SOURCE_STOCK_MISSING',
+  });
+  const seedUnavailable = buildProductionSmokeSetupFailure({
+    message: 'Stock adjustment route is unavailable.',
+    stage: 'SOURCE_STOCK_SEED_UNAVAILABLE',
+  });
+
+  assert.equal(missingWarehouse.code, 'PRODUCTION_SMOKE_SETUP_FAILED');
+  assert.equal(missingWarehouse.stage, 'WAREHOUSE_OR_SOURCE_STOCK_MISSING');
+  assert.equal(seedUnavailable.code, 'PRODUCTION_SMOKE_SETUP_FAILED');
+  assert.equal(seedUnavailable.stage, 'SOURCE_STOCK_SEED_UNAVAILABLE');
 });

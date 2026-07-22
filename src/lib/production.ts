@@ -153,6 +153,17 @@ export type LiveWarehouseLike = {
 };
 
 export type LiveWarehouseKind = 'production' | 'raw';
+export type ProductionSmokeSetupStage =
+  | 'WAREHOUSE_OR_SOURCE_STOCK_MISSING'
+  | 'SOURCE_STOCK_SEED_UNAVAILABLE';
+
+export type ProductionSmokeSetupFailure = {
+  success: false;
+  code: 'PRODUCTION_SMOKE_SETUP_FAILED';
+  stage: ProductionSmokeSetupStage;
+  message: string;
+  details: Record<string, unknown>;
+};
 
 function normalizeLiveWarehouseType(value: unknown) {
   const warehouseType = normalizeWarehouseCode(String(value ?? ''));
@@ -202,6 +213,44 @@ export function resolveWarehouseTypeForLive(
   }
 
   return null;
+}
+
+export function resolveWarehouseTypeCandidatesForLive(
+  kind: LiveWarehouseKind,
+  existingTypes: string[],
+) {
+  const preferredTypes =
+    kind === 'production'
+      ? ['PRODUCTION', 'WIP', 'GENERAL']
+      : ['RAW_MATERIALS', 'RAW_MATERIAL', 'GENERAL'];
+  const normalizedExisting = existingTypes
+    .map((type) => normalizeLiveWarehouseType(type))
+    .filter(Boolean);
+
+  return [...new Set([...preferredTypes.filter((type) => normalizedExisting.includes(type)), ...preferredTypes])];
+}
+
+export function calculateProductionSmokeSeedQuantity(
+  availableQuantity: number,
+  requiredQuantity: number,
+) {
+  const normalizedAvailable = Number.isFinite(availableQuantity) ? availableQuantity : 0;
+  const normalizedRequired = ensurePositiveQuantity(requiredQuantity, 'requiredQuantity');
+  return Math.max(normalizedRequired - normalizedAvailable, 0);
+}
+
+export function buildProductionSmokeSetupFailure(input: {
+  details?: Record<string, unknown>;
+  message: string;
+  stage: ProductionSmokeSetupStage;
+}): ProductionSmokeSetupFailure {
+  return {
+    success: false,
+    code: 'PRODUCTION_SMOKE_SETUP_FAILED',
+    stage: input.stage,
+    message: input.message,
+    details: input.details ?? {},
+  };
 }
 
 export function normalizeProductionStockReceiveItems(
