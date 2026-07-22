@@ -1,9 +1,12 @@
 'use client';
 
 import Link from 'next/link';
+import { usePathname } from 'next/navigation';
 import { AlertTriangle, RefreshCw } from 'lucide-react';
+import { useEffect } from 'react';
 
 import { Button } from '@/components/ui/button';
+import { useCurrentUser } from '@/hooks/useCurrentUser';
 
 export default function GlobalError({
   error,
@@ -12,6 +15,21 @@ export default function GlobalError({
   error: Error & { digest?: string };
   reset: () => void;
 }) {
+  const pathname = usePathname();
+  const currentUserQuery = useCurrentUser();
+  const currentUserRole = currentUserQuery.data?.profile?.role ?? currentUserQuery.data?.roles?.[0]?.name ?? null;
+
+  useEffect(() => {
+    console.error('GlobalError boundary caught runtime error', {
+      currentUserRole,
+      digest: error.digest ?? null,
+      message: error.message,
+      name: error.name,
+      pathname,
+      stack: error.stack ?? null,
+    });
+  }, [currentUserRole, error, pathname]);
+
   return (
     <html lang="en">
       <body className="min-h-screen bg-[var(--app-bg-canvas)]">

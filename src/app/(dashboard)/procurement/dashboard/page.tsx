@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { FileClock, ShieldAlert, Truck, Wallet } from 'lucide-react';
+import type { ReactNode } from 'react';
 
 import { PageHeader } from '@/components/dashboard/page-header';
 import { ProcurementNav } from '@/components/procurement/procurement-nav';
@@ -153,7 +154,7 @@ function formatQuantity(value: number) {
   return value.toLocaleString(undefined, { maximumFractionDigits: 3 });
 }
 
-function MetricCard({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
+function MetricCard({ icon, label, value }: { icon: ReactNode; label: string; value: string }) {
   return (
     <div className="dashboard-blue-card p-4">
       <div className="flex items-center justify-between">

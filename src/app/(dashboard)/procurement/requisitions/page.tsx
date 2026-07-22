@@ -24,6 +24,7 @@ import {
   getRequisitionWorkflowCopy,
 } from '@/lib/procurement-workflow';
 import { buildRequisitionDraftPayload } from '@/lib/procurement-requisitions';
+import { formatCatDate } from '@/lib/date-time';
 import { API_ROUTES, PERMISSIONS } from '@/lib/shared';
 import { usePermission } from '@/hooks/usePermission';
 
@@ -385,8 +386,8 @@ export default function RequisitionsPage() {
               <div className="space-y-1">
                 <p className="font-medium text-foreground">{row.requisitionNumber}</p>
                 <p className="text-xs text-muted">
-                  Requested {formatDateLabel(row.requestDate) ?? '-'}
-                  {row.neededByDate ? ` • Needed ${formatDateLabel(row.neededByDate)}` : ''}
+                  Requested {formatCatDate(row.requestDate)}
+                  {row.neededByDate ? ` • Needed ${formatCatDate(row.neededByDate)}` : ''}
                 </p>
               </div>
             ),
