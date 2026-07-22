@@ -219,6 +219,20 @@ export interface GrnStockPostingFailureDetails {
   warehouseResolved?: boolean;
 }
 
+export interface NormalizedPostableGrnLine {
+  batchNumber: string | null;
+  hasAcceptedQuantity: boolean;
+  itemId: string;
+  lineId: string | null;
+  organizationId: string;
+  purchaseOrderItemId: string | null;
+  quantity: number;
+  rawLine: Record<string, unknown>;
+  receivedValue: number;
+  unitCost: number;
+  warehouseId: string;
+}
+
 export class GrnStockPostingError extends Error {
   readonly code = 'GRN_STOCK_POST_FAILED';
   readonly details: GrnStockPostingFailureDetails;
@@ -252,6 +266,13 @@ function isInvalidGrnStatusEnumError(error: unknown) {
 function isInvalidMovementTypeEnumError(error: unknown) {
   const message = getErrorMessage(error).toLowerCase();
   return message.includes('invalid input value for enum') && message.includes('movement');
+}
+
+function isUniqueConstraintError(error: unknown, constraintName?: string) {
+  const message = getErrorMessage(error).toLowerCase();
+  return message.includes('duplicate key value violates unique constraint') && (
+    !constraintName || message.includes(constraintName.toLowerCase())
+  );
 }
 
 function extractMissingColumnName(error: unknown, table: string) {
@@ -328,6 +349,29 @@ function resolveGrnOrganizationId(input: {
 }
 
 function resolveGrnItemQuantity(item: Record<string, unknown>) {
+  const acceptedCandidates = [
+    item.accepted_quantity,
+    item.acceptedQuantity,
+    item.quantity_accepted,
+    item.quantityAccepted,
+    item.received_accepted_quantity,
+    item.receivedAcceptedQuantity,
+  ];
+
+  for (const candidate of acceptedCandidates) {
+    const quantity = toNumber(candidate);
+    if (quantity > 0) {
+      return quantity;
+    }
+  }
+
+  const hasAcceptedQuantityField = acceptedCandidates.some(
+    (candidate) => candidate !== undefined && candidate !== null && String(candidate).trim() !== '',
+  );
+  if (hasAcceptedQuantityField) {
+    return 0;
+  }
+
   return toNumber(item.quantity_received ?? item.received_quantity ?? item.quantity ?? item.qty);
 }
 
@@ -352,6 +396,139 @@ function resolveGrnItemPurchaseOrderItemId(item: Record<string, unknown>) {
       item.poItemId ??
       '',
   ).trim();
+}
+
+function resolveLineUnitCost(
+  line: Record<string, unknown>,
+  purchaseOrderItem: Record<string, unknown> | null | undefined,
+  itemMaster: Record<string, unknown> | null | undefined,
+) {
+  return toNumber(
+    line.unit_cost ??
+      line.cost ??
+      line.price ??
+      line.unit_price ??
+      purchaseOrderItem?.unit_price ??
+      purchaseOrderItem?.unitPrice ??
+      purchaseOrderItem?.unit_cost ??
+      purchaseOrderItem?.unitCost ??
+      resolveItemMasterUnitCost(itemMaster) ??
+      0,
+  );
+}
+
+function buildNormalizedLineScore(line: Pick<NormalizedPostableGrnLine, 'hasAcceptedQuantity' | 'purchaseOrderItemId' | 'quantity'>) {
+  return (line.purchaseOrderItemId ? 100 : 0) + (line.hasAcceptedQuantity ? 10 : 0) + Math.min(line.quantity, 1);
+}
+
+export function findMatchingGrnReceiveLine(
+  existingItems: Array<Record<string, unknown>>,
+  input: {
+    itemId: string;
+    poItemId?: string | null;
+  },
+) {
+  const purchaseOrderItemId = String(input.poItemId ?? '').trim();
+  if (purchaseOrderItemId) {
+    const byPurchaseOrderItem = existingItems.find(
+      (item) => resolveGrnItemPurchaseOrderItemId(item) === purchaseOrderItemId,
+    );
+    if (byPurchaseOrderItem) {
+      return byPurchaseOrderItem;
+    }
+  }
+
+  return existingItems.find((item) => normalizeGoodsReceivedItemId(item) === input.itemId) ?? null;
+}
+
+export function normalizePostableGrnLines(input: {
+  fallbackOrganizationId?: string | null;
+  grn: Record<string, unknown>;
+  itemMastersById: Map<string, Record<string, unknown>>;
+  poItemsById: Map<string, Record<string, unknown>>;
+  rawLines: Array<Record<string, unknown>>;
+}) {
+  const headerWarehouseId = resolveGrnHeaderWarehouseId(input.grn);
+  const candidates = new Map<string, NormalizedPostableGrnLine>();
+
+  for (const rawLine of input.rawLines) {
+    const purchaseOrderItemId = resolveGrnItemPurchaseOrderItemId(rawLine) || null;
+    const purchaseOrderItem = purchaseOrderItemId ? input.poItemsById.get(purchaseOrderItemId) ?? null : null;
+    const itemId = normalizeGoodsReceivedItemId({
+      item_id: rawLine.item_id ?? purchaseOrderItem?.item_id,
+      itemId: rawLine.itemId ?? purchaseOrderItem?.itemId,
+      product_id: rawLine.product_id ?? purchaseOrderItem?.product_id,
+      productId: rawLine.productId ?? purchaseOrderItem?.productId,
+      raw_material_id: rawLine.raw_material_id ?? purchaseOrderItem?.raw_material_id,
+      rawMaterialId: rawLine.rawMaterialId ?? purchaseOrderItem?.rawMaterialId,
+    });
+    const quantity = resolveGrnItemQuantity(rawLine);
+    if (!itemId || quantity <= 0) {
+      continue;
+    }
+
+    const warehouseId = resolveGrnItemWarehouseId(rawLine, headerWarehouseId);
+    if (!warehouseId) {
+      continue;
+    }
+
+    const itemMaster = input.itemMastersById.get(itemId) ?? null;
+    const unitCost = resolveLineUnitCost(rawLine, purchaseOrderItem, itemMaster);
+    const receivedValue = toNumber(rawLine.line_total ?? rawLine.total_value) || (quantity * unitCost);
+    const normalizedLine: NormalizedPostableGrnLine = {
+      batchNumber: rawLine.batch_number ? String(rawLine.batch_number) : null,
+      hasAcceptedQuantity: quantity > 0 && (
+        rawLine.accepted_quantity !== undefined ||
+        rawLine.acceptedQuantity !== undefined ||
+        rawLine.quantity_accepted !== undefined ||
+        rawLine.quantityAccepted !== undefined ||
+        rawLine.received_accepted_quantity !== undefined ||
+        rawLine.receivedAcceptedQuantity !== undefined
+      ),
+      itemId,
+      lineId: String(rawLine.id ?? '').trim() || null,
+      organizationId: resolveGrnOrganizationId({
+        fallbackOrganizationId: input.fallbackOrganizationId ?? null,
+        grn: input.grn,
+        itemMaster,
+        line: rawLine,
+        purchaseOrderItem,
+      }),
+      purchaseOrderItemId,
+      quantity,
+      rawLine,
+      receivedValue,
+      unitCost,
+      warehouseId,
+    };
+
+    const exactKey = `${normalizedLine.itemId}::${normalizedLine.warehouseId}::${normalizedLine.purchaseOrderItemId ?? ''}`;
+    const existingExact = candidates.get(exactKey);
+    if (!existingExact || buildNormalizedLineScore(normalizedLine) > buildNormalizedLineScore(existingExact) || (
+      buildNormalizedLineScore(normalizedLine) === buildNormalizedLineScore(existingExact) &&
+      normalizedLine.quantity > existingExact.quantity
+    )) {
+      candidates.set(exactKey, normalizedLine);
+    }
+  }
+
+  const groupedByItemWarehouse = new Map<string, NormalizedPostableGrnLine[]>();
+  for (const line of candidates.values()) {
+    const key = `${line.itemId}::${line.warehouseId}`;
+    groupedByItemWarehouse.set(key, [...(groupedByItemWarehouse.get(key) ?? []), line]);
+  }
+
+  const normalizedLines: NormalizedPostableGrnLine[] = [];
+  for (const group of groupedByItemWarehouse.values()) {
+    const poLinked = group.filter((line) => Boolean(line.purchaseOrderItemId));
+    if (poLinked.length > 0) {
+      normalizedLines.push(...poLinked);
+      continue;
+    }
+    normalizedLines.push(...group);
+  }
+
+  return normalizedLines;
 }
 
 function resolveItemMasterUnitCost(itemMaster: Record<string, unknown> | null | undefined) {
@@ -893,6 +1070,17 @@ async function insertCompatibleStockMovement(
       return result.data as Record<string, unknown>;
     }
 
+    if (isUniqueConstraintError(result.error, 'idx_stock_movements_reference_guard')) {
+      const existingMovement = await findExistingGrnMovementForLine(service, {
+        grnId: input.grnId,
+        itemId: input.itemId,
+        warehouseId: input.warehouseId,
+      });
+      if (existingMovement) {
+        return existingMovement;
+      }
+    }
+
     if (isInvalidMovementTypeEnumError(result.error)) {
       continue;
     }
@@ -970,6 +1158,75 @@ async function findExistingGrnMovement(
     if (
       isMissingColumnError(result.error, 'stock_movements', 'source_document_id') ||
       isMissingColumnError(result.error, 'stock_movements', 'reference_id')
+    ) {
+      continue;
+    }
+  }
+
+  return null;
+}
+
+async function findExistingGrnMovementForLine(
+  service: {
+    from: (table: string) => any;
+  },
+  input: {
+    grnId: string;
+    itemId: string;
+    warehouseId: string;
+  },
+) {
+  const attempts = [
+    () =>
+      service
+        .from('stock_movements')
+        .select('*')
+        .eq('source_document_type', 'GRN')
+        .eq('source_document_id', input.grnId)
+        .eq('item_id', input.itemId)
+        .eq('warehouse_id', input.warehouseId)
+        .limit(1),
+    () =>
+      service
+        .from('stock_movements')
+        .select('*')
+        .eq('reference_type', 'goods_received_note')
+        .eq('reference_id', input.grnId)
+        .eq('item_id', input.itemId)
+        .eq('warehouse_id', input.warehouseId)
+        .limit(1),
+    () =>
+      service
+        .from('stock_movements')
+        .select('*')
+        .eq('source_document_id', input.grnId)
+        .eq('item_id', input.itemId)
+        .eq('warehouse_id', input.warehouseId)
+        .limit(1),
+    () =>
+      service
+        .from('stock_movements')
+        .select('*')
+        .eq('reference_id', input.grnId)
+        .eq('item_id', input.itemId)
+        .eq('warehouse_id', input.warehouseId)
+        .limit(1),
+  ];
+
+  for (const attempt of attempts) {
+    const result = await attempt();
+    if (!result.error) {
+      const rows = (result.data ?? []) as Record<string, unknown>[];
+      return rows[0] ?? null;
+    }
+
+    if (
+      isMissingColumnError(result.error, 'stock_movements', 'source_document_type') ||
+      isMissingColumnError(result.error, 'stock_movements', 'source_document_id') ||
+      isMissingColumnError(result.error, 'stock_movements', 'reference_type') ||
+      isMissingColumnError(result.error, 'stock_movements', 'reference_id') ||
+      isMissingColumnError(result.error, 'stock_movements', 'item_id') ||
+      isMissingColumnError(result.error, 'stock_movements', 'warehouse_id')
     ) {
       continue;
     }
@@ -1207,19 +1464,6 @@ export async function postGoodsReceivedNoteToInventory(
     });
   }
 
-  const existingMovement = await findExistingGrnMovement(service, input.grnId);
-  if (existingMovement) {
-    return updatePostedGoodsReceivedNoteState(service, {
-      currentStatus: grn.status,
-      grnId: input.grnId,
-      inventoryValuePosted: toNumber(grn.inventory_value_posted),
-      itemCount: 0,
-      postedAt: new Date().toISOString(),
-      userId: input.userId,
-      warehouseResolved: true,
-    });
-  }
-
   const items = await loadCompatibleGrnItems(service, input.grnId);
   if (items.length === 0) {
     throw buildGrnPostingFailure(
@@ -1261,89 +1505,52 @@ export async function postGoodsReceivedNoteToInventory(
     fallbackOrganizationId: input.organizationId,
     grn,
   });
+  const normalizedLines = normalizePostableGrnLines({
+    fallbackOrganizationId: headerOrganizationId || input.organizationId,
+    grn,
+    itemMastersById: itemsById,
+    poItemsById,
+    rawLines: items,
+  });
+  if (normalizedLines.length === 0) {
+    const existingMovement = await findExistingGrnMovement(service, input.grnId);
+    if (existingMovement) {
+      return updatePostedGoodsReceivedNoteState(service, {
+        currentStatus: grn.status,
+        grnId: input.grnId,
+        inventoryValuePosted: toNumber(grn.inventory_value_posted),
+        itemCount: 0,
+        postedAt: new Date().toISOString(),
+        userId: input.userId,
+        warehouseResolved: true,
+      });
+    }
+
+    throw buildGrnPostingFailure(
+      {
+        grnId: input.grnId,
+        itemCount: 0,
+        stage: 'GRN_HAS_NO_ITEMS',
+        warehouseResolved: true,
+      },
+      undefined,
+      'Goods received note has no postable items.',
+    );
+  }
   let inventoryValuePosted = 0;
 
-  for (const rawItem of items) {
-    const purchaseOrderItemId = resolveGrnItemPurchaseOrderItemId(rawItem);
-    const poItem = purchaseOrderItemId ? poItemsById.get(purchaseOrderItemId) ?? null : null;
-    const itemId = normalizeGoodsReceivedItemId({
-      item_id: rawItem.item_id ?? poItem?.item_id,
-      itemId: rawItem.itemId ?? poItem?.itemId,
-      product_id: rawItem.product_id ?? poItem?.product_id,
-      productId: rawItem.productId ?? poItem?.productId,
-      raw_material_id: rawItem.raw_material_id ?? poItem?.raw_material_id,
-      rawMaterialId: rawItem.rawMaterialId ?? poItem?.rawMaterialId,
-    });
-
-    if (!itemId) {
+  for (const normalizedLine of normalizedLines) {
+    if (!normalizedLine.organizationId) {
       throw buildGrnPostingFailure(
         {
           grnId: input.grnId,
-          itemCount: items.length,
-          lineId: String(rawItem.id ?? '').trim() || null,
-          purchaseOrderItemId: purchaseOrderItemId || null,
-          stage: 'GRN_ITEM_ID_MISSING',
-          warehouseResolved: Boolean(warehouseId),
-        },
-        undefined,
-        'Goods received note item is missing item_id.',
-      );
-    }
-
-    const quantity = resolveGrnItemQuantity(rawItem);
-    if (quantity <= 0) {
-      throw buildGrnPostingFailure(
-        {
-          grnId: input.grnId,
-          itemCount: items.length,
-          itemId,
-          lineId: String(rawItem.id ?? '').trim() || null,
-          purchaseOrderItemId: purchaseOrderItemId || null,
-          stage: 'GRN_QUANTITY_MISSING_OR_ZERO',
-          warehouseResolved: Boolean(warehouseId),
-        },
-        undefined,
-        'Goods received note item quantity is missing or zero.',
-      );
-    }
-
-    const lineWarehouseId = resolveGrnItemWarehouseId(rawItem, warehouseId);
-    if (!lineWarehouseId) {
-      throw buildGrnPostingFailure(
-        {
-          grnId: input.grnId,
-          itemCount: items.length,
-          itemId,
-          lineId: String(rawItem.id ?? '').trim() || null,
-          purchaseOrderItemId: purchaseOrderItemId || null,
-          stage: 'GRN_WAREHOUSE_MISSING',
-          warehouseResolved: false,
-        },
-        undefined,
-        'Please select a receiving warehouse before posting GRN.',
-      );
-    }
-
-    const itemMaster = itemsById.get(itemId) ?? null;
-    const resolvedOrganizationId = resolveGrnOrganizationId({
-      fallbackOrganizationId: headerOrganizationId || input.organizationId,
-      grn,
-      itemMaster,
-      line: rawItem,
-      purchaseOrderItem: poItem,
-    });
-
-    if (!resolvedOrganizationId) {
-      throw buildGrnPostingFailure(
-        {
-          grnId: input.grnId,
-          itemCount: items.length,
-          itemId,
-          lineId: String(rawItem.id ?? '').trim() || null,
+          itemCount: normalizedLines.length,
+          itemId: normalizedLine.itemId,
+          lineId: normalizedLine.lineId,
           operation: 'resolve_organization_id',
-          purchaseOrderItemId: purchaseOrderItemId || null,
+          purchaseOrderItemId: normalizedLine.purchaseOrderItemId,
           stage: 'GRN_ORGANIZATION_MISSING',
-          warehouseId: lineWarehouseId,
+          warehouseId: normalizedLine.warehouseId,
           warehouseResolved: true,
         },
         undefined,
@@ -1351,50 +1558,46 @@ export async function postGoodsReceivedNoteToInventory(
       );
     }
 
-    const unitCost = toNumber(
-      rawItem.unit_cost ??
-        rawItem.cost ??
-        rawItem.price ??
-        rawItem.unit_price ??
-        poItem?.unit_price ??
-        poItem?.unitPrice ??
-        poItem?.unit_cost ??
-        poItem?.unitCost ??
-        resolveItemMasterUnitCost(itemMaster) ??
-        0,
-    );
-    const receivedValue = toNumber(rawItem.line_total ?? rawItem.total_value) || (quantity * unitCost);
-    inventoryValuePosted += receivedValue;
+    inventoryValuePosted += normalizedLine.receivedValue;
+
+    const existingLineMovement = await findExistingGrnMovementForLine(service, {
+      grnId: input.grnId,
+      itemId: normalizedLine.itemId,
+      warehouseId: normalizedLine.warehouseId,
+    });
+    if (existingLineMovement) {
+      continue;
+    }
 
     const updatedBalance = await createOrUpdateStockBalance(service, {
       grnId: input.grnId,
-      itemId,
-      organizationId: resolvedOrganizationId,
-      quantity,
-      receivedValue,
-      unitCost,
-      warehouseId: lineWarehouseId,
+      itemId: normalizedLine.itemId,
+      organizationId: normalizedLine.organizationId,
+      quantity: normalizedLine.quantity,
+      receivedValue: normalizedLine.receivedValue,
+      unitCost: normalizedLine.unitCost,
+      warehouseId: normalizedLine.warehouseId,
     });
 
     await insertCompatibleStockMovement(service, {
-      batchNumber: rawItem.batch_number ? String(rawItem.batch_number) : null,
+      batchNumber: normalizedLine.batchNumber,
       grnId: input.grnId,
       grnNumber,
-      itemId,
+      itemId: normalizedLine.itemId,
       notes: String(grn.notes ?? grn.approval_notes ?? ''),
-      organizationId: resolvedOrganizationId,
-      quantity,
+      organizationId: normalizedLine.organizationId,
+      quantity: normalizedLine.quantity,
       runningBalance: toNumber(updatedBalance.quantity_on_hand ?? updatedBalance.quantity),
-      unitCost,
+      unitCost: normalizedLine.unitCost,
       userId: input.userId,
-      warehouseId: lineWarehouseId,
+      warehouseId: normalizedLine.warehouseId,
     });
 
-    if (purchaseOrderItemId) {
+    if (normalizedLine.purchaseOrderItemId) {
       const poItemResult = await service
         .from('purchase_order_items')
         .select('*')
-        .eq('id', purchaseOrderItemId)
+        .eq('id', normalizedLine.purchaseOrderItemId)
         .maybeSingle();
       if (!poItemResult.error && poItemResult.data) {
         const currentReceived = toNumber(poItemResult.data.quantity_received ?? poItemResult.data.received_qty);
@@ -1402,11 +1605,12 @@ export async function postGoodsReceivedNoteToInventory(
           service,
           'purchase_order_items',
           {
-            quantity_received: currentReceived + quantity,
-            received_qty: currentReceived + quantity,
+            quantity_received: currentReceived + normalizedLine.quantity,
+            received_qty: currentReceived + normalizedLine.quantity,
           },
-          (query) => query.eq('id', purchaseOrderItemId),
+          (query) => query.eq('id', normalizedLine.purchaseOrderItemId),
         );
+        poItemResult.data.quantity_received = currentReceived + normalizedLine.quantity;
       }
     }
   }
@@ -1430,7 +1634,7 @@ export async function postGoodsReceivedNoteToInventory(
     currentStatus: grn.status,
     grnId: input.grnId,
     inventoryValuePosted,
-    itemCount: items.length,
+    itemCount: normalizedLines.length,
     postedAt,
     userId: input.userId,
     warehouseResolved: true,

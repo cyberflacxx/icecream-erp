@@ -548,8 +548,23 @@ async function main() {
     const sourceDocumentType = normalizeString(entry.source_document_type ?? entry.sourceDocumentType ?? entry.reference?.type).toUpperCase();
     return sourceDocumentId === grnId && sourceDocumentType === 'GRN';
   });
+  const grnMovements = movementRows.filter((entry) => {
+    const sourceDocumentId = normalizeString(entry.source_document_id ?? entry.sourceDocumentId ?? entry.reference?.id);
+    const sourceDocumentType = normalizeString(entry.source_document_type ?? entry.sourceDocumentType ?? entry.reference?.type).toUpperCase();
+    return sourceDocumentId === grnId && sourceDocumentType === 'GRN';
+  });
   if (!grnMovement) {
     fail('No stock movement was found with source_document_type = GRN and source_document_id = posted GRN id.', movementRows.slice(0, 10));
+  }
+  if (grnMovements.length < 1) {
+    fail('Expected at least one GRN stock movement for the posted GRN.', movementRows.slice(0, 10));
+  }
+  if (Number(grnMovement.quantity) !== TEST_QUANTITY) {
+    fail(`GRN stock movement quantity must equal ${TEST_QUANTITY}.`, {
+      grnId,
+      movement: grnMovement,
+      movementCount: grnMovements.length,
+    });
   }
   logStep('Stock Movement', 'PASS', `${grnMovement.type} qty=${grnMovement.quantity} source_document_type=${grnMovement.source_document_type ?? grnMovement.sourceDocumentType}`);
 

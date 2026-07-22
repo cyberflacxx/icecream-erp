@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { badRequest, can, forbidden, getAuthContext, notFound, serverError, unauthorized } from '@/lib/api-auth';
 import { calculateAcceptedQuantity, calculateShortageQuantity } from '@/lib/inventory';
+import { findMatchingGrnReceiveLine } from '@/lib/procurement-goods-received';
 import { recordAuditLog } from '@/lib/security-server';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
@@ -82,15 +83,15 @@ export async function POST(
     const poItemsById = new Map(poItemsArr.map((i) => [i.id as string, i]));
     const existingGrnItemsResult = await loadExistingGrnItems(service, id);
     if (typeof existingGrnItemsResult === 'string') return serverError(existingGrnItemsResult);
-    const grnItemsByItemId = new Map(
-      existingGrnItemsResult.map((item) => [String(item.item_id), item as Record<string, unknown>]),
-    );
-
     const warnings: string[] = [];
 
     for (const line of body.items) {
       const poItem = line.poItemId ? poItemsById.get(line.poItemId) : null;
-      const manualGrnItem = grnItemsByItemId.get(line.itemId) ?? null;
+      const matchingGrnItem = findMatchingGrnReceiveLine(existingGrnItemsResult, {
+        itemId: line.itemId,
+        poItemId: line.poItemId ?? null,
+      });
+      const manualGrnItem = matchingGrnItem ?? null;
 
       if (purchaseOrderId && (!poItem || poItem.item_id !== line.itemId)) {
         return badRequest('GRN line references an invalid purchase order item.');
@@ -127,17 +128,6 @@ export async function POST(
       }
 
       // Upsert GRN item
-      const existingGrnItem = purchaseOrderId
-        ? await service
-            .from('goods_received_note_items')
-            .select('id')
-            .eq('grn_id', id)
-            .eq('po_item_id', line.poItemId ?? '')
-            .maybeSingle()
-        : { data: manualGrnItem ? { id: manualGrnItem.id } : null, error: null };
-
-      if (existingGrnItem.error) return serverError(existingGrnItem.error.message);
-
       const grnItemData = {
         grn_id: id,
         item_id: line.itemId,
@@ -157,21 +147,23 @@ export async function POST(
           `accepted=${accepted}; damaged=${Number(line.damagedQuantity ?? 0)}; shortage=${shortageQuantity}`,
       };
 
-      if (existingGrnItem.data) {
+      if (matchingGrnItem?.id) {
         const updateError = await writeGrnItem(
           service,
           'update',
           grnItemData,
-          (query) => query.eq('id', String((existingGrnItem.data as Record<string, unknown>).id)),
+          (query) => query.eq('id', String(matchingGrnItem.id)),
         );
         if (updateError) {
           return serverError(updateError);
         }
+        Object.assign(matchingGrnItem, grnItemData);
       } else {
         const insertError = await writeGrnItem(service, 'insert', grnItemData);
         if (insertError) {
           return serverError(insertError);
         }
+        existingGrnItemsResult.push({ id: `pending-${line.itemId}`, ...grnItemData });
       }
     }
 

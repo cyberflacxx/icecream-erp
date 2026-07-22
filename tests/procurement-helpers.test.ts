@@ -30,7 +30,9 @@ import {
   buildGoodsReceivedDraftPayload,
   createOrUpdateStockBalance,
   fetchGoodsReceivedNoteDetail,
+  findMatchingGrnReceiveLine,
   isGrnStockPostingError,
+  normalizePostableGrnLines,
   normalizeGoodsReceivedItemId,
   normalizeGoodsReceivedPurchaseOrderId,
   normalizeGoodsReceivedUnitOfMeasureId,
@@ -707,6 +709,335 @@ test('resolveCompatibleGrnPostedStatus never returns APPROVED and prefers POSTED
   assert.equal(resolveCompatibleGrnPostedStatus('draft'), 'POSTED');
 });
 
+test('findMatchingGrnReceiveLine reuses an existing item line when the seed line has no purchase order item id', () => {
+  const existingItems = [
+    {
+      id: 'seed-line',
+      item_id: 'item-dup',
+      po_item_id: null,
+      quantity_expected: 50,
+      unit_cost: 2,
+    },
+  ] as Array<Record<string, unknown>>;
+
+  const match = findMatchingGrnReceiveLine(existingItems, {
+    itemId: 'item-dup',
+    poItemId: 'po-item-dup',
+  });
+
+  assert.equal(match?.id, 'seed-line');
+});
+
+test('normalizePostableGrnLines prefers accepted quantity and drops duplicate GRN seed lines', () => {
+  const normalized = normalizePostableGrnLines({
+    fallbackOrganizationId: 'org-dup',
+    grn: {
+      id: 'grn-dup',
+      organization_id: 'org-dup',
+      receiving_warehouse_id: 'wh-dup',
+    },
+    itemMastersById: new Map([
+      ['item-dup', { id: 'item-dup', organization_id: 'org-dup', purchase_price: 2 }],
+    ]),
+    poItemsById: new Map([
+      ['po-item-dup', { id: 'po-item-dup', item_id: 'item-dup', organization_id: 'org-dup', unit_price: 2 }],
+    ]),
+    rawLines: [
+      {
+        accepted_quantity: 0,
+        id: 'seed-line',
+        item_id: 'item-dup',
+        quantity_received: 50,
+        unit_cost: 2,
+        warehouse_id: 'wh-dup',
+      },
+      {
+        accepted_quantity: 50,
+        id: 'receive-line',
+        item_id: 'item-dup',
+        po_item_id: 'po-item-dup',
+        quantity_received: 50,
+        unit_cost: 2,
+        warehouse_id: 'wh-dup',
+      },
+    ],
+  });
+
+  assert.equal(normalized.length, 1);
+  assert.equal(normalized[0]?.lineId, 'receive-line');
+  assert.equal(normalized[0]?.purchaseOrderItemId, 'po-item-dup');
+  assert.equal(normalized[0]?.quantity, 50);
+});
+
+test('postGoodsReceivedNoteToInventory posts duplicate GRN lines once and recovers from duplicate movement guard', async () => {
+  const noteUpdates: Array<Record<string, unknown>> = [];
+  const poItemUpdates: Array<Record<string, unknown>> = [];
+  const stockBalanceInserts: Array<Record<string, unknown>> = [];
+  const movementInsertAttempts: Array<Record<string, unknown>> = [];
+  let movementLookupCount = 0;
+
+  const service = {
+    from(table: string) {
+      return {
+        select(columns: string) {
+          return {
+            eq(column: string, value: string) {
+              if (table === 'goods_received_notes') {
+                return {
+                  eq(nextColumn: string, nextValue: string) {
+                    assert.equal(column, 'organization_id');
+                    assert.equal(nextColumn, 'id');
+                    assert.equal(nextValue, 'grn-dup');
+                    return {
+                      maybeSingle() {
+                        return Promise.resolve({
+                          data: {
+                            id: 'grn-dup',
+                            organization_id: 'org-dup',
+                            status: 'DRAFT',
+                            quality_status: 'APPROVED',
+                            receiving_warehouse_id: 'wh-dup',
+                            purchase_order_id: 'po-dup',
+                            notes: 'Approved',
+                            approval_notes: 'Approved',
+                            stock_posted: false,
+                          },
+                          error: null,
+                        });
+                      },
+                    };
+                  },
+                  maybeSingle() {
+                    assert.equal(value, 'grn-dup');
+                    return Promise.resolve({
+                      data: {
+                        id: 'grn-dup',
+                        organization_id: 'org-dup',
+                        status: 'DRAFT',
+                        quality_status: 'APPROVED',
+                        receiving_warehouse_id: 'wh-dup',
+                        purchase_order_id: 'po-dup',
+                        notes: 'Approved',
+                        approval_notes: 'Approved',
+                        stock_posted: false,
+                      },
+                      error: null,
+                    });
+                  },
+                };
+              }
+
+              if (table === 'goods_received_note_items') {
+                assert.equal(column, 'grn_id');
+                assert.equal(value, 'grn-dup');
+                return Promise.resolve({
+                  data: [
+                    {
+                      accepted_quantity: 0,
+                      id: 'seed-line',
+                      item_id: 'item-dup',
+                      po_item_id: null,
+                      quantity_received: 50,
+                      unit_cost: 2,
+                      warehouse_id: 'wh-dup',
+                    },
+                    {
+                      accepted_quantity: 50,
+                      id: 'receive-line',
+                      item_id: 'item-dup',
+                      po_item_id: 'po-item-dup',
+                      quantity_received: 50,
+                      unit_cost: 2,
+                      warehouse_id: 'wh-dup',
+                    },
+                  ],
+                  error: null,
+                });
+              }
+
+              if (table === 'stock_movements' && columns === '*') {
+                assert.equal(column, 'source_document_type');
+                assert.equal(value, 'GRN');
+                return {
+                  eq(nextColumn: string, nextValue: string) {
+                    assert.equal(nextColumn, 'source_document_id');
+                    assert.equal(nextValue, 'grn-dup');
+                    return {
+                      eq(finalColumn: string, finalValue: string) {
+                        assert.equal(finalColumn, 'item_id');
+                        assert.equal(finalValue, 'item-dup');
+                        return {
+                          eq(lastColumn: string, lastValue: string) {
+                            assert.equal(lastColumn, 'warehouse_id');
+                            assert.equal(lastValue, 'wh-dup');
+                            return {
+                              limit(limitValue: number) {
+                                assert.equal(limitValue, 1);
+                                movementLookupCount += 1;
+                                return Promise.resolve({
+                                  data: movementLookupCount >= 2 ? [{ id: 'move-existing', item_id: 'item-dup' }] : [],
+                                  error: null,
+                                });
+                              },
+                            };
+                          },
+                        };
+                      },
+                    };
+                  },
+                };
+              }
+
+              if (table === 'stock_balances') {
+                assert.equal(column, 'item_id');
+                assert.equal(value, 'item-dup');
+                return {
+                  eq(nextColumn: string, nextValue: string) {
+                    assert.equal(nextColumn, 'warehouse_id');
+                    assert.equal(nextValue, 'wh-dup');
+                    return {
+                      maybeSingle() {
+                        return Promise.resolve({ data: null, error: null });
+                      },
+                    };
+                  },
+                };
+              }
+
+              if (table === 'purchase_order_items' && columns === '*') {
+                if (column === 'purchase_order_id') {
+                  assert.equal(value, 'po-dup');
+                  return Promise.resolve({
+                    data: [{ id: 'po-item-dup', item_id: 'item-dup', unit_price: 2, unit_cost: 2, quantity_ordered: 50, quantity_received: 0 }],
+                    error: null,
+                  });
+                }
+                if (column === 'id') {
+                  assert.equal(value, 'po-item-dup');
+                  return {
+                    maybeSingle() {
+                      return Promise.resolve({
+                        data: { id: 'po-item-dup', quantity_received: 0 },
+                        error: null,
+                      });
+                    },
+                  };
+                }
+              }
+
+              throw new Error(`Unhandled select().eq() for ${table} ${columns}`);
+            },
+            in(column: string, values: string[]) {
+              if (table === 'purchase_order_items') {
+                assert.equal(column, 'id');
+                assert.deepEqual(values, ['po-item-dup']);
+                return Promise.resolve({
+                  data: [{ id: 'po-item-dup', item_id: 'item-dup', unit_price: 2, unit_cost: 2, quantity_ordered: 50, quantity_received: 0, organization_id: 'org-dup' }],
+                  error: null,
+                });
+              }
+              if (table === 'items') {
+                assert.equal(column, 'id');
+                assert.deepEqual(values, ['item-dup']);
+                return Promise.resolve({
+                  data: [{ id: 'item-dup', purchase_price: 2, organization_id: 'org-dup' }],
+                  error: null,
+                });
+              }
+              throw new Error(`Unhandled select().in() for ${table} ${columns}`);
+            },
+            or(filter: string) {
+              if (table !== 'stock_movements') {
+                throw new Error(`Unhandled select().or() for ${table}`);
+              }
+              assert.equal(filter, 'reference_id.eq.grn-dup,source_document_id.eq.grn-dup');
+              return {
+                limit(limitValue: number) {
+                  assert.equal(limitValue, 1);
+                  return Promise.resolve({ data: [], error: null });
+                },
+              };
+            },
+          };
+        },
+        insert(payload: Record<string, unknown>) {
+          if (table === 'stock_balances') {
+            stockBalanceInserts.push(payload);
+            return {
+              select() {
+                return {
+                  single() {
+                    return Promise.resolve({
+                      data: { id: 'bal-dup', quantity_on_hand: 50, ...payload },
+                      error: null,
+                    });
+                  },
+                };
+              },
+            };
+          }
+
+          if (table === 'stock_movements') {
+            movementInsertAttempts.push(payload);
+            return {
+              select() {
+                return {
+                  single() {
+                    return Promise.resolve({
+                      data: null,
+                      error: {
+                        message: 'duplicate key value violates unique constraint "idx_stock_movements_reference_guard"',
+                      },
+                    });
+                  },
+                };
+              },
+            };
+          }
+
+          throw new Error(`Unhandled insert for ${table}`);
+        },
+        update(payload: Record<string, unknown>) {
+          if (table === 'goods_received_notes') {
+            noteUpdates.push(payload);
+          }
+          if (table === 'purchase_order_items') {
+            poItemUpdates.push(payload);
+          }
+          return {
+            eq() {
+              return {
+                select() {
+                  return {
+                    single() {
+                      return Promise.resolve({ data: { id: `${table}-dup`, ...payload }, error: null });
+                    },
+                  };
+                },
+              };
+            },
+          };
+        },
+      };
+    },
+  };
+
+  const result = await postGoodsReceivedNoteToInventory(service as any, {
+    grnId: 'grn-dup',
+    organizationId: 'org-dup',
+    userId: 'user-dup',
+  });
+
+  assert.equal(stockBalanceInserts.length, 1);
+  assert.equal(stockBalanceInserts[0]?.quantity_on_hand, 50);
+  assert.equal(movementInsertAttempts.length, 1);
+  assert.equal(movementInsertAttempts[0]?.quantity, 50);
+  assert.equal(movementLookupCount, 2);
+  assert.equal(poItemUpdates.length, 1);
+  assert.equal(noteUpdates.some((payload) => payload.stock_posted === true), true);
+  assert.equal(result.stock_posted, true);
+});
+
 test('postGoodsReceivedNoteToInventory prefers POSTED, falls back safely, and records GRN stock movement', async () => {
   const noteUpdates: Array<Record<string, unknown>> = [];
   const movementInserts: Array<Record<string, unknown>> = [];
@@ -785,6 +1116,38 @@ test('postGoodsReceivedNoteToInventory prefers POSTED, falls back safely, and re
                   ],
                   error: null,
                 });
+              }
+
+              if (table === 'stock_movements' && columns === '*') {
+                assert.equal(column, 'source_document_type');
+                assert.equal(value, 'GRN');
+                return {
+                  eq(nextColumn: string, nextValue: string) {
+                    assert.equal(nextColumn, 'source_document_id');
+                    assert.equal(nextValue, 'grn-1');
+                    return {
+                      eq(finalColumn: string, finalValue: string) {
+                        assert.equal(finalColumn, 'item_id');
+                        assert.equal(finalValue, 'item-1');
+                        return {
+                          eq(lastColumn: string, lastValue: string) {
+                            assert.equal(lastColumn, 'warehouse_id');
+                            assert.equal(lastValue, 'wh-1');
+                            return {
+                              limit(limitValue: number) {
+                                assert.equal(limitValue, 1);
+                                return Promise.resolve({
+                                  data: stockMovementExists ? [{ id: 'move-1' }] : [],
+                                  error: null,
+                                });
+                              },
+                            };
+                          },
+                        };
+                      },
+                    };
+                  },
+                };
               }
 
               if (table === 'stock_balances') {
@@ -1062,6 +1425,7 @@ test('postGoodsReceivedNoteToInventory remains idempotent when stock movement al
                         return Promise.resolve({
                           data: {
                             id: 'grn-2',
+                            organization_id: 'org-1',
                             status: 'RECEIVED',
                             quality_status: 'APPROVED',
                             warehouse_id: 'wh-1',
@@ -1078,7 +1442,71 @@ test('postGoodsReceivedNoteToInventory remains idempotent when stock movement al
                 };
               }
 
+              if (table === 'goods_received_note_items') {
+                assert.equal(column, 'grn_id');
+                assert.equal(value, 'grn-2');
+                return Promise.resolve({
+                  data: [
+                    {
+                      id: 'line-2',
+                      item_id: 'item-2',
+                      quantity_received: 50,
+                      unit_cost: 2,
+                      warehouse_id: 'wh-1',
+                    },
+                  ],
+                  error: null,
+                });
+              }
+
+              if (table === 'stock_movements' && columns === '*') {
+                assert.equal(column, 'source_document_type');
+                assert.equal(value, 'GRN');
+                return {
+                  eq(nextColumn: string, nextValue: string) {
+                    assert.equal(nextColumn, 'source_document_id');
+                    assert.equal(nextValue, 'grn-2');
+                    return {
+                      eq(finalColumn: string, finalValue: string) {
+                        assert.equal(finalColumn, 'item_id');
+                        assert.equal(finalValue, 'item-2');
+                        return {
+                          eq(lastColumn: string, lastValue: string) {
+                            assert.equal(lastColumn, 'warehouse_id');
+                            assert.equal(lastValue, 'wh-1');
+                            return {
+                              limit(limitValue: number) {
+                                assert.equal(limitValue, 1);
+                                return Promise.resolve({
+                                  data: [{ id: 'move-existing' }],
+                                  error: null,
+                                });
+                              },
+                            };
+                          },
+                        };
+                      },
+                    };
+                  },
+                };
+              }
+
+              if (table === 'items') {
+                throw new Error('Item master lookup should not run when line movement already exists.');
+              }
+
               throw new Error(`Unhandled select().eq() for ${table} ${columns}`);
+            },
+            in(column: string, values: string[]) {
+              if (table === 'items') {
+                assert.equal(column, 'id');
+                assert.deepEqual(values, ['item-2']);
+                return Promise.resolve({
+                  data: [{ id: 'item-2', organization_id: 'org-1', unit_cost: 2 }],
+                  error: null,
+                });
+              }
+              throw new Error(`Unhandled select().in() for ${table} ${columns}`);
             },
             or(filter: string) {
               if (table !== 'stock_movements') {
@@ -1185,6 +1613,35 @@ test('postGoodsReceivedNoteToInventory resolves warehouse from warehouse_id when
                   ],
                   error: null,
                 });
+              }
+
+              if (table === 'stock_movements' && columns === '*') {
+                assert.equal(column, 'source_document_type');
+                assert.equal(value, 'GRN');
+                return {
+                  eq(nextColumn: string, nextValue: string) {
+                    assert.equal(nextColumn, 'source_document_id');
+                    assert.equal(nextValue, 'grn-3');
+                    return {
+                      eq(finalColumn: string, finalValue: string) {
+                        assert.equal(finalColumn, 'item_id');
+                        assert.equal(finalValue, 'item-3');
+                        return {
+                          eq(lastColumn: string, lastValue: string) {
+                            assert.equal(lastColumn, 'warehouse_id');
+                            assert.equal(lastValue, 'wh-main');
+                            return {
+                              limit(limitValue: number) {
+                                assert.equal(limitValue, 1);
+                                return Promise.resolve({ data: [], error: null });
+                              },
+                            };
+                          },
+                        };
+                      },
+                    };
+                  },
+                };
               }
 
               if (table === 'stock_balances') {
@@ -1315,6 +1772,35 @@ test('postGoodsReceivedNoteToInventory resolves item_id from linked purchase ord
                   ],
                   error: null,
                 });
+              }
+
+              if (table === 'stock_movements' && columns === '*') {
+                assert.equal(column, 'source_document_type');
+                assert.equal(value, 'GRN');
+                return {
+                  eq(nextColumn: string, nextValue: string) {
+                    assert.equal(nextColumn, 'source_document_id');
+                    assert.equal(nextValue, 'grn-4');
+                    return {
+                      eq(finalColumn: string, finalValue: string) {
+                        assert.equal(finalColumn, 'item_id');
+                        assert.equal(finalValue, 'item-4');
+                        return {
+                          eq(lastColumn: string, lastValue: string) {
+                            assert.equal(lastColumn, 'warehouse_id');
+                            assert.equal(lastValue, 'wh-4');
+                            return {
+                              limit(limitValue: number) {
+                                assert.equal(limitValue, 1);
+                                return Promise.resolve({ data: [], error: null });
+                              },
+                            };
+                          },
+                        };
+                      },
+                    };
+                  },
+                };
               }
 
               if (table === 'stock_balances') {
@@ -1472,6 +1958,35 @@ test('postGoodsReceivedNoteToInventory updates existing stock balance quantity, 
                 });
               }
 
+              if (table === 'stock_movements' && columns === '*') {
+                assert.equal(column, 'source_document_type');
+                assert.equal(value, 'GRN');
+                return {
+                  eq(nextColumn: string, nextValue: string) {
+                    assert.equal(nextColumn, 'source_document_id');
+                    assert.equal(nextValue, 'grn-5');
+                    return {
+                      eq(finalColumn: string, finalValue: string) {
+                        assert.equal(finalColumn, 'item_id');
+                        assert.equal(finalValue, 'item-5');
+                        return {
+                          eq(lastColumn: string, lastValue: string) {
+                            assert.equal(lastColumn, 'warehouse_id');
+                            assert.equal(lastValue, 'wh-5');
+                            return {
+                              limit(limitValue: number) {
+                                assert.equal(limitValue, 1);
+                                return Promise.resolve({ data: [], error: null });
+                              },
+                            };
+                          },
+                        };
+                      },
+                    };
+                  },
+                };
+              }
+
               if (table === 'stock_balances') {
                 assert.equal(column, 'item_id');
                 return {
@@ -1610,6 +2125,35 @@ test('postGoodsReceivedNoteToInventory returns stage-specific stock balance read
                   ],
                   error: null,
                 });
+              }
+
+              if (table === 'stock_movements' && columns === '*') {
+                assert.equal(column, 'source_document_type');
+                assert.equal(value, 'GRN');
+                return {
+                  eq(nextColumn: string, nextValue: string) {
+                    assert.equal(nextColumn, 'source_document_id');
+                    assert.equal(nextValue, 'grn-6');
+                    return {
+                      eq(finalColumn: string, finalValue: string) {
+                        assert.equal(finalColumn, 'item_id');
+                        assert.equal(finalValue, 'item-6');
+                        return {
+                          eq(lastColumn: string, lastValue: string) {
+                            assert.equal(lastColumn, 'warehouse_id');
+                            assert.equal(lastValue, 'wh-6');
+                            return {
+                              limit(limitValue: number) {
+                                assert.equal(limitValue, 1);
+                                return Promise.resolve({ data: [], error: null });
+                              },
+                            };
+                          },
+                        };
+                      },
+                    };
+                  },
+                };
               }
 
               if (table === 'stock_balances') {
