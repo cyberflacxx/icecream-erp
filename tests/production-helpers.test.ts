@@ -15,7 +15,9 @@ import {
   calculateCostPerUnit,
   calculateProductivity,
   calculateYieldPercentage,
+  getExistingWarehouseTypes,
   normalizeProductionStockReceiveItems,
+  resolveWarehouseTypeForLive,
   validateRecipeImportRows,
   validateShiftTargetImportRows,
 } from '../src/lib/production';
@@ -187,4 +189,31 @@ test('production stock receive failure payload keeps stage and db diagnostics', 
   assert.equal(failure.details.destinationWarehouseId, 'prod-wh');
   assert.equal(failure.details.quantity, 50);
   assert.equal(failure.details.dbMessage, 'Warehouse not found or inactive.');
+});
+
+test('production warehouse type resolver prefers PRODUCTION when available', () => {
+  assert.equal(
+    resolveWarehouseTypeForLive('production', ['PRODUCTION', 'RAW_MATERIALS']),
+    'PRODUCTION',
+  );
+});
+
+test('production warehouse type resolver falls back to WIP and GENERAL safely', () => {
+  assert.equal(
+    resolveWarehouseTypeForLive('production', ['WIP', 'RAW_MATERIALS']),
+    'WIP',
+  );
+  assert.equal(resolveWarehouseTypeForLive('production', ['GENERAL']), 'GENERAL');
+});
+
+test('existing warehouse types normalize live compatibility aliases', () => {
+  assert.deepEqual(
+    getExistingWarehouseTypes([
+      { warehouseType: 'PRODUCTION_MATERIALS' },
+      { type: 'WIP' },
+      { warehouse_type: 'RAW_MATERIALS' },
+      { warehouseType: 'production_materials' },
+    ]),
+    ['PRODUCTION', 'WIP', 'RAW_MATERIALS'],
+  );
 });

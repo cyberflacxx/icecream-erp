@@ -1,4 +1,4 @@
-import { asArray, asObject, ensureNonNegative, ensurePositiveQuantity, normalizeDate, toCsv, toNumber } from './inventory';
+import { asArray, asObject, ensureNonNegative, ensurePositiveQuantity, normalizeDate, normalizeWarehouseCode, toCsv, toNumber } from './inventory';
 
 export const PRODUCTION_PLAN_STATUSES = [
   'DRAFT',
@@ -143,6 +143,66 @@ export type ProductionStockReceiveFailure = {
     dbMessage: string | null;
   };
 };
+
+export type LiveWarehouseLike = {
+  code?: unknown;
+  name?: unknown;
+  type?: unknown;
+  warehouseType?: unknown;
+  warehouse_type?: unknown;
+};
+
+export type LiveWarehouseKind = 'production' | 'raw';
+
+function normalizeLiveWarehouseType(value: unknown) {
+  const warehouseType = normalizeWarehouseCode(String(value ?? ''));
+
+  switch (warehouseType) {
+    case 'PRODUCTION_MATERIAL':
+    case 'PRODUCTION_MATERIALS':
+    case 'PRODUCTION_MATERIALS_STORE':
+    case 'PRODUCTION_WAREHOUSE':
+      return 'PRODUCTION';
+    case 'RAW_MATERIALS_STORE':
+      return 'RAW_MATERIALS';
+    default:
+      return warehouseType;
+  }
+}
+
+export function getExistingWarehouseTypes(warehouses: LiveWarehouseLike[]) {
+  const types = new Set<string>();
+
+  for (const warehouse of warehouses) {
+    const warehouseType = normalizeLiveWarehouseType(
+      warehouse.warehouseType ?? warehouse.warehouse_type ?? warehouse.type,
+    );
+    if (warehouseType) {
+      types.add(warehouseType);
+    }
+  }
+
+  return [...types];
+}
+
+export function resolveWarehouseTypeForLive(
+  kind: LiveWarehouseKind,
+  existingTypes: string[],
+) {
+  const normalizedTypes = new Set(existingTypes.map((type) => normalizeLiveWarehouseType(type)).filter(Boolean));
+  const preferredTypes =
+    kind === 'production'
+      ? ['PRODUCTION', 'WIP', 'GENERAL']
+      : ['RAW_MATERIALS', 'RAW_MATERIAL', 'GENERAL'];
+
+  for (const preferredType of preferredTypes) {
+    if (normalizedTypes.has(preferredType)) {
+      return preferredType;
+    }
+  }
+
+  return null;
+}
 
 export function normalizeProductionStockReceiveItems(
   items: ProductionStockReceiveLineInput[],

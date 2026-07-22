@@ -25,7 +25,7 @@ const currencyFormatter = new Intl.NumberFormat('en-US', {
 
 const warehouseTypes = [
   { label: 'Raw Materials', value: 'RAW_MATERIALS' },
-  { label: 'Production Materials', value: 'PRODUCTION_MATERIALS' },
+  { label: 'Production Warehouse', value: 'PRODUCTION' },
   { label: 'Work in Progress', value: 'WIP' },
   { label: 'Finished Goods', value: 'FINISHED_GOODS' },
   { label: 'Dispatch', value: 'DISPATCH' },
@@ -45,7 +45,7 @@ const initialFormState = {
 
 const requiredWarehouseTypes = [
   'RAW_MATERIALS',
-  'PRODUCTION_MATERIALS',
+  'PRODUCTION',
   'FINISHED_GOODS',
   'DISPATCH',
   'RETURNS',

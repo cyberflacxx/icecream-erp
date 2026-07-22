@@ -94,6 +94,8 @@ test('warehouse helpers normalize codes and types expected by inventory stores',
   assert.equal(normalizeWarehouseType('raw_store'), 'RAW_MATERIALS');
   assert.equal(resolveWarehouseStorageType('raw_store'), 'MAIN');
   assert.equal(resolveWarehouseDisplayType({ code: 'RAW_STORE', type: 'MAIN' }), 'RAW_MATERIALS');
+  assert.equal(normalizeWarehouseType('production_materials'), 'PRODUCTION');
+  assert.equal(resolveWarehouseDisplayType({ code: 'PROD_MATERIALS', type: 'MAIN' }), 'PRODUCTION');
   assert.equal(normalizeWarehouseType('fg warehouse'), 'FINISHED_GOODS');
   assert.equal(normalizeTransferStatus('posted'), 'COMPLETED');
 });

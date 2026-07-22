@@ -8,8 +8,38 @@ import {
   serverError,
   unauthorized,
 } from '@/lib/api-auth';
-import { isMissingTableColumnError, normalizeWarehouseCode, normalizeWarehouseType, resolveWarehouseDisplayType, resolveWarehouseStorageType } from '@/lib/inventory';
+import { INVENTORY_WAREHOUSE_TYPES, isMissingTableColumnError, normalizeWarehouseCode, resolveWarehouseDisplayType, resolveWarehouseStorageType } from '@/lib/inventory';
 import { createServiceRoleClient } from '@/lib/supabase/server';
+
+const SUPPORTED_WAREHOUSE_TYPES = new Set([...INVENTORY_WAREHOUSE_TYPES, 'RAW_MATERIAL']);
+
+function normalizeWarehouseTypeForWrite(value: unknown) {
+  const warehouseType = normalizeWarehouseCode(value);
+
+  switch (warehouseType) {
+    case 'PRODUCTION_MATERIAL':
+    case 'PRODUCTION_MATERIALS':
+    case 'PRODUCTION_MATERIALS_STORE':
+    case 'PRODUCTION_WAREHOUSE':
+      return 'PRODUCTION';
+    case 'RAW_MATERIALS_STORE':
+      return 'RAW_MATERIALS';
+    default:
+      return warehouseType;
+  }
+}
+
+function warehouseTypeInvalidResponse(attemptedType: unknown, normalizedType: string | null) {
+  return NextResponse.json(
+    {
+      code: 'WAREHOUSE_TYPE_INVALID',
+      error: 'Warehouse type is not supported.',
+      attemptedType: attemptedType == null ? null : String(attemptedType),
+      normalizedType,
+    },
+    { status: 400 },
+  );
+}
 
 export async function GET(request: NextRequest) {
   const ctx = await getAuthContext();
@@ -95,6 +125,7 @@ export async function GET(request: NextRequest) {
         label: warehouse.label,
         name: warehouse.name,
         status: warehouse.status,
+        type: warehouse.type,
         warehouse_type: warehouse.warehouse_type,
         warehouseType: warehouse.warehouseType,
       })),
@@ -183,10 +214,14 @@ export async function POST(request: NextRequest) {
 
   const code = normalizeWarehouseCode(body.code);
   const name = String(body.name ?? '').trim();
-  const type = normalizeWarehouseType(body.warehouseType ?? body.type);
+  const attemptedType = body.warehouseType ?? body.type;
+  const type = normalizeWarehouseTypeForWrite(attemptedType);
 
   if (!code || !name || !type) {
     return badRequest('code, name, and type are required.');
+  }
+  if (!SUPPORTED_WAREHOUSE_TYPES.has(type)) {
+    return warehouseTypeInvalidResponse(attemptedType, type || null);
   }
 
   const { data: duplicateWarehouse, error: duplicateError } = await service
@@ -216,7 +251,7 @@ export async function POST(request: NextRequest) {
       code,
       name,
       type: resolveWarehouseStorageType(type),
-      warehouse_type: resolveWarehouseStorageType(type),
+      warehouse_type: type,
       is_active: body.isActive ?? true,
       address: body.address ?? null,
       branch_id: body.branchId ?? null,
@@ -227,7 +262,13 @@ export async function POST(request: NextRequest) {
     )
     .single();
 
-  if (error) return serverError(error.message);
+  if (error) {
+    const message = String(error.message ?? '');
+    if (message.toLowerCase().includes('invalid input value for enum warehouse_type')) {
+      return warehouseTypeInvalidResponse(attemptedType, type);
+    }
+    return serverError(message);
+  }
   return NextResponse.json({
     ...data,
     type: resolveWarehouseDisplayType({

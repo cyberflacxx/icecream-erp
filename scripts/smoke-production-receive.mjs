@@ -110,26 +110,197 @@ async function appRequest(path, { method = 'GET', body, cookie } = {}) {
   return { json, status: response.status, text };
 }
 
-async function findReceiveScenario() {
-  const productionWarehouses = await rest('warehouses', {
-    query: 'select=id,name,code,organization_id&or=(type.eq.PRODUCTION_MATERIALS,code.eq.PROD_MATERIALS)&limit=5',
+function normalizeWarehouseValue(value) {
+  return String(value ?? '').trim().toUpperCase().replace(/[^A-Z0-9]+/g, '_');
+}
+
+function normalizeWarehouseTypeForLive(value) {
+  const warehouseType = normalizeWarehouseValue(value);
+
+  switch (warehouseType) {
+    case 'PRODUCTION_MATERIAL':
+    case 'PRODUCTION_MATERIALS':
+    case 'PRODUCTION_MATERIALS_STORE':
+    case 'PRODUCTION_WAREHOUSE':
+      return 'PRODUCTION';
+    case 'RAW_MATERIALS_STORE':
+      return 'RAW_MATERIALS';
+    default:
+      return warehouseType;
+  }
+}
+
+function getExistingWarehouseTypes(warehouses) {
+  const types = new Set();
+
+  for (const warehouse of warehouses ?? []) {
+    const warehouseType = normalizeWarehouseTypeForLive(
+      warehouse?.warehouseType ?? warehouse?.warehouse_type ?? warehouse?.type,
+    );
+    if (warehouseType) {
+      types.add(warehouseType);
+    }
+  }
+
+  return [...types];
+}
+
+function resolveWarehouseTypeForLive(kind, existingTypes) {
+  const normalizedTypes = new Set(
+    (existingTypes ?? []).map((type) => normalizeWarehouseTypeForLive(type)).filter(Boolean),
+  );
+  const preferredTypes =
+    kind === 'production'
+      ? ['PRODUCTION', 'WIP', 'GENERAL']
+      : ['RAW_MATERIALS', 'RAW_MATERIAL', 'GENERAL'];
+
+  for (const preferredType of preferredTypes) {
+    if (normalizedTypes.has(preferredType)) {
+      return preferredType;
+    }
+  }
+
+  return null;
+}
+
+function matchesWarehouse(value, fragments) {
+  const normalized = normalizeWarehouseValue(value);
+  return fragments.some((fragment) => normalized.includes(fragment));
+}
+
+function readWarehouseType(warehouse) {
+  return normalizeWarehouseTypeForLive(
+    warehouse?.warehouseType ?? warehouse?.warehouse_type ?? warehouse?.type,
+  );
+}
+
+function isProductionWarehouse(warehouse) {
+  const warehouseType = readWarehouseType(warehouse);
+
+  return (
+    warehouseType === 'PRODUCTION' ||
+    warehouseType === 'WIP' ||
+    matchesWarehouse(warehouse?.code, ['PROD', 'PRODUCTION']) ||
+    matchesWarehouse(warehouse?.name, ['PRODUCTION', 'WIP'])
+  );
+}
+
+function isRawWarehouse(warehouse) {
+  const warehouseType = readWarehouseType(warehouse);
+
+  return (
+    warehouseType === 'RAW_MATERIALS' ||
+    warehouseType === 'RAW_MATERIAL' ||
+    matchesWarehouse(warehouse?.code, ['RAW', 'STORE', 'STORES']) ||
+    matchesWarehouse(warehouse?.name, ['RAW', 'STORE', 'STORES'])
+  );
+}
+
+function describeWarehouseTypes(existingTypes) {
+  return existingTypes.length > 0 ? existingTypes.join(', ') : '(none)';
+}
+
+async function loadPickerWarehouses(cookie) {
+  const response = await appRequest('/api/inventory/warehouses?picker=true', { cookie });
+
+  if (response.status === 401 || response.status === 403) {
+    throw new Error('Login succeeded, but this account cannot view inventory warehouses.');
+  }
+  if (response.status !== 200) {
+    throw new Error(response.text || `Warehouse picker failed with status ${response.status}.`);
+  }
+
+  const warehouses = Array.isArray(response.json?.data)
+    ? response.json.data
+    : Array.isArray(response.json)
+      ? response.json
+      : [];
+
+  return warehouses;
+}
+
+async function createSmokeWarehouse({ cookie, existingTypes, kind }) {
+  const warehouseType = resolveWarehouseTypeForLive(kind, existingTypes);
+  if (!warehouseType) {
+    throw new Error(
+      `Could not resolve live-compatible warehouse type. Existing types: ${describeWarehouseTypes(existingTypes)}`,
+    );
+  }
+
+  const suffix = String(Date.now()).slice(-6);
+  const code = kind === 'production' ? `SMOKE_PROD_${suffix}` : `SMOKE_RAW_${suffix}`;
+  const name =
+    kind === 'production'
+      ? `Smoke Production Warehouse ${suffix}`
+      : `Smoke Raw Materials Warehouse ${suffix}`;
+
+  const response = await appRequest('/api/inventory/warehouses', {
+    method: 'POST',
+    body: {
+      code,
+      name,
+      type: warehouseType,
+    },
+    cookie,
   });
 
-  for (const destinationWarehouse of productionWarehouses ?? []) {
+  if (response.status === 401 || response.status === 403) {
+    throw new Error('Login succeeded, but this account cannot provision a smoke warehouse.');
+  }
+  if (response.status !== 200 && response.status !== 201) {
+    throw new Error(response.text || `Smoke warehouse create failed with status ${response.status}.`);
+  }
+
+  return {
+    code: String(response.json?.code ?? code),
+    id: String(response.json?.id ?? ''),
+    name: String(response.json?.name ?? name),
+    type: String(response.json?.type ?? warehouseType),
+    warehouse_type: String(
+      response.json?.warehouse_type ?? response.json?.warehouseType ?? response.json?.type ?? warehouseType,
+    ),
+    warehouseType: String(
+      response.json?.warehouseType ?? response.json?.warehouse_type ?? response.json?.type ?? warehouseType,
+    ),
+  };
+}
+
+async function findReceiveScenario(cookie) {
+  const warehouses = await loadPickerWarehouses(cookie);
+  const existingTypes = getExistingWarehouseTypes(warehouses);
+  let destinationWarehouse = warehouses.find((warehouse) => isProductionWarehouse(warehouse));
+
+  if (!destinationWarehouse) {
+    destinationWarehouse = await createSmokeWarehouse({
+      cookie,
+      existingTypes,
+      kind: 'production',
+    });
+  }
+
+  const sourceWarehouses = warehouses.filter(
+    (warehouse) =>
+      String(warehouse.id ?? '') !== String(destinationWarehouse.id ?? '') && isRawWarehouse(warehouse),
+  );
+
+  if (sourceWarehouses.length === 0) {
+    throw new Error('Unable to find a stocked raw material source warehouse for production receiving.');
+  }
+
+  for (const sourceWarehouse of sourceWarehouses) {
     const balances = await rest('stock_balances', {
       query: [
-        'select=item_id,warehouse_id,quantity_available,quantity_on_hand,organization_id',
-        `organization_id=eq.${destinationWarehouse.organization_id}`,
+        'select=item_id,warehouse_id,quantity_available,quantity_on_hand',
+        `warehouse_id=eq.${sourceWarehouse.id}`,
         'quantity_available=gt.0',
         'limit=100',
       ].join('&'),
     });
 
-    const sourceCandidates = (balances ?? []).filter((row) => String(row.warehouse_id) !== String(destinationWarehouse.id));
-    for (const balance of sourceCandidates) {
+    for (const balance of balances ?? []) {
       const [item] = await rest('items', {
         query: [
-          'select=id,code,name,item_type,unit_cost,purchase_price',
+          'select=id,code,name,item_type,unit_cost',
           `id=eq.${balance.item_id}`,
           'limit=1',
         ].join('&'),
@@ -148,7 +319,7 @@ async function findReceiveScenario() {
       });
 
       const available = Number(balance.quantity_available ?? balance.quantity_on_hand ?? 0);
-      if (!sourceWarehouse || available < TRANSFER_QUANTITY) {
+      if (available < TRANSFER_QUANTITY) {
         continue;
       }
 
@@ -193,7 +364,7 @@ function pass(message) {
 
 async function main() {
   const cookie = await login();
-  const scenario = await findReceiveScenario();
+  const scenario = await findReceiveScenario(cookie);
 
   const beforeSource = await getBalance(scenario.item.id, scenario.sourceWarehouse.id);
   const beforeDestination = await getBalance(scenario.item.id, scenario.destinationWarehouse.id);
@@ -206,7 +377,7 @@ async function main() {
         {
           itemId: scenario.item.id,
           quantity: TRANSFER_QUANTITY,
-          unitCost: Number(scenario.item.purchase_price ?? scenario.item.unit_cost ?? 0),
+          unitCost: Number(scenario.item.unit_cost ?? 0),
         },
       ],
       notes: `Smoke production receive ${new Date().toISOString()}`,

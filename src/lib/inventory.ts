@@ -18,7 +18,6 @@ export const INVENTORY_WAREHOUSE_TYPES = [
   'RETURNS',
   'DAMAGED',
   'RAW_MATERIALS',
-  'PRODUCTION_MATERIALS',
   'GENERAL',
 ] as const;
 
@@ -31,7 +30,7 @@ export const DEFAULT_INVENTORY_WAREHOUSES = [
   {
     code: 'PROD_MATERIALS',
     name: 'Production Materials Store',
-    warehouseType: 'PRODUCTION_MATERIALS',
+    warehouseType: 'PRODUCTION',
   },
   {
     code: 'PRODUCTION_FINISHED_GOODS',
@@ -224,8 +223,10 @@ export function normalizeWarehouseType(value: string | null | undefined) {
     case 'PROD_MATERIALS':
     case 'PRODUCTION_STORE':
     case 'PRODUCTION_MATERIAL':
+    case 'PRODUCTION_MATERIALS':
     case 'PRODUCTION_MATERIALS_STORE':
-      return 'PRODUCTION_MATERIALS';
+    case 'PRODUCTION_WAREHOUSE':
+      return 'PRODUCTION';
     case 'FG':
     case 'FG_STORE':
     case 'FG_WAREHOUSE':
@@ -261,7 +262,7 @@ export function resolveWarehouseDisplayType(input: {
   const code = normalizeWarehouseCode(input.code);
 
   if (code === 'RAW_STORE') return 'RAW_MATERIALS';
-  if (code === 'PROD_MATERIALS') return 'PRODUCTION_MATERIALS';
+  if (code === 'PROD_MATERIALS') return 'PRODUCTION';
   if (code === 'PRODUCTION_FINISHED_GOODS') return 'FINISHED_GOODS';
   if (code === 'FG_WAREHOUSE') return 'FINISHED_GOODS';
   if (code === 'DISPATCH_WAREHOUSE') return 'DISPATCH';
