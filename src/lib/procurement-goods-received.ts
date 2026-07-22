@@ -194,6 +194,7 @@ export type GrnStockPostingFailureStage =
   | 'GRN_HEADER_LOAD_FAILED'
   | 'GRN_ITEMS_LOAD_FAILED'
   | 'GRN_HAS_NO_ITEMS'
+  | 'GRN_ORGANIZATION_MISSING'
   | 'GRN_WAREHOUSE_MISSING'
   | 'GRN_ITEM_ID_MISSING'
   | 'GRN_QUANTITY_MISSING_OR_ZERO'
@@ -298,6 +299,32 @@ function resolvePurchaseOrderId(grn: Record<string, unknown>) {
     purchase_order_id: grn.purchase_order_id,
     purchaseOrderId: grn.purchaseOrderId,
   });
+}
+
+function resolveOrganizationId(...values: unknown[]) {
+  return values
+    .map((value) => String(value ?? '').trim())
+    .find(Boolean) ?? '';
+}
+
+function resolveGrnOrganizationId(input: {
+  fallbackOrganizationId?: string | null;
+  grn?: Record<string, unknown> | null;
+  itemMaster?: Record<string, unknown> | null;
+  line?: Record<string, unknown> | null;
+  purchaseOrderItem?: Record<string, unknown> | null;
+}) {
+  return resolveOrganizationId(
+    input.grn?.organization_id,
+    input.grn?.organizationId,
+    input.line?.organization_id,
+    input.line?.organizationId,
+    input.purchaseOrderItem?.organization_id,
+    input.purchaseOrderItem?.organizationId,
+    input.itemMaster?.organization_id,
+    input.itemMaster?.organizationId,
+    input.fallbackOrganizationId,
+  );
 }
 
 function resolveGrnItemQuantity(item: Record<string, unknown>) {
@@ -625,6 +652,7 @@ function buildStockBalanceInsertPayloadLevels(input: {
   // Alias fields are read-compatible only. Do not write optional alias columns to
   // PostgREST unless schema inspection confirms they exist.
   const sharedPayload: Record<string, unknown> = {
+    organization_id: input.organizationId,
     item_id: input.itemId,
     warehouse_id: input.warehouseId,
     quantity_on_hand: input.quantity,
@@ -1229,6 +1257,10 @@ export async function postGoodsReceivedNoteToInventory(
     ),
   ];
   const itemsById = await loadCompatibleItemMasters(service, resolvedItemIds);
+  const headerOrganizationId = resolveGrnOrganizationId({
+    fallbackOrganizationId: input.organizationId,
+    grn,
+  });
   let inventoryValuePosted = 0;
 
   for (const rawItem of items) {
@@ -1293,6 +1325,32 @@ export async function postGoodsReceivedNoteToInventory(
     }
 
     const itemMaster = itemsById.get(itemId) ?? null;
+    const resolvedOrganizationId = resolveGrnOrganizationId({
+      fallbackOrganizationId: headerOrganizationId || input.organizationId,
+      grn,
+      itemMaster,
+      line: rawItem,
+      purchaseOrderItem: poItem,
+    });
+
+    if (!resolvedOrganizationId) {
+      throw buildGrnPostingFailure(
+        {
+          grnId: input.grnId,
+          itemCount: items.length,
+          itemId,
+          lineId: String(rawItem.id ?? '').trim() || null,
+          operation: 'resolve_organization_id',
+          purchaseOrderItemId: purchaseOrderItemId || null,
+          stage: 'GRN_ORGANIZATION_MISSING',
+          warehouseId: lineWarehouseId,
+          warehouseResolved: true,
+        },
+        undefined,
+        'Goods received note is missing organization_id.',
+      );
+    }
+
     const unitCost = toNumber(
       rawItem.unit_cost ??
         rawItem.cost ??
@@ -1311,7 +1369,7 @@ export async function postGoodsReceivedNoteToInventory(
     const updatedBalance = await createOrUpdateStockBalance(service, {
       grnId: input.grnId,
       itemId,
-      organizationId: input.organizationId,
+      organizationId: resolvedOrganizationId,
       quantity,
       receivedValue,
       unitCost,
@@ -1324,7 +1382,7 @@ export async function postGoodsReceivedNoteToInventory(
       grnNumber,
       itemId,
       notes: String(grn.notes ?? grn.approval_notes ?? ''),
-      organizationId: input.organizationId,
+      organizationId: resolvedOrganizationId,
       quantity,
       runningBalance: toNumber(updatedBalance.quantity_on_hand ?? updatedBalance.quantity),
       unitCost,

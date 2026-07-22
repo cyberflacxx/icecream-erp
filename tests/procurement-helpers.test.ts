@@ -731,6 +731,7 @@ test('postGoodsReceivedNoteToInventory prefers POSTED, falls back safely, and re
                         return Promise.resolve({
                           data: {
                             id: 'grn-1',
+                            organization_id: 'org-header-1',
                             status: 'DRAFT',
                             quality_status: 'APPROVED',
                             warehouse_id: 'wh-1',
@@ -750,6 +751,7 @@ test('postGoodsReceivedNoteToInventory prefers POSTED, falls back safely, and re
                     return Promise.resolve({
                       data: {
                         id: 'grn-1',
+                        organization_id: 'org-header-1',
                         status: 'DRAFT',
                         quality_status: 'APPROVED',
                         warehouse_id: 'wh-1',
@@ -1033,6 +1035,8 @@ test('postGoodsReceivedNoteToInventory prefers POSTED, falls back safely, and re
   assert.equal(stockBalanceInserts.length, 1);
   assert.equal(poItemUpdates.length, 1);
   assert.equal(movementInserts.length, 1);
+  assert.equal(stockBalanceInserts[0]?.organization_id, 'org-header-1');
+  assert.equal(movementInserts[0]?.organization_id, 'org-header-1');
   assert.equal(movementInserts[0]?.source_document_type, 'GRN');
   assert.equal(movementInserts[0]?.source_document_id, 'grn-1');
   assert.equal(movementInserts[0]?.reference_type, 'goods_received_note');
@@ -1741,13 +1745,14 @@ test('createOrUpdateStockBalance retries down to a minimal insert payload when o
   assert.equal(insertPayloads.length > 1, true);
   assert.deepEqual(
     Object.keys(insertPayloads[0] ?? {}).sort(),
-    ['average_cost', 'item_id', 'quantity_available', 'quantity_on_hand', 'total_value', 'updated_at', 'warehouse_id'],
+    ['average_cost', 'item_id', 'organization_id', 'quantity_available', 'quantity_on_hand', 'total_value', 'updated_at', 'warehouse_id'],
   );
   assert.equal(insertPayloads.some((payload) => 'balance_quantity' in payload), false);
   assert.deepEqual(
     Object.keys(insertPayloads.at(-1) ?? {}).sort(),
-    ['item_id', 'quantity_on_hand', 'warehouse_id'],
+    ['item_id', 'organization_id', 'quantity_on_hand', 'warehouse_id'],
   );
+  assert.equal(insertPayloads.every((payload) => payload.organization_id === 'org-7'), true);
 });
 
 test('createOrUpdateStockBalance handles PostgREST schema-cache missing-column messages while retrying inserts', async () => {
@@ -1814,6 +1819,7 @@ test('createOrUpdateStockBalance handles PostgREST schema-cache missing-column m
   assert.equal(String(result.id), 'bal-7b');
   assert.equal(insertPayloads.length >= 2, true);
   assert.equal(insertPayloads.some((payload) => 'balance_quantity' in payload), false);
+  assert.equal(insertPayloads.every((payload) => payload.organization_id === 'org-7b'), true);
 });
 
 test('createOrUpdateStockBalance surfaces operation and dbMessage when insert still fails', async () => {
@@ -1965,6 +1971,106 @@ test('createOrUpdateStockBalance updates stock balances with only safe core writ
   );
   assert.equal(updatePayloads.some((payload) => 'balance_quantity' in payload), false);
   assert.equal(updatePayloads.some((payload) => 'unit_cost' in payload), false);
+});
+
+test('postGoodsReceivedNoteToInventory returns GRN_ORGANIZATION_MISSING when no organization_id can be resolved', async () => {
+  const service = {
+    from(table: string) {
+      return {
+        select(columns: string) {
+          return {
+            eq(column: string, value: string) {
+              if (table === 'goods_received_notes') {
+                return {
+                  eq(nextColumn: string, nextValue: string) {
+                    assert.equal(column, 'organization_id');
+                    assert.equal(nextColumn, 'id');
+                    assert.equal(nextValue, 'grn-org-missing');
+                    return {
+                      maybeSingle() {
+                        return Promise.resolve({
+                          data: {
+                            id: 'grn-org-missing',
+                            status: 'DRAFT',
+                            receiving_warehouse_id: 'wh-org-missing',
+                            stock_posted: false,
+                          },
+                          error: null,
+                        });
+                      },
+                    };
+                  },
+                };
+              }
+
+              if (table === 'goods_received_note_items') {
+                assert.equal(column, 'grn_id');
+                assert.equal(value, 'grn-org-missing');
+                return Promise.resolve({
+                  data: [
+                    {
+                      id: 'line-org-missing',
+                      item_id: 'item-org-missing',
+                      quantity_received: 50,
+                      unit_cost: 0,
+                    },
+                  ],
+                  error: null,
+                });
+              }
+
+              if (table === 'stock_balances') {
+                return {
+                  eq() {
+                    return {
+                      maybeSingle() {
+                        return Promise.resolve({ data: null, error: null });
+                      },
+                    };
+                  },
+                };
+              }
+
+              throw new Error(`Unhandled select().eq() for ${table} ${columns}`);
+            },
+            in(column: string, values: string[]) {
+              if (table === 'items') {
+                assert.equal(column, 'id');
+                assert.deepEqual(values, ['item-org-missing']);
+                return Promise.resolve({
+                  data: [{ id: 'item-org-missing', unit_cost: 0 }],
+                  error: null,
+                });
+              }
+              throw new Error(`Unhandled select().in() for ${table} ${columns}`);
+            },
+            or() {
+              return {
+                limit() {
+                  return Promise.resolve({ data: [], error: null });
+                },
+              };
+            },
+          };
+        },
+      };
+    },
+  };
+
+  await assert.rejects(
+    () =>
+      postGoodsReceivedNoteToInventory(service as any, {
+        grnId: 'grn-org-missing',
+        organizationId: '',
+        userId: 'user-1',
+      }),
+    (error: unknown) => {
+      assert.equal(isGrnStockPostingError(error), true);
+      assert.equal((error as { details?: { stage?: string } }).details?.stage, 'GRN_ORGANIZATION_MISSING');
+      assert.equal((error as { details?: { operation?: string } }).details?.operation, 'resolve_organization_id');
+      return true;
+    },
+  );
 });
 
 test('fetchGoodsReceivedNoteDetail loads GRN header and items separately without embed ambiguity', async () => {
