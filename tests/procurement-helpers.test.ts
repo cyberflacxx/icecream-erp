@@ -1702,22 +1702,9 @@ test('createOrUpdateStockBalance retries down to a minimal insert payload when o
                 single() {
                   for (const optionalColumn of [
                     'quantity_available',
-                    'available_quantity',
                     'average_cost',
-                    'avg_cost',
                     'total_value',
-                    'stock_value',
-                    'unit_cost',
-                    'quantity_reserved',
-                    'reserved_qty',
-                    'created_at',
                     'updated_at',
-                    'last_updated',
-                    'organization_id',
-                    'quantity',
-                    'current_quantity',
-                    'balance_quantity',
-                    'stock_quantity',
                   ]) {
                     if (optionalColumn in payload) {
                       return Promise.resolve({
@@ -1753,9 +1740,80 @@ test('createOrUpdateStockBalance retries down to a minimal insert payload when o
   assert.equal(String(result.id), 'bal-7');
   assert.equal(insertPayloads.length > 1, true);
   assert.deepEqual(
+    Object.keys(insertPayloads[0] ?? {}).sort(),
+    ['average_cost', 'item_id', 'quantity_available', 'quantity_on_hand', 'total_value', 'updated_at', 'warehouse_id'],
+  );
+  assert.equal(insertPayloads.some((payload) => 'balance_quantity' in payload), false);
+  assert.deepEqual(
     Object.keys(insertPayloads.at(-1) ?? {}).sort(),
     ['item_id', 'quantity_on_hand', 'warehouse_id'],
   );
+});
+
+test('createOrUpdateStockBalance handles PostgREST schema-cache missing-column messages while retrying inserts', async () => {
+  const insertPayloads: Array<Record<string, unknown>> = [];
+
+  const service = {
+    from(table: string) {
+      assert.equal(table, 'stock_balances');
+      return {
+        select(columns?: string) {
+          if (columns !== undefined) {
+            assert.equal(columns, '*');
+          }
+          return {
+            eq() {
+              return {
+                eq() {
+                  return {
+                    maybeSingle() {
+                      return Promise.resolve({ data: null, error: null });
+                    },
+                  };
+                },
+              };
+            },
+          };
+        },
+        insert(payload: Record<string, unknown>) {
+          insertPayloads.push({ ...payload });
+          return {
+            select() {
+              return {
+                single() {
+                  if ('updated_at' in payload) {
+                    return Promise.resolve({
+                      data: null,
+                      error: { message: "Could not find the 'updated_at' column of 'stock_balances' in the schema cache" },
+                    });
+                  }
+
+                  return Promise.resolve({
+                    data: { id: 'bal-7b', ...payload },
+                    error: null,
+                  });
+                },
+              };
+            },
+          };
+        },
+      };
+    },
+  };
+
+  const result = await createOrUpdateStockBalance(service as any, {
+    grnId: 'grn-7b',
+    itemId: 'item-7b',
+    organizationId: 'org-7b',
+    quantity: 50,
+    receivedValue: 0,
+    unitCost: 0,
+    warehouseId: 'wh-7b',
+  });
+
+  assert.equal(String(result.id), 'bal-7b');
+  assert.equal(insertPayloads.length >= 2, true);
+  assert.equal(insertPayloads.some((payload) => 'balance_quantity' in payload), false);
 });
 
 test('createOrUpdateStockBalance surfaces operation and dbMessage when insert still fails', async () => {
@@ -1818,6 +1876,95 @@ test('createOrUpdateStockBalance surfaces operation and dbMessage when insert st
       return true;
     },
   );
+});
+
+test('createOrUpdateStockBalance updates stock balances with only safe core write columns', async () => {
+  const updatePayloads: Array<Record<string, unknown>> = [];
+
+  const service = {
+    from(table: string) {
+      assert.equal(table, 'stock_balances');
+      return {
+        select(columns?: string) {
+          if (columns !== undefined) {
+            assert.equal(columns, '*');
+          }
+          return {
+            eq(column: string, value: string) {
+              assert.equal(column, 'item_id');
+              assert.equal(value, 'item-8b');
+              return {
+                eq(nextColumn: string, nextValue: string) {
+                  assert.equal(nextColumn, 'warehouse_id');
+                  assert.equal(nextValue, 'wh-8b');
+                  return {
+                    maybeSingle() {
+                      return Promise.resolve({
+                        data: {
+                          id: 'bal-8b',
+                          quantity_on_hand: 10,
+                          quantity_available: 10,
+                          average_cost: 1,
+                          total_value: 10,
+                        },
+                        error: null,
+                      });
+                    },
+                  };
+                },
+              };
+            },
+          };
+        },
+        update(payload: Record<string, unknown>) {
+          updatePayloads.push({ ...payload });
+          return {
+            eq(column: string, value: string) {
+              assert.equal(column, 'id');
+              assert.equal(value, 'bal-8b');
+              return {
+                select() {
+                  return {
+                    single() {
+                      if ('updated_at' in payload) {
+                        return Promise.resolve({
+                          data: null,
+                          error: { message: "Could not find the 'updated_at' column of 'stock_balances' in the schema cache" },
+                        });
+                      }
+
+                      return Promise.resolve({
+                        data: { id: 'bal-8b', ...payload },
+                        error: null,
+                      });
+                    },
+                  };
+                },
+              };
+            },
+          };
+        },
+      };
+    },
+  };
+
+  const result = await createOrUpdateStockBalance(service as any, {
+    grnId: 'grn-8b',
+    itemId: 'item-8b',
+    organizationId: 'org-8b',
+    quantity: 50,
+    receivedValue: 0,
+    unitCost: 0,
+    warehouseId: 'wh-8b',
+  });
+
+  assert.equal(String(result.id), 'bal-8b');
+  assert.deepEqual(
+    Object.keys(updatePayloads[0] ?? {}).sort(),
+    ['average_cost', 'quantity_available', 'quantity_on_hand', 'total_value', 'updated_at'],
+  );
+  assert.equal(updatePayloads.some((payload) => 'balance_quantity' in payload), false);
+  assert.equal(updatePayloads.some((payload) => 'unit_cost' in payload), false);
 });
 
 test('fetchGoodsReceivedNoteDetail loads GRN header and items separately without embed ambiguity', async () => {

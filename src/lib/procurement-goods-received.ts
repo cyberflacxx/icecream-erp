@@ -255,8 +255,15 @@ function isInvalidMovementTypeEnumError(error: unknown) {
 
 function extractMissingColumnName(error: unknown, table: string) {
   const message = getErrorMessage(error);
-  const match = message.match(new RegExp(`column\\s+${table}\\.([a-z_]+)\\s+does not exist`, 'i'));
-  return match?.[1] ?? null;
+  const directMatch = message.match(new RegExp(`column\\s+${table}\\.([a-z_]+)\\s+does not exist`, 'i'));
+  if (directMatch?.[1]) {
+    return directMatch[1];
+  }
+
+  const schemaCacheMatch = message.match(
+    new RegExp(`Could not find the '([a-z_]+)' column of '${table}' in the schema cache`, 'i'),
+  );
+  return schemaCacheMatch?.[1] ?? null;
 }
 
 function buildGrnPostingFailure(
@@ -615,44 +622,90 @@ function buildStockBalanceInsertPayloadLevels(input: {
   unitCost: number;
   warehouseId: string;
 }, now: string) {
+  // Alias fields are read-compatible only. Do not write optional alias columns to
+  // PostgREST unless schema inspection confirms they exist.
   const sharedPayload: Record<string, unknown> = {
     item_id: input.itemId,
     warehouse_id: input.warehouseId,
-    organization_id: input.organizationId,
-    quantity: input.quantity,
     quantity_on_hand: input.quantity,
-    current_quantity: input.quantity,
-    balance_quantity: input.quantity,
-    stock_quantity: input.quantity,
   };
 
   return [
     {
       ...sharedPayload,
-      quantity_available: input.quantity,
-      available_quantity: input.quantity,
       average_cost: input.unitCost,
-      avg_cost: input.unitCost,
+      quantity_available: input.quantity,
       total_value: input.receivedValue,
-      stock_value: input.receivedValue,
-      unit_cost: input.unitCost,
-      quantity_reserved: 0,
-      reserved_qty: 0,
-      created_at: now,
       updated_at: now,
-      last_updated: now,
     },
     {
       ...sharedPayload,
       quantity_available: input.quantity,
-      available_quantity: input.quantity,
-      quantity_reserved: 0,
-      reserved_qty: 0,
     },
     {
       ...sharedPayload,
     },
   ] as Array<Record<string, unknown>>;
+}
+
+function buildStockBalanceUpdatePayloadLevels(input: {
+  nextAvailable: number;
+  nextAverageCost: number;
+  nextOnHand: number;
+  nextTotalValue: number;
+}, now: string) {
+  const sharedPayload: Record<string, unknown> = {
+    quantity_on_hand: input.nextOnHand,
+  };
+
+  return [
+    {
+      ...sharedPayload,
+      quantity_available: input.nextAvailable,
+      average_cost: input.nextAverageCost,
+      total_value: input.nextTotalValue,
+      updated_at: now,
+    },
+    {
+      ...sharedPayload,
+      quantity_available: input.nextAvailable,
+    },
+    {
+      ...sharedPayload,
+    },
+  ] as Array<Record<string, unknown>>;
+}
+
+async function tryStockBalanceWriteLevels(
+  service: {
+    from: (table: string) => any;
+  },
+  input: {
+    applyFilter?: ((query: any) => any) | null;
+    levels: Array<Record<string, unknown>>;
+    operation: 'insert' | 'update';
+  },
+) {
+  let lastResult: { data: unknown; error: unknown } | null = null;
+
+  for (const payload of input.levels) {
+    const result = input.operation === 'insert'
+      ? await insertWithMissingColumnFallback(service, 'stock_balances', payload)
+      : await updateWithMissingColumnFallback(
+          service,
+          'stock_balances',
+          payload,
+          input.applyFilter ?? ((query) => query),
+        );
+
+    if (!result.error && result.data) {
+      return result;
+    }
+
+    lastResult = result;
+  }
+
+  return lastResult ?? { data: null, error: new Error('Failed to write stock balance.') };
 }
 
 export async function createOrUpdateStockBalance(
@@ -695,34 +748,16 @@ export async function createOrUpdateStockBalance(
     const nextTotalValue = currentTotalValue + totalValue;
     const nextAverageCost = nextOnHand > 0 ? nextTotalValue / nextOnHand : currentAverageCost;
 
-    const updatePayload: Record<string, unknown> = {
-      avg_cost: nextAverageCost,
-      average_cost: nextAverageCost,
-      available_quantity: nextAvailable,
-      balance_quantity: nextOnHand,
-      current_quantity: nextOnHand,
-      quantity: toNumber(
-        current.quantity ??
-          current.current_quantity ??
-          current.balance_quantity ??
-          current.stock_quantity ??
-          quantityOnHand,
-      ) + quantity,
-      quantity_available: nextAvailable,
-      quantity_on_hand: nextOnHand,
-      quantity_reserved: quantityReserved,
-      reserved_qty: quantityReserved,
-      stock_quantity: nextOnHand,
-      stock_value: nextTotalValue,
-      total_value: nextTotalValue,
-      unit_cost: unitCost,
-      updated_at: now,
-      last_updated: now,
-    };
-
-    const result = await updateWithMissingColumnFallback(service, 'stock_balances', updatePayload, (query) =>
-      query.eq('id', current.id),
-    );
+    const result = await tryStockBalanceWriteLevels(service, {
+      applyFilter: (query) => query.eq('id', current.id),
+      levels: buildStockBalanceUpdatePayloadLevels({
+        nextAvailable,
+        nextAverageCost,
+        nextOnHand,
+        nextTotalValue,
+      }, now),
+      operation: 'update',
+    });
 
     if (result.error || !result.data) {
       throw buildGrnPostingFailure(
@@ -746,20 +781,20 @@ export async function createOrUpdateStockBalance(
     return result.data as Record<string, unknown>;
   }
 
-  let lastResult: { data: unknown; error: unknown } | null = null;
-  for (const insertPayload of buildStockBalanceInsertPayloadLevels({
-    itemId: input.itemId,
-    organizationId: input.organizationId,
-    quantity,
-    receivedValue: totalValue,
-    unitCost,
-    warehouseId: input.warehouseId,
-  }, now)) {
-    const result = await insertWithMissingColumnFallback(service, 'stock_balances', insertPayload);
-    if (!result.error && result.data) {
-      return result.data as Record<string, unknown>;
-    }
-    lastResult = result;
+  const lastResult = await tryStockBalanceWriteLevels(service, {
+    levels: buildStockBalanceInsertPayloadLevels({
+      itemId: input.itemId,
+      organizationId: input.organizationId,
+      quantity,
+      receivedValue: totalValue,
+      unitCost,
+      warehouseId: input.warehouseId,
+    }, now),
+    operation: 'insert',
+  });
+
+  if (!lastResult.error && lastResult.data) {
+    return lastResult.data as Record<string, unknown>;
   }
 
   throw buildGrnPostingFailure(
