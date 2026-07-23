@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 
 import {
   buildInventoryAdjustmentFailure,
@@ -630,4 +631,19 @@ test('inventory adjustment failure helper returns staged stock movement diagnost
   assert.equal(failure.code, 'INVENTORY_ADJUSTMENT_FAILED');
   assert.equal(failure.stage, 'STOCK_MOVEMENT_INSERT_FAILED');
   assert.equal(failure.details.totalValue, 0);
+});
+
+test('inventory adjustment route no longer references undefined serverError and supports reload fallback', () => {
+  const route = fs.readFileSync('src/app/api/inventory/adjustments/route.ts', 'utf8');
+
+  assert.doesNotMatch(route, /return serverError\(/);
+  assert.match(route, /warning:\s*'Stock adjustment posted but updated balance could not be fully reloaded'/);
+  assert.match(route, /adjustmentPosted:\s*true/);
+});
+
+test('inventory adjustment route does not emit serverError is not defined in failure payloads', () => {
+  const route = fs.readFileSync('src/app/api/inventory/adjustments/route.ts', 'utf8');
+
+  assert.doesNotMatch(route, /serverError is not defined/);
+  assert.match(route, /const dbMessage = error instanceof Error \? error\.message/);
 });

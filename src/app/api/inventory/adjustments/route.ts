@@ -35,6 +35,31 @@ function inventoryAdjustmentFailedResponse(input: {
   return NextResponse.json(buildInventoryAdjustmentFailureResponse(input), { status: 500 });
 }
 
+function inventoryAdjustmentSuccessWarningResponse(input: {
+  adjustmentId: string;
+  itemId: string;
+  quantity: number;
+  totalValue: number;
+  unitCost: number;
+  warehouseId: string;
+  warning: string;
+}) {
+  return NextResponse.json(
+    {
+      adjustmentPosted: true,
+      id: input.adjustmentId,
+      itemId: input.itemId,
+      quantity: input.quantity,
+      success: true,
+      totalValue: input.totalValue,
+      unitCost: input.unitCost,
+      warehouseId: input.warehouseId,
+      warning: input.warning,
+    },
+    { status: 201 },
+  );
+}
+
 export async function POST(request: NextRequest) {
   const ctx = await getAuthContext();
   if (!ctx) return unauthorized();
@@ -102,7 +127,17 @@ export async function POST(request: NextRequest) {
       .eq('item_id', itemId)
       .eq('warehouse_id', warehouseId)
       .maybeSingle();
-    if (balanceError) return serverError(balanceError.message);
+    if (balanceError) {
+      return inventoryAdjustmentFailedResponse({
+        dbMessage: balanceError.message,
+        itemId,
+        quantity: qty,
+        stage,
+        totalValue: resolvedTotalValue,
+        unitCost: resolvedUnitCost,
+        warehouseId,
+      });
+    }
 
     const currentOnHand = Number(balance?.quantity_on_hand ?? 0);
     const currentReserved = Number(balance?.quantity_reserved ?? 0);
@@ -189,7 +224,35 @@ export async function POST(request: NextRequest) {
       .eq('item_id', itemId)
       .eq('warehouse_id', warehouseId)
       .single();
-    if (fetchErr) return serverError(fetchErr.message);
+    if (fetchErr) {
+      const fallbackBalanceResult = await service
+        .from('stock_balances')
+        .select('id, quantity_on_hand, quantity_available, quantity_reserved, total_value, average_cost, avg_cost, last_updated, updated_at')
+        .eq('item_id', itemId)
+        .eq('warehouse_id', warehouseId)
+        .maybeSingle();
+
+      if (!fallbackBalanceResult.error && fallbackBalanceResult.data) {
+        return NextResponse.json(
+          {
+            ...fallbackBalanceResult.data,
+            adjustmentPosted: true,
+            warning: 'Stock adjustment posted but updated balance could not be fully reloaded',
+          },
+          { status: 201 },
+        );
+      }
+
+      return inventoryAdjustmentSuccessWarningResponse({
+        adjustmentId: String(adjustment.id),
+        itemId,
+        quantity: qty,
+        totalValue: resolvedTotalValue,
+        unitCost: resolvedUnitCost,
+        warehouseId,
+        warning: 'Stock adjustment posted but updated balance could not be reloaded',
+      });
+    }
 
     return NextResponse.json(updatedBalance, { status: 201 });
   } catch (error) {

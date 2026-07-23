@@ -264,3 +264,10 @@ test('production receive smoke setup sends explicit seed unitCost and totalValue
   assert.match(script, /totalValue:\s*seedTotalValue/);
   assert.match(script, /toNumber\(item\?\.unitCost \?\? item\?\.unit_cost, 0\)/);
 });
+
+test('production receive smoke checks existing source stock before reseeding', () => {
+  const script = fs.readFileSync('scripts/smoke-production-receive.mjs', 'utf8');
+
+  assert.match(script, /if \(currentAvailable >= TRANSFER_QUANTITY\)/);
+  assert.match(script, /pass\('Source stock already available'\)/);
+});

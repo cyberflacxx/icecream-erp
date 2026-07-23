@@ -538,6 +538,7 @@ async function ensureSourceStock({ cookie, item, sourceWarehouse, setupContext }
 
   if (currentAvailable >= TRANSFER_QUANTITY) {
     setupContext.sourceStockFound = true;
+    pass('Source stock already available');
     return currentBalance;
   }
 
