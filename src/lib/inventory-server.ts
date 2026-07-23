@@ -1,9 +1,12 @@
 import {
+  buildInventoryAdjustmentFailure,
   ensureNonNegative,
   ensurePositiveQuantity,
   isInvoiceApprovedForDispatch,
   normalizeDate,
   normalizeStockMovementType,
+  resolveInventoryUnitCost,
+  resolveInventoryValue,
   toNumber,
 } from './inventory';
 
@@ -333,6 +336,7 @@ export async function applyInventoryDelta(
     itemId: string;
     organizationId?: string;
     quantityDelta: number;
+    totalValue?: number | null;
     unitCost?: number | null;
     warehouseId: string;
   },
@@ -352,15 +356,16 @@ export async function applyInventoryDelta(
   const nextLegacyQuantity = currentLegacyQuantity + quantityDelta;
   const currentAverageCost = toNumber(current?.average_cost ?? current?.avg_cost);
   const currentTotalValue = toNumber(current?.total_value ?? (toNumber(current?.quantity_on_hand) * currentAverageCost));
-  const incomingUnitCost = params.unitCost == null ? null : toNumber(params.unitCost);
-  const nextAverageCost =
-    quantityDelta > 0 && incomingUnitCost !== null && nextOnHand > 0
-      ? (((toNumber(current?.quantity_on_hand) * currentAverageCost) + (quantityDelta * incomingUnitCost)) / nextOnHand)
-      : currentAverageCost;
+  const resolvedUnitCost = params.unitCost == null ? currentAverageCost : toNumber(params.unitCost);
+  const movementValue =
+    params.totalValue == null
+      ? Math.abs(quantityDelta) * resolvedUnitCost
+      : Math.max(0, toNumber(params.totalValue));
   const nextTotalValue =
-    quantityDelta > 0 && incomingUnitCost !== null
-      ? currentTotalValue + (quantityDelta * incomingUnitCost)
-      : currentTotalValue;
+    quantityDelta >= 0
+      ? currentTotalValue + movementValue
+      : Math.max(0, currentTotalValue - movementValue);
+  const nextAverageCost = nextOnHand > 0 ? nextTotalValue / nextOnHand : 0;
 
   ensureNonNegative(nextOnHand, 'stock balance');
   ensureNonNegative(nextAvailable, 'available stock');
@@ -395,8 +400,8 @@ export async function applyInventoryDelta(
   const { data, error } = await service
     .from('stock_balances')
     .insert({
-      avg_cost: incomingUnitCost ?? 0,
-      average_cost: incomingUnitCost ?? 0,
+      avg_cost: resolvedUnitCost,
+      average_cost: resolvedUnitCost,
       organization_id: organizationId,
       item_id: params.itemId,
       quantity: nextLegacyQuantity,
@@ -405,7 +410,7 @@ export async function applyInventoryDelta(
       quantity_available: nextAvailable,
       quantity_reserved: quantityReserved,
       reserved_qty: quantityReserved,
-      total_value: Math.max(0, quantityDelta * toNumber(incomingUnitCost)),
+      total_value: Math.max(0, nextTotalValue),
       updated_at: new Date().toISOString(),
       last_updated: new Date().toISOString(),
     })
@@ -434,15 +439,37 @@ export async function recordStockMovement(
     referenceId?: string | null;
     referenceType?: string | null;
     sourceWarehouseId?: string | null;
+    stockValue?: number | null;
+    totalCost?: number | null;
+    totalValue?: number | null;
     unitCost?: number | null;
+    value?: number | null;
     warehouseId: string;
   },
 ) {
   const item = await requireItem(service, params.itemId);
   const balance = await getBalance(service, params.itemId, params.warehouseId);
   const quantity = ensurePositiveQuantity(params.quantity);
-  const unitCost = params.unitCost == null ? toNumber(item.unit_cost) : toNumber(params.unitCost);
-  const totalCost = unitCost * quantity;
+  const unitCost = resolveInventoryUnitCost(
+    {
+      unitCost: params.unitCost,
+      unit_cost: params.unitCost,
+    },
+    toNumber(item.unit_cost),
+  );
+  const totalValue = Math.max(
+    0,
+    resolveInventoryValue(
+      {
+        stockValue: params.stockValue,
+        totalCost: params.totalCost,
+        totalValue: params.totalValue,
+        value: params.value,
+      },
+      quantity * unitCost,
+    ),
+  );
+  const totalCost = totalValue;
   const organizationId = await resolveInventoryOrganizationId(service, {
     explicitOrganizationId: params.organizationId,
     fallbackOrganizationId: balance?.organization_id
@@ -461,9 +488,9 @@ export async function recordStockMovement(
     movement_type: movementType,
     quantity,
     running_balance: toNumber(balance?.quantity_on_hand),
-    unit_cost: unitCost || null,
-    total_cost: totalCost || null,
-    total_value: totalCost || null,
+    unit_cost: unitCost,
+    total_cost: totalCost,
+    total_value: totalValue,
     reference_id: params.referenceId ?? null,
     reference_type: params.referenceType ?? null,
     source_document_id: params.referenceId ?? null,
@@ -559,6 +586,7 @@ export async function createInventoryAdjustmentRecord(
     organizationId?: string;
     quantity: number;
     reason: string;
+    unitCost?: number | null;
     warehouseId: string;
   },
 ) {
@@ -611,7 +639,13 @@ export async function createInventoryAdjustmentRecord(
       quantity_before: quantityBefore,
       quantity_adjusted: quantityAdjusted,
       quantity_after: quantityAfter,
-      unit_cost: toNumber(item.unit_cost),
+      unit_cost: resolveInventoryUnitCost(
+        {
+          unitCost: params.unitCost,
+          unit_cost: params.unitCost,
+        },
+        toNumber(item.unit_cost),
+      ),
       movement_type: params.movementType,
       reason: params.reason,
     });
@@ -621,6 +655,18 @@ export async function createInventoryAdjustmentRecord(
   }
 
   return adjustment;
+}
+
+export function buildInventoryAdjustmentFailureResponse(input: {
+  dbMessage?: string | null;
+  itemId?: string | null;
+  quantity?: number | null;
+  stage: string;
+  totalValue?: number | null;
+  unitCost?: number | null;
+  warehouseId?: string | null;
+}) {
+  return buildInventoryAdjustmentFailure(input);
 }
 
 export function normalizeMovementDate(value: string | null | undefined) {

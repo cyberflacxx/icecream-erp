@@ -5,11 +5,16 @@ import {
   can,
   forbidden,
   getAuthContext,
-  serverError,
   unauthorized,
 } from '@/lib/api-auth';
 import {
+  resolveInventoryUnitCost,
+  resolveInventoryValue,
+  toNumber,
+} from '@/lib/inventory';
+import {
   applyInventoryDelta,
+  buildInventoryAdjustmentFailureResponse,
   createInventoryAdjustmentRecord,
   recordStockMovement,
   requireItem,
@@ -18,19 +23,42 @@ import {
 } from '@/lib/inventory-server';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
+function inventoryAdjustmentFailedResponse(input: {
+  dbMessage?: string | null;
+  itemId?: string | null;
+  quantity?: number | null;
+  stage: string;
+  totalValue?: number | null;
+  unitCost?: number | null;
+  warehouseId?: string | null;
+}) {
+  return NextResponse.json(buildInventoryAdjustmentFailureResponse(input), { status: 500 });
+}
+
 export async function POST(request: NextRequest) {
   const ctx = await getAuthContext();
   if (!ctx) return unauthorized();
   if (!can(ctx, 'inventory.write')) return forbidden();
 
   const service = createServiceRoleClient();
+  let stage = 'READ_REQUEST';
 
   const body = (await request.json()) as {
     itemId?: string;
+    organizationId?: string;
     warehouseId?: string;
     quantity?: number;
+    stockValue?: number;
     transactionAt?: string;
+    totalCost?: number;
+    totalValue?: number;
     type?: 'ADJUSTMENT_IN' | 'ADJUSTMENT_OUT';
+    unitCost?: number;
+    unit_cost?: number;
+    total_cost?: number;
+    total_value?: number;
+    stock_value?: number;
+    value?: number;
     reason?: string;
   };
 
@@ -49,17 +77,25 @@ export async function POST(request: NextRequest) {
     return badRequest('quantity must be a positive number.');
   }
 
+  let resolvedUnitCost = 0;
+  let resolvedTotalValue = 0;
+
   try {
+    stage = 'PARSE_TRANSACTION_DATE';
     const parsedTransactionAt = new Date(transactionAt);
     if (Number.isNaN(parsedTransactionAt.getTime())) {
       return badRequest('transactionAt must be a valid ISO date-time.');
     }
 
+    stage = 'LOAD_ITEM_AND_WAREHOUSE';
     const [item, warehouse] = await Promise.all([
       requireItem(service, itemId),
       requireWarehouseAccess(service, warehouseId, ctx.branchId, ctx.isBranchScoped, ctx.warehouseAssignments),
     ]);
+    resolvedUnitCost = resolveInventoryUnitCost(body, toNumber(item.unit_cost));
+    resolvedTotalValue = Math.max(0, resolveInventoryValue(body, qty * resolvedUnitCost));
 
+    stage = 'LOAD_BALANCE';
     const { data: balance, error: balanceError } = await service
       .from('stock_balances')
       .select('id, quantity_on_hand, quantity_available, quantity_reserved')
@@ -78,37 +114,49 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    stage = 'CREATE_ADJUSTMENT_RECORD';
     const adjustment = await createInventoryAdjustmentRecord(service, {
       adjustmentDate: parsedTransactionAt.toISOString(),
       createdBy: ctx.userId,
       itemId,
       movementType: type,
-      organizationId: ctx.organizationId,
+      organizationId: ctx.organizationId ?? body.organizationId,
       quantity: qty,
       reason,
+      unitCost: resolvedUnitCost,
       warehouseId,
     });
 
+    stage = 'UPDATE_STOCK_BALANCE';
     await applyInventoryDelta(service, {
       itemId,
-      organizationId: ctx.organizationId,
+      organizationId: ctx.organizationId ?? body.organizationId ?? String(item.organization_id ?? warehouse.organization_id ?? ''),
       quantityDelta: type === 'ADJUSTMENT_IN' ? qty : -qty,
+      totalValue: resolvedTotalValue,
+      unitCost: resolvedUnitCost,
       warehouseId,
     });
 
+    stage = 'STOCK_MOVEMENT_INSERT_FAILED';
     await recordStockMovement(service, {
       createdAt: parsedTransactionAt.toISOString(),
       createdBy: ctx.userId,
       itemId,
       movementType: type,
       notes: reason,
-      organizationId: ctx.organizationId,
+      organizationId: ctx.organizationId ?? body.organizationId ?? String(item.organization_id ?? warehouse.organization_id ?? ''),
       quantity: qty,
       referenceId: String(adjustment.id),
       referenceType: 'stock_adjustment',
+      stockValue: body.stockValue ?? body.stock_value,
+      totalCost: body.totalCost ?? body.total_cost,
+      totalValue: body.totalValue ?? body.total_value,
+      unitCost: resolvedUnitCost,
+      value: body.value,
       warehouseId,
     });
 
+    stage = 'WRITE_AUDIT_LOG';
     await writeInventoryAuditLog(service, {
       action: 'STOCK_ADJUSTMENT_POSTED',
       details: {
@@ -116,8 +164,10 @@ export async function POST(request: NextRequest) {
         itemName: item.name,
         quantity: qty,
         reason,
+        totalValue: resolvedTotalValue,
         transactionAt: parsedTransactionAt.toISOString(),
         type,
+        unitCost: resolvedUnitCost,
         warehouseCode: warehouse.code ?? null,
         warehouseName: warehouse.name,
       },
@@ -126,6 +176,7 @@ export async function POST(request: NextRequest) {
       userProfileId: ctx.userId,
     });
 
+    stage = 'FETCH_UPDATED_BALANCE';
     const { data: updatedBalance, error: fetchErr } = await service
       .from('stock_balances')
       .select(
@@ -142,6 +193,15 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json(updatedBalance, { status: 201 });
   } catch (error) {
-    return serverError(error instanceof Error ? error.message : 'Failed to post stock adjustment.');
+    const dbMessage = error instanceof Error ? error.message : 'Failed to post stock adjustment.';
+    return inventoryAdjustmentFailedResponse({
+      dbMessage,
+      itemId,
+      quantity: qty,
+      stage,
+      totalValue: resolvedTotalValue,
+      unitCost: resolvedUnitCost,
+      warehouseId,
+    });
   }
 }

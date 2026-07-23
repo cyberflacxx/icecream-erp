@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 
 import {
   buildProductionSmokeSetupFailure,
@@ -254,4 +255,12 @@ test('production smoke setup failure exposes required stage codes', () => {
   assert.equal(missingWarehouse.stage, 'WAREHOUSE_OR_SOURCE_STOCK_MISSING');
   assert.equal(seedUnavailable.code, 'PRODUCTION_SMOKE_SETUP_FAILED');
   assert.equal(seedUnavailable.stage, 'SOURCE_STOCK_SEED_UNAVAILABLE');
+});
+
+test('production receive smoke setup sends explicit seed unitCost and totalValue while preserving zero', () => {
+  const script = fs.readFileSync('scripts/smoke-production-receive.mjs', 'utf8');
+
+  assert.match(script, /unitCost:\s*seedUnitCost/);
+  assert.match(script, /totalValue:\s*seedTotalValue/);
+  assert.match(script, /toNumber\(item\?\.unitCost \?\? item\?\.unit_cost, 0\)/);
 });

@@ -310,7 +310,7 @@ function mapSmokeItem(item) {
     code: String(item?.code ?? ''),
     id: String(item?.id ?? ''),
     name: String(item?.name ?? item?.code ?? 'Production Smoke Raw Material'),
-    unitCost: toNumber(item?.unitCost ?? item?.unit_cost, 1),
+    unitCost: toNumber(item?.unitCost ?? item?.unit_cost, 0),
   };
 }
 
@@ -542,14 +542,18 @@ async function ensureSourceStock({ cookie, item, sourceWarehouse, setupContext }
   }
 
   const requiredSeedQuantity = Math.max(TRANSFER_QUANTITY - currentAvailable, TRANSFER_QUANTITY);
+  const seedUnitCost = toNumber(item.unitCost, 0);
+  const seedTotalValue = requiredSeedQuantity * seedUnitCost;
   const response = await appRequest('/api/inventory/adjustments', {
     method: 'POST',
     body: {
       itemId: item.id,
       quantity: requiredSeedQuantity,
       reason: `Production smoke seed ${new Date().toISOString()}`,
+      totalValue: seedTotalValue,
       transactionAt: new Date().toISOString(),
       type: 'ADJUSTMENT_IN',
+      unitCost: seedUnitCost,
       warehouseId: sourceWarehouse.id,
     },
     cookie,
@@ -593,6 +597,7 @@ async function ensureSourceStock({ cookie, item, sourceWarehouse, setupContext }
   }
 
   setupContext.sourceStockFound = true;
+  pass('Source stock seeded');
   return seededBalance;
 }
 

@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  buildInventoryAdjustmentFailure,
   buildOpeningClosingRows,
   calculateAcceptedQuantity,
   calculateShortageQuantity,
@@ -14,15 +15,19 @@ import {
   normalizeTransferStatus,
   normalizeWarehouseCode,
   normalizeWarehouseType,
+  resolveInventoryUnitCost,
   resolveInventoryValue,
   resolveWarehouseDisplayType,
   resolveWarehouseStorageType,
   summarizeInventoryByType,
 } from '../src/lib/inventory';
 import {
+  applyInventoryDelta,
+  buildInventoryAdjustmentFailureResponse,
   buildStockMovementListSelectClause,
   listCompatibleStockMovements,
   mapCompatibleStockMovementRows,
+  recordStockMovement,
 } from '../src/lib/inventory-server';
 
 test('deriveSupplierShortages returns open shortages from ordered versus received quantities', () => {
@@ -187,9 +192,16 @@ test('resolveInventoryValue accepts live alias fields and preserves zero values'
   assert.equal(resolveInventoryValue({ stock_value: 85 }), 85);
   assert.equal(resolveInventoryValue({ inventory_value_posted: 42.5 }), 42.5);
   assert.equal(resolveInventoryValue({ line_total: 12.25 }), 12.25);
+  assert.equal(resolveInventoryValue({ value: 14.75 }), 14.75);
   assert.equal(resolveInventoryValue({ totalValue: 9.5 }), 9.5);
   assert.equal(resolveInventoryValue({ stockValue: 0 }), 0);
   assert.equal(resolveInventoryValue({}, 7), 7);
+});
+
+test('resolveInventoryUnitCost preserves explicit zero values and safe aliases', () => {
+  assert.equal(resolveInventoryUnitCost({ unitCost: 0 }, 9), 0);
+  assert.equal(resolveInventoryUnitCost({ unit_cost: 4.5 }, 0), 4.5);
+  assert.equal(resolveInventoryUnitCost({ standard_cost: 3 }, 0), 3);
 });
 
 test('buildStockMovementListSelectClause keeps source document fields and never embeds users', () => {
@@ -297,4 +309,325 @@ test('listCompatibleStockMovements uses raw stock movement columns and mapping p
   assert.equal(mapped[0]?.unitCost, 0);
   assert.equal(mapped[0]?.totalValue, 0);
   assert.equal(mapped[0]?.createdBy?.name, 'Ada Lovelace');
+});
+
+test('recordStockMovement includes numeric total_value when unit cost is zero', async () => {
+  const movementPayloads: Array<Record<string, unknown>> = [];
+
+  const service = {
+    from(table: string) {
+      if (table === 'items') {
+        return {
+          select() {
+            return {
+              eq(column: string, value: string) {
+                assert.equal(column, 'id');
+                assert.equal(value, 'item-zero');
+                return {
+                  is(nextColumn: string, nextValue: null) {
+                    assert.equal(nextColumn, 'deleted_at');
+                    assert.equal(nextValue, null);
+                    return {
+                      maybeSingle() {
+                        return Promise.resolve({
+                          data: {
+                            id: 'item-zero',
+                            code: 'ZERO-1',
+                            name: 'Zero Cost Item',
+                            item_type: 'RAW_MATERIAL',
+                            unit_cost: 0,
+                            organization_id: 'org-1',
+                          },
+                          error: null,
+                        });
+                      },
+                    };
+                  },
+                };
+              },
+            };
+          },
+        };
+      }
+
+      if (table === 'stock_balances') {
+        return {
+          select() {
+            return {
+              eq(column: string, value: string) {
+                assert.equal(column, 'item_id');
+                assert.equal(value, 'item-zero');
+                return {
+                  eq(nextColumn: string, nextValue: string) {
+                    assert.equal(nextColumn, 'warehouse_id');
+                    assert.equal(nextValue, 'wh-1');
+                    return {
+                      maybeSingle() {
+                        return Promise.resolve({
+                          data: {
+                            id: 'bal-1',
+                            organization_id: 'org-1',
+                            quantity_on_hand: 5,
+                          },
+                          error: null,
+                        });
+                      },
+                    };
+                  },
+                };
+              },
+            };
+          },
+        };
+      }
+
+      if (table === 'stock_movements') {
+        return {
+          insert(payload: Record<string, unknown>) {
+            movementPayloads.push({ ...payload });
+            return {
+              select() {
+                return {
+                  single() {
+                    return Promise.resolve({
+                      data: { id: 'move-zero', ...payload },
+                      error: null,
+                    });
+                  },
+                };
+              },
+            };
+          },
+        };
+      }
+
+      throw new Error(`Unhandled table ${table}`);
+    },
+  };
+
+  await recordStockMovement(service as any, {
+    createdBy: 'user-1',
+    itemId: 'item-zero',
+    movementType: 'ADJUSTMENT_IN',
+    organizationId: 'org-1',
+    quantity: 5,
+    referenceId: 'adj-1',
+    referenceType: 'stock_adjustment',
+    totalValue: 0,
+    unitCost: 0,
+    warehouseId: 'wh-1',
+  });
+
+  assert.equal(movementPayloads[0]?.unit_cost, 0);
+  assert.equal(movementPayloads[0]?.total_cost, 0);
+  assert.equal(movementPayloads[0]?.total_value, 0);
+  assert.notEqual(movementPayloads[0]?.total_value, null);
+});
+
+test('recordStockMovement computes total_value from quantity and unit cost', async () => {
+  const movementPayloads: Array<Record<string, unknown>> = [];
+
+  const service = {
+    from(table: string) {
+      if (table === 'items') {
+        return {
+          select() {
+            return {
+              eq() {
+                return {
+                  is() {
+                    return {
+                      maybeSingle() {
+                        return Promise.resolve({
+                          data: {
+                            id: 'item-valued',
+                            code: 'VAL-1',
+                            name: 'Valued Item',
+                            item_type: 'RAW_MATERIAL',
+                            unit_cost: 2.5,
+                            organization_id: 'org-1',
+                          },
+                          error: null,
+                        });
+                      },
+                    };
+                  },
+                };
+              },
+            };
+          },
+        };
+      }
+
+      if (table === 'stock_balances') {
+        return {
+          select() {
+            return {
+              eq() {
+                return {
+                  eq() {
+                    return {
+                      maybeSingle() {
+                        return Promise.resolve({
+                          data: {
+                            id: 'bal-2',
+                            organization_id: 'org-1',
+                            quantity_on_hand: 10,
+                          },
+                          error: null,
+                        });
+                      },
+                    };
+                  },
+                };
+              },
+            };
+          },
+        };
+      }
+
+      if (table === 'stock_movements') {
+        return {
+          insert(payload: Record<string, unknown>) {
+            movementPayloads.push({ ...payload });
+            return {
+              select() {
+                return {
+                  single() {
+                    return Promise.resolve({
+                      data: { id: 'move-valued', ...payload },
+                      error: null,
+                    });
+                  },
+                };
+              },
+            };
+          },
+        };
+      }
+
+      throw new Error(`Unhandled table ${table}`);
+    },
+  };
+
+  await recordStockMovement(service as any, {
+    createdBy: 'user-1',
+    itemId: 'item-valued',
+    movementType: 'ADJUSTMENT_IN',
+    organizationId: 'org-1',
+    quantity: 4,
+    referenceId: 'adj-2',
+    referenceType: 'stock_adjustment',
+    unitCost: 2.5,
+    warehouseId: 'wh-2',
+  });
+
+  assert.equal(movementPayloads[0]?.unit_cost, 2.5);
+  assert.equal(movementPayloads[0]?.total_value, 10);
+  assert.equal(movementPayloads[0]?.total_cost, 10);
+});
+
+test('applyInventoryDelta increases stock balance value and average cost safely', async () => {
+  const updatePayloads: Array<Record<string, unknown>> = [];
+
+  const service = {
+    from(table: string) {
+      assert.equal(table, 'stock_balances');
+      return {
+        select() {
+          return {
+            eq(column: string, value: string) {
+              assert.equal(column, 'item_id');
+              assert.equal(value, 'item-balance');
+              return {
+                eq(nextColumn: string, nextValue: string) {
+                  assert.equal(nextColumn, 'warehouse_id');
+                  assert.equal(nextValue, 'wh-balance');
+                  return {
+                    maybeSingle() {
+                      return Promise.resolve({
+                        data: {
+                          id: 'bal-3',
+                          organization_id: 'org-1',
+                          quantity_on_hand: 10,
+                          quantity_available: 10,
+                          quantity_reserved: 0,
+                          average_cost: 1,
+                          total_value: 10,
+                        },
+                        error: null,
+                      });
+                    },
+                  };
+                },
+              };
+            },
+          };
+        },
+        update(payload: Record<string, unknown>) {
+          updatePayloads.push({ ...payload });
+          return {
+            eq(column: string, value: string) {
+              assert.equal(column, 'id');
+              assert.equal(value, 'bal-3');
+              return {
+                select() {
+                  return {
+                    single() {
+                      return Promise.resolve({
+                        data: { id: 'bal-3', ...payload },
+                        error: null,
+                      });
+                    },
+                  };
+                },
+              };
+            },
+          };
+        },
+      };
+    },
+  };
+
+  await applyInventoryDelta(service as any, {
+    itemId: 'item-balance',
+    organizationId: 'org-1',
+    quantityDelta: 4,
+    totalValue: 20,
+    unitCost: 5,
+    warehouseId: 'wh-balance',
+  });
+
+  assert.equal(updatePayloads[0]?.quantity_on_hand, 14);
+  assert.equal(updatePayloads[0]?.quantity_available, 14);
+  assert.equal(updatePayloads[0]?.total_value, 30);
+  assert.equal(updatePayloads[0]?.average_cost, 30 / 14);
+});
+
+test('inventory adjustment failure helper returns staged stock movement diagnostics', () => {
+  const failure = buildInventoryAdjustmentFailureResponse({
+    dbMessage: 'null value in column "total_value" violates not-null constraint',
+    itemId: 'item-1',
+    quantity: 5,
+    stage: 'STOCK_MOVEMENT_INSERT_FAILED',
+    totalValue: 0,
+    unitCost: 0,
+    warehouseId: 'wh-1',
+  });
+
+  assert.deepEqual(
+    failure,
+    buildInventoryAdjustmentFailure({
+      dbMessage: 'null value in column "total_value" violates not-null constraint',
+      itemId: 'item-1',
+      quantity: 5,
+      stage: 'STOCK_MOVEMENT_INSERT_FAILED',
+      totalValue: 0,
+      unitCost: 0,
+      warehouseId: 'wh-1',
+    }),
+  );
+  assert.equal(failure.code, 'INVENTORY_ADJUSTMENT_FAILED');
+  assert.equal(failure.stage, 'STOCK_MOVEMENT_INSERT_FAILED');
+  assert.equal(failure.details.totalValue, 0);
 });

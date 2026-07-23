@@ -120,6 +120,20 @@ export type SupplierShortageRow = {
   supplierName: string;
 };
 
+export type InventoryAdjustmentFailure = {
+  success: false;
+  code: 'INVENTORY_ADJUSTMENT_FAILED';
+  stage: string;
+  details: {
+    dbMessage: string | null;
+    itemId: string | null;
+    quantity: number | null;
+    totalValue: number;
+    unitCost: number;
+    warehouseId: string | null;
+  };
+};
+
 export type CsvRow = Record<string, string | number | boolean | null | undefined>;
 
 export function toNumber(value: unknown, fallback = 0): number {
@@ -141,6 +155,7 @@ export function resolveInventoryValue(
     row.inventory_value,
     row.inventory_value_posted,
     row.line_total,
+    row.value,
     row.totalCost,
     row.totalValue,
     row.stockValue,
@@ -152,6 +167,54 @@ export function resolveInventoryValue(
   }
 
   return toNumber(fallback);
+}
+
+export function resolveInventoryUnitCost(
+  row: Record<string, unknown> | null | undefined,
+  fallback = 0,
+) {
+  if (!row) {
+    return toNumber(fallback);
+  }
+
+  for (const candidate of [
+    row.unit_cost,
+    row.unitCost,
+    row.cost,
+    row.cost_price,
+    row.standard_cost,
+    row.standardCost,
+  ]) {
+    if (candidate !== null && candidate !== undefined && candidate !== '') {
+      return toNumber(candidate, toNumber(fallback));
+    }
+  }
+
+  return toNumber(fallback);
+}
+
+export function buildInventoryAdjustmentFailure(input: {
+  dbMessage?: string | null;
+  itemId?: string | null;
+  quantity?: number | null;
+  stage: string;
+  totalValue?: number | null;
+  unitCost?: number | null;
+  warehouseId?: string | null;
+}): InventoryAdjustmentFailure {
+  return {
+    success: false,
+    code: 'INVENTORY_ADJUSTMENT_FAILED',
+    stage: input.stage,
+    details: {
+      dbMessage: input.dbMessage ? String(input.dbMessage) : null,
+      itemId: input.itemId ? String(input.itemId) : null,
+      quantity: input.quantity == null ? null : toNumber(input.quantity),
+      totalValue: toNumber(input.totalValue ?? 0),
+      unitCost: toNumber(input.unitCost ?? 0),
+      warehouseId: input.warehouseId ? String(input.warehouseId) : null,
+    },
+  };
 }
 
 export function getItemReorderQuantity(row: Record<string, unknown> | null | undefined) {
