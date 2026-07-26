@@ -1,6 +1,8 @@
 import { createServerClient } from '@supabase/ssr';
 import { type NextRequest, NextResponse } from 'next/server';
 
+import { resolvePublicAppUrl } from '@/lib/app-url';
+
 const protectedPrefixes = [
   '/dashboard',
   '/procurement',
@@ -17,7 +19,43 @@ const protectedPrefixes = [
 const DEFAULT_TIMEOUT_MINUTES = 15;
 const LAST_ACTIVITY_COOKIE = 'icecream-last-activity';
 
+function isLocalHostname(hostname: string) {
+  return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '0.0.0.0';
+}
+
+function buildCanonicalRedirect(request: NextRequest) {
+  const configuredUrl = resolvePublicAppUrl(request.nextUrl);
+  const canonicalUrl = new URL(configuredUrl);
+  const currentUrl = request.nextUrl;
+  const forwardedProto = request.headers.get('x-forwarded-proto') ?? currentUrl.protocol.replace(':', '');
+  const needsHttps = !isLocalHostname(currentUrl.hostname) && forwardedProto !== 'https';
+  const needsHostRedirect =
+    !isLocalHostname(currentUrl.hostname) &&
+    currentUrl.hostname.toLowerCase() !== canonicalUrl.hostname.toLowerCase();
+  const needsTrailingSlashRedirect =
+    currentUrl.pathname.length > 1 && currentUrl.pathname.endsWith('/');
+
+  if (!needsHttps && !needsHostRedirect && !needsTrailingSlashRedirect) {
+    return null;
+  }
+
+  const redirectUrl = currentUrl.clone();
+  redirectUrl.protocol = isLocalHostname(currentUrl.hostname) ? currentUrl.protocol : canonicalUrl.protocol;
+  redirectUrl.host = canonicalUrl.host;
+
+  if (needsTrailingSlashRedirect) {
+    redirectUrl.pathname = currentUrl.pathname.replace(/\/+$/, '');
+  }
+
+  return redirectUrl;
+}
+
 export async function middleware(request: NextRequest) {
+  const canonicalRedirect = buildCanonicalRedirect(request);
+  if (canonicalRedirect) {
+    return NextResponse.redirect(canonicalRedirect, 308);
+  }
+
   let supabaseResponse = NextResponse.next({ request });
   const { pathname } = request.nextUrl;
 
@@ -49,7 +87,11 @@ export async function middleware(request: NextRequest) {
   const isProtected = protectedPrefixes.some(
     (p) => pathname === p || pathname.startsWith(`${p}/`)
   );
-  const isLoginPage = pathname.startsWith('/auth/login') || pathname === '/sign-in';
+  const isLoginPage =
+    pathname === '/login' ||
+    pathname.startsWith('/login/') ||
+    pathname.startsWith('/auth/login') ||
+    pathname === '/sign-in';
   const lastActivityCookie = request.cookies.get(LAST_ACTIVITY_COOKIE)?.value;
 
   if (isProtected && !user) {
@@ -80,6 +122,25 @@ export async function middleware(request: NextRequest) {
       secure: process.env.NODE_ENV === 'production',
       path: '/',
     });
+  }
+
+  const shouldDisableCache =
+    pathname === '/login' ||
+    pathname.startsWith('/auth/login') ||
+    pathname === '/dashboard' ||
+    pathname.startsWith('/dashboard/') ||
+    pathname === '/procurement' ||
+    pathname.startsWith('/procurement/') ||
+    pathname === '/production' ||
+    pathname.startsWith('/production/') ||
+    pathname === '/inventory' ||
+    pathname.startsWith('/inventory/') ||
+    pathname === '/api/auth/me';
+
+  if (shouldDisableCache) {
+    supabaseResponse.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    supabaseResponse.headers.set('Pragma', 'no-cache');
+    supabaseResponse.headers.set('Expires', '0');
   }
 
   return supabaseResponse;

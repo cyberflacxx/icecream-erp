@@ -32,6 +32,7 @@
     "smoke:api-contract": "node scripts/smoke-api-contract.mjs",
     "smoke:procurement:e2e": "node scripts/smoke-procurement-e2e.mjs",
     "smoke:production:receive": "node scripts/smoke-production-receive.mjs",
+    "smoke:domain": "node scripts/smoke-domain-health.mjs",
     "smoke:live-pages": "node scripts/smoke-live-pages.mjs",
     "smoke:frontend-agent": "node scripts/frontend-agent-smoke.mjs --mode=pages",
     "verify:production-workflow": "node scripts/verify-production-workflow.mjs",

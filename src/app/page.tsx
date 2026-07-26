@@ -176,7 +176,7 @@ export default function HomePage() {
 
           <div className="animate-slide-up mt-7 flex flex-wrap items-center justify-center gap-3" style={{ animationDelay: '0.4s' }}>
             <Link
-              href="/auth/login"
+              href="/login"
               className="btn-shimmer group relative inline-flex items-center gap-2 overflow-hidden rounded-2xl bg-orange px-7 py-3.5 text-sm font-semibold text-white shadow-[0_0_30px_rgba(249,115,22,0.4)] transition-all duration-300 hover:bg-deepOrange hover:shadow-[0_0_50px_rgba(249,115,22,0.6)]"
             >
               Launch Dashboard
@@ -547,7 +547,7 @@ export default function HomePage() {
             <h2 className="font-display text-5xl font-bold text-white lg:text-6xl">Ready to run the factory<br /><span className="grad-text">at full visibility?</span></h2>
             <p className="mx-auto mt-6 max-w-xl text-lg text-white/50">Log in and start managing your ice cream manufacturing operation with complete control.</p>
             <div className="mt-10 flex flex-wrap items-center justify-center gap-4">
-              <Link href="/auth/login" className="btn-shimmer group inline-flex items-center gap-2 rounded-2xl bg-orange px-10 py-4 text-lg font-semibold text-white shadow-[0_0_40px_rgba(249,115,22,0.5)] transition-all duration-300 hover:bg-deepOrange hover:shadow-[0_0_60px_rgba(249,115,22,0.7)]">
+              <Link href="/login" className="btn-shimmer group inline-flex items-center gap-2 rounded-2xl bg-orange px-10 py-4 text-lg font-semibold text-white shadow-[0_0_40px_rgba(249,115,22,0.5)] transition-all duration-300 hover:bg-deepOrange hover:shadow-[0_0_60px_rgba(249,115,22,0.7)]">
                 Launch Dashboard<ArrowRight className="h-5 w-5 transition-transform group-hover:translate-x-1" />
               </Link>
             </div>

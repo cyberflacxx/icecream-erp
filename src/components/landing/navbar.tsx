@@ -71,7 +71,7 @@ export function Navbar() {
 
         <div className="hidden md:block">
           <Button asChild>
-            <Link href="/auth/login" prefetch={false}>
+            <Link href="/login" prefetch={false}>
               Login to Dashboard
             </Link>
           </Button>
@@ -106,7 +106,7 @@ export function Navbar() {
             </a>
           ))}
           <Button asChild className="w-full">
-            <Link href="/auth/login" prefetch={false} onClick={() => setOpen(false)}>
+            <Link href="/login" prefetch={false} onClick={() => setOpen(false)}>
               Login to Dashboard
             </Link>
           </Button>
