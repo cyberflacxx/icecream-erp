@@ -99,6 +99,16 @@ function firstString(...values: unknown[]) {
     .find(Boolean) ?? '';
 }
 
+function toNumber(value: unknown) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function isActivePurchaseOrderForRequisitionConversion(row: Record<string, unknown>) {
+  const status = normalizePurchaseOrderStatus(row.status);
+  return !row.deleted_at && !row.rejected_at && !['CANCELLED', 'DELETED', 'REJECTED', 'VOID'].includes(status);
+}
+
 function poCreateFailure(
   status: number,
   details: {
@@ -220,7 +230,7 @@ export async function GET(request: NextRequest) {
       if (endDate) fallbackQuery = fallbackQuery.lte('order_date', endDate);
 
       const fallback = await fallbackQuery.range(from, from + pageSize - 1);
-      data = fallback.data;
+      data = fallback.data as typeof data;
       count = fallback.count;
       error = fallback.error;
     }
@@ -335,6 +345,8 @@ export async function POST(request: NextRequest) {
       lineTotal?: number;
       line_total?: number;
     }>;
+    allowOverRequisitionQuantity?: boolean;
+    overrideOverRequisitionQuantity?: boolean;
   };
 
   try {
@@ -355,8 +367,11 @@ export async function POST(request: NextRequest) {
       taxRate: normalizePurchaseOrderTaxRate(item),
       unitCost: normalizePurchaseOrderUnitPrice(item),
       unitOfMeasureId: normalizePurchaseOrderUnitOfMeasureId(item),
+      requisitionItemId: firstString((item as Record<string, unknown>).requisition_item_id, (item as Record<string, unknown>).requisitionItemId),
       raw: item,
     }));
+  const allowOverRequisitionQuantity = body.allowOverRequisitionQuantity === true || body.overrideOverRequisitionQuantity === true;
+  let requisitionRemainingAfterCreate: Array<{ lineId: string; remainingAfterCreate: number }> = [];
 
   if (!supplierId) {
     return poCreateFailure(400, {
@@ -412,6 +427,98 @@ export async function POST(request: NextRequest) {
       if (reqErr || !req) return badRequest('Selected requisition is no longer available. Please refresh and try again.');
       if (!isApprovedRequisitionStatus((req as Record<string, unknown>).status, (req as Record<string, unknown>).approval_status)) {
         return badRequest('Selected requisition is no longer available. Please refresh and try again.');
+      }
+
+      const requestedRequisitionItemIds = normalizedItems.map((item) => item.requisitionItemId).filter(Boolean);
+      if (requestedRequisitionItemIds.length !== normalizedItems.length) {
+        return badRequest('Every PO line converted from a requisition must keep its requisition line reference.');
+      }
+
+      const requisitionItemsResult = await service
+        .from('purchase_requisition_items')
+        .select('id, requisition_id, pr_id, item_id, quantity, quantity_requested, quantity_approved')
+        .in('id', requestedRequisitionItemIds);
+
+      if (requisitionItemsResult.error) return serverError(requisitionItemsResult.error.message);
+
+      const requisitionItemsById = new Map(
+        (requisitionItemsResult.data ?? []).map((line) => [String(line.id), line as Record<string, unknown>]),
+      );
+
+      if (requisitionItemsById.size !== requestedRequisitionItemIds.length) {
+        return badRequest('One or more requisition lines are no longer available. Please refresh and try again.');
+      }
+
+      for (const item of normalizedItems) {
+        const requisitionItem = requisitionItemsById.get(item.requisitionItemId);
+        const owningRequisitionId = String(requisitionItem?.requisition_id ?? requisitionItem?.pr_id ?? '');
+        if (!requisitionItem || owningRequisitionId !== requisitionId || String(requisitionItem.item_id ?? '') !== item.itemId) {
+          return badRequest('One or more PO lines do not belong to the selected approved requisition.');
+        }
+      }
+
+      const poLinesResult = await service
+        .from('purchase_order_items')
+        .select('requisition_item_id, quantity_ordered, quantity, purchase_order_id, po_id')
+        .in('requisition_item_id', requestedRequisitionItemIds);
+
+      if (poLinesResult.error) return serverError(poLinesResult.error.message);
+
+      const purchaseOrderIds = [
+        ...new Set(
+          (poLinesResult.data ?? [])
+            .map((line) => String(line.purchase_order_id ?? line.po_id ?? ''))
+            .filter(Boolean),
+        ),
+      ];
+      const purchaseOrdersResult = purchaseOrderIds.length
+        ? await service
+            .from('purchase_orders')
+            .select('id, status, rejected_at, deleted_at')
+            .eq('organization_id', ctx.organizationId)
+            .in('id', purchaseOrderIds)
+        : { data: [], error: null };
+
+      if (purchaseOrdersResult.error) return serverError(purchaseOrdersResult.error.message);
+
+      const activePurchaseOrderIds = new Set(
+        (purchaseOrdersResult.data ?? [])
+          .filter((row) => isActivePurchaseOrderForRequisitionConversion(row as Record<string, unknown>))
+          .map((row) => String(row.id)),
+      );
+      const convertedByLine = new Map<string, number>();
+      for (const line of poLinesResult.data ?? []) {
+        const poId = String(line.purchase_order_id ?? line.po_id ?? '');
+        const requisitionItemId = String(line.requisition_item_id ?? '');
+        if (!poId || !requisitionItemId || !activePurchaseOrderIds.has(poId)) continue;
+        convertedByLine.set(requisitionItemId, (convertedByLine.get(requisitionItemId) ?? 0) + toNumber(line.quantity_ordered ?? line.quantity));
+      }
+
+      const currentRequestByLine = new Map<string, number>();
+      for (const item of normalizedItems) {
+        currentRequestByLine.set(
+          item.requisitionItemId,
+          (currentRequestByLine.get(item.requisitionItemId) ?? 0) + item.quantityOrdered,
+        );
+      }
+
+      requisitionRemainingAfterCreate = [];
+      for (const [lineId, requestedQuantity] of currentRequestByLine.entries()) {
+        const requisitionItem = requisitionItemsById.get(lineId);
+        const approvedQuantity = toNumber(
+          requisitionItem?.quantity_approved ?? requisitionItem?.quantity_requested ?? requisitionItem?.quantity,
+        );
+        const alreadyConverted = convertedByLine.get(lineId) ?? 0;
+        const remainingBeforeCreate = Math.max(0, approvedQuantity - alreadyConverted);
+
+        if (requestedQuantity > remainingBeforeCreate && !allowOverRequisitionQuantity) {
+          return badRequest(`PO quantity exceeds remaining approved requisition quantity for line ${lineId}.`);
+        }
+
+        requisitionRemainingAfterCreate.push({
+          lineId,
+          remainingAfterCreate: Math.max(0, remainingBeforeCreate - requestedQuantity),
+        });
       }
     }
 
@@ -502,7 +609,7 @@ export async function POST(request: NextRequest) {
         itemId: item.itemId,
         lineTotal: item.requestedLineTotal ?? (item.quantityOrdered * resolvedUnitCost),
         quantityOrdered: item.quantityOrdered,
-        requisitionItemId: String((item.raw as Record<string, unknown>).requisition_item_id ?? (item.raw as Record<string, unknown>).requisitionItemId ?? ''),
+        requisitionItemId: item.requisitionItemId,
         taxRate: item.taxRate,
         unitCost: resolvedUnitCost,
         unitOfMeasureId: resolvedUnitId,
@@ -577,7 +684,7 @@ export async function POST(request: NextRequest) {
 
     const orderId = (order as Record<string, unknown>).id as string;
 
-    let itemPayload = resolvedItems.map((item) => ({
+    let itemPayload: Record<string, unknown>[] = resolvedItems.map((item) => ({
       po_id: orderId,
       purchase_order_id: orderId,
       requisition_item_id: item.requisitionItemId || null,
@@ -626,10 +733,10 @@ export async function POST(request: NextRequest) {
     }
 
     // Update requisition status if linked
-    if (requisitionId) {
+    if (requisitionId && requisitionRemainingAfterCreate.every((line) => line.remainingAfterCreate <= 0)) {
       await service
         .from('purchase_requisitions')
-        .update({ status: 'po_created' })
+        .update({ status: 'PO_CREATED' })
         .eq('id', requisitionId);
     }
 

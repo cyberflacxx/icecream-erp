@@ -289,6 +289,33 @@ test('mapRequisitionItemToPurchaseOrderLine preserves item, UOM, quantity, price
   assert.equal(line?.taxRate, '0');
 });
 
+test('mapRequisitionItemToPurchaseOrderLine uses remaining approved quantity for PO conversion', () => {
+  const line = mapRequisitionItemToPurchaseOrderLine({
+    item_id: 'item-1',
+    quantity_approved: 50,
+    quantityConvertedToPurchaseOrders: 30,
+    requisition_item_id: 'req-line-remaining',
+    unit_price: 2,
+  });
+
+  assert.equal(line?.quantityOrdered, '20');
+  assert.equal(line?.requisitionItemId, 'req-line-remaining');
+
+  const fullyConverted = extractRequisitionLineItems({
+    data: {
+      items: [
+        {
+          item_id: 'item-1',
+          remainingApprovedQuantity: 0,
+          requisition_item_id: 'req-line-complete',
+        },
+      ],
+    },
+  });
+
+  assert.equal(fullyConverted[0]?.quantityRemainingForPurchaseOrder, 0);
+});
+
 test('approved requisition status helper accepts live procurement variants', () => {
   assert.equal(isApprovedRequisitionStatus('approved', null), true);
   assert.equal(isApprovedRequisitionStatus('submitted', null), true);
@@ -596,6 +623,7 @@ test('buildGoodsReceivedDraftPayload stores purchase order, item, and UOM ids ca
     entryMode: 'manual',
     items: [
       {
+        damagedQuantity: 2,
         itemId: 'item-1',
         poItemId: 'po-item-1',
         quantityExpected: 4,
@@ -628,6 +656,8 @@ test('buildGoodsReceivedDraftPayload stores purchase order, item, and UOM ids ca
   assert.equal(payload.items[0]?.unitOfMeasureId, 'uom-1');
   assert.equal(payload.items[0]?.unit_of_measure_id, 'uom-1');
   assert.equal(payload.items[0]?.uomId, 'uom-1');
+  assert.equal(payload.items[0]?.damagedQuantity, 2);
+  assert.equal(payload.items[0]?.damaged_quantity, 2);
 });
 
 test('workflow helper normalizes live role names for procurement access fallbacks', () => {

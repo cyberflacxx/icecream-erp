@@ -141,6 +141,20 @@ const actionButtonClassNames = {
     'border border-sky-200 bg-sky-50 text-sky-700 hover:border-sky-600 hover:bg-sky-600 hover:text-white',
 } as const;
 
+function toStatusBadgeVariant(
+  variant: unknown,
+): 'error' | 'info' | 'neutral' | 'success' | 'warning' {
+  switch (variant) {
+    case 'error':
+    case 'info':
+    case 'success':
+    case 'warning':
+      return variant;
+    default:
+      return 'neutral';
+  }
+}
+
 function createEditState(order: PurchaseOrderDetail): EditFormState {
   return {
     approverEmail: order.approverEmail ?? '',
@@ -643,7 +657,7 @@ export default function PurchaseOrderDetailPage({ params }: PurchaseOrderDetailP
                     <div className="flex flex-wrap items-center gap-2">
                       <StatusBadge
                         status={formatProcurementWorkflowStatusLabel(getGoodsReceivedActionState(grn, {}).normalizedStatus)}
-                        variant={getGoodsReceivedActionState(grn, {}).statusVariant}
+                        variant={toStatusBadgeVariant(getGoodsReceivedActionState(grn, {}).statusVariant)}
                       />
                       <span className="rounded-full bg-white/80 px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-muted">
                         {formatProcurementWorkflowStatusLabel(String(grn.qualityStatus ?? 'draft'))}

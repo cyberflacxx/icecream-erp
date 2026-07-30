@@ -481,7 +481,7 @@ export function DashboardOverview() {
             title="Low Stock Alerts"
             value={formatNumber(lowStockTop5.length)}
             icon={<AlertTriangle className="h-5 w-5" />}
-            color="warning"
+            color="danger"
           />
         </div>
 

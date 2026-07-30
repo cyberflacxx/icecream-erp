@@ -1,20 +1,28 @@
 'use client';
 
 import Link from 'next/link';
-import { Boxes, Factory, FileSpreadsheet, LayoutDashboard, PackageCheck, RefreshCcw, Rows3 } from 'lucide-react';
+import { Boxes, Factory, FileSpreadsheet, LayoutDashboard, PackageCheck, RefreshCcw, Rows3, ScrollText } from 'lucide-react';
 import { usePathname, useSearchParams } from 'next/navigation';
 
 import { cn } from '@/lib/utils';
 
+type ProductionNavLink = {
+  href: string;
+  icon: typeof LayoutDashboard;
+  label: string;
+  match?: 'overview' | 'issue' | 'release' | 'stock-balance' | 'transfers';
+};
+
 const links = [
   { href: '/production/dashboard', icon: LayoutDashboard, label: 'Overview', match: 'overview' },
+  { href: '/production/orders', icon: ScrollText, label: 'Orders' },
   { href: '/production/recipes', icon: FileSpreadsheet, label: 'BOM' },
   { href: '/production/batches?stage=issue', icon: Factory, label: 'Issues', match: 'issue' },
   { href: '/production/batches?stage=release', icon: PackageCheck, label: 'Release', match: 'release' },
   { href: '/inventory/stock-balances', icon: Boxes, label: 'Stock Balance', match: 'stock-balance' },
   { href: '/production/transfers', icon: RefreshCcw, label: 'Transfers In', match: 'transfers' },
   { href: '/production/reports', icon: Rows3, label: 'Reports' },
-] as const;
+] satisfies ProductionNavLink[];
 
 export function ProductionNav() {
   const pathname = usePathname();
@@ -37,7 +45,7 @@ export function ProductionNav() {
                     ? pathname === '/inventory/stock-balances'
                     : link.match === 'transfers'
                       ? pathname === '/production/transfers'
-                      : pathname === link.href || pathname.startsWith(`${link.href}/`);
+              : pathname === link.href || pathname.startsWith(`${link.href}/`);
 
           return (
             <Link

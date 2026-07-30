@@ -9,14 +9,15 @@ interface StatCardProps {
   icon: ReactNode;
   trend?: 'up' | 'down' | 'neutral';
   trendValue?: string;
-  color?: 'orange' | 'brown' | 'success' | 'warning';
+  color?: 'orange' | 'brown' | 'success' | 'warning' | 'danger';
 }
 
 const colorStyles = {
   orange: 'bg-white/18 text-white border-white/20',
   brown: 'bg-white/12 text-white border-white/16',
   success: 'bg-emerald-400/18 text-white border-emerald-200/20',
-  warning: 'bg-amber-300/18 text-white border-amber-200/20'
+  warning: 'bg-amber-300/18 text-white border-amber-200/20',
+  danger: 'bg-white/18 text-white border-white/24'
 } as const;
 
 export function StatCard({
@@ -28,7 +29,7 @@ export function StatCard({
   color = 'orange'
 }: StatCardProps) {
   return (
-    <article className="dashboard-blue-card p-5">
+    <article className={cn('dashboard-blue-card p-5', color === 'danger' && 'dashboard-danger-card')}>
       <div className="flex items-start justify-between gap-4">
         <div>
           <p className="dashboard-blue-label text-sm font-semibold">{title}</p>

@@ -31,7 +31,7 @@ export default function NotificationAlertDashboardPage() {
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard title="Critical Alerts" value={String(stats.criticalAlerts ?? 0)} icon={<AlertTriangle className="h-5 w-5" />} color="warning" />
         <StatCard title="Pending Approvals" value={String(stats.pendingApprovals ?? 0)} icon={<AlertTriangle className="h-5 w-5" />} />
-        <StatCard title="Low Stock" value={String(stats.lowStockAlerts ?? 0)} icon={<AlertTriangle className="h-5 w-5" />} color="brown" />
+        <StatCard title="Low Stock" value={String(stats.lowStockAlerts ?? 0)} icon={<AlertTriangle className="h-5 w-5" />} color="danger" />
         <StatCard title="Security Alerts" value={String(stats.securityAlerts ?? 0)} icon={<AlertTriangle className="h-5 w-5" />} color="success" />
       </div>
       <DataTable

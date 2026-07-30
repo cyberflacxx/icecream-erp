@@ -66,6 +66,14 @@ export interface InventoryDashboardMetrics {
   receivedTodayQuantity: number;
   returnedFromProductionTodayQuantity: number;
   supplierShortageCount: number;
+  recentApprovals: Array<{
+    approvalStatus: string;
+    id: string;
+    referenceNumber: string;
+    requestDate: string;
+    requestType: string;
+    requestedBy: string | null;
+  }>;
   stockBalanceByWarehouse: Array<{
     availableQuantity: number;
     isLowStock: boolean;
@@ -123,6 +131,20 @@ export interface InventoryApprovalRow {
     comments: string | null;
     acted_at: string;
   }>;
+  approvalId?: string;
+  approvalNotes?: string | null;
+  approvalStatus?: string;
+  canApprove?: boolean;
+  currentApprover?: string | null;
+  destinationWarehouseId?: string | null;
+  itemDescription?: string;
+  quantity?: number | null;
+  referenceNumber?: string;
+  requestDate?: string;
+  requestedBy?: string | null;
+  requesterId?: string | null;
+  requestType?: string;
+  sourceWarehouseId?: string | null;
 }
 
 export interface InventoryReportResponse<T> {
@@ -242,6 +264,8 @@ export interface WarehouseCard {
     name: string;
   } | null;
   itemCount: number;
+  lowStockCount?: number;
+  stockQuantity?: number;
   totalValue: number;
 }
 
@@ -252,6 +276,7 @@ export interface LowStockRow {
     code: string;
     name: string;
     reorderLevel: number;
+    reorderQuantity?: number;
   };
   quantityAvailable: number;
   quantityOnHand: number;

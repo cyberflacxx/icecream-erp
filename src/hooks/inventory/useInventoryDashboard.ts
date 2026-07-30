@@ -14,7 +14,13 @@ export function useInventoryDashboard() {
 
   return useQuery({
     queryKey: ['inventory', 'dashboard', userId],
-    queryFn: () => request<InventoryDashboardMetrics>(API_ROUTES.INVENTORY.DASHBOARD),
+    queryFn: async () => {
+      const response = await request<InventoryDashboardMetrics | { data?: InventoryDashboardMetrics; success?: boolean }>(
+        API_ROUTES.INVENTORY.DASHBOARD,
+      );
+
+      return 'data' in response && response.data ? response.data : response as InventoryDashboardMetrics;
+    },
     enabled: isLoaded && Boolean(isSignedIn),
   });
 }

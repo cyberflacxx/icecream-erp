@@ -15,3 +15,7 @@ npm-debug.log*
 verification-results/
 
 .vercel
+
+.tmp-tests/
+
+deployment/validation/

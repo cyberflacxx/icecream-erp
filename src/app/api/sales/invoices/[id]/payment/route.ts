@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { can, forbidden, getAuthContext, notFound, serverError, unauthorized } from '@/lib/api-auth';
 import { buildFinanceSourceReference } from '@/lib/finance';
 import { createLinkedFinanceTransaction, financeErrorMessage, isMissingFinanceTable, postFinanceDocument } from '@/lib/finance-server';
+import { isSalesTransactionRpcUnavailable, postSalesPaymentTransaction, shouldRequireSalesTransactionRpc } from '@/lib/sales-transactions-server';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
 function normalizeInvoiceStatus(amountPaid: number, total: number): string {
@@ -81,6 +82,17 @@ export async function POST(
     paymentMethod: string;
     referenceNumber?: string;
     notes?: string;
+    branchId?: string;
+    costCenterCode?: string;
+    currencyCode?: string;
+    departmentId?: string;
+    exchangeRate?: number;
+    idempotencyKey?: string;
+    tenders?: Array<{
+      amount: number;
+      paymentMethod: string;
+      referenceNumber?: string;
+    }>;
   };
 
   if (!body.amount || !body.paymentDate || !body.paymentMethod) {
@@ -104,6 +116,32 @@ export async function POST(
       },
       { status: 400 },
     );
+  }
+
+  try {
+    const transaction = await postSalesPaymentTransaction(
+      {
+        amount: body.amount,
+        branchId: body.branchId ?? null,
+        costCenterCode: body.costCenterCode ?? null,
+        currencyCode: body.currencyCode ?? null,
+        departmentId: body.departmentId ?? null,
+        exchangeRate: body.exchangeRate ?? null,
+        idempotencyKey: body.idempotencyKey ?? null,
+        invoiceId: params.id,
+        notes: body.notes ?? null,
+        paymentDate: body.paymentDate,
+        paymentMethod,
+        referenceNumber: body.referenceNumber ?? null,
+        tenders: body.tenders ?? null,
+      },
+      ctx,
+    );
+    return NextResponse.json(transaction);
+  } catch (transactionError) {
+    if (shouldRequireSalesTransactionRpc() || !isSalesTransactionRpcUnavailable(transactionError)) {
+      return serverError(financeErrorMessage(transactionError) || 'Failed to post invoice payment transaction.');
+    }
   }
 
   // Fetch customer balance

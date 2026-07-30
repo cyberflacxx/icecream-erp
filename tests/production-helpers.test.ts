@@ -26,6 +26,50 @@ import {
   validateShiftTargetImportRows,
 } from '../src/lib/production';
 
+test('production order migration package stays schema-local and additive', () => {
+  const migrationNames = [
+    '035_production_order_workflow_foundation.sql',
+    '036_production_issue_and_receipt_documents.sql',
+    '037_production_order_planning_release_rpcs.sql',
+    '038_production_order_transaction_rpcs.sql',
+    '039_production_relationship_map_and_reporting.sql',
+  ];
+
+  const migrations = migrationNames.map((name) => fs.readFileSync(`migrations/${name}`, 'utf8')).join('\n');
+
+  assert.match(migrations, /create table if not exists icecream_erp\.production_orders/i);
+  assert.match(migrations, /create table if not exists icecream_erp\.production_order_components/i);
+  assert.match(migrations, /create table if not exists icecream_erp\.production_issues/i);
+  assert.match(migrations, /create table if not exists icecream_erp\.production_receipts/i);
+  assert.match(migrations, /create or replace function icecream_erp\.release_production_order/i);
+  assert.match(migrations, /create or replace function icecream_erp\.post_production_issue/i);
+  assert.match(migrations, /create or replace function icecream_erp\.post_production_receipt/i);
+  assert.match(migrations, /create or replace function icecream_erp\.close_production_order/i);
+  assert.match(migrations, /for update/i);
+  assert.match(migrations, /notify pgrst, 'reload schema'/i);
+  assert.doesNotMatch(migrations, /alter role\s+authenticator/i);
+  assert.doesNotMatch(migrations, /^\s*drop\s+table/im);
+  assert.doesNotMatch(migrations, /^\s*truncate\s+table/im);
+  assert.doesNotMatch(migrations, /create table\s+public\./i);
+});
+
+test('production order routes delegate workflow changes to RPC-backed helpers', () => {
+  const releaseRoute = fs.readFileSync('src/app/api/production/orders/[id]/release/route.ts', 'utf8');
+  const issueRoute = fs.readFileSync('src/app/api/production/orders/[id]/issue/route.ts', 'utf8');
+  const receiptRoute = fs.readFileSync('src/app/api/production/orders/[id]/receipt/route.ts', 'utf8');
+  const closeRoute = fs.readFileSync('src/app/api/production/orders/[id]/close/route.ts', 'utf8');
+  const helper = fs.readFileSync('src/lib/production-orders-server.ts', 'utf8');
+
+  assert.match(releaseRoute, /releaseProductionOrder/);
+  assert.match(issueRoute, /postProductionIssue/);
+  assert.match(receiptRoute, /postProductionReceipt/);
+  assert.match(closeRoute, /closeProductionOrder/);
+  assert.match(helper, /\.rpc\('release_production_order'/);
+  assert.match(helper, /\.rpc\('post_production_issue'/);
+  assert.match(helper, /\.rpc\('post_production_receipt'/);
+  assert.match(helper, /\.rpc\('close_production_order'/);
+});
+
 test('calculateRequiredMaterials scales ingredient demand and shortages', () => {
   const rows = calculateRequiredMaterials(
     [

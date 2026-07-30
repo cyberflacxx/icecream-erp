@@ -5,6 +5,7 @@ import { buildFinanceSourceReference } from '@/lib/finance';
 import { createLinkedFinanceTransaction, financeErrorMessage, isMissingFinanceTable, postFinanceDocument } from '@/lib/finance-server';
 import { canRecordPayment } from '@/lib/sales';
 import { generateSalesReferenceNumber, isMissingSalesColumn, isMissingSalesTable, logSalesRouteError, salesErrorMessage, salesService, writeSalesAuditLog } from '@/lib/sales-server';
+import { isSalesTransactionRpcUnavailable, postSalesPaymentTransaction, shouldRequireSalesTransactionRpc } from '@/lib/sales-transactions-server';
 
 function normalizeSalesPaymentMethod(value: string) {
   const normalized = String(value ?? '').trim().toUpperCase();
@@ -19,7 +20,7 @@ export async function GET() {
 
   try {
     const service = salesService();
-    let paymentsResult = await service
+    let paymentsResult: any = await service
       .from('payments')
       .select('id, payment_number, customer_id, invoice_id, payment_date, amount, payment_method, reference_number, status, created_at')
       .order('payment_date', { ascending: false });
@@ -73,6 +74,17 @@ export async function POST(request: NextRequest) {
       paymentMethod: string;
       referenceNumber?: string;
       remarks?: string;
+      branchId?: string;
+      costCenterCode?: string;
+      currencyCode?: string;
+      departmentId?: string;
+      exchangeRate?: number;
+      idempotencyKey?: string;
+      tenders?: Array<{
+        amount: number;
+        paymentMethod: string;
+        referenceNumber?: string;
+      }>;
     };
     if (!body.customerId || !body.invoiceId || !body.paymentDate || !body.paymentMethod) {
       return badRequest('customerId, invoiceId, paymentDate, and paymentMethod are required.');
@@ -99,6 +111,33 @@ export async function POST(request: NextRequest) {
     if (invoiceError) throw invoiceError;
     if (!canRecordPayment(Number(invoice.balance_due ?? 0), body.amount)) {
       return badRequest('Payment amount exceeds invoice balance.');
+    }
+
+    try {
+      const transaction = await postSalesPaymentTransaction(
+        {
+          amount: body.amount,
+          branchId: body.branchId ?? null,
+          costCenterCode: body.costCenterCode ?? null,
+          currencyCode: body.currencyCode ?? null,
+          customerId: body.customerId,
+          departmentId: body.departmentId ?? null,
+          exchangeRate: body.exchangeRate ?? null,
+          idempotencyKey: body.idempotencyKey ?? null,
+          invoiceId: body.invoiceId,
+          notes: body.remarks ?? null,
+          paymentDate: body.paymentDate,
+          paymentMethod: normalizedPaymentMethod,
+          referenceNumber: body.referenceNumber ?? null,
+          tenders: body.tenders ?? null,
+        },
+        ctx,
+      );
+      return NextResponse.json(transaction, { status: 201 });
+    } catch (transactionError) {
+      if (shouldRequireSalesTransactionRpc() || !isSalesTransactionRpcUnavailable(transactionError)) {
+        return serverError(salesErrorMessage(transactionError) || 'Failed to post customer payment transaction.');
+      }
     }
 
     let paymentNumber: string;

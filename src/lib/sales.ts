@@ -44,6 +44,31 @@ export type CreditLimitRow = {
   exceeded: boolean;
 };
 
+export type SalesPostingLine = {
+  accountCode: string;
+  creditAmount: number;
+  debitAmount: number;
+  description: string;
+};
+
+export type SalesPostingRole =
+  | 'ACCOUNTS_RECEIVABLE'
+  | 'SALES_REVENUE'
+  | 'VAT_OUTPUT'
+  | 'COST_OF_GOODS_SOLD'
+  | 'FINISHED_GOODS_INVENTORY'
+  | 'CASH_ON_HAND'
+  | 'BANK_ACCOUNT'
+  | 'MOBILE_MONEY'
+  | 'DISCOUNTS_ALLOWED'
+  | 'SALES_RETURNS';
+
+export type SalesTenderInput = {
+  amount: number;
+  paymentMethod: string;
+  referenceNumber?: string | null;
+};
+
 export type DispatchReportRow = {
   customerName: string;
   dispatchDate: string | null;
@@ -203,6 +228,114 @@ export function canRecordPayment(balanceDue: number, attemptedPayment: number) {
   const normalizedBalance = ensureNonNegative(balanceDue, 'balanceDue');
   const normalizedPayment = ensurePositiveQuantity(attemptedPayment, 'attemptedPayment');
   return normalizedPayment <= normalizedBalance;
+}
+
+export function normalizeSalesPaymentMethod(value: string) {
+  const normalized = String(value ?? '').trim().toUpperCase();
+  if (normalized === 'BANK_TRANSFER') return 'BANK';
+  return normalized || 'CASH';
+}
+
+export function resolveSalesPaymentPostingRole(paymentMethod: string): SalesPostingRole {
+  const normalized = normalizeSalesPaymentMethod(paymentMethod);
+  if (['BANK', 'CARD', 'POS'].includes(normalized)) return 'BANK_ACCOUNT';
+  if (['ECOCASH', 'ONEMONEY', 'MUKURU', 'MOBILE_MONEY'].includes(normalized)) return 'MOBILE_MONEY';
+  return 'CASH_ON_HAND';
+}
+
+export function validateSalesTenderSplit(totalAmount: number, tenders: SalesTenderInput[]) {
+  const normalizedTotal = ensurePositiveQuantity(totalAmount, 'totalAmount');
+  if (tenders.length === 0) return 'At least one payment tender is required.';
+
+  const tenderTotal = tenders.reduce((sum, tender) => {
+    const amount = ensurePositiveQuantity(tender.amount, 'tender.amount');
+    if (!String(tender.paymentMethod ?? '').trim()) throw new Error('paymentMethod is required for every tender');
+    return sum + amount;
+  }, 0);
+
+  return Math.abs(tenderTotal - normalizedTotal) <= 0.01 ? null : 'Tender totals must equal payment amount.';
+}
+
+export function buildSalesInvoicePostingLines(input: {
+  invoiceNumber?: string | null;
+  stockCostTotal?: number | null;
+  taxAmount?: number | null;
+  total: number;
+}): SalesPostingLine[] {
+  const total = ensurePositiveQuantity(input.total, 'total');
+  const taxAmount = ensureNonNegative(input.taxAmount ?? 0, 'taxAmount');
+  const stockCostTotal = ensureNonNegative(input.stockCostTotal ?? 0, 'stockCostTotal');
+  const invoiceNumber = input.invoiceNumber || 'sales invoice';
+  const netSales = total - taxAmount;
+  if (netSales < 0) throw new Error('taxAmount cannot exceed invoice total');
+
+  const lines: SalesPostingLine[] = [
+    {
+      accountCode: 'ACCOUNTS_RECEIVABLE',
+      creditAmount: 0,
+      debitAmount: total,
+      description: `Accounts receivable for ${invoiceNumber}`,
+    },
+    {
+      accountCode: 'SALES_REVENUE',
+      creditAmount: netSales,
+      debitAmount: 0,
+      description: `Sales revenue for ${invoiceNumber}`,
+    },
+  ];
+
+  if (taxAmount > 0) {
+    lines.push({
+      accountCode: 'VAT_OUTPUT',
+      creditAmount: taxAmount,
+      debitAmount: 0,
+      description: `Output VAT for ${invoiceNumber}`,
+    });
+  }
+
+  if (stockCostTotal > 0) {
+    lines.push(
+      {
+        accountCode: 'COST_OF_GOODS_SOLD',
+        creditAmount: 0,
+        debitAmount: stockCostTotal,
+        description: `Cost of goods sold for ${invoiceNumber}`,
+      },
+      {
+        accountCode: 'FINISHED_GOODS_INVENTORY',
+        creditAmount: stockCostTotal,
+        debitAmount: 0,
+        description: `Inventory issue for ${invoiceNumber}`,
+      },
+    );
+  }
+
+  return lines;
+}
+
+export function buildSalesPaymentPostingLines(input: {
+  amount: number;
+  invoiceNumber?: string | null;
+  paymentMethod: string;
+}): SalesPostingLine[] {
+  const amount = ensurePositiveQuantity(input.amount, 'amount');
+  const paymentMethod = normalizeSalesPaymentMethod(input.paymentMethod);
+  const invoiceNumber = input.invoiceNumber || 'sales invoice';
+
+  return [
+    {
+      accountCode: resolveSalesPaymentPostingRole(paymentMethod),
+      creditAmount: 0,
+      debitAmount: amount,
+      description: `Customer payment via ${paymentMethod}`,
+    },
+    {
+      accountCode: 'ACCOUNTS_RECEIVABLE',
+      creditAmount: amount,
+      debitAmount: 0,
+      description: `Reduce accounts receivable for ${invoiceNumber}`,
+    },
+  ];
 }
 
 export function buildSalesReportCsv(rows: Array<Record<string, unknown>>) {

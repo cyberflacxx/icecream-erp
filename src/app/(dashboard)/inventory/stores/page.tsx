@@ -285,7 +285,7 @@ export default function InventoryStoresPage() {
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <MetricTile icon={<TriangleAlert className="h-5 w-5 text-warning" />} label="Damaged today" value={String(metrics?.damagedTodayQuantity?.toFixed(3) ?? '0.000')} helper="Stock deducted as damaged or waste" />
         <MetricTile icon={<ClipboardCheck className="h-5 w-5 text-orange" />} label="Pending approvals" value={String(metrics?.pendingApprovalsCount ?? 0)} helper="Transfers, returns, and adjustments waiting" />
-        <MetricTile icon={<AlertTriangle className="h-5 w-5 text-warning" />} label="Low stock" value={String(metrics?.lowStockCount ?? 0)} helper="Immediate reorder watch" />
+        <MetricTile icon={<AlertTriangle className="h-5 w-5" />} label="Low stock" value={String(metrics?.lowStockCount ?? 0)} helper="Immediate reorder watch" variant="danger" />
         <MetricTile icon={<Scale className="h-5 w-5 text-orange" />} label="Expiring soon" value={String(metrics?.expiringSoonCount ?? 0)} helper="Batch attention needed" />
       </div>
 
@@ -685,21 +685,23 @@ function MetricTile({
   helper,
   icon,
   label,
+  variant = 'default',
   value,
 }: {
   helper: string;
   icon: ReactNode;
   label: string;
+  variant?: 'default' | 'danger';
   value: string;
 }) {
   return (
-    <div className="surface-card">
+    <div className={variant === 'danger' ? 'dashboard-blue-card dashboard-danger-card p-4' : 'surface-card'}>
       <div className="flex items-center justify-between">
-        <p className="text-sm font-semibold uppercase tracking-[0.18em] text-orange">{label}</p>
+        <p className={variant === 'danger' ? 'dashboard-blue-label text-sm font-semibold uppercase tracking-[0.18em]' : 'text-sm font-semibold uppercase tracking-[0.18em] text-orange'}>{label}</p>
         {icon}
       </div>
-      <p className="mt-4 text-3xl font-semibold text-brown">{value}</p>
-      <p className="mt-2 text-sm text-muted">{helper}</p>
+      <p className={variant === 'danger' ? 'dashboard-blue-value mt-4 text-3xl font-semibold' : 'mt-4 text-3xl font-semibold text-brown'}>{value}</p>
+      <p className={variant === 'danger' ? 'dashboard-blue-copy mt-2 text-sm' : 'mt-2 text-sm text-muted'}>{helper}</p>
     </div>
   );
 }

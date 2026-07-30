@@ -142,6 +142,27 @@
     --dashboard-card-negative: #ef4444;
   }
 
+  .dashboard-danger-card {
+    background: linear-gradient(160deg, #dc2626 0%, #b91c1c 54%, #7f1d1d 100%) !important;
+    border-color: rgba(254, 202, 202, 0.42) !important;
+    color: #ffffff !important;
+    --dashboard-card-axis: #1f2937;
+    --dashboard-card-grid: rgba(15, 23, 42, 0.12);
+    --dashboard-card-fill: #dc2626;
+    --dashboard-card-warm: #ef4444;
+    --dashboard-card-positive: #16a34a;
+    --dashboard-card-negative: #dc2626;
+  }
+
+  .dashboard-danger-card :is(h1, h2, h3, h4, h5, h6, p, span, small, strong, em, a, li, dt, dd, label, th, td),
+  .dashboard-danger-card :is([class*='text-brown'], [class*='text-slate'], [class*='text-gray'], [class*='text-blue'], [class*='text-muted'], [class*='text-orange'], [class*='text-warning']) {
+    color: #ffffff !important;
+  }
+
+  .dashboard-danger-card :is(svg, i) {
+    color: #ffffff !important;
+  }
+
   .dashboard-blue-card-soft {
     @apply rounded-xl border;
     background: rgba(255, 255, 255, 0.1);
@@ -314,6 +335,28 @@
   .dashboard-blue-card .dashboard-card-plot :is(h1, h2, h3, h4, h5, h6, p, span, small, strong, em, a, li, dt, dd, label, th, td, svg, i),
   .dashboard-blue-card .dashboard-card-plot :is([class*='text-brown'], [class*='text-slate'], [class*='text-gray'], [class*='text-blue'], [class*='text-muted'], [class*='text-orange']) {
     color: inherit !important;
+  }
+
+  .dashboard-card-plot {
+    --dashboard-card-axis: #334155;
+    --dashboard-card-grid: rgba(100, 116, 139, 0.22);
+    --dashboard-card-fill: #2563eb;
+    --dashboard-card-warm: #0ea5e9;
+    --dashboard-card-positive: #16a34a;
+    --dashboard-card-negative: #dc2626;
+  }
+
+  .dashboard-card-plot .recharts-default-tooltip {
+    border-color: #cbd5e1 !important;
+    background: #ffffff !important;
+    color: #0f172a !important;
+    box-shadow: 0 12px 30px rgba(15, 23, 42, 0.12);
+  }
+
+  .dashboard-card-plot .recharts-tooltip-label,
+  .dashboard-card-plot .recharts-tooltip-item,
+  .dashboard-card-plot .recharts-legend-item-text {
+    color: #0f172a !important;
   }
 
   .dash-card {

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { badRequest, can, forbidden, getAuthContext, notFound, serverError, unauthorized } from '@/lib/api-auth';
+import { normalizePurchaseOrderStatus } from '@/lib/procurement-purchase-orders';
 import { deriveRequisitionWorkflowStatus } from '@/lib/procurement-workflow';
 import {
   buildRequisitionDetailItem,
@@ -71,6 +72,16 @@ function requisitionNotFoundResponse() {
     },
     { status: 404 },
   );
+}
+
+function toNumber(value: unknown) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function isActivePurchaseOrderForRequisitionConversion(row: Record<string, unknown>) {
+  const status = normalizePurchaseOrderStatus(row.status);
+  return !row.deleted_at && !row.rejected_at && !['CANCELLED', 'DELETED', 'REJECTED', 'VOID'].includes(status);
 }
 
 async function fetchRequisitionHeader(
@@ -256,6 +267,73 @@ export async function GET(
         unit: unitsById.get(String(item.unit_of_measure_id ?? '')) ?? null,
       }),
     );
+    const requisitionItemIds = items.map((item) => String(item.requisition_item_id ?? item.id ?? '')).filter(Boolean);
+    const convertedByRequisitionItemId = new Map<string, number>();
+
+    if (requisitionItemIds.length) {
+      const poLinesResult = await service
+        .from('purchase_order_items')
+        .select('requisition_item_id, quantity_ordered, quantity, purchase_order_id, po_id')
+        .in('requisition_item_id', requisitionItemIds);
+
+      if (poLinesResult.error) {
+        return serverError(poLinesResult.error.message);
+      }
+
+      const purchaseOrderIds = [
+        ...new Set(
+          (poLinesResult.data ?? [])
+            .map((line) => String(line.purchase_order_id ?? line.po_id ?? ''))
+            .filter(Boolean),
+        ),
+      ];
+      const purchaseOrdersResult = purchaseOrderIds.length
+        ? await service
+            .from('purchase_orders')
+            .select('id, status, rejected_at, deleted_at')
+            .eq('organization_id', ctx.organizationId)
+            .in('id', purchaseOrderIds)
+        : { data: [], error: null };
+
+      if (purchaseOrdersResult.error) {
+        return serverError(purchaseOrdersResult.error.message);
+      }
+
+      const activePurchaseOrderIds = new Set(
+        (purchaseOrdersResult.data ?? [])
+          .filter((row) => isActivePurchaseOrderForRequisitionConversion(row as Record<string, unknown>))
+          .map((row) => String(row.id)),
+      );
+
+      for (const line of poLinesResult.data ?? []) {
+        const poId = String(line.purchase_order_id ?? line.po_id ?? '');
+        const requisitionItemId = String(line.requisition_item_id ?? '');
+        if (!poId || !requisitionItemId || !activePurchaseOrderIds.has(poId)) continue;
+
+        const converted = toNumber(line.quantity_ordered ?? line.quantity);
+        convertedByRequisitionItemId.set(
+          requisitionItemId,
+          (convertedByRequisitionItemId.get(requisitionItemId) ?? 0) + converted,
+        );
+      }
+    }
+
+    const conversionAwareItems = items.map((item) => {
+      const requisitionItemId = String(item.requisition_item_id ?? item.id ?? '');
+      const approvedQuantity = toNumber(
+        item.quantity_approved ?? item.quantityApproved ?? item.quantity_requested ?? item.quantityRequested ?? item.quantity,
+      );
+      const quantityConvertedToPurchaseOrders = convertedByRequisitionItemId.get(requisitionItemId) ?? 0;
+      const remainingApprovedQuantity = Math.max(0, approvedQuantity - quantityConvertedToPurchaseOrders);
+
+      return {
+        ...item,
+        converted_quantity: quantityConvertedToPurchaseOrders,
+        quantityConvertedToPurchaseOrders,
+        remaining_approved_quantity: remainingApprovedQuantity,
+        remainingApprovedQuantity,
+      };
+    });
 
     const normalizedStatus = deriveRequisitionWorkflowStatus({
       approvalStatus: requisition.approval_status,
@@ -279,12 +357,12 @@ export async function GET(
       approverName: requisition.approver_name ? String(requisition.approver_name) : null,
       approverEmail: requisition.approver_email ? String(requisition.approver_email) : null,
       approvalNotes: requisition.approval_notes ? String(requisition.approval_notes) : null,
-      items,
-      line_items: items,
-      lineItems: items,
-      requisition_items: items,
-      requisitionItems: items,
-      purchase_requisition_items: items,
+      items: conversionAwareItems,
+      line_items: conversionAwareItems,
+      lineItems: conversionAwareItems,
+      requisition_items: conversionAwareItems,
+      requisitionItems: conversionAwareItems,
+      purchase_requisition_items: conversionAwareItems,
     };
 
     return NextResponse.json({

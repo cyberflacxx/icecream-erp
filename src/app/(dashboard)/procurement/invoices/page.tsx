@@ -21,6 +21,8 @@ const initialFormState = {
   goodsReceivedNoteId: '',
   invoiceDate: '',
   invoiceNumber: '',
+  notes: '',
+  attachmentName: '',
   purchaseOrderId: '',
   supplierId: '',
 };
@@ -86,6 +88,22 @@ export default function ProcurementInvoicesPage() {
       map.set(line.itemId, (map.get(line.itemId) ?? 0) + Number(line.quantityInvoiced ?? 0));
     }
     return map;
+  }, [lineItems]);
+  const invoiceTotals = useMemo(() => {
+    return lineItems.reduce(
+      (totals, line) => {
+        const quantity = Number(line.quantityInvoiced || 0);
+        const invoiceCost = Number(line.unitCost || 0);
+        const poCost = Number(line.poUnitCost || 0);
+        const lineTotal = quantity * invoiceCost;
+
+        totals.quantity += Number.isFinite(quantity) ? quantity : 0;
+        totals.subtotal += Number.isFinite(lineTotal) ? lineTotal : 0;
+        totals.variance += Number.isFinite(quantity * (invoiceCost - poCost)) ? quantity * (invoiceCost - poCost) : 0;
+        return totals;
+      },
+      { quantity: 0, subtotal: 0, variance: 0 },
+    );
   }, [lineItems]);
 
   useEffect(() => {
@@ -177,6 +195,7 @@ export default function ProcurementInvoicesPage() {
           invoiceDate: formState.invoiceDate || null,
           invoiceNumber: formState.invoiceNumber,
           items,
+          notes: formState.notes || null,
           purchaseOrderId: formState.purchaseOrderId || null,
           supplierId: formState.supplierId,
         }),
@@ -295,14 +314,9 @@ export default function ProcurementInvoicesPage() {
             </div>
           ) : null}
 
-          <div className="rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-800">
-            Link the invoice to the purchase order or GRN whenever possible so procurement, finance, and payment history stay traceable.
-          </div>
-
           <section className="space-y-4 rounded-2xl border border-border/70 bg-white/80 p-4">
             <div>
-              <p className="text-sm font-semibold uppercase tracking-[0.18em] text-orange">Supplier Details</p>
-              <p className="mt-1 text-xs text-muted">Link the invoice to the supplier, PO, and GRN so procurement and finance can reconcile quantities and balances cleanly.</p>
+              <p className="text-sm font-semibold uppercase tracking-[0.18em] text-orange">Invoice Info</p>
             </div>
             <div className="grid gap-5 sm:grid-cols-2">
             <label className="space-y-2 text-sm text-muted">
@@ -311,6 +325,33 @@ export default function ProcurementInvoicesPage() {
                 required
                 value={formState.supplierId}
                 onChange={(supplierId) => setFormState((current) => ({ ...current, supplierId }))}
+              />
+            </label>
+            <label className="space-y-2 text-sm text-muted">
+              <span>Invoice Number</span>
+              <input
+                required
+                value={formState.invoiceNumber}
+                onChange={(event) => setFormState((current) => ({ ...current, invoiceNumber: event.target.value }))}
+                className="surface-input-soft"
+              />
+            </label>
+            <label className="space-y-2 text-sm text-muted">
+              <span>Invoice Date</span>
+              <input
+                type="date"
+                value={formState.invoiceDate}
+                onChange={(event) => setFormState((current) => ({ ...current, invoiceDate: event.target.value }))}
+                className="surface-input-soft"
+              />
+            </label>
+            <label className="space-y-2 text-sm text-muted">
+              <span>Due Date</span>
+              <input
+                type="date"
+                value={formState.dueDate}
+                onChange={(event) => setFormState((current) => ({ ...current, dueDate: event.target.value }))}
+                className="surface-input-soft"
               />
             </label>
             <div className="space-y-2 text-sm text-muted">
@@ -335,6 +376,14 @@ export default function ProcurementInvoicesPage() {
                 }
               />
             </div>
+            </div>
+          </section>
+
+          <section className="space-y-4 rounded-2xl border border-border/70 bg-white/80 p-4">
+            <div>
+              <p className="text-sm font-semibold uppercase tracking-[0.18em] text-orange">Billing / Delivery Context</p>
+            </div>
+            <div className="grid gap-5 sm:grid-cols-2">
             <label className="space-y-2 text-sm text-muted">
               <span>Purchase Order</span>
               <select
@@ -386,33 +435,6 @@ export default function ProcurementInvoicesPage() {
                 ))}
               </select>
             </label>
-            <label className="space-y-2 text-sm text-muted">
-              <span>Invoice Number</span>
-              <input
-                required
-                value={formState.invoiceNumber}
-                onChange={(event) => setFormState((current) => ({ ...current, invoiceNumber: event.target.value }))}
-                className="surface-input-soft"
-              />
-            </label>
-            <label className="space-y-2 text-sm text-muted">
-              <span>Invoice Date</span>
-              <input
-                type="date"
-                value={formState.invoiceDate}
-                onChange={(event) => setFormState((current) => ({ ...current, invoiceDate: event.target.value }))}
-                className="surface-input-soft"
-              />
-            </label>
-            <label className="space-y-2 text-sm text-muted">
-              <span>Due Date</span>
-              <input
-                type="date"
-                value={formState.dueDate}
-                onChange={(event) => setFormState((current) => ({ ...current, dueDate: event.target.value }))}
-                className="surface-input-soft"
-              />
-            </label>
             </div>
           </section>
 
@@ -435,13 +457,10 @@ export default function ProcurementInvoicesPage() {
             </section>
           ) : null}
 
-          <div className="space-y-3 rounded-2xl border border-border bg-cream/60 p-4">
+          <section className="space-y-3 rounded-2xl border border-border bg-cream/60 p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm font-semibold uppercase tracking-[0.18em] text-orange">Invoice Items</p>
-                <p className="mt-1 text-xs text-muted">
-                  Capture what the supplier billed, and keep the PO reference cost visible for comparison.
-                </p>
+                <p className="text-sm font-semibold uppercase tracking-[0.18em] text-orange">Invoice Lines</p>
               </div>
               <Button
                 type="button"
@@ -456,6 +475,13 @@ export default function ProcurementInvoicesPage() {
               >
                 Add Item
               </Button>
+            </div>
+            <div className="hidden gap-3 px-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-muted md:grid md:grid-cols-[1fr_120px_120px_120px_auto]">
+              <span>Item</span>
+              <span>Qty</span>
+              <span>Invoice Cost</span>
+              <span>PO Cost</span>
+              <span>Action</span>
             </div>
             {lineItems.map((item, index) => (
               <div key={`${item.itemId}-${index}`} className="grid gap-3 md:grid-cols-[1fr_120px_120px_120px_auto]">
@@ -546,27 +572,54 @@ export default function ProcurementInvoicesPage() {
                 ) : null}
               </div>
             ))}
-          </div>
-
-          <section className="rounded-2xl border border-border/70 bg-white/80 p-4">
-            <p className="text-sm font-semibold uppercase tracking-[0.18em] text-orange">Quantity Reconciliation</p>
-            <p className="mt-2 text-sm text-muted">
-              Originating PO, received quantities, invoiced quantities, and outstanding balances stay visible here so procurement and finance do not over-invoice a delivery.
-            </p>
           </section>
 
-          <section className="rounded-2xl border border-border/70 bg-white/80 p-4">
-            <p className="text-sm font-semibold uppercase tracking-[0.18em] text-orange">Audit Trail</p>
-            <p className="mt-2 text-sm text-muted">
-              Invoice creation, posting, and linked-document updates are written to the server-side audit log and remain visible from the invoice workspace after save.
-            </p>
+          <section className="space-y-4 rounded-2xl border border-border/70 bg-white/80 p-4">
+            <p className="text-sm font-semibold uppercase tracking-[0.18em] text-orange">Totals</p>
+            <div className="grid gap-3 sm:grid-cols-3">
+              <div className="rounded-2xl border border-border/60 bg-white px-3 py-2">
+                <p className="text-xs uppercase tracking-[0.16em] text-muted">Quantity</p>
+                <p className="mt-1 font-semibold text-brown">{invoiceTotals.quantity.toFixed(3)}</p>
+              </div>
+              <div className="rounded-2xl border border-border/60 bg-white px-3 py-2">
+                <p className="text-xs uppercase tracking-[0.16em] text-muted">Subtotal</p>
+                <p className="mt-1 font-semibold text-brown">{currencyFormatter.format(invoiceTotals.subtotal)}</p>
+              </div>
+              <div className="rounded-2xl border border-border/60 bg-white px-3 py-2">
+                <p className="text-xs uppercase tracking-[0.16em] text-muted">Cost Variance</p>
+                <p className="mt-1 font-semibold text-brown">{currencyFormatter.format(invoiceTotals.variance)}</p>
+              </div>
+            </div>
           </section>
 
-          <div className="flex justify-end gap-3">
+          <section className="space-y-4 rounded-2xl border border-border/70 bg-white/80 p-4">
+            <p className="text-sm font-semibold uppercase tracking-[0.18em] text-orange">Notes / Attachments</p>
+            <label className="space-y-2 text-sm text-muted">
+              <span>Notes</span>
+              <textarea
+                rows={3}
+                value={formState.notes}
+                onChange={(event) => setFormState((current) => ({ ...current, notes: event.target.value }))}
+                className="surface-textarea-soft"
+              />
+            </label>
+            <label className="space-y-2 text-sm text-muted">
+              <span>Attachment Reference</span>
+              <input
+                value={formState.attachmentName}
+                onChange={(event) => setFormState((current) => ({ ...current, attachmentName: event.target.value }))}
+                className="surface-input-soft"
+              />
+            </label>
+          </section>
+
+          <div className="sticky bottom-0 -mx-1 flex justify-end gap-3 border-t border-border/70 bg-white/95 px-1 py-4 backdrop-blur">
             <Button type="button" variant="outline" onClick={() => setIsDrawerOpen(false)}>
               Cancel
             </Button>
-            <Button type="submit">Save Invoice</Button>
+            <Button type="submit" disabled={pendingAction === 'create'}>
+              Save Invoice
+            </Button>
           </div>
         </form>
       </FormDrawer>

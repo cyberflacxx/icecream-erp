@@ -2,17 +2,13 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
 import { buildInvoiceAgeingRows, buildSupplierShortageRows } from '@/lib/procurement';
+import { normalizePurchaseOrderStatus } from '@/lib/procurement-purchase-orders';
 import { createServiceRoleClient } from '@/lib/supabase/server';
-
-function isMissingOptionalTable(error: unknown) {
-  if (!error || typeof error !== 'object' || !('message' in error)) return false;
-  return String((error as { message?: unknown }).message ?? '').includes("Could not find the table 'icecream_erp.");
-}
 
 export async function GET(_request: NextRequest) {
   const ctx = await getAuthContext();
   if (!ctx) return unauthorized();
-  if (!can(ctx, 'procurement.read', 'reports.read', 'finance.read')) return forbidden();
+  if (!can(ctx, 'procurement.dashboard.view', 'procurement.read', 'reports.read', 'finance.read')) return forbidden();
 
   const service = createServiceRoleClient();
 
@@ -24,8 +20,8 @@ export async function GET(_request: NextRequest) {
     invoices,
     payments,
   ] = await Promise.all([
-    service.from('purchase_requisitions').select('id, status', { count: 'exact' }).eq('organization_id', ctx.organizationId),
-    service.from('purchase_requisitions').select('id', { count: 'exact', head: true }).eq('organization_id', ctx.organizationId).eq('status', 'submitted'),
+    service.from('purchase_requisitions').select('id, status, approval_status', { count: 'exact' }).eq('organization_id', ctx.organizationId),
+    service.from('purchase_requisitions').select('id, status, approval_status', { count: 'exact' }).eq('organization_id', ctx.organizationId),
     service.from('purchase_orders').select('id, status, total_amount, expected_date, supplier_id', { count: 'exact' }).eq('organization_id', ctx.organizationId),
     service.from('supplier_returns').select('id', { count: 'exact', head: true }).eq('organization_id', ctx.organizationId).in('status', ['draft', 'pending_qc']),
     service.from('supplier_invoices').select('id, invoice_number, invoice_date, due_date, invoice_total, status, supplier_id').eq('organization_id', ctx.organizationId),
@@ -35,14 +31,14 @@ export async function GET(_request: NextRequest) {
   if (requisitions.error) return serverError(requisitions.error.message);
   if (approvals.error) return serverError(approvals.error.message);
   if (orders.error) return serverError(orders.error.message);
-  if (returns.error && !isMissingOptionalTable(returns.error)) return serverError(returns.error.message);
-  if (invoices.error && !isMissingOptionalTable(invoices.error)) return serverError(invoices.error.message);
-  if (payments.error && !isMissingOptionalTable(payments.error)) return serverError(payments.error.message);
+  if (returns.error) return serverError(returns.error.message);
+  if (invoices.error) return serverError(invoices.error.message);
+  if (payments.error) return serverError(payments.error.message);
 
   const orderIds = (orders.data ?? []).map((row) => String(row.id));
   const supplierIds = [...new Set((orders.data ?? []).map((row) => String(row.supplier_id ?? '')).filter(Boolean))];
   const [orderItems, suppliersResult] = await Promise.all([
-    orderIds.length ? service.from('purchase_order_items').select('po_id, quantity, received_qty, item_id').in('po_id', orderIds) : Promise.resolve({ data: [], error: null }),
+    orderIds.length ? service.from('purchase_order_items').select('po_id, purchase_order_id, quantity, quantity_ordered, received_qty, quantity_received, item_id').or(`po_id.in.(${orderIds.join(',')}),purchase_order_id.in.(${orderIds.join(',')})`) : Promise.resolve({ data: [], error: null }),
     supplierIds.length ? service.from('suppliers').select('id, name').in('id', supplierIds) : Promise.resolve({ data: [], error: null }),
   ]);
   if (orderItems.error) return serverError(orderItems.error.message);
@@ -56,10 +52,10 @@ export async function GET(_request: NextRequest) {
   const itemsById = new Map((itemsResult.data ?? []).map((row) => [String(row.id), row]));
   const itemsByOrder = new Map<string, Array<Record<string, unknown>>>();
   for (const item of orderItems.data ?? []) {
-    const key = String(item.po_id);
+    const key = String(item.purchase_order_id ?? item.po_id);
     itemsByOrder.set(key, [...(itemsByOrder.get(key) ?? []), {
-      quantity_ordered: item.quantity,
-      quantity_received: item.received_qty,
+      quantity_ordered: item.quantity_ordered ?? item.quantity,
+      quantity_received: item.quantity_received ?? item.received_qty,
       items: itemsById.get(String(item.item_id)) ?? null,
     }]);
   }
@@ -72,19 +68,19 @@ export async function GET(_request: NextRequest) {
   })) as Array<Record<string, unknown>>;
   const shortages = buildSupplierShortageRows(purchaseOrders);
   const paymentsByInvoiceId = new Map<string, number>();
-  for (const payment of payments.error ? [] : payments.data ?? []) {
+  for (const payment of payments.data ?? []) {
     const key = String(payment.supplier_invoice_id);
     paymentsByInvoiceId.set(key, (paymentsByInvoiceId.get(key) ?? 0) + Number(payment.amount_paid ?? 0));
   }
-  const ageing = buildInvoiceAgeingRows((invoices.error ? [] : invoices.data ?? []) as Array<Record<string, unknown>>, paymentsByInvoiceId);
+  const ageing = buildInvoiceAgeingRows((invoices.data ?? []) as Array<Record<string, unknown>>, paymentsByInvoiceId);
 
   return NextResponse.json({
-    openPurchaseRequisitions: (requisitions.data ?? []).filter((row) => ['draft', 'submitted'].includes(String(row.status))).length,
-    pendingPurchaseApprovals: approvals.count ?? 0,
-    openPurchaseOrders: (orders.data ?? []).filter((row) => ['draft', 'approved', 'sent_to_supplier'].includes(String(row.status))).length,
-    partiallyReceivedPurchaseOrders: (orders.data ?? []).filter((row) => String(row.status) === 'partial_received').length,
+    openPurchaseRequisitions: (requisitions.data ?? []).filter((row) => ['DRAFT', 'SUBMITTED', 'PENDING_APPROVAL'].includes(normalizePurchaseOrderStatus(row.approval_status ?? row.status))).length,
+    pendingPurchaseApprovals: (approvals.data ?? []).filter((row) => ['SUBMITTED', 'PENDING_APPROVAL'].includes(normalizePurchaseOrderStatus(row.approval_status ?? row.status))).length,
+    openPurchaseOrders: (orders.data ?? []).filter((row) => ['DRAFT', 'APPROVED', 'SENT', 'SENT_TO_SUPPLIER'].includes(normalizePurchaseOrderStatus(row.status))).length,
+    partiallyReceivedPurchaseOrders: (orders.data ?? []).filter((row) => ['PARTIAL_RECEIVED', 'PARTIALLY_RECEIVED'].includes(normalizePurchaseOrderStatus(row.status))).length,
     supplierShortages: shortages.length,
-    pendingSupplierReturns: returns.error ? 0 : returns.count ?? 0,
+    pendingSupplierReturns: returns.count ?? 0,
     supplierInvoicesDue: ageing.filter((row) => row.balance > 0).length,
     topSuppliersByValue: aggregateSupplierValue(purchaseOrders),
     lateDeliveries: shortages.filter((row) => row.ageInDays > 0).length,

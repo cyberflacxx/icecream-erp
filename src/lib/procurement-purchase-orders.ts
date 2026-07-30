@@ -285,6 +285,9 @@ export interface NormalizedRequisitionLineItem {
   item_name: string | null;
   itemName: string | null;
   quantity: number;
+  quantityApproved: number;
+  quantityConvertedToPurchaseOrders: number;
+  quantityRemainingForPurchaseOrder: number;
   qty: number;
   requisition_item_id: string;
   requisitionItemId: string;
@@ -312,6 +315,15 @@ function firstArray(...values: unknown[]) {
   return [];
 }
 
+function firstFiniteNumber(...values: unknown[]) {
+  for (const value of values) {
+    if (value === undefined || value === null || String(value).trim() === '') continue;
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return 0;
+}
+
 export function normalizeRequisitionLineItem(input: unknown): NormalizedRequisitionLineItem | null {
   const row = asRecord(input);
   if (!row) return null;
@@ -323,12 +335,45 @@ export function normalizeRequisitionLineItem(input: unknown): NormalizedRequisit
   const itemId = String(row.item_id ?? row.itemId ?? nestedItem?.id ?? '').trim();
   const itemCode = String(row.item_code ?? row.itemCode ?? nestedItem?.code ?? '').trim() || null;
   const itemName = String(row.item_name ?? row.itemName ?? nestedItem?.name ?? '').trim() || null;
-  const quantity = normalizePurchaseOrderQuantity({
-    quantity: row.quantity ?? row.quantity_requested ?? row.quantityApproved,
-    quantity_ordered: row.quantity_approved ?? row.quantityApproved,
-    quantityOrdered: row.quantityRequested,
-    qty: row.qty,
-  });
+  const quantityApproved = firstFiniteNumber(
+    row.quantity_approved,
+    row.quantityApproved,
+    row.approved_quantity,
+    row.approvedQuantity,
+    row.quantity,
+    row.qty,
+    row.quantity_requested,
+    row.quantityRequested,
+  );
+  const quantityConvertedToPurchaseOrders = firstFiniteNumber(
+    row.quantity_converted_to_purchase_orders,
+    row.quantityConvertedToPurchaseOrders,
+    row.converted_quantity,
+    row.convertedQuantity,
+    row.po_quantity,
+    row.poQuantity,
+  );
+  const hasExplicitRemaining = [
+    row.remaining_approved_quantity,
+    row.remainingApprovedQuantity,
+    row.quantity_remaining_for_purchase_order,
+    row.quantityRemainingForPurchaseOrder,
+    row.remaining_quantity,
+    row.remainingQuantity,
+  ].some((value) => value !== undefined && value !== null && String(value).trim() !== '');
+  const explicitRemaining = firstFiniteNumber(
+    row.remaining_approved_quantity,
+    row.remainingApprovedQuantity,
+    row.quantity_remaining_for_purchase_order,
+    row.quantityRemainingForPurchaseOrder,
+    row.remaining_quantity,
+    row.remainingQuantity,
+  );
+  const quantityRemainingForPurchaseOrder =
+    hasExplicitRemaining
+      ? explicitRemaining
+      : Math.max(0, quantityApproved - quantityConvertedToPurchaseOrders);
+  const quantity = quantityRemainingForPurchaseOrder > 0 ? quantityRemainingForPurchaseOrder : quantityApproved;
   const unitOfMeasureId = String(
     row.unit_of_measure_id ??
       row.unitOfMeasureId ??
@@ -373,6 +418,9 @@ export function normalizeRequisitionLineItem(input: unknown): NormalizedRequisit
     item_name: itemName,
     itemName,
     quantity,
+    quantityApproved,
+    quantityConvertedToPurchaseOrders,
+    quantityRemainingForPurchaseOrder,
     qty: quantity,
     requisition_item_id: requisitionItemId,
     requisitionItemId,
@@ -413,9 +461,9 @@ export function mapRequisitionItemToPurchaseOrderLine(input: unknown) {
 
   return {
     description: item.description,
-    itemCode: item.itemCode,
+    itemCode: item.itemCode ?? '',
     itemId: item.itemId,
-    itemName: item.itemName,
+    itemName: item.itemName ?? '',
     quantityOrdered: String(item.quantity || 1),
     requisitionItemId: item.requisitionItemId,
     rowId: item.requisitionItemId || item.id || `req-line-${item.itemId}`,
@@ -423,7 +471,7 @@ export function mapRequisitionItemToPurchaseOrderLine(input: unknown) {
     taxRate: String(item.taxRate),
     unitCost: String(item.unitPrice),
     unitOfMeasureId: item.unitOfMeasureId ?? '',
-    unitOfMeasureName: item.uomName,
+    unitOfMeasureName: item.uomName ?? '',
   };
 }
 
