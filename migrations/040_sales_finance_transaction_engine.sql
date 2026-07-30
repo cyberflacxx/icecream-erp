@@ -710,7 +710,7 @@ begin
   end if;
 
   if v_idempotency_key is not null then
-    v_idempotency_payload_hash := encode(public.digest(convert_to(p_invoice_payload::text, 'UTF8'), 'sha256'), 'hex');
+    v_idempotency_payload_hash := encode(extensions.digest(convert_to(p_invoice_payload::text, 'UTF8'), 'sha256'), 'hex');
 
     select inv.id, inv.invoice_number, inv.idempotency_payload_hash, journal.id as journal_id, journal.entry_number as journal_number
       into v_existing_invoice
@@ -1012,7 +1012,7 @@ begin
       coalesce(nullif(v_payment ->> 'notes', ''), 'Receipt for invoice ' || v_invoice_number), 'PAID',
       v_branch_id, v_department_id, v_cost_center_code, v_currency_code, v_exchange_rate,
       nullif(v_payment ->> 'idempotencyKey', ''),
-      case when nullif(v_payment ->> 'idempotencyKey', '') is not null then encode(public.digest(convert_to(v_payment::text, 'UTF8'), 'sha256'), 'hex') else null end,
+      case when nullif(v_payment ->> 'idempotencyKey', '') is not null then encode(extensions.digest(convert_to(v_payment::text, 'UTF8'), 'sha256'), 'hex') else null end,
       v_actor_user_account_id
     )
     returning id into v_payment_id;
@@ -1164,7 +1164,7 @@ begin
   end if;
 
   if v_idempotency_key is not null then
-    v_idempotency_payload_hash := encode(public.digest(convert_to(p_payment_payload::text, 'UTF8'), 'sha256'), 'hex');
+    v_idempotency_payload_hash := encode(extensions.digest(convert_to(p_payment_payload::text, 'UTF8'), 'sha256'), 'hex');
 
     select pay.id, pay.payment_number, pay.invoice_id, pay.idempotency_payload_hash, journal.id as journal_id, journal.entry_number as journal_number
       into v_existing_payment
