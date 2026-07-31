@@ -1,7 +1,27 @@
+import type { AuthContext } from '@/lib/api-auth';
+import {
+  authorizeProductionOrderForWrite,
+  resolveProductionCreateBranchAuthorization,
+  resolveProductionUpdateBranchAuthorization,
+  type ProductionAuthorizationContext,
+  type ProductionAuthorizationResult,
+  type ProductionBranchAuthorizationRecord,
+  type ProductionOrderAuthorizationRecord,
+} from './production-order-authorization';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
 export function productionService() {
   return createServiceRoleClient().schema('icecream_erp');
+}
+
+function toProductionAuthorizationContext(ctx: AuthContext): ProductionAuthorizationContext {
+  return {
+    branchAssignments: ctx.branchAssignments,
+    branchId: ctx.branchId,
+    isBranchScoped: ctx.isBranchScoped,
+    organizationId: ctx.organizationId,
+    permissions: ctx.permissions,
+  };
 }
 
 export function productionErrorMessage(error: unknown) {
@@ -12,6 +32,13 @@ export function productionErrorMessage(error: unknown) {
   return '';
 }
 
+export interface ProductionDocumentAuthorizationRecord {
+  id: string;
+  organizationId: string;
+  postingStatus: string | null;
+  productionOrderId: string;
+}
+
 export function isMissingProductionTable(error: unknown) {
   const message = productionErrorMessage(error);
   return (
@@ -19,6 +46,137 @@ export function isMissingProductionTable(error: unknown) {
     message.includes('Could not find a relationship between') ||
     message.includes('does not exist')
   );
+}
+
+export async function loadProductionOrderAuthorizationRecord(
+  orderId: string,
+  organizationId: string,
+): Promise<ProductionOrderAuthorizationRecord | null> {
+  const service = productionService();
+  const { data, error } = await service
+    .from('production_orders')
+    .select('id, organization_id, branch_id, status, is_locked')
+    .eq('organization_id', organizationId)
+    .eq('id', orderId)
+    .maybeSingle();
+
+  if (error) throw error;
+  if (!data) return null;
+
+  return {
+    branchId: data.branch_id ? String(data.branch_id) : null,
+    id: String(data.id),
+    isLocked: Boolean(data.is_locked),
+    organizationId: String(data.organization_id),
+    status: data.status ? String(data.status) : null,
+  };
+}
+
+export async function loadProductionBranchAuthorizationRecord(
+  branchId: string,
+  organizationId: string,
+): Promise<ProductionBranchAuthorizationRecord | null> {
+  const service = productionService();
+  const { data, error } = await service
+    .from('branches')
+    .select('id, organization_id, status')
+    .eq('organization_id', organizationId)
+    .eq('id', branchId)
+    .maybeSingle();
+
+  if (error) throw error;
+  if (!data) return null;
+
+  return {
+    id: String(data.id),
+    organizationId: String(data.organization_id),
+    status: data.status ? String(data.status) : null,
+  };
+}
+
+async function loadProductionDocumentAuthorizationRecord(
+  table: 'production_issues' | 'production_receipts',
+  documentId: string,
+  organizationId: string,
+): Promise<ProductionDocumentAuthorizationRecord | null> {
+  const service = productionService();
+  const { data, error } = await service
+    .from(table)
+    .select('id, organization_id, posting_status, production_order_id')
+    .eq('organization_id', organizationId)
+    .eq('id', documentId)
+    .maybeSingle();
+
+  if (error) throw error;
+  if (!data) return null;
+
+  return {
+    id: String(data.id),
+    organizationId: String(data.organization_id),
+    postingStatus: data.posting_status ? String(data.posting_status) : null,
+    productionOrderId: String(data.production_order_id),
+  };
+}
+
+export async function loadProductionIssueAuthorizationRecord(
+  issueId: string,
+  organizationId: string,
+) {
+  return loadProductionDocumentAuthorizationRecord('production_issues', issueId, organizationId);
+}
+
+export async function loadProductionReceiptAuthorizationRecord(
+  receiptId: string,
+  organizationId: string,
+) {
+  return loadProductionDocumentAuthorizationRecord('production_receipts', receiptId, organizationId);
+}
+
+export async function authorizeProductionOrderWriteAccess(
+  orderId: string,
+  ctx: AuthContext,
+): Promise<ProductionAuthorizationResult<ProductionOrderAuthorizationRecord>> {
+  const order = await loadProductionOrderAuthorizationRecord(orderId, ctx.organizationId);
+  return authorizeProductionOrderForWrite(toProductionAuthorizationContext(ctx), order);
+}
+
+export async function resolveAuthorizedProductionCreateBranchId(
+  requestedBranchId: string | null | undefined,
+  ctx: AuthContext,
+): Promise<ProductionAuthorizationResult<{ branchId: string | null }>> {
+  const branch = !ctx.isBranchScoped && requestedBranchId
+    ? await loadProductionBranchAuthorizationRecord(requestedBranchId, ctx.organizationId)
+    : null;
+
+  return resolveProductionCreateBranchAuthorization(
+    toProductionAuthorizationContext(ctx),
+    requestedBranchId,
+    branch,
+  );
+}
+
+export async function resolveAuthorizedProductionUpdateBranchId(input: {
+  ctx: AuthContext;
+  orderId: string;
+  requestedBranchId: string | null | undefined;
+}): Promise<ProductionAuthorizationResult<{ branchId: string | null; order: ProductionOrderAuthorizationRecord }>> {
+  const order = await loadProductionOrderAuthorizationRecord(input.orderId, input.ctx.organizationId);
+  const orderAuthorization = authorizeProductionOrderForWrite(
+    toProductionAuthorizationContext(input.ctx),
+    order,
+  );
+  if (!orderAuthorization.ok) return orderAuthorization;
+
+  const branch = !input.ctx.isBranchScoped && input.requestedBranchId
+    ? await loadProductionBranchAuthorizationRecord(input.requestedBranchId, input.ctx.organizationId)
+    : null;
+
+  return resolveProductionUpdateBranchAuthorization({
+    branch,
+    ctx: toProductionAuthorizationContext(input.ctx),
+    order: orderAuthorization.value,
+    requestedBranchId: input.requestedBranchId,
+  });
 }
 
 export async function resolveBranchWarehouseIds(branchId: string | null) {

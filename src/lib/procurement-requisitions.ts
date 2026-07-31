@@ -215,7 +215,9 @@ export function buildRequisitionDetailItem(
       item?.name ??
       '',
   ).trim();
-  const quantity = firstFiniteNumber(row.quantity, row.qty, row.quantity_requested, row.quantityRequested, row.quantity_approved, row.quantityApproved);
+  const quantityRequested = firstFiniteNumber(row.quantity_requested, row.quantityRequested, row.quantity, row.qty);
+  const quantityApproved = firstFiniteNumber(row.quantity_approved, row.quantityApproved, quantityRequested);
+  const quantity = quantityApproved || quantityRequested;
   const unitOfMeasureId = String(
     row.unit_of_measure_id ??
       row.unitOfMeasureId ??
@@ -262,6 +264,10 @@ export function buildRequisitionDetailItem(
     description,
     specification,
     quantity,
+    quantity_approved: quantityApproved,
+    quantityApproved,
+    quantity_requested: quantityRequested,
+    quantityRequested,
     qty: quantity,
     unit_of_measure_id: unitOfMeasureId,
     unitOfMeasureId: unitOfMeasureId,

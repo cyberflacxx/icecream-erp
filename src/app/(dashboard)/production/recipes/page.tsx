@@ -262,7 +262,7 @@ export default function ProductionRecipesPage() {
         </div>
         <div className="surface-card bg-gradient-to-br from-white via-white to-sky-50">
           <p className="text-xs uppercase tracking-[0.22em] text-muted">SAP Flow</p>
-          <p className="mt-3 text-sm font-semibold text-brown">BOM {'->'} Issue {'->'} Release</p>
+          <p className="mt-3 text-sm font-semibold text-brown">BOM {'->'} Issue {'->'} Receipt</p>
         </div>
       </section>
 
@@ -378,14 +378,14 @@ export default function ProductionRecipesPage() {
             <FlowCard
               index="2"
               title="Issues"
-              description="Issue raw materials from Production Warehouse to start production."
+              description="Open released Production Orders and post raw-material issues from the modern order workflow."
               fields={[
                 { label: 'Production Order', value: String(issueBatch?.batchNumber ?? 'Create a production run first') },
                 { label: 'Quantity To Produce', value: issueBatch ? String(issueBatch.plannedQuantity ?? '') : String(Number(productionQuantity || 0)) },
                 { label: 'Issue Date', value: issueBatch ? String(issueBatch.productionDate ?? '').slice(0, 10) : new Date().toISOString().slice(0, 10) },
               ]}
-              actionHref="/production/batches?stage=issue"
-              actionLabel={issueBatch ? 'Open Issue Screen' : 'Create / Open Issues'}
+              actionHref="/production/orders?workflow=issue&status=RELEASED"
+              actionLabel={issueBatch ? 'Open Issue Orders' : 'Open Issue Orders'}
               rows={calculatorRows.map((row) => ({
                 label: row.itemName,
                 unit: row.unit || '-',
@@ -395,15 +395,15 @@ export default function ProductionRecipesPage() {
 
             <FlowCard
               index="3"
-              title="Release"
-              description="Release finished units to Production Warehouse inventory."
+              title="Receipts"
+              description="Open released Production Orders and post finished-goods receipts from the modern order workflow."
               fields={[
                 { label: 'Production Order', value: String(releaseBatch?.batchNumber ?? 'Release after issue') },
                 { label: 'Quantity Produced', value: releaseBatch ? String(releaseBatch.actualOutput ?? releaseBatch.expectedOutput ?? '') : String(Number(productionQuantity || 0)) },
-                { label: 'Release Date', value: releaseBatch ? String(releaseBatch.productionDate ?? '').slice(0, 10) : new Date().toISOString().slice(0, 10) },
+                { label: 'Receipt Date', value: releaseBatch ? String(releaseBatch.productionDate ?? '').slice(0, 10) : new Date().toISOString().slice(0, 10) },
               ]}
-              actionHref="/production/batches?stage=release"
-              actionLabel={releaseBatch ? 'Open Release Screen' : 'Open Release Flow'}
+              actionHref="/production/orders?workflow=receipt&status=RELEASED"
+              actionLabel={releaseBatch ? 'Open Receipt Orders' : 'Open Receipt Orders'}
               rows={[
                 {
                   label: String((calculatorRecipe as Record<string, unknown>).name ?? 'Finished Product'),

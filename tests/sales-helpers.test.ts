@@ -1,12 +1,19 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 import {
   buildCreditLimitRows,
+  buildSalesInvoicePostingLines,
+  buildSalesPaymentPostingLines,
   calculateInvoiceTotals,
   canRecordPayment,
   checkStockAvailability,
   evaluateCreditLimit,
+  normalizeSalesPaymentMethod,
+  resolveSalesPaymentPostingRole,
+  validateSalesTenderSplit,
   validateCustomerBalanceImportRows,
   validateCustomerCodeUniqueness,
   validateCustomerImportRows,
@@ -50,6 +57,75 @@ test('customer code uniqueness and payment validation guard transactions', () =>
   assert.equal(validateCustomerCodeUniqueness(['cus-001', 'CUS-002'], 'cus-002'), false);
   assert.equal(canRecordPayment(150, 100), true);
   assert.equal(canRecordPayment(150, 151), false);
+});
+
+test('sales finance posting helpers produce balanced GL lines', () => {
+  const invoiceLines = buildSalesInvoicePostingLines({
+    invoiceNumber: 'INV-00001',
+    stockCostTotal: 45,
+    taxAmount: 15,
+    total: 115,
+  });
+  const paymentLines = buildSalesPaymentPostingLines({
+    amount: 50,
+    invoiceNumber: 'INV-00001',
+    paymentMethod: 'bank_transfer',
+  });
+
+  assert.equal(normalizeSalesPaymentMethod('bank_transfer'), 'BANK');
+  assert.deepEqual(invoiceLines.map((line) => line.accountCode), [
+    'ACCOUNTS_RECEIVABLE',
+    'SALES_REVENUE',
+    'VAT_OUTPUT',
+    'COST_OF_GOODS_SOLD',
+    'FINISHED_GOODS_INVENTORY',
+  ]);
+  assert.equal(invoiceLines.reduce((sum, line) => sum + line.debitAmount, 0), 160);
+  assert.equal(invoiceLines.reduce((sum, line) => sum + line.creditAmount, 0), 160);
+  assert.deepEqual(paymentLines.map((line) => line.accountCode), ['BANK_ACCOUNT', 'ACCOUNTS_RECEIVABLE']);
+  assert.equal(paymentLines.reduce((sum, line) => sum + line.debitAmount, 0), 50);
+  assert.equal(paymentLines.reduce((sum, line) => sum + line.creditAmount, 0), 50);
+});
+
+test('sales payment tender helpers validate split totals and posting roles', () => {
+  assert.equal(resolveSalesPaymentPostingRole('cash'), 'CASH_ON_HAND');
+  assert.equal(resolveSalesPaymentPostingRole('ecocash'), 'MOBILE_MONEY');
+  assert.equal(resolveSalesPaymentPostingRole('pos'), 'BANK_ACCOUNT');
+  assert.equal(
+    validateSalesTenderSplit(100, [
+      { amount: 40, paymentMethod: 'cash' },
+      { amount: 60, paymentMethod: 'ecocash' },
+    ]),
+    null,
+  );
+  assert.equal(
+    validateSalesTenderSplit(100, [
+      { amount: 40, paymentMethod: 'cash' },
+      { amount: 30, paymentMethod: 'ecocash' },
+    ]),
+    'Tender totals must equal payment amount.',
+  );
+});
+
+test('sales finance transaction migration stays schema-local and RPC gated', () => {
+  const root = process.cwd();
+  const migration = readFileSync(join(root, 'migrations', '040_sales_finance_transaction_engine.sql'), 'utf8');
+  const invoiceRoute = readFileSync(join(root, 'src', 'app', 'api', 'sales', 'invoices', 'route.ts'), 'utf8');
+  const paymentsRoute = readFileSync(join(root, 'src', 'app', 'api', 'sales', 'payments', 'route.ts'), 'utf8');
+
+  assert.match(migration, /create table if not exists icecream_erp\.sales_posting_account_mappings/);
+  assert.match(migration, /create or replace function icecream_erp\.post_sales_invoice_transaction/);
+  assert.match(migration, /create or replace function icecream_erp\.post_sales_payment_transaction/);
+  assert.match(migration, /sales_assert_open_period/);
+  assert.match(migration, /idempotency_key/);
+  assert.match(migration, /sales_payment_tenders/);
+  assert.match(migration, /sales_payment_allocations/);
+  assert.match(migration, /revoke all on table icecream_erp\.sales_posting_account_mappings from anon, authenticated/);
+  assert.doesNotMatch(migration.replace(/public\.digest/g, ''), /public\./);
+  assert.doesNotMatch(migration, /grant\s+.+\s+to\s+(anon|authenticated)/i);
+  assert.doesNotMatch(migration, /alter\s+role|authenticator|pgrst\.db_schemas|db-extra-search-path/i);
+  assert.match(invoiceRoute, /shouldRequireSalesTransactionRpc/);
+  assert.match(paymentsRoute, /shouldRequireSalesTransactionRpc/);
 });
 
 test('credit limit report rows expose exceeded accounts', () => {

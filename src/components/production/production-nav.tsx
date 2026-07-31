@@ -1,25 +1,34 @@
 'use client';
 
 import Link from 'next/link';
-import { Boxes, Factory, FileSpreadsheet, LayoutDashboard, PackageCheck, RefreshCcw, Rows3 } from 'lucide-react';
+import { Archive, ClipboardList, Factory, LayoutDashboard, PackageCheck, Rows3, ScrollText } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 import { usePathname, useSearchParams } from 'next/navigation';
 
 import { cn } from '@/lib/utils';
 
+type ProductionNavLink = {
+  href: string;
+  icon: LucideIcon;
+  label: string;
+  match?: 'dashboard' | 'issues' | 'legacy' | 'orders' | 'planned' | 'receipts' | 'reports';
+  legacy?: boolean;
+};
+
 const links = [
-  { href: '/production/dashboard', icon: LayoutDashboard, label: 'Overview', match: 'overview' },
-  { href: '/production/recipes', icon: FileSpreadsheet, label: 'BOM' },
-  { href: '/production/batches?stage=issue', icon: Factory, label: 'Issues', match: 'issue' },
-  { href: '/production/batches?stage=release', icon: PackageCheck, label: 'Release', match: 'release' },
-  { href: '/inventory/stock-balances', icon: Boxes, label: 'Stock Balance', match: 'stock-balance' },
-  { href: '/production/transfers', icon: RefreshCcw, label: 'Transfers In', match: 'transfers' },
-  { href: '/production/reports', icon: Rows3, label: 'Reports' },
-] as const;
+  { href: '/production/dashboard', icon: LayoutDashboard, label: 'Dashboard', match: 'dashboard' },
+  { href: '/production/orders', icon: ScrollText, label: 'Production Orders', match: 'orders' },
+  { href: '/production/orders/new', icon: ClipboardList, label: 'Planned Production', match: 'planned' },
+  { href: '/production/orders?workflow=issue&status=RELEASED', icon: Factory, label: 'Issues', match: 'issues' },
+  { href: '/production/orders?workflow=receipt&status=RELEASED', icon: PackageCheck, label: 'Receipts', match: 'receipts' },
+  { href: '/production/reports', icon: Rows3, label: 'Reports', match: 'reports' },
+  { href: '/production/batches', icon: Archive, label: 'Legacy Batches', match: 'legacy', legacy: true },
+] satisfies ProductionNavLink[];
 
 export function ProductionNav() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const stage = searchParams.get('stage');
+  const workflow = searchParams.get('workflow');
 
   return (
     <div className="overflow-x-auto rounded-xl border border-[color:var(--app-border)] bg-[color:var(--app-surface)] p-1.5 shadow-sm">
@@ -27,17 +36,19 @@ export function ProductionNav() {
         {links.map((link) => {
           const Icon = link.icon;
           const isActive =
-            link.match === 'issue'
-              ? pathname === '/production/batches' && stage === 'issue'
-              : link.match === 'release'
-                ? pathname === '/production/batches' && stage === 'release'
-                : link.match === 'overview'
-                  ? pathname === '/production/dashboard'
-                  : link.match === 'stock-balance'
-                    ? pathname === '/inventory/stock-balances'
-                    : link.match === 'transfers'
-                      ? pathname === '/production/transfers'
-                      : pathname === link.href || pathname.startsWith(`${link.href}/`);
+            link.match === 'dashboard'
+              ? pathname === '/production/dashboard'
+              : link.match === 'orders'
+                ? pathname === '/production/orders' && workflow !== 'issue' && workflow !== 'receipt'
+                : link.match === 'planned'
+                  ? pathname === '/production/orders/new' || pathname.endsWith('/edit')
+                  : link.match === 'issues'
+                    ? pathname === '/production/orders' && workflow === 'issue'
+                    : link.match === 'receipts'
+                      ? pathname === '/production/orders' && workflow === 'receipt'
+                      : link.match === 'legacy'
+                        ? pathname === '/production/batches'
+                        : pathname === link.href || pathname.startsWith(`${link.href}/`);
 
           return (
             <Link
@@ -49,7 +60,8 @@ export function ProductionNav() {
               )}
             >
               <Icon className="h-3.5 w-3.5" />
-              {link.label}
+              <span>{link.label}</span>
+              {link.legacy ? <span className="rounded bg-[color:var(--app-bg-subtle)] px-1.5 py-0.5 text-[10px] uppercase tracking-[0.14em]">Legacy</span> : null}
             </Link>
           );
         })}

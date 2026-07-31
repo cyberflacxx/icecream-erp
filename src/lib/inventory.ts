@@ -105,6 +105,17 @@ const STOCK_MOVEMENT_TYPE_ALIASES: Record<string, string> = {
   WAREHOUSE_TRANSFER_OUT: 'TRANSFER_OUT',
 };
 
+export const INVENTORY_PENDING_APPROVAL_STATUSES = [
+  'PENDING',
+  'PENDING_APPROVAL',
+  'SUBMITTED',
+  'AWAITING_APPROVAL',
+] as const;
+
+const INVENTORY_PENDING_APPROVAL_STATUS_SET = new Set<string>(
+  INVENTORY_PENDING_APPROVAL_STATUSES,
+);
+
 export type SupplierShortageRow = {
   expectedResolutionDate: string | null;
   itemCode: string | null;
@@ -191,6 +202,54 @@ export function resolveInventoryUnitCost(
   }
 
   return toNumber(fallback);
+}
+
+export function normalizeInventoryApprovalStatus(value: unknown) {
+  return normalizeWarehouseCode(String(value ?? ''));
+}
+
+export function isPendingInventoryApprovalStatus(value: unknown) {
+  return INVENTORY_PENDING_APPROVAL_STATUS_SET.has(normalizeInventoryApprovalStatus(value));
+}
+
+export function isProcessedInventoryApprovalStatus(value: unknown) {
+  return ['APPROVED', 'REJECTED'].includes(normalizeInventoryApprovalStatus(value));
+}
+
+export function calculateStockBalanceValue(row: Record<string, unknown> | null | undefined) {
+  if (!row) return 0;
+
+  const item = asObject(row.items);
+  const quantityOnHand = toNumber(row.quantity_on_hand ?? row.quantity);
+  const unitCost = toNumber(
+    row.average_cost ??
+      row.avg_cost ??
+      row.unit_cost ??
+      row.unitCost ??
+      item?.unit_cost ??
+      item?.standard_cost,
+  );
+
+  return resolveInventoryValue(row, quantityOnHand * unitCost);
+}
+
+export function calculateTotalStockValue(
+  rows: Array<Record<string, unknown>>,
+  filter?: { organizationId?: string | null; warehouseIds?: string[] | null },
+) {
+  const allowedWarehouses = filter?.warehouseIds ? new Set(filter.warehouseIds) : null;
+
+  return rows.reduce((sum, row) => {
+    if (filter?.organizationId && String(row.organization_id ?? '') !== filter.organizationId) {
+      return sum;
+    }
+
+    if (allowedWarehouses && !allowedWarehouses.has(String(row.warehouse_id ?? ''))) {
+      return sum;
+    }
+
+    return sum + calculateStockBalanceValue(row);
+  }, 0);
 }
 
 export function buildInventoryAdjustmentFailure(input: {
@@ -444,13 +503,9 @@ export function summarizeInventoryByType(
   };
 
   for (const row of rows) {
-    const quantityOnHand = toNumber(row.quantity_on_hand ?? row.quantity);
     const item = asObject(row.items);
     const itemType = String(item?.item_type ?? item?.type ?? '');
-    const unitCost = toNumber(row.average_cost ?? row.avg_cost ?? item?.unit_cost ?? item?.standard_cost);
-    const value = row.total_value === null || row.total_value === undefined
-      ? quantityOnHand * unitCost
-      : toNumber(row.total_value);
+    const value = calculateStockBalanceValue(row);
 
     summary.totalStockValue += value;
 

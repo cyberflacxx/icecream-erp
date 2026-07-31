@@ -1,8 +1,26 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
-import { isMissingTableColumnError, resolveInventoryValue } from '@/lib/inventory';
+import { calculateStockBalanceValue, isMissingTableColumnError, toNumber } from '@/lib/inventory';
 import { createServiceRoleClient } from '@/lib/supabase/server';
+
+type DbErrorLike = { message: string } | null;
+type StockBalanceDbRow = Record<string, unknown>;
+
+function isMissingStockBalanceValuationColumn(error: unknown) {
+  return (
+    isMissingTableColumnError(error, 'stock_balances', 'quantity') ||
+    isMissingTableColumnError(error, 'stock_balances', 'average_cost') ||
+    isMissingTableColumnError(error, 'stock_balances', 'avg_cost') ||
+    isMissingTableColumnError(error, 'stock_balances', 'total_value')
+  );
+}
+
+function normalizeBalanceRows(data: unknown): StockBalanceDbRow[] {
+  return Array.isArray(data)
+    ? data.filter((row): row is StockBalanceDbRow => Boolean(row) && typeof row === 'object')
+    : [];
+}
 
 export async function GET(request: NextRequest) {
   const ctx = await getAuthContext();
@@ -45,17 +63,11 @@ export async function GET(request: NextRequest) {
   // Fetch without range first if lowStock filter is needed (post-filter)
   // For lowStock we must fetch all and filter in memory then paginate
   if (lowStock) {
-    let { data, error } = await query.order('updated_at', { ascending: false });
+    const primaryResult = await query.order('updated_at', { ascending: false });
+    let rows = normalizeBalanceRows(primaryResult.data);
+    let error: DbErrorLike = primaryResult.error;
 
-    if (
-      error &&
-      (
-        isMissingTableColumnError(error, 'stock_balances', 'quantity') ||
-        isMissingTableColumnError(error, 'stock_balances', 'average_cost') ||
-        isMissingTableColumnError(error, 'stock_balances', 'avg_cost') ||
-        isMissingTableColumnError(error, 'stock_balances', 'total_value')
-      )
-    ) {
+    if (error && isMissingStockBalanceValuationColumn(error)) {
       let fallbackQuery = service
         .from('stock_balances')
         .select('id, item_id, warehouse_id, quantity_on_hand, quantity_reserved, quantity_available, last_updated')
@@ -68,13 +80,13 @@ export async function GET(request: NextRequest) {
           : fallbackQuery.in('warehouse_id', ['00000000-0000-0000-0000-000000000000']);
       }
       const fallback = await fallbackQuery.order('updated_at', { ascending: false });
-      data = fallback.data;
+      rows = normalizeBalanceRows(fallback.data);
       error = fallback.error;
     }
 
     if (error) return serverError(error.message);
 
-    const mapped = await mapBalances(service, (data ?? []) as Array<Record<string, unknown>>);
+    const mapped = await mapBalances(service, rows);
     const filtered = mapped.filter((row) => {
       const reorderLevel = Number(row.item?.reorderLevel ?? 0);
       const available = Number(row.quantityAvailable ?? 0);
@@ -104,19 +116,14 @@ export async function GET(request: NextRequest) {
   }
 
   const from = (page - 1) * pageSize;
-  let { data, count, error } = await query
+  const primaryPageResult = await query
     .order('updated_at', { ascending: false })
     .range(from, from + pageSize - 1);
+  let rows = normalizeBalanceRows(primaryPageResult.data);
+  let count = primaryPageResult.count;
+  let error: DbErrorLike = primaryPageResult.error;
 
-  if (
-    error &&
-    (
-      isMissingTableColumnError(error, 'stock_balances', 'quantity') ||
-      isMissingTableColumnError(error, 'stock_balances', 'average_cost') ||
-      isMissingTableColumnError(error, 'stock_balances', 'avg_cost') ||
-      isMissingTableColumnError(error, 'stock_balances', 'total_value')
-    )
-  ) {
+  if (error && isMissingStockBalanceValuationColumn(error)) {
     let fallbackQuery = service
       .from('stock_balances')
       .select('id, item_id, warehouse_id, quantity_on_hand, quantity_reserved, quantity_available, last_updated', { count: 'exact' })
@@ -139,7 +146,7 @@ export async function GET(request: NextRequest) {
         : fallbackQuery.in('warehouse_id', ['00000000-0000-0000-0000-000000000000']);
     }
     const fallback = await fallbackQuery.order('updated_at', { ascending: false }).range(from, from + pageSize - 1);
-    data = fallback.data;
+    rows = normalizeBalanceRows(fallback.data);
     count = fallback.count;
     error = fallback.error;
   }
@@ -147,7 +154,7 @@ export async function GET(request: NextRequest) {
   if (error) return serverError(error.message);
 
   return NextResponse.json({
-    data: await mapBalances(service, (data ?? []) as Array<Record<string, unknown>>),
+    data: await mapBalances(service, rows),
     pagination: { page, pageSize, total: count ?? 0 },
   });
 }
@@ -181,11 +188,11 @@ async function mapBalances(service: ReturnType<typeof createServiceRoleClient>, 
     const warehouse = warehouses.get(String(row.warehouse_id ?? '')) ?? null;
     const unitOfMeasure = item ? units.get(String(item.unit_of_measure_id ?? '')) ?? null : null;
     const branch = warehouse ? branches.get(String(warehouse.branch_id ?? '')) ?? null : null;
-    const quantityOnHand = Number(row.quantity_on_hand ?? row.quantity ?? 0);
-    const quantityReserved = Number(row.quantity_reserved ?? 0);
-    const quantityAvailable = Number(row.quantity_available ?? (quantityOnHand - quantityReserved));
-    const unitCost = Number(row.average_cost ?? row.avg_cost ?? item?.unit_cost ?? item?.standard_cost ?? 0);
-    const stockValue = resolveInventoryValue(row, quantityOnHand * unitCost);
+    const quantityOnHand = toNumber(row.quantity_on_hand ?? row.quantity);
+    const quantityReserved = toNumber(row.quantity_reserved);
+    const quantityAvailable = toNumber(row.quantity_available ?? (quantityOnHand - quantityReserved));
+    const unitCost = toNumber(row.average_cost ?? row.avg_cost ?? item?.unit_cost ?? item?.standard_cost);
+    const stockValue = calculateStockBalanceValue({ ...row, items: item });
     return {
       id: row.id,
       lastUpdated: row.last_updated,

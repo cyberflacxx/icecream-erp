@@ -17,6 +17,7 @@ const currencyFormatter = new Intl.NumberFormat('en-US', {
 export default function InventoryDashboardPage() {
   const dashboardQuery = useInventoryDashboard();
   const metrics = dashboardQuery.data;
+  const dashboardError = dashboardQuery.error instanceof Error ? dashboardQuery.error.message : null;
 
   return (
     <div className="space-y-6">
@@ -31,14 +32,15 @@ export default function InventoryDashboardPage() {
         <MetricCard
           icon={<Wallet className="h-5 w-5" />}
           label="Total stock value"
-          value={currencyFormatter.format(metrics?.totalStockValue ?? 0)}
-          helper="Live balance valuation"
+          value={dashboardQuery.isLoading ? 'Loading...' : currencyFormatter.format(metrics?.totalStockValue ?? 0)}
+          helper={dashboardQuery.isError ? dashboardError ?? 'Unable to load valuation' : 'Live balance valuation'}
         />
         <MetricCard
           icon={<AlertTriangle className="h-5 w-5" />}
           label="Low stock alerts"
           value={String(metrics?.lowStockCount ?? 0)}
           helper="At or below reorder level"
+          variant="danger"
         />
         <MetricCard
           icon={<ClipboardCheck className="h-5 w-5" />}
@@ -126,6 +128,40 @@ export default function InventoryDashboardPage() {
       </div>
 
       <div className="dashboard-blue-card p-4">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h2 className="dashboard-blue-value text-lg font-semibold">Pending inventory approvals</h2>
+            <p className="dashboard-blue-copy mt-1 text-sm">Most recent transfer, adjustment, return, and stock control requests waiting for approval.</p>
+          </div>
+          <Link href="/inventory/approvals" className="dashboard-blue-badge hover:bg-white/18">View all approvals</Link>
+        </div>
+        <div className="mt-4 space-y-3">
+          {metrics?.recentApprovals?.length ? (
+            metrics.recentApprovals.map((approval) => (
+              <div key={approval.id} className="dashboard-blue-card-soft flex flex-col gap-2 px-4 py-3 md:flex-row md:items-center md:justify-between">
+                <div>
+                  <p className="dashboard-blue-value font-medium">{formatRequestType(approval.requestType)}</p>
+                  <p className="dashboard-blue-copy text-sm">{approval.referenceNumber}</p>
+                </div>
+                <div className="flex items-center gap-3">
+                  <StatusBadge status={approval.approvalStatus} variant="warning" />
+                  <span className="dashboard-blue-copy text-sm">
+                    {approval.requestDate ? new Date(approval.requestDate).toLocaleDateString() : 'No date'}
+                  </span>
+                </div>
+              </div>
+            ))
+          ) : (
+            <EmptyState
+              icon={<ClipboardCheck className="h-6 w-6" />}
+              title="No pending inventory approvals"
+              description="Pending inventory approvals will appear here when requests are submitted."
+            />
+          )}
+        </div>
+      </div>
+
+      <div className="dashboard-blue-card p-4">
         <h2 className="dashboard-blue-value text-lg font-semibold">Today&apos;s stock movements</h2>
         <div className="mt-4 space-y-3">
           {metrics?.todaysMovements?.length ? (
@@ -183,15 +219,17 @@ function MetricCard({
   helper,
   icon,
   label,
+  variant = 'default',
   value,
 }: {
   helper: string;
   icon: ReactNode;
   label: string;
+  variant?: 'default' | 'danger';
   value: string;
 }) {
   return (
-    <div className="dashboard-blue-card p-4">
+    <div className={`dashboard-blue-card p-4 ${variant === 'danger' ? 'dashboard-danger-card' : ''}`}>
       <div className="flex items-center justify-between">
         <p className="dashboard-blue-label text-sm font-semibold uppercase tracking-[0.18em]">{label}</p>
         <span className="dashboard-blue-icon h-11 w-11">{icon}</span>
@@ -200,6 +238,10 @@ function MetricCard({
       <p className="dashboard-blue-copy mt-2 text-sm">{helper}</p>
     </div>
   );
+}
+
+function formatRequestType(value: string) {
+  return value.replace(/^inventory\./i, '').replaceAll('_', ' ').replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
 function ValueTile({ label, value }: { label: string; value: number }) {

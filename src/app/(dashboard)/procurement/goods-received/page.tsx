@@ -44,6 +44,7 @@ const initialFormState = {
 
 type GrnLineItem = {
   batchNumber: string;
+  damagedQuantity: string;
   expiryDate: string;
   itemId: string;
   poItemId?: string;
@@ -75,6 +76,7 @@ function createGrnRowId() {
 function buildEmptyGrnLineItem(): GrnLineItem {
   return {
     batchNumber: '',
+    damagedQuantity: '0',
     expiryDate: '',
     itemId: '',
     qualityNotes: '',
@@ -180,6 +182,7 @@ export default function GoodsReceivedPage() {
     setLineItems(
       order.items.map((item) => ({
         batchNumber: '',
+        damagedQuantity: '0',
         expiryDate: '',
         itemId: item.item?.id ?? '',
         poItemId: item.id,
@@ -208,6 +211,18 @@ export default function GoodsReceivedPage() {
     0,
   );
   const postedCount = grns.filter((row) => row.stockPosted).length;
+  const receiptTotals = lineItems.reduce(
+    (totals, line) => {
+      totals.expected += Number(line.quantityExpected || 0);
+      totals.received += Number(line.quantityReceived || 0);
+      totals.rejected += Number(line.quantityRejected || 0);
+      totals.damaged += Number(line.damagedQuantity || 0);
+      totals.accepted += getAcceptedLineQuantity(line);
+      totals.value += getLineValue(line);
+      return totals;
+    },
+    { accepted: 0, damaged: 0, expected: 0, received: 0, rejected: 0, value: 0 },
+  );
 
   function formatCurrency(value: unknown) {
     return currencyFormatter.format(Number(value ?? 0));
@@ -219,7 +234,7 @@ export default function GoodsReceivedPage() {
 
   function getAcceptedLineQuantity(item: GrnLineItem) {
     return calculateAcceptedQuantity({
-      damagedQuantity: 0,
+      damagedQuantity: Number(item.damagedQuantity || 0),
       receivedQuantity: Number(item.quantityReceived || 0),
       rejectedQuantity: Number(item.quantityRejected || 0),
     });
@@ -291,6 +306,7 @@ export default function GoodsReceivedPage() {
         quantityExpected: Number(item.quantityExpected || 0),
         quantityReceived: Number(item.quantityReceived),
         quantityRejected: Number(item.quantityRejected),
+        damagedQuantity: Number(item.damagedQuantity || 0),
         reason: item.reason || null,
         unitCost: Number(item.unitCost || 0),
         unitOfMeasureId: item.unitOfMeasureId,
@@ -308,8 +324,10 @@ export default function GoodsReceivedPage() {
         (item) =>
           Number.isNaN(item.quantityReceived) ||
           Number.isNaN(item.quantityRejected) ||
+          Number.isNaN(Number((item as { damagedQuantity?: unknown }).damagedQuantity ?? 0)) ||
           item.quantityReceived < 0 ||
-          item.quantityRejected < 0,
+          item.quantityRejected < 0 ||
+          Number((item as { damagedQuantity?: unknown }).damagedQuantity ?? 0) < 0,
       )
     ) {
       setFormError('Invalid quantities detected in one or more line items.');
@@ -359,6 +377,8 @@ export default function GoodsReceivedPage() {
                   quantityExpected: item.quantityExpected,
                   quantityReceived: item.quantityReceived,
                   quantityRejected: item.quantityRejected,
+                  damagedQuantity: item.damagedQuantity,
+                  damaged_quantity: item.damaged_quantity,
                   unitCost: item.unitCost,
                   unitOfMeasureId: item.unitOfMeasureId,
                   unit_of_measure_id: item.unit_of_measure_id,
@@ -629,7 +649,7 @@ export default function GoodsReceivedPage() {
         />
       ) : null}
 
-      <FormDrawer title="Create / Receive Goods" open={isDrawerOpen} onClose={() => setIsDrawerOpen(false)}>
+      <FormDrawer title="New Goods Received Note" open={isDrawerOpen} onClose={() => setIsDrawerOpen(false)}>
         <form className="space-y-5" onSubmit={handleSubmit}>
           {formError ? (
             <div className="rounded-2xl border border-error/20 bg-error/5 px-4 py-3 text-sm text-error">
@@ -637,15 +657,9 @@ export default function GoodsReceivedPage() {
             </div>
           ) : null}
 
-          <div className="rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-800">
-            <p className="font-semibold text-sky-900">Stock Posting Status</p>
-            <p className="mt-1">This GRN workflow posts accepted stock into an HQ warehouse only after supervisor approval and inventory posting.</p>
-          </div>
-
           <section className="space-y-4 rounded-2xl border border-border/70 bg-white/80 p-4">
             <div>
-              <p className="text-sm font-semibold uppercase tracking-[0.18em] text-orange">Purchase Order Details</p>
-              <p className="mt-1 text-xs text-muted">Choose whether the receipt is PO-linked or manual, then confirm the supplier and receiving warehouse before quantity capture.</p>
+              <p className="text-sm font-semibold uppercase tracking-[0.18em] text-orange">Receipt Info</p>
             </div>
             <div className="grid gap-5 sm:grid-cols-2">
             <label className="space-y-2 text-sm text-muted">
@@ -769,8 +783,7 @@ export default function GoodsReceivedPage() {
 
           <section className="space-y-4 rounded-2xl border border-border/70 bg-white/80 p-4">
             <div>
-              <p className="text-sm font-semibold uppercase tracking-[0.18em] text-orange">Quality / Acceptance Details</p>
-              <p className="mt-1 text-xs text-muted">Quality notes and acceptance controls stay with the GRN until approval and warehouse posting are completed.</p>
+              <p className="text-sm font-semibold uppercase tracking-[0.18em] text-orange">Quality / Acceptance</p>
             </div>
             <label className="space-y-2 text-sm text-muted">
             <span>Quality Notes</span>
@@ -785,26 +798,24 @@ export default function GoodsReceivedPage() {
           </label>
           </section>
 
-          <div className="space-y-3 rounded-2xl border border-border bg-cream/60 p-4">
+          <section className="space-y-3 rounded-2xl border border-border bg-cream/60 p-4">
             <div>
-              <p className="text-sm font-semibold uppercase tracking-[0.18em] text-orange">Received Items</p>
-              <p className="mt-1 text-xs text-muted">
-                PO-linked receipts inherit the selected PO lines. Manual receipts let you capture stock even when no PO was used.
-              </p>
+              <p className="text-sm font-semibold uppercase tracking-[0.18em] text-orange">Received Lines</p>
             </div>
-            <div className="hidden gap-3 px-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-muted md:grid md:grid-cols-[minmax(0,1.2fr)_120px_120px_120px_120px_120px_120px_120px]">
+            <div className="hidden gap-3 px-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-muted md:grid md:grid-cols-[minmax(0,1.2fr)_96px_96px_96px_96px_96px_110px_110px_110px]">
               <span>Item Name</span>
               <span>UOM</span>
               <span>Ordered Qty</span>
               <span>Received Qty</span>
-              <span>Rejected/Damaged Qty</span>
+              <span>Rejected Qty</span>
+              <span>Damaged Qty</span>
               <span>Unit Cost</span>
               <span>Batch No.</span>
               <span>Expiry Date</span>
             </div>
             {lineItems.map((item, index) => (
               <div key={item.rowId} className="space-y-3 rounded-2xl border border-border/70 bg-white/90 p-3">
-                <div className="grid gap-3 md:grid-cols-[1.2fr_120px_120px_120px_120px_120px_120px_120px]">
+                <div className="grid gap-3 md:grid-cols-[1.2fr_96px_96px_96px_96px_96px_110px_110px_110px]">
                   <div className="space-y-2">
                     <select
                       value={item.itemId}
@@ -932,6 +943,20 @@ export default function GoodsReceivedPage() {
                   />
                   <input
                     min="0"
+                    step="0.001"
+                    type="number"
+                    value={item.damagedQuantity}
+                    onChange={(event) =>
+                      setLineItems((current) =>
+                        current.map((row, rowIndex) =>
+                          rowIndex === index ? { ...row, damagedQuantity: event.target.value } : row,
+                        ),
+                      )
+                    }
+                    className="surface-input-soft"
+                  />
+                  <input
+                    min="0"
                     step="0.01"
                     type="number"
                     placeholder="Unit cost"
@@ -1027,13 +1052,28 @@ export default function GoodsReceivedPage() {
                 Add Manual Item
               </Button>
             ) : null}
-          </div>
+          </section>
 
           <section className="space-y-4 rounded-2xl border border-border/70 bg-white/80 p-4">
-            <div>
-              <p className="text-sm font-semibold uppercase tracking-[0.18em] text-orange">Approval / Posting Actions</p>
-              <p className="mt-1 text-xs text-muted">Approval, rejection, and posting events are logged on the server and remain linked to the GRN and resulting stock movement.</p>
+            <p className="text-sm font-semibold uppercase tracking-[0.18em] text-orange">Totals</p>
+            <div className="grid gap-3 sm:grid-cols-3">
+              <div className="rounded-2xl border border-border/60 bg-white px-3 py-2">
+                <p className="text-xs uppercase tracking-[0.16em] text-muted">Accepted</p>
+                <p className="mt-1 font-semibold text-brown">{receiptTotals.accepted.toFixed(3)}</p>
+              </div>
+              <div className="rounded-2xl border border-border/60 bg-white px-3 py-2">
+                <p className="text-xs uppercase tracking-[0.16em] text-muted">Rejected / Damaged</p>
+                <p className="mt-1 font-semibold text-brown">{(receiptTotals.rejected + receiptTotals.damaged).toFixed(3)}</p>
+              </div>
+              <div className="rounded-2xl border border-border/60 bg-white px-3 py-2">
+                <p className="text-xs uppercase tracking-[0.16em] text-muted">Accepted Value</p>
+                <p className="mt-1 font-semibold text-brown">{formatCurrency(receiptTotals.value)}</p>
+              </div>
             </div>
+          </section>
+
+          <section className="space-y-4 rounded-2xl border border-border/70 bg-white/80 p-4">
+            <p className="text-sm font-semibold uppercase tracking-[0.18em] text-orange">Notes / Attachments</p>
             <label className="space-y-2 text-sm text-muted">
             <span>Notes</span>
             <textarea
@@ -1045,7 +1085,7 @@ export default function GoodsReceivedPage() {
           </label>
           </section>
 
-          <div className="flex justify-end gap-3">
+          <div className="sticky bottom-0 -mx-1 flex justify-end gap-3 border-t border-border/70 bg-white/95 px-1 py-4 backdrop-blur">
             <Button type="button" variant="outline" onClick={() => setIsDrawerOpen(false)}>
               Cancel
             </Button>

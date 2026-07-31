@@ -14,10 +14,13 @@ export function useInventoryApprovals(status = 'PENDING') {
 
   return useQuery({
     queryKey: ['inventory', 'approvals', userId, status],
-    queryFn: () =>
-      request<InventoryApprovalRow[]>(
+    queryFn: async () => {
+      const response = await request<InventoryApprovalRow[] | { data?: InventoryApprovalRow[]; success?: boolean }>(
         `${API_ROUTES.INVENTORY.APPROVALS}${buildInventoryQuery({ status })}`,
-      ),
+      );
+
+      return Array.isArray(response) ? response : response.data ?? [];
+    },
     enabled: isLoaded && Boolean(isSignedIn),
   });
 }

@@ -92,10 +92,10 @@ export default function StockBalancesPage() {
       <InventoryNav />
 
       <div className="grid gap-4 md:grid-cols-3">
-        <div className="surface-card">
-          <p className="text-sm font-semibold uppercase tracking-[0.18em] text-orange">Low stock</p>
-          <p className="mt-3 text-3xl font-semibold text-brown">{lowStockQuery.data?.length ?? 0}</p>
-          <p className="mt-2 text-sm text-muted">Items already at or below reorder threshold.</p>
+        <div className="dashboard-blue-card dashboard-danger-card p-4">
+          <p className="dashboard-blue-label text-sm font-semibold uppercase tracking-[0.18em]">Low stock</p>
+          <p className="dashboard-blue-value mt-3 text-3xl font-semibold">{lowStockQuery.data?.length ?? 0}</p>
+          <p className="dashboard-blue-copy mt-2 text-sm">Items already at or below reorder threshold.</p>
         </div>
         <div className="surface-card">
           <p className="text-sm font-semibold uppercase tracking-[0.18em] text-orange">Expiring soon</p>

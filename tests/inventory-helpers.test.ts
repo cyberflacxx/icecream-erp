@@ -5,13 +5,18 @@ import fs from 'node:fs';
 import {
   buildInventoryAdjustmentFailure,
   buildOpeningClosingRows,
+  calculateStockBalanceValue,
+  calculateTotalStockValue,
   calculateAcceptedQuantity,
   calculateShortageQuantity,
   deriveSupplierShortages,
   findMissingDefaultWarehouses,
   getItemReorderQuantity,
+  isPendingInventoryApprovalStatus,
+  isProcessedInventoryApprovalStatus,
   isMissingTableColumnError,
   isInvoiceApprovedForDispatch,
+  normalizeInventoryApprovalStatus,
   normalizeStockMovementType,
   normalizeTransferStatus,
   normalizeWarehouseCode,
@@ -203,6 +208,81 @@ test('resolveInventoryUnitCost preserves explicit zero values and safe aliases',
   assert.equal(resolveInventoryUnitCost({ unitCost: 0 }, 9), 0);
   assert.equal(resolveInventoryUnitCost({ unit_cost: 4.5 }, 0), 4.5);
   assert.equal(resolveInventoryUnitCost({ standard_cost: 3 }, 0), 3);
+});
+
+test('calculateStockBalanceValue falls back through live balance quantity and cost aliases', () => {
+  assert.equal(calculateStockBalanceValue({ quantity_on_hand: 8, average_cost: 2.5 }), 20);
+  assert.equal(calculateStockBalanceValue({ quantity: 5, avg_cost: 3 }), 15);
+  assert.equal(calculateStockBalanceValue({ quantity_on_hand: 7, items: { unit_cost: 4 } }), 28);
+  assert.equal(calculateStockBalanceValue({ quantity_on_hand: 7, items: { standard_cost: 6 } }), 42);
+  assert.equal(calculateStockBalanceValue({ quantity_on_hand: 7, total_value: 0, avg_cost: 6 }), 0);
+  assert.equal(calculateStockBalanceValue({ quantity_on_hand: 0, avg_cost: 6 }), 0);
+});
+
+test('calculateTotalStockValue sums current balances without transfer double-counting', () => {
+  const before = [
+    { organization_id: 'org-1', warehouse_id: 'wh-a', quantity_on_hand: 10, avg_cost: 2 },
+    { organization_id: 'org-1', warehouse_id: 'wh-b', quantity_on_hand: 5, avg_cost: 2 },
+  ];
+  const afterTransfer = [
+    { organization_id: 'org-1', warehouse_id: 'wh-a', quantity_on_hand: 7, avg_cost: 2 },
+    { organization_id: 'org-1', warehouse_id: 'wh-b', quantity_on_hand: 8, avg_cost: 2 },
+  ];
+
+  assert.equal(calculateTotalStockValue(before), 30);
+  assert.equal(calculateTotalStockValue(afterTransfer), 30);
+  assert.equal(
+    calculateTotalStockValue([
+      ...afterTransfer,
+      { organization_id: 'org-2', warehouse_id: 'wh-x', quantity_on_hand: 100, avg_cost: 9 },
+    ], { organizationId: 'org-1' }),
+    30,
+  );
+  assert.equal(calculateTotalStockValue(afterTransfer, { warehouseIds: ['wh-b'] }), 16);
+});
+
+test('inventory approval status helpers share a case-insensitive pending definition', () => {
+  for (const status of ['PENDING', 'pending_approval', ' submitted ', 'Awaiting Approval']) {
+    assert.equal(isPendingInventoryApprovalStatus(status), true);
+  }
+
+  assert.equal(normalizeInventoryApprovalStatus('pending-approval'), 'PENDING_APPROVAL');
+  assert.equal(isPendingInventoryApprovalStatus('APPROVED'), false);
+  assert.equal(isPendingInventoryApprovalStatus('REJECTED'), false);
+  assert.equal(isProcessedInventoryApprovalStatus('approved'), true);
+  assert.equal(isProcessedInventoryApprovalStatus(' rejected '), true);
+});
+
+test('atomic inventory approval migration locks the request and writes status action and audit together', () => {
+  const migration = fs.readFileSync('migrations/034_atomic_inventory_approval_processing.sql', 'utf8');
+
+  assert.match(migration, /create or replace function icecream_erp\.process_inventory_approval/i);
+  assert.match(migration, /set search_path = icecream_erp, pg_temp/i);
+  assert.match(migration, /for update/i);
+  assert.match(migration, /update icecream_erp\.approval_requests/i);
+  assert.match(migration, /insert into icecream_erp\.approval_actions/i);
+  assert.match(migration, /insert into icecream_erp\.audit_logs/i);
+  assert.match(migration, /already_processed/i);
+  assert.match(migration, /inventoryPostingApplied', false/i);
+  assert.match(migration, /grant execute on function icecream_erp\.process_inventory_approval/i);
+  assert.doesNotMatch(migration, /exception\s+when/i);
+});
+
+test('inventory approval routes delegate processing to the atomic RPC wrapper only', () => {
+  const approveRoute = fs.readFileSync('src/app/api/inventory/approvals/[id]/approve/route.ts', 'utf8');
+  const rejectRoute = fs.readFileSync('src/app/api/inventory/approvals/[id]/reject/route.ts', 'utf8');
+  const rpcWrapper = fs.readFileSync('src/lib/inventory-approvals-server.ts', 'utf8');
+
+  for (const route of [approveRoute, rejectRoute]) {
+    assert.match(route, /processInventoryApproval/);
+    assert.doesNotMatch(route, /\.from\('approval_requests'\)\s*[\s\S]*\.update/);
+    assert.doesNotMatch(route, /\.from\('approval_actions'\)\s*[\s\S]*\.insert/);
+    assert.doesNotMatch(route, /recordAuditLog/);
+  }
+
+  assert.match(rpcWrapper, /\.rpc\('process_inventory_approval'/);
+  assert.match(rpcWrapper, /p_organization_id: input\.organizationId/);
+  assert.match(rpcWrapper, /p_actor_user_id: input\.userId/);
 });
 
 test('buildStockMovementListSelectClause keeps source document fields and never embeds users', () => {

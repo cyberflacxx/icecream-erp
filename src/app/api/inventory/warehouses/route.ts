@@ -8,13 +8,69 @@ import {
   serverError,
   unauthorized,
 } from '@/lib/api-auth';
-import { INVENTORY_WAREHOUSE_TYPES, isMissingTableColumnError, normalizeWarehouseCode, resolveWarehouseDisplayType, resolveWarehouseStorageType } from '@/lib/inventory';
+import {
+  calculateStockBalanceValue,
+  INVENTORY_WAREHOUSE_TYPES,
+  isMissingTableColumnError,
+  normalizeWarehouseCode,
+  resolveWarehouseDisplayType,
+  resolveWarehouseStorageType,
+  toNumber,
+} from '@/lib/inventory';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
 const SUPPORTED_WAREHOUSE_TYPES = new Set([...INVENTORY_WAREHOUSE_TYPES, 'RAW_MATERIAL']);
+const EMPTY_UUID = '00000000-0000-0000-0000-000000000000';
+
+type BranchRelation = {
+  id?: unknown;
+  name?: unknown;
+};
+
+type ItemRelation = {
+  reorder_level?: unknown;
+  standard_cost?: unknown;
+  unit_cost?: unknown;
+};
+
+type WarehouseRow = {
+  address?: unknown;
+  branch_id?: unknown;
+  branches?: BranchRelation | BranchRelation[] | null;
+  code?: unknown;
+  created_at?: unknown;
+  id?: unknown;
+  is_active?: unknown;
+  name?: unknown;
+  type?: unknown;
+  warehouse_type?: unknown;
+};
+
+type StockBalanceRow = {
+  average_cost?: unknown;
+  avg_cost?: unknown;
+  item_id?: unknown;
+  items?: ItemRelation | ItemRelation[] | null;
+  quantity?: unknown;
+  quantity_available?: unknown;
+  quantity_on_hand?: unknown;
+  total_value?: unknown;
+  warehouse_id?: unknown;
+};
+
+function asRecordArray<T extends Record<string, unknown>>(value: unknown): T[] {
+  return Array.isArray(value)
+    ? value.filter((row): row is T => Boolean(row) && typeof row === 'object')
+    : [];
+}
+
+function firstRelation<T extends Record<string, unknown>>(value: T | T[] | null | undefined): T | null {
+  if (Array.isArray(value)) return value[0] ?? null;
+  return value ?? null;
+}
 
 function normalizeWarehouseTypeForWrite(value: unknown) {
-  const warehouseType = normalizeWarehouseCode(value);
+  const warehouseType = normalizeWarehouseCode(String(value ?? ''));
 
   switch (warehouseType) {
     case 'PRODUCTION_MATERIAL':
@@ -63,7 +119,9 @@ export async function GET(request: NextRequest) {
     query = picker ? query.or(`branch_id.eq.${ctx.branchId},branch_id.is.null`) : query.eq('branch_id', ctx.branchId);
   }
 
-  let { data: warehouses, error } = await query;
+  const primaryWarehouseResult = await query;
+  let warehouses = asRecordArray<WarehouseRow>(primaryWarehouseResult.data);
+  let error = primaryWarehouseResult.error;
   if (
     error &&
     (isMissingTableColumnError(error, 'warehouses', 'is_active') ||
@@ -82,13 +140,13 @@ export async function GET(request: NextRequest) {
     }
 
     const fallback = await fallbackQuery;
-    warehouses = fallback.data as typeof warehouses;
+    warehouses = asRecordArray<WarehouseRow>(fallback.data);
     error = fallback.error;
   }
 
   if (error) return serverError(error.message);
 
-  const normalizedWarehouses = (warehouses ?? [])
+  const normalizedWarehouses = warehouses
     .filter((warehouse) => {
       if (warehouse.is_active === false) return false;
       return true;
@@ -96,9 +154,9 @@ export async function GET(request: NextRequest) {
     .map((warehouse) => {
       const code = String(warehouse.code ?? '').trim();
       const name = String(warehouse.name ?? '').trim();
-      const branchId = 'branch_id' in warehouse && warehouse.branch_id ? String(warehouse.branch_id) : null;
-      const warehouseType = 'warehouse_type' in warehouse && warehouse.warehouse_type ? String(warehouse.warehouse_type) : null;
-      const type = 'type' in warehouse && warehouse.type ? String(warehouse.type) : null;
+      const branchId = warehouse.branch_id ? String(warehouse.branch_id) : null;
+      const warehouseType = warehouse.warehouse_type ? String(warehouse.warehouse_type) : null;
+      const type = warehouse.type ? String(warehouse.type) : null;
       return {
         id: String(warehouse.id),
         code,
@@ -135,41 +193,68 @@ export async function GET(request: NextRequest) {
   // Fetch stock balances summary per warehouse
   const warehouseIds = normalizedWarehouses.map((w) => w.id);
 
-  let balancesData: Array<{
-    warehouse_id: string;
-    quantity_on_hand: number;
-    item_id: string;
-    items: { unit_cost: number | null } | null;
-  }> = [];
+  let balancesData: StockBalanceRow[] = [];
 
   if (warehouseIds.length > 0) {
-    const { data: balances } = await service
+    const primaryBalancesResult = await service
       .from('stock_balances')
-      .select('warehouse_id, quantity_on_hand, item_id, items!item_id(unit_cost)')
+      .select('warehouse_id, quantity_on_hand, quantity_available, quantity, total_value, average_cost, avg_cost, item_id, items!item_id(unit_cost, standard_cost, reorder_level)')
+      .eq('organization_id', ctx.organizationId)
       .in('warehouse_id', warehouseIds);
-    balancesData = (balances ?? []) as unknown as typeof balancesData;
+    let balancesRows: unknown = primaryBalancesResult.data;
+    let balancesError = primaryBalancesResult.error;
+
+    if (
+      balancesError &&
+      (
+        isMissingTableColumnError(balancesError, 'stock_balances', 'total_value') ||
+        isMissingTableColumnError(balancesError, 'stock_balances', 'average_cost') ||
+        isMissingTableColumnError(balancesError, 'stock_balances', 'avg_cost') ||
+        isMissingTableColumnError(balancesError, 'stock_balances', 'quantity_available')
+      )
+    ) {
+      const fallbackBalancesResult = await service
+        .from('stock_balances')
+        .select('warehouse_id, quantity_on_hand, quantity, item_id, items!item_id(unit_cost, standard_cost, reorder_level)')
+        .eq('organization_id', ctx.organizationId)
+        .in('warehouse_id', warehouseIds);
+      balancesRows = fallbackBalancesResult.data;
+      balancesError = fallbackBalancesResult.error;
+    }
+
+    if (balancesError) return serverError(balancesError.message);
+    balancesData = asRecordArray<StockBalanceRow>(balancesRows);
   }
 
   const balancesByWarehouse = new Map<
     string,
-    Array<{ quantity_on_hand: number; unit_cost: number | null }>
+    Array<{ isLowStock: boolean; quantityOnHand: number; stockValue: number }>
   >();
   for (const b of balancesData) {
-    const rawItems = b.items as { unit_cost?: unknown } | Array<{ unit_cost?: unknown }> | null;
-    const itemObj = Array.isArray(rawItems) ? (rawItems[0] ?? null) : rawItems;
-    const unitCost = itemObj?.unit_cost !== undefined ? (itemObj.unit_cost as number | null) : null;
-    const existing = balancesByWarehouse.get(b.warehouse_id) ?? [];
-    existing.push({ quantity_on_hand: Number(b.quantity_on_hand), unit_cost: unitCost });
-    balancesByWarehouse.set(b.warehouse_id, existing);
+    const warehouseId = String(b.warehouse_id ?? '');
+    if (!warehouseId) continue;
+
+    const item = firstRelation(b.items);
+    const quantityOnHand = toNumber(b.quantity_on_hand ?? b.quantity);
+    const quantityAvailable = toNumber(b.quantity_available ?? quantityOnHand);
+    const reorderLevel = toNumber(item?.reorder_level);
+    const stockValue = calculateStockBalanceValue({ ...b, items: item });
+    const existing = balancesByWarehouse.get(warehouseId) ?? [];
+    existing.push({
+      isLowStock: reorderLevel > 0 && quantityAvailable <= reorderLevel,
+      quantityOnHand,
+      stockValue,
+    });
+    balancesByWarehouse.set(warehouseId, existing);
   }
 
   const result = normalizedWarehouses.map((warehouse) => {
     const balances = balancesByWarehouse.get(warehouse.id) ?? [];
-    const itemCount = balances.filter((b) => b.quantity_on_hand > 0).length;
-    const totalValue = balances.reduce((sum, b) => {
-      const cost = b.unit_cost ?? 0;
-      return sum + b.quantity_on_hand * cost;
-    }, 0);
+    const itemCount = balances.filter((b) => b.quantityOnHand > 0).length;
+    const stockQuantity = balances.reduce((sum, b) => sum + b.quantityOnHand, 0);
+    const totalValue = balances.reduce((sum, b) => sum + b.stockValue, 0);
+    const lowStockCount = balances.filter((b) => b.isLowStock).length;
+    const branch = firstRelation(warehouse.raw.branches);
 
     return {
       id: warehouse.id,
@@ -181,13 +266,11 @@ export async function GET(request: NextRequest) {
         warehouseType: warehouse.warehouseType,
       }),
       isActive: warehouse.status === 'ACTIVE',
-      address: ('address' in warehouse.raw ? warehouse.raw.address : null) ?? null,
-      branch: (() => {
-        const raw = ('branches' in warehouse.raw ? warehouse.raw.branches : null) as { id: string; name: string } | Array<{ id: string; name: string }> | null;
-        const b = Array.isArray(raw) ? (raw[0] ?? null) : raw;
-        return b ? { id: b.id, name: b.name } : null;
-      })(),
+      address: warehouse.raw.address ? String(warehouse.raw.address) : null,
+      branch: branch ? { id: String(branch.id ?? ''), name: String(branch.name ?? '') } : null,
       itemCount,
+      lowStockCount,
+      stockQuantity,
       totalValue,
     };
   });

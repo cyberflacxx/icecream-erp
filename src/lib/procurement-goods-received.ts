@@ -101,6 +101,8 @@ interface GoodsReceivedDraftPayloadInput {
     quantityExpected: number;
     quantityReceived: number;
     quantityRejected: number;
+    damagedQuantity?: number;
+    damaged_quantity?: number;
     reason?: string | null;
     unitCost: number;
     unitOfMeasureId?: string | null;
@@ -147,6 +149,8 @@ export function buildGoodsReceivedDraftPayload(input: GoodsReceivedDraftPayloadI
         quantityExpected: item.quantityExpected,
         quantityReceived: item.quantityReceived,
         quantityRejected: item.quantityRejected,
+        damagedQuantity: Number(item.damagedQuantity ?? item.damaged_quantity ?? 0),
+        damaged_quantity: Number(item.damagedQuantity ?? item.damaged_quantity ?? 0),
         unitCost: item.unitCost,
         unitOfMeasureId,
         unit_of_measure_id: unitOfMeasureId,

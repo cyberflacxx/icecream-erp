@@ -232,6 +232,9 @@ interface RequisitionDetailResponse {
     itemName?: string | null;
     description?: string | null;
     quantity?: number | string;
+    quantityRemainingForPurchaseOrder?: number | string;
+    remainingApprovedQuantity?: number | string;
+    remaining_approved_quantity?: number | string;
     unit_of_measure_id?: string | null;
     unitOfMeasureId?: string | null;
     unit_of_measure_name?: string | null;
@@ -252,6 +255,9 @@ interface RequisitionDetailResponse {
     item_name?: string | null;
     itemName?: string | null;
     description?: string | null;
+    quantityRemainingForPurchaseOrder?: number | string;
+    remainingApprovedQuantity?: number | string;
+    remaining_approved_quantity?: number | string;
     unit_of_measure_id: string;
     unitOfMeasureId?: string | null;
     unit_of_measure_name?: string | null;
@@ -341,9 +347,12 @@ export default function PurchaseOrdersPage() {
       const response = await request<RequisitionDetailResponse>(`/api/procurement/requisitions/${requisitionId}`);
       const detail = response.data ?? response;
       const requisitionItems = extractRequisitionLineItems(response);
+      const eligibleRequisitionItems = requisitionItems.filter((item) => item.quantityRemainingForPurchaseOrder > 0 && item.itemId);
 
       if (!requisitionItems.length) {
         setRequisitionLoadError('Selected requisition has no items. Please check the requisition before creating a PO.');
+      } else if (!eligibleRequisitionItems.length) {
+        setRequisitionLoadError('Selected requisition is fully converted or has no remaining approved quantity.');
       }
 
       setFormState((current) => ({
@@ -354,8 +363,8 @@ export default function PurchaseOrdersPage() {
         approvalNotes: current.approvalNotes || detail.approvalNotes || detail.approval_notes || '',
         expectedDeliveryDate: current.expectedDeliveryDate || (detail.needed_by_date ? String(detail.needed_by_date).slice(0, 10) : ''),
         items:
-          requisitionItems.length > 0
-            ? requisitionItems.map((item) => mapRequisitionItemToPurchaseOrderLine(item) ?? createLineItemDraft())
+          eligibleRequisitionItems.length > 0
+            ? eligibleRequisitionItems.map((item) => mapRequisitionItemToPurchaseOrderLine(item) ?? createLineItemDraft())
             : [createLineItemDraft()],
         requisitionId,
       }));

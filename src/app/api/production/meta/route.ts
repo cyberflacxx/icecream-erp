@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 
 import { can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
+import { selectLatestActiveBom } from '@/lib/production';
 import { productionService } from '@/lib/production-server';
 
 type SupabaseResult<T> = {
@@ -47,6 +48,7 @@ export async function GET() {
       unitsOfMeasure,
       categories,
       warehouses,
+      branches,
       recipes,
       recipeItems,
       recipePackagingItems,
@@ -66,6 +68,9 @@ export async function GET() {
       ),
       safeList<Record<string, unknown>>(
         service.from('warehouses').select('*').eq('is_active', true).order('name', { ascending: true }),
+      ),
+      safeList<Record<string, unknown>>(
+        service.from('branches').select('id, name, code, status').eq('organization_id', ctx.organizationId).eq('status', 'ACTIVE').order('name', { ascending: true }),
       ),
       safeList<Record<string, unknown>>(
         service.from('recipes').select('*').is('deleted_at', null).order('updated_at', { ascending: false }),
@@ -99,11 +104,17 @@ export async function GET() {
       if (warehouseId) stockByItemWarehouse.set(`${itemId}:${warehouseId}`, quantity);
     }
 
-    const normalizedItems = items.map((item) => ({
+    const normalizedItems: Array<Record<string, unknown> & {
+      id: string;
+      itemType: string;
+      unitCost: number;
+      unitOfMeasureId: string | null;
+    }> = items.map((item) => ({
       ...item,
+      id: String(item.id ?? ''),
       itemType: itemType(item),
       unitCost: Number(item.unit_cost ?? item.standard_cost ?? 0),
-      unitOfMeasureId: unitId(item),
+      unitOfMeasureId: item.unit_id || item.unit_of_measure_id ? String(unitId(item) ?? '') : null,
     }));
 
     const recipeItemsByRecipe = new Map<string, Record<string, unknown>[]>();
@@ -120,14 +131,39 @@ export async function GET() {
       packagingItemsByRecipe.set(recipeId, [...(packagingItemsByRecipe.get(recipeId) ?? []), row]);
     }
 
+    const itemById = new Map(normalizedItems.map((item) => [String(item.id), item]));
+    const unitById = new Map(unitsOfMeasure.map((unit) => [String(unit.id ?? ''), unit]));
+
     const normalizedRecipes = recipes.map((recipe) => ({
       ...recipe,
       expectedOutputQuantity: Number(recipe.expected_output_quantity ?? recipe.batch_size ?? 0),
       finishedItemId: recipe.finished_item_id ?? null,
       outputUnitId: recipe.output_unit_id ?? recipe.batch_unit_id ?? null,
-      ingredients: recipeItemsByRecipe.get(String(recipe.id)) ?? [],
-      packagingItems: packagingItemsByRecipe.get(String(recipe.id)) ?? [],
+      ingredients: (recipeItemsByRecipe.get(String(recipe.id)) ?? []).map((row) => ({
+        ...row,
+        items: itemById.get(String(row.item_id ?? '')) ?? null,
+        units_of_measure: unitById.get(String(row.unit_id ?? '')) ?? null,
+      })),
+      packagingItems: (packagingItemsByRecipe.get(String(recipe.id)) ?? []).map((row) => ({
+        ...row,
+        items: itemById.get(String(row.item_id ?? '')) ?? null,
+        units_of_measure: unitById.get(String(row.unit_id ?? '')) ?? null,
+      })),
     }));
+
+    const recipeGroupsByFinishedItem = new Map<string, Array<Record<string, unknown>>>();
+    for (const recipe of normalizedRecipes) {
+      const finishedItemId = String(recipe.finishedItemId ?? '');
+      if (!finishedItemId) continue;
+      recipeGroupsByFinishedItem.set(finishedItemId, [...(recipeGroupsByFinishedItem.get(finishedItemId) ?? []), recipe]);
+    }
+
+    const products = normalizedItems
+      .filter((item) => ['FINISHED_GOOD', 'FINISHED'].includes(String(item.itemType)))
+      .map((item) => ({
+        ...item,
+        activeBom: selectLatestActiveBom(recipeGroupsByFinishedItem.get(String(item.id)) ?? []),
+      }));
 
     const normalizedWarehouses = warehouses.map((warehouse) => {
       const type = warehouseType(warehouse);
@@ -163,12 +199,14 @@ export async function GET() {
     return NextResponse.json({
       categories,
       chocolateTypes,
+      branches,
       employees: employees.map((employee) => ({
         ...employee,
         displayName: employee.full_name ?? employee.name ?? employee.employee_name ?? 'Unnamed employee',
       })),
       flavours,
       items: normalizedItems,
+      products,
       rawMaterials: normalizedItems.filter((item) => ['RAW_MATERIAL', 'RAW'].includes(String(item.itemType))),
       packagingItems: normalizedItems.filter((item) => ['PACKAGING', 'PACKAGING_MATERIAL'].includes(String(item.itemType))),
       finishedGoods: normalizedItems.filter((item) => ['FINISHED_GOOD', 'FINISHED'].includes(String(item.itemType))),

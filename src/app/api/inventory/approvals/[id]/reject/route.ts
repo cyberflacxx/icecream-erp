@@ -1,17 +1,38 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { badRequest, can, forbidden, getAuthContext, notFound, serverError, unauthorized } from '@/lib/api-auth';
-import { createServiceRoleClient } from '@/lib/supabase/server';
+import { processInventoryApproval } from '@/lib/inventory-approvals-server';
+
+function conflict(message: string) {
+  return NextResponse.json({ error: message }, { status: 409 });
+}
+
+function mapApprovalProcessResult(result: Awaited<ReturnType<typeof processInventoryApproval>>) {
+  if (result.success) {
+    return NextResponse.json({ success: true, data: result.data });
+  }
+
+  switch (result.code) {
+    case 'invalid_action':
+    case 'invalid_input':
+      return badRequest(result.message ?? 'Invalid approval request.');
+    case 'not_found':
+      return notFound('Approval request not found.');
+    case 'already_processed':
+      return conflict(result.message ?? 'Approval request has already been processed.');
+    default:
+      return serverError('Failed to process approval.');
+  }
+}
 
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const ctx = await getAuthContext();
+  const ctx = await getAuthContext(request);
   if (!ctx) return unauthorized();
   if (!can(ctx, 'inventory.write', 'procurement.approve')) return forbidden();
 
-  const service = createServiceRoleClient();
   const { id } = await params;
   const body = (await request.json().catch(() => ({}))) as { comments?: string };
 
@@ -19,40 +40,19 @@ export async function POST(
     return badRequest('comments are required when rejecting an approval request.');
   }
 
-  const { data: existing, error: fetchError } = await service
-    .from('approval_requests')
-    .select('id, current_step, status')
-    .eq('id', id)
-    .single();
+  try {
+    const result = await processInventoryApproval({
+      action: 'REJECT',
+      approvalId: id,
+      comments: body.comments,
+      ipAddress: request.headers.get('x-forwarded-for'),
+      organizationId: ctx.organizationId,
+      userAgent: request.headers.get('user-agent'),
+      userId: ctx.userId,
+    });
 
-  if (fetchError || !existing) return notFound('Approval request not found.');
-  if (existing.status !== 'PENDING') {
-    return NextResponse.json({ error: 'Only pending approvals can be rejected.' }, { status: 400 });
+    return mapApprovalProcessResult(result);
+  } catch {
+    return serverError('Failed to process approval.');
   }
-
-  const { error: actionError } = await service.from('approval_actions').insert({
-    approval_request_id: id,
-    step_number: existing.current_step,
-    level: 'LEVEL2_MANAGER',
-    action_by: ctx.userId,
-    action: 'REJECTED',
-    comments: body.comments,
-  });
-
-  if (actionError) return serverError(actionError.message);
-
-  const { data, error } = await service
-    .from('approval_requests')
-    .update({
-      status: 'REJECTED',
-      completed_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', id)
-    .select()
-    .single();
-
-  if (error) return serverError(error.message);
-
-  return NextResponse.json(data);
 }

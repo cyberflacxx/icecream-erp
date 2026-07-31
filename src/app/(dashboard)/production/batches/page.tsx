@@ -311,28 +311,32 @@ export default function ProductionBatchesPage() {
       <PageHeader
         title={
           viewMode === 'issue'
-            ? 'Production Issues'
+            ? 'Legacy Production Issues'
             : viewMode === 'release'
-              ? 'Production Release'
-              : 'Production Workflow'
+              ? 'Legacy Production Release'
+              : 'Legacy Batch Workflow'
         }
         description={
           viewMode === 'issue'
-            ? 'Issue raw materials against the production order using the selected BOM standard and quantity to produce.'
+            ? 'Legacy batch issue posting remains available for historical records. New issue postings must use Production Orders.'
             : viewMode === 'release'
-              ? 'Release actual finished output back into the production warehouse after production is complete.'
-              : 'Simple SAP-style manufacturing flow: BOM standard, issue raw materials, then release finished goods into the production warehouse.'
+              ? 'Legacy batch release remains available for historical records. New receipts must use Production Orders.'
+              : 'Legacy batch workflow is preserved for backward compatibility only. New production transactions must use Production Orders.'
         }
         actions={
           viewMode === 'release' ? undefined : (
             <Button type="button" size="sm" onClick={() => setCreateOpen(true)}>
               <Plus className="mr-2 h-4 w-4" />
-              New Production Run
+              Legacy Batch Entry
             </Button>
           )
         }
       />
       <ProductionNav />
+
+      <div className="rounded-lg border border-amber-300/60 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+        Legacy batch screens are retained for historical compatibility. New planning, issue posting, and receipt posting must be performed from Production Orders.
+      </div>
 
       {feedback ? (
         <div

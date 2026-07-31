@@ -68,6 +68,97 @@ export type PlanShortageSummary = {
   supplierLeadTimeDays: number | null;
 };
 
+export type ProductionDashboardOrderRow = {
+  actual_cost?: number | null;
+  completed_quantity?: number | null;
+  id?: string | null;
+  planned_cost?: number | null;
+  production_order_number?: string | null;
+  product_description_snapshot?: string | null;
+  product_number?: string | null;
+  remaining_quantity?: number | null;
+  released_quantity?: number | null;
+  status?: string | null;
+  updated_at?: string | null;
+};
+
+export type ProductionDashboardComponentRow = {
+  issued_quantity?: number | null;
+  production_order_id?: string | null;
+  released_quantity?: number | null;
+  shortage_quantity?: number | null;
+};
+
+export type ProductionDashboardIssueRow = {
+  id?: string | null;
+  issue_date?: string | null;
+  issue_number?: string | null;
+  posting_status?: string | null;
+  production_order_id?: string | null;
+  total_quantity?: number | null;
+  warehouse_name?: string | null;
+};
+
+export type ProductionDashboardReceiptRow = {
+  id?: string | null;
+  posting_status?: string | null;
+  production_order_id?: string | null;
+  receipt_date?: string | null;
+  receipt_number?: string | null;
+  total_completed_quantity?: number | null;
+  warehouse_name?: string | null;
+};
+
+export type ProductionDashboardCostRow = {
+  actual_cost?: number | null;
+  cost_variance?: number | null;
+  planned_cost?: number | null;
+  production_order_id?: string | null;
+};
+
+export type ProductionOrdersDashboardSnapshot = {
+  recentIssues: Array<{
+    documentDate: string;
+    documentNumber: string;
+    id: string;
+    postingStatus: string;
+    productionOrderId: string;
+    quantity: number;
+    warehouseName: string | null;
+  }>;
+  recentOrders: Array<{
+    actualCost: number;
+    id: string;
+    plannedCost: number;
+    productionOrderNumber: string;
+    productDescription: string;
+    productNumber: string;
+    remainingQuantity: number;
+    releasedQuantity: number;
+    status: string;
+  }>;
+  recentReceipts: Array<{
+    documentDate: string;
+    documentNumber: string;
+    id: string;
+    postingStatus: string;
+    productionOrderId: string;
+    quantity: number;
+    warehouseName: string | null;
+  }>;
+  stats: {
+    actualCost: number;
+    closedOrders: number;
+    costVariance: number;
+    ordersRequiringMaterials: number;
+    outstandingFinishedGoodsReceiptQuantity: number;
+    outstandingMaterialQuantity: number;
+    plannedCost: number;
+    plannedOrders: number;
+    releasedOrders: number;
+  };
+};
+
 export type ProductionVarianceRow = {
   actualMaterialQuantity: number;
   actualOutput: number;
@@ -322,6 +413,30 @@ export function calculateScalingFactor(plannedQuantity: number, standardOutputQu
   return normalizedPlanned / normalizedStandardOutput;
 }
 
+function parseComparableTimestamp(value: unknown) {
+  const timestamp = Date.parse(String(value ?? ''));
+  return Number.isFinite(timestamp) ? timestamp : Number.NEGATIVE_INFINITY;
+}
+
+function compareProductionBomRows(left: Record<string, unknown>, right: Record<string, unknown>) {
+  const versionDelta = toNumber(right.version) - toNumber(left.version);
+  if (versionDelta !== 0) return versionDelta;
+
+  const updatedAtDelta = parseComparableTimestamp(right.updated_at) - parseComparableTimestamp(left.updated_at);
+  if (updatedAtDelta !== 0) return updatedAtDelta;
+
+  return String(right.id ?? '').localeCompare(String(left.id ?? ''));
+}
+
+export function selectLatestActiveBom<T extends Record<string, unknown>>(boms: T[]) {
+  const activeBoms = boms
+    .filter((bom) => String(bom.status ?? '').toUpperCase() === 'ACTIVE')
+    .slice()
+    .sort((left, right) => compareProductionBomRows(left, right));
+
+  return activeBoms[0] ?? null;
+}
+
 export function calculateScaledMaterialRequirement(input: {
   plannedQuantity: number;
   quantityRequired: number | string;
@@ -390,6 +505,104 @@ export function calculateRequiredMaterials(
       wastageAllowancePercent,
     };
   });
+}
+
+export function isProductionDocumentDateInFuture(
+  value: string | null | undefined,
+  today = new Date().toISOString().slice(0, 10),
+) {
+  if (!value) return false;
+  return String(value).slice(0, 10) > today;
+}
+
+export function buildProductionOrdersDashboard(input: {
+  components: ProductionDashboardComponentRow[];
+  costs: ProductionDashboardCostRow[];
+  issues: ProductionDashboardIssueRow[];
+  orders: ProductionDashboardOrderRow[];
+  receipts: ProductionDashboardReceiptRow[];
+}): ProductionOrdersDashboardSnapshot {
+  const orders = input.orders.map((row) => ({
+    actualCost: toNumber(row.actual_cost),
+    id: String(row.id ?? ''),
+    plannedCost: toNumber(row.planned_cost),
+    productionOrderNumber: String(row.production_order_number ?? ''),
+    productDescription: String(row.product_description_snapshot ?? ''),
+    productNumber: String(row.product_number ?? ''),
+    remainingQuantity: toNumber(row.remaining_quantity),
+    releasedQuantity: toNumber(row.released_quantity),
+    status: String(row.status ?? '').toUpperCase(),
+    updatedAt: String(row.updated_at ?? ''),
+  }));
+
+  const orderIds = new Set(orders.map((row) => row.id).filter(Boolean));
+  const outstandingByOrder = new Map<string, number>();
+
+  for (const component of input.components) {
+    const orderId = String(component.production_order_id ?? '');
+    if (!orderId || !orderIds.has(orderId)) continue;
+
+    const releasedQuantity = toNumber(component.released_quantity);
+    const issuedQuantity = toNumber(component.issued_quantity);
+    const shortageQuantity = Math.max(0, toNumber(component.shortage_quantity));
+    const outstandingQuantity = Math.max(0, releasedQuantity - issuedQuantity) + shortageQuantity;
+    outstandingByOrder.set(orderId, (outstandingByOrder.get(orderId) ?? 0) + outstandingQuantity);
+  }
+
+  const normalizedCosts = input.costs.filter((row) => orderIds.has(String(row.production_order_id ?? '')));
+  const normalizedIssues = input.issues
+    .filter((row) => orderIds.has(String(row.production_order_id ?? '')))
+    .map((row) => ({
+      documentDate: String(row.issue_date ?? '').slice(0, 10),
+      documentNumber: String(row.issue_number ?? ''),
+      id: String(row.id ?? ''),
+      postingStatus: String(row.posting_status ?? ''),
+      productionOrderId: String(row.production_order_id ?? ''),
+      quantity: toNumber(row.total_quantity),
+      warehouseName: row.warehouse_name ? String(row.warehouse_name) : null,
+    }))
+    .sort((left, right) => right.documentDate.localeCompare(left.documentDate))
+    .slice(0, 8);
+  const normalizedReceipts = input.receipts
+    .filter((row) => orderIds.has(String(row.production_order_id ?? '')))
+    .map((row) => ({
+      documentDate: String(row.receipt_date ?? '').slice(0, 10),
+      documentNumber: String(row.receipt_number ?? ''),
+      id: String(row.id ?? ''),
+      postingStatus: String(row.posting_status ?? ''),
+      productionOrderId: String(row.production_order_id ?? ''),
+      quantity: toNumber(row.total_completed_quantity),
+      warehouseName: row.warehouse_name ? String(row.warehouse_name) : null,
+    }))
+    .sort((left, right) => right.documentDate.localeCompare(left.documentDate))
+    .slice(0, 8);
+
+  const plannedCost = normalizedCosts.reduce((sum, row) => sum + toNumber(row.planned_cost), 0);
+  const actualCost = normalizedCosts.reduce((sum, row) => sum + toNumber(row.actual_cost), 0);
+  const costVariance = normalizedCosts.reduce((sum, row) => sum + toNumber(row.cost_variance), 0);
+
+  return {
+    recentIssues: normalizedIssues,
+    recentOrders: orders
+      .slice()
+      .sort((left, right) => parseComparableTimestamp(right.updatedAt) - parseComparableTimestamp(left.updatedAt))
+      .slice(0, 8)
+      .map(({ updatedAt: _updatedAt, ...row }) => row),
+    recentReceipts: normalizedReceipts,
+    stats: {
+      actualCost,
+      closedOrders: orders.filter((row) => row.status === 'CLOSED').length,
+      costVariance,
+      ordersRequiringMaterials: [...outstandingByOrder.values()].filter((value) => value > 0).length,
+      outstandingFinishedGoodsReceiptQuantity: orders
+        .filter((row) => row.status === 'RELEASED')
+        .reduce((sum, row) => sum + Math.max(0, row.remainingQuantity), 0),
+      outstandingMaterialQuantity: [...outstandingByOrder.values()].reduce((sum, value) => sum + Math.max(0, value), 0),
+      plannedCost,
+      plannedOrders: orders.filter((row) => row.status === 'PLANNED').length,
+      releasedOrders: orders.filter((row) => row.status === 'RELEASED').length,
+    },
+  };
 }
 
 export function summarizePlanShortages(

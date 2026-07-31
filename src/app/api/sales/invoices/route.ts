@@ -8,7 +8,9 @@ import {
   logSalesRouteError,
   loadSalesOrderById,
   loadSalesOrderItems,
+  salesErrorMessage,
 } from '@/lib/sales-server';
+import { isSalesTransactionRpcUnavailable, postSalesInvoiceTransaction, shouldRequireSalesTransactionRpc } from '@/lib/sales-transactions-server';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -63,15 +65,7 @@ export async function GET(request: NextRequest) {
     scopedOrderIds = (scopedOrders.data ?? []).map((row) => String(row.id));
   }
 
-  const applyFilters = (
-    query: {
-      eq: (column: string, value: string) => any;
-      gte: (column: string, value: string) => any;
-      lte: (column: string, value: string) => any;
-      in: (column: string, values: string[]) => any;
-    },
-    orderColumn = 'sales_order_id',
-  ) => {
+  const applyFilters = (query: any, orderColumn = 'sales_order_id') => {
     let next = query;
     if (status) next = next.eq('status', status);
     if (customerId) next = next.eq('customer_id', customerId);
@@ -189,8 +183,29 @@ export async function POST(request: NextRequest) {
     invoiceDate?: string;
     dueDate?: string;
     notes?: string;
-    discountAmount: number;
+    allowCreditOverride?: boolean;
+    discountAmount?: number;
     taxAmount: number;
+    postInventory?: boolean;
+    payment?: {
+      amount?: number;
+      idempotencyKey?: string;
+      paymentDate?: string;
+      paymentMethod?: string;
+      referenceNumber?: string;
+      notes?: string;
+      tenders?: Array<{
+        amount: number;
+        paymentMethod: string;
+        referenceNumber?: string;
+      }>;
+    };
+    branchId?: string;
+    costCenterCode?: string;
+    currencyCode?: string;
+    departmentId?: string;
+    exchangeRate?: number;
+    idempotencyKey?: string;
     items?: Array<{
       itemId: string;
       quantity: number;
@@ -334,6 +349,39 @@ export async function POST(request: NextRequest) {
   const discountAmount = body.discountAmount ?? 0;
   const taxAmount = body.taxAmount ?? 0;
   const total = subtotal + taxAmount - discountAmount - lineDiscountTotal;
+  const allowCreditOverride =
+    body.allowCreditOverride === true && can(ctx, 'sales.credit.override', 'sales.approve', 'finance.approve');
+
+  try {
+    const transaction = await postSalesInvoiceTransaction(
+      {
+        allowCreditOverride,
+        branchId: branchId ?? body.branchId ?? null,
+        costCenterCode: body.costCenterCode ?? null,
+        currencyCode: body.currencyCode ?? null,
+        customerId: body.customerId,
+        departmentId: body.departmentId ?? null,
+        discountAmount,
+        dueDate: body.dueDate ?? null,
+        exchangeRate: body.exchangeRate ?? null,
+        idempotencyKey: body.idempotencyKey ?? null,
+        invoiceDate: body.invoiceDate ?? new Date().toISOString().slice(0, 10),
+        items: resolvedItems,
+        notes: body.notes ?? null,
+        payment: body.payment ?? null,
+        postInventory: body.postInventory === true,
+        salesOrderId: body.salesOrderId ?? null,
+        taxAmount,
+        warehouseId,
+      },
+      ctx,
+    );
+    return NextResponse.json(transaction, { status: 201 });
+  } catch (error) {
+    if (shouldRequireSalesTransactionRpc() || !isSalesTransactionRpcUnavailable(error)) {
+      return serverError(salesErrorMessage(error) || 'Failed to post sales invoice transaction.');
+    }
+  }
 
   // Generate invoice number
   const { count } = await service

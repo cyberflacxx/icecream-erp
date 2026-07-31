@@ -1,6 +1,7 @@
 'use client';
 
 import * as Dialog from '@radix-ui/react-dialog';
+import type { ReactNode } from 'react';
 
 interface ConfirmDialogProps {
   title: string;
@@ -11,6 +12,9 @@ interface ConfirmDialogProps {
   loading?: boolean;
   confirmLabel?: string;
   cancelLabel?: string;
+  children?: ReactNode;
+  confirmDisabled?: boolean;
+  errorMessage?: string | null;
 }
 
 export function ConfirmDialog({
@@ -21,7 +25,10 @@ export function ConfirmDialog({
   open,
   loading = false,
   confirmLabel = 'Confirm',
-  cancelLabel = 'Cancel'
+  cancelLabel = 'Cancel',
+  children,
+  confirmDisabled = false,
+  errorMessage = null,
 }: ConfirmDialogProps) {
   return (
     <Dialog.Root open={open} onOpenChange={(nextOpen) => (!nextOpen ? onCancel() : undefined)}>
@@ -32,6 +39,8 @@ export function ConfirmDialog({
           <Dialog.Description className="mt-3 text-sm leading-6 text-muted dark:text-darkMuted">
             {description}
           </Dialog.Description>
+          {children ? <div className="mt-4">{children}</div> : null}
+          {errorMessage ? <p className="mt-4 text-sm text-error">{errorMessage}</p> : null}
           <div className="mt-6 flex justify-end gap-3">
             <button
               type="button"
@@ -43,7 +52,7 @@ export function ConfirmDialog({
             <button
               type="button"
               onClick={onConfirm}
-              disabled={loading}
+              disabled={loading || confirmDisabled}
               className="rounded-full bg-orange px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
             >
               {loading ? 'Working...' : confirmLabel}

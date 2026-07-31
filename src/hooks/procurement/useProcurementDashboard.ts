@@ -16,5 +16,11 @@ export function useProcurementDashboard() {
     queryKey: ['procurement', 'dashboard', userId],
     queryFn: () => request<ProcurementDashboardMetrics>(API_ROUTES.PROCUREMENT.DASHBOARD),
     enabled: isLoaded && Boolean(isSignedIn),
+    refetchInterval: 30000,
+    refetchIntervalInBackground: false,
+    refetchOnMount: 'always',
+    refetchOnReconnect: true,
+    refetchOnWindowFocus: true,
+    staleTime: 0,
   });
 }
