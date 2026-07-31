@@ -1835,3 +1835,15 @@ test('production recipe workflow cards point to modern order issue and receipt f
   assert.doesNotMatch(recipesPage, /\/production\/batches\?stage=release/);
   assert.match(recipesPage, /BOM \{'->'\} Issue \{'->'\} Receipt/);
 });
+
+test('production planning and BOM pages use the shared branch and item selector controls', () => {
+  const planningForm = fs.readFileSync('src/components/production/production-order-planning-form.tsx', 'utf8');
+  const recipesPage = fs.readFileSync('src/app/(dashboard)/production/recipes/page.tsx', 'utf8');
+
+  assert.match(planningForm, /useAuthorizedBranches/);
+  assert.match(planningForm, /useItemSelectorOptions/);
+  assert.match(planningForm, /ItemSelectorField/);
+  assert.match(recipesPage, /useItemSelectorOptions/);
+  assert.match(recipesPage, /ItemSelectorField/);
+  assert.match(recipesPage, /Search finished product/);
+});

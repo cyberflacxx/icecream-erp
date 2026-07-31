@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { badRequest, can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
+import { filterAuthorizedBranches } from '@/lib/branch-access';
 import { isMissingColumnError } from '@/lib/postgrest-compat';
 import { syncUserBranchAssignment } from '@/lib/registration';
 import { createServiceRoleClient } from '@/lib/supabase/server';
@@ -16,42 +17,85 @@ export async function GET(request: NextRequest) {
   const pageSize = Math.min(100, parseInt(searchParams.get('pageSize') ?? '20'));
   const search = searchParams.get('search') ?? undefined;
   const status = searchParams.get('status') ?? undefined;
+  const includeInactive = searchParams.get('includeInactive') === 'true';
+  const selector = searchParams.get('selector') === 'true';
 
   try {
     const buildQuery = (includeDeletedAtFilter: boolean) => {
       let query = service
         .schema('icecream_erp')
         .from('branches')
-        .select('id, code, name, phone, status, address, manager_id', { count: 'exact' })
+        .select('id, organization_id, code, name, phone, status, address, manager_id', { count: selector ? undefined : 'exact' })
+        .eq('organization_id', ctx.organizationId)
         .order('name', { ascending: true });
 
       if (includeDeletedAtFilter) {
         query = query.is('deleted_at', null);
       }
 
-      if (status) query = query.eq('status', status);
-      if (search) query = query.or(`code.ilike.%${search}%,name.ilike.%${search}%`);
-
-      if (ctx.isBranchScoped && ctx.branchId) {
-        query = query.eq('id', ctx.branchId);
+      if (status) {
+        query = query.eq('status', status);
+      } else if (!includeInactive) {
+        query = query.eq('status', 'ACTIVE');
       }
+      if (search) query = query.or(`code.ilike.%${search}%,name.ilike.%${search}%`);
 
       return query;
     };
 
     let query = buildQuery(true);
     const from = (page - 1) * pageSize;
-    let result = await query.range(from, from + pageSize - 1);
+    let result = selector ? await query.limit(pageSize) : await query.range(from, from + pageSize - 1);
 
     if (result.error && isMissingColumnError(result.error, 'branches', 'deleted_at')) {
       query = buildQuery(false);
-      result = await query.range(from, from + pageSize - 1);
+      result = selector ? await query.limit(pageSize) : await query.range(from, from + pageSize - 1);
     }
 
     const { data: branches, count, error } = result;
     if (error) throw error;
 
-    const branchIds = (branches ?? []).map((b: { id: string }) => b.id);
+    const authorizedBranches = filterAuthorizedBranches(
+      {
+        branchAssignments: ctx.branchAssignments,
+        branchId: ctx.branchId,
+        isBranchScoped: ctx.isBranchScoped,
+        organizationId: ctx.organizationId,
+        permissions: ctx.permissions,
+      },
+      (branches ?? []).map((branch) => ({
+        code: branch.code ? String(branch.code) : null,
+        id: String(branch.id),
+        name: branch.name ? String(branch.name) : null,
+        organizationId: String(branch.organization_id ?? ''),
+        status: branch.status ? String(branch.status) : null,
+      })),
+      { includeInactive },
+    );
+
+    const branchIds = authorizedBranches.map((branch) => branch.id);
+    const warehouseResult = branchIds.length
+      ? await service
+          .schema('icecream_erp')
+          .from('warehouses')
+          .select('id, branch_id, code, name, type, warehouse_type, is_active')
+          .eq('organization_id', ctx.organizationId)
+          .in('branch_id', branchIds)
+          .eq('is_active', true)
+          .order('name', { ascending: true })
+      : { data: [], error: null };
+    if (warehouseResult.error) throw warehouseResult.error;
+
+    const defaultWarehouseByBranchId = new Map<string, { id: string; code: string; name: string }>();
+    for (const warehouse of warehouseResult.data ?? []) {
+      const branchId = String(warehouse.branch_id ?? '');
+      if (!branchId || defaultWarehouseByBranchId.has(branchId)) continue;
+      defaultWarehouseByBranchId.set(branchId, {
+        code: String(warehouse.code ?? ''),
+        id: String(warehouse.id),
+        name: String(warehouse.name ?? ''),
+      });
+    }
 
     // Today's sales
     const today = new Date();
@@ -73,20 +117,24 @@ export async function GET(request: NextRequest) {
     }
 
     return NextResponse.json({
-      data: (branches ?? []).map((b: Record<string, unknown>) => {
+      data: authorizedBranches.map((branch) => {
+        const defaultWarehouse = defaultWarehouseByBranchId.get(branch.id) ?? null;
         return {
-          id: b.id,
-          code: b.code,
-          name: b.name,
-          phone: b.phone,
-          status: b.status,
-          address: b.address,
+          id: branch.id,
+          code: branch.code ?? '',
+          name: branch.name ?? '',
+          organizationId: ctx.organizationId,
+          phone: (branches ?? []).find((candidate) => String(candidate.id) === branch.id)?.phone ?? null,
+          status: branch.status ?? 'ACTIVE',
+          address: (branches ?? []).find((candidate) => String(candidate.id) === branch.id)?.address ?? null,
           manager: null,
-          todaySales: salesMap.get(b.id as string) ?? 0,
-          stockStatus: b.status === 'ACTIVE' ? 'Operational' : 'Check Branch',
+          defaultWarehouseId: defaultWarehouse?.id ?? null,
+          defaultWarehouse,
+          todaySales: salesMap.get(branch.id) ?? 0,
+          stockStatus: branch.status === 'ACTIVE' ? 'Operational' : 'Check Branch',
         };
       }),
-      pagination: { page, pageSize, total: count ?? 0 },
+      pagination: selector ? undefined : { page, pageSize, total: count ?? authorizedBranches.length },
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : typeof err === 'object' && err !== null && 'message' in err ? String((err as { message?: unknown }).message ?? '') : 'Internal server error';

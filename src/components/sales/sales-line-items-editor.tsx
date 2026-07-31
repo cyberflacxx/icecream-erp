@@ -1,7 +1,8 @@
 'use client';
 
 import { Button } from '@/components/ui/button';
-import type { SalesMetaItem } from '@/hooks/sales/useSalesMeta';
+import { ItemSelectorField } from '@/components/shared/item-selector-field';
+import type { ItemSelectorOption } from '@/hooks/useItemSelectorOptions';
 
 export interface SalesLineDraft {
   discountPercent: string;
@@ -39,12 +40,22 @@ export function normalizeSalesLines(lines: SalesLineDraft[]) {
 }
 
 interface SalesLineItemsEditorProps {
-  items: SalesMetaItem[];
+  emptyMessage?: string;
+  errorMessage?: string | null;
+  items: ItemSelectorOption[];
   lines: SalesLineDraft[];
+  loading?: boolean;
   onChange: (lines: SalesLineDraft[]) => void;
 }
 
-export function SalesLineItemsEditor({ items, lines, onChange }: SalesLineItemsEditorProps) {
+export function SalesLineItemsEditor({
+  emptyMessage,
+  errorMessage,
+  items,
+  lines,
+  loading = false,
+  onChange,
+}: SalesLineItemsEditorProps) {
   function updateLine(index: number, updates: Partial<SalesLineDraft>) {
     onChange(lines.map((line, lineIndex) => (lineIndex === index ? { ...line, ...updates } : line)));
   }
@@ -65,25 +76,20 @@ export function SalesLineItemsEditor({ items, lines, onChange }: SalesLineItemsE
         {lines.map((line, index) => (
           <div key={`${index}-${line.itemId}`} className="space-y-2">
             <div className="grid gap-3 md:grid-cols-[1fr_110px_130px_110px_auto]">
-              <select
-                className="surface-input-soft"
+              <ItemSelectorField
                 value={line.itemId}
-                onChange={(event) => {
-                  const item = items.find((row) => row.id === event.target.value);
+                options={items}
+                loading={loading}
+                errorMessage={errorMessage}
+                emptyMessage={emptyMessage ?? 'No saleable items are available.'}
+                onChange={(nextItemId) => {
+                  const item = items.find((row) => row.id === nextItemId);
                   updateLine(index, {
-                    itemId: event.target.value,
-                    unitPrice: item ? String(item.defaultPrice ?? 0) : line.unitPrice,
+                    itemId: nextItemId,
+                    unitPrice: item ? String(item.sellingPrice ?? line.unitPrice ?? 0) : line.unitPrice,
                   });
                 }}
-              >
-                <option value="">Select item</option>
-                {items.map((item) => (
-                  <option key={item.id} value={item.id}>
-                    {item.code ? `${item.code} - ` : ''}
-                    {item.name} ({item.availableQuantity} available)
-                  </option>
-                ))}
-              </select>
+              />
               <input
                 className="surface-input-soft"
                 min="0.001"
@@ -117,7 +123,7 @@ export function SalesLineItemsEditor({ items, lines, onChange }: SalesLineItemsE
                 Remove
               </Button>
             </div>
-            {line.itemId && (items.find((item) => item.id === line.itemId)?.availableQuantity ?? 0) <= 0 ? (
+            {line.itemId && Number((items.find((item) => item.id === line.itemId)?.warehouseQuantity ?? items.find((item) => item.id === line.itemId)?.branchQuantity ?? 0)) <= 0 ? (
               <p className="text-xs text-amber-700">
                 This item is still selectable with zero stock. Validate availability before approval or dispatch.
               </p>

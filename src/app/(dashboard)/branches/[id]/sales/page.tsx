@@ -5,12 +5,14 @@ import { useParams, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { Plus, ShoppingBasket } from 'lucide-react';
 
+import { ItemSelectorField } from '@/components/shared/item-selector-field';
 import { DataTable, EmptyState, FilterBar, FormDrawer } from '@/components/ui-library';
 
 import { BranchOperationsNav } from '@/components/branch-operations/branch-operations-nav';
 import { PageHeader } from '@/components/dashboard/page-header';
 import { PaginationControls } from '@/components/inventory/pagination-controls';
 import { Button } from '@/components/ui/button';
+import { useItemSelectorOptions } from '@/hooks/useItemSelectorOptions';
 import {
   useBranchSales,
   useBranchStock,
@@ -71,14 +73,18 @@ export default function BranchSalesPage() {
     page: 1,
     pageSize: 100
   });
+  const itemOptionsQuery = useItemSelectorOptions({
+    branchId,
+    includePrice: true,
+    includeStock: true,
+    itemType: ['FINISHED_GOOD', 'FINISHED'],
+  });
   const createSale = useCreateBranchSale(branchId);
   const createExpense = useCreateBranchExpense(branchId);
   const stockRows = stockQuery.data?.data ?? [];
-  const stockOptions = stockRows.filter(
-    (row) => String(row.item.itemType ?? '').toUpperCase() === 'FINISHED_GOOD' && row.quantityAvailable > 0,
-  );
+  const stockOptions = useMemo(() => itemOptionsQuery.data ?? [], [itemOptionsQuery.data]);
   const stockOptionByItemId = useMemo(
-    () => new Map(stockOptions.map((option) => [option.item.id, option])),
+    () => new Map(stockOptions.map((option) => [option.id, option])),
     [stockOptions],
   );
   const sales = salesQuery.data?.data ?? [];
@@ -399,33 +405,30 @@ export default function BranchSalesPage() {
 
             {saleItems.map((line, index) => (
               <div key={`${line.itemId}-${index}`} className="grid gap-3 rounded-2xl bg-white p-3 sm:grid-cols-4">
-                <select
-                  value={line.itemId}
-                  onChange={(event) => {
-                    const selectedItemId = event.target.value;
-                    const selectedStock = stockOptionByItemId.get(selectedItemId);
-                    const defaultPrice = Number(selectedStock?.sellingPrice ?? selectedStock?.unitCost ?? 0);
-                    setSaleItems((current) =>
-                      current.map((item, itemIndex) =>
-                        itemIndex === index
-                          ? {
-                              ...item,
-                              itemId: selectedItemId,
-                              unitPrice: defaultPrice > 0 ? String(defaultPrice) : item.unitPrice,
-                            }
-                          : item,
-                      ),
-                    );
-                  }}
-                  className="surface-input-soft sm:col-span-2"
-                >
-                  <option value="">Select item</option>
-                  {stockOptions.map((option) => (
-                    <option key={option.item.id} value={option.item.id}>
-                      {option.item.code} - {option.item.name} ({currencyFormatter.format(option.sellingPrice)}, {option.quantityAvailable} available)
-                    </option>
-                  ))}
-                </select>
+                <div className="sm:col-span-2">
+                  <ItemSelectorField
+                    value={line.itemId}
+                    options={stockOptions}
+                    loading={itemOptionsQuery.isLoading}
+                    errorMessage={itemOptionsQuery.error?.message ?? null}
+                    emptyMessage="No branch sale items are available."
+                    onChange={(selectedItemId) => {
+                      const selectedStock = stockOptionByItemId.get(selectedItemId);
+                      const defaultPrice = Number(selectedStock?.sellingPrice ?? selectedStock?.currentInventoryCost ?? 0);
+                      setSaleItems((current) =>
+                        current.map((item, itemIndex) =>
+                          itemIndex === index
+                            ? {
+                                ...item,
+                                itemId: selectedItemId,
+                                unitPrice: defaultPrice > 0 ? String(defaultPrice) : item.unitPrice,
+                              }
+                            : item,
+                        ),
+                      );
+                    }}
+                  />
+                </div>
                 <input
                   min="0"
                   step="0.001"
@@ -457,7 +460,7 @@ export default function BranchSalesPage() {
                 <div className="text-sm text-muted sm:col-span-4">
                   {stockOptionByItemId.get(line.itemId) ? (
                     <span className="mr-3">
-                      Available: {stockOptionByItemId.get(line.itemId)?.quantityAvailable}
+                      Available: {stockOptionByItemId.get(line.itemId)?.branchQuantity?.toFixed(3) ?? '0.000'}
                     </span>
                   ) : null}
                   Line Total:{' '}

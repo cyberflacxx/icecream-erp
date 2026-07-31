@@ -8,6 +8,8 @@ import {
   serverError,
   unauthorized,
 } from '@/lib/api-auth';
+import { resolveRequestedBranchId } from '@/lib/branch-access';
+import { buildItemSelectorOptions } from '@/lib/item-selector';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
 function normalizeItem(row: Record<string, unknown>, categories = new Map<string, Record<string, unknown>>(), units = new Map<string, Record<string, unknown>>()) {
@@ -60,6 +62,192 @@ export async function GET(request: NextRequest) {
   const category = searchParams.get('category') ?? '';
   const status = searchParams.get('status') ?? '';
   const type = searchParams.get('type') ?? '';
+  const selector = searchParams.get('selector') === 'true';
+  const branchIdParam = searchParams.get('branch_id') ?? searchParams.get('branchId');
+  const warehouseId = searchParams.get('warehouse_id') ?? searchParams.get('warehouseId');
+  const includeStock = searchParams.get('include_stock') === 'true' || searchParams.get('includeStock') === 'true';
+  const includeCost = searchParams.get('include_cost') === 'true' || searchParams.get('includeCost') === 'true';
+  const includePrice = searchParams.get('include_price') === 'true' || searchParams.get('includePrice') === 'true';
+  const includeInactive = searchParams.get('includeInactive') === 'true';
+
+  if (selector) {
+    let branchLookup = service
+      .from('branches')
+      .select('id, organization_id, status')
+      .eq('organization_id', ctx.organizationId)
+      .order('name', { ascending: true });
+
+    if (branchIdParam) {
+      branchLookup = branchLookup.eq('id', branchIdParam);
+    }
+
+    const branchResult = await branchLookup;
+    if (branchResult.error) return serverError(branchResult.error.message);
+
+    const branchAuthorization = resolveRequestedBranchId(
+      {
+        branchAssignments: ctx.branchAssignments,
+        branchId: ctx.branchId,
+        isBranchScoped: ctx.isBranchScoped,
+        organizationId: ctx.organizationId,
+        permissions: ctx.permissions,
+      },
+      branchIdParam,
+      (branchResult.data ?? []).map((branch) => ({
+        id: String(branch.id),
+        organizationId: String(branch.organization_id ?? ''),
+        status: branch.status ? String(branch.status) : null,
+      })),
+      { includeInactive: true },
+    );
+    if (!branchAuthorization.ok) {
+      return NextResponse.json({ error: branchAuthorization.message }, { status: branchAuthorization.status });
+    }
+
+    const effectiveBranchId = branchAuthorization.branchId;
+    let authorizedWarehouseId = warehouseId ? String(warehouseId) : null;
+
+    let warehouseQuery = service
+      .from('warehouses')
+      .select('id, branch_id')
+      .eq('organization_id', ctx.organizationId)
+      .eq('is_active', true);
+
+    if (authorizedWarehouseId) {
+      warehouseQuery = warehouseQuery.eq('id', authorizedWarehouseId);
+    } else if (effectiveBranchId) {
+      warehouseQuery = warehouseQuery.eq('branch_id', effectiveBranchId);
+    } else if (ctx.isBranchScoped && ctx.branchAssignments.length > 0) {
+      warehouseQuery = warehouseQuery.in('branch_id', ctx.branchAssignments);
+    }
+
+    const warehouseResult = await warehouseQuery;
+    if (warehouseResult.error) return serverError(warehouseResult.error.message);
+
+    if (authorizedWarehouseId) {
+      const warehouseBranchId = warehouseResult.data?.[0]?.branch_id ? String(warehouseResult.data[0].branch_id) : null;
+      const warehouseAllowed =
+        warehouseResult.data?.length === 1 &&
+        (
+          !ctx.isBranchScoped ||
+          !warehouseBranchId ||
+          warehouseBranchId === effectiveBranchId ||
+          ctx.warehouseAssignments.includes(authorizedWarehouseId)
+        );
+      if (!warehouseAllowed) {
+        return NextResponse.json({ error: 'Warehouse not found or out of scope.' }, { status: 400 });
+      }
+    }
+
+    const typeFilters = (searchParams.get('item_type') ?? searchParams.get('itemType') ?? type)
+      .split(',')
+      .map((value) => value.trim())
+      .filter(Boolean);
+
+    let selectorQuery = service
+      .from('items')
+      .select(
+        'id, organization_id, code, name, description, type, item_type, category_id, unit_id, unit_of_measure_id, standard_cost, unit_cost, cost_price, purchase_price, selling_price, is_active',
+      )
+      .eq('organization_id', ctx.organizationId)
+      .order('name', { ascending: true });
+
+    if (search) {
+      selectorQuery = selectorQuery.or(`name.ilike.%${search}%,code.ilike.%${search}%,description.ilike.%${search}%`);
+    }
+    if (category) selectorQuery = selectorQuery.eq('category_id', category);
+    if (!includeInactive) selectorQuery = selectorQuery.eq('is_active', true);
+    if (typeFilters.length === 1) {
+      selectorQuery = selectorQuery.or(`type.eq.${typeFilters[0]},item_type.eq.${typeFilters[0]}`);
+    }
+
+    const selectorResult = await selectorQuery;
+    if (selectorResult.error) return serverError(selectorResult.error.message);
+
+    const selectorRows = (selectorResult.data ?? []).filter((row) =>
+      typeFilters.length === 0
+        ? true
+        : typeFilters.includes(String(row.item_type ?? row.type ?? '').trim().toUpperCase()),
+    );
+
+    const categoryIds = [...new Set(selectorRows.map((row) => String(row.category_id ?? '')).filter(Boolean))];
+    const unitIds = [...new Set(selectorRows.map((row) => String(row.unit_id ?? row.unit_of_measure_id ?? '')).filter(Boolean))];
+
+    const [categoriesResult, unitsResult, stockResult] = await Promise.all([
+      categoryIds.length
+        ? service.from('item_categories').select('id, name').in('id', categoryIds)
+        : Promise.resolve({ data: [], error: null }),
+      unitIds.length
+        ? service.from('units_of_measure').select('id, name, abbreviation').in('id', unitIds)
+        : Promise.resolve({ data: [], error: null }),
+      includeStock || includeCost
+        ? service
+            .from('stock_balances')
+            .select('item_id, warehouse_id, quantity_on_hand, quantity_available, average_cost, avg_cost')
+            .in('item_id', selectorRows.map((row) => String(row.id)))
+        : Promise.resolve({ data: [], error: null }),
+    ]);
+    if (categoriesResult.error) return serverError(categoriesResult.error.message);
+    if (unitsResult.error) return serverError(unitsResult.error.message);
+    if (stockResult.error) return serverError(stockResult.error.message);
+
+    const categoryById = new Map((categoriesResult.data ?? []).map((row) => [String(row.id), String(row.name ?? '')]));
+    const unitById = new Map(
+      (unitsResult.data ?? []).map((row) => [
+        String(row.id),
+        {
+          abbreviation: row.abbreviation ? String(row.abbreviation) : null,
+          name: row.name ? String(row.name) : null,
+        },
+      ]),
+    );
+    const warehousesById = new Map(
+      (warehouseResult.data ?? []).map((row) => [
+        String(row.id),
+        {
+          branchId: row.branch_id ? String(row.branch_id) : null,
+          id: String(row.id),
+        },
+      ]),
+    );
+
+    const options = buildItemSelectorOptions({
+      branchId: effectiveBranchId,
+      items: selectorRows.map((row) => {
+        const categoryName = categoryById.get(String(row.category_id ?? '')) ?? null;
+        const unit = unitById.get(String(row.unit_id ?? row.unit_of_measure_id ?? '')) ?? null;
+        const rawCost = includeCost
+          ? Number(row.unit_cost ?? row.standard_cost ?? row.cost_price ?? row.purchase_price)
+          : null;
+        const rawPrice = includePrice ? Number(row.selling_price) : null;
+        return {
+          categoryId: row.category_id ? String(row.category_id) : null,
+          categoryName,
+          code: String(row.code ?? ''),
+          currentInventoryCost: rawCost !== null && Number.isFinite(rawCost) ? rawCost : null,
+          id: String(row.id),
+          isActive: row.is_active !== false,
+          itemType: String(row.item_type ?? row.type ?? ''),
+          name: String(row.name ?? row.code ?? ''),
+          sellingPrice: rawPrice !== null && Number.isFinite(rawPrice) ? rawPrice : null,
+          unitAbbreviation: unit?.abbreviation ?? null,
+          unitId: row.unit_id ? String(row.unit_id) : row.unit_of_measure_id ? String(row.unit_of_measure_id) : null,
+          unitName: unit?.name ?? null,
+        };
+      }),
+      stockRows: (stockResult.data ?? []).filter((row) => warehousesById.has(String(row.warehouse_id ?? ''))).map((row) => ({
+        averageCost: Number.isFinite(Number(row.average_cost ?? row.avg_cost)) ? Number(row.average_cost ?? row.avg_cost) : null,
+        itemId: String(row.item_id ?? ''),
+        quantityAvailable: Number.isFinite(Number(row.quantity_available)) ? Number(row.quantity_available) : null,
+        quantityOnHand: Number.isFinite(Number(row.quantity_on_hand)) ? Number(row.quantity_on_hand) : null,
+        warehouseId: String(row.warehouse_id ?? ''),
+      })),
+      warehouseId: authorizedWarehouseId,
+      warehousesById,
+    });
+
+    return NextResponse.json({ data: options });
+  }
 
   let query = service
     .from('items')

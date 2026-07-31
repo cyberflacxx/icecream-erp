@@ -5,6 +5,7 @@ import { ArrowRightLeft, MoveRight, Package2, Plus, Truck } from 'lucide-react';
 import { type FormEvent, useMemo, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 
+import { ItemSelectorField } from '@/components/shared/item-selector-field';
 import { DataTable, EmptyState, FilterBar, FormDrawer, PermissionGate, StatusBadge } from '@/components/ui-library';
 import { PERMISSIONS } from '@/lib/shared';
 
@@ -12,6 +13,7 @@ import { InventoryNav } from '@/components/inventory/inventory-nav';
 import { PaginationControls } from '@/components/inventory/pagination-controls';
 import { PageHeader } from '@/components/dashboard/page-header';
 import { Button } from '@/components/ui/button';
+import { useItemSelectorOptions } from '@/hooks/useItemSelectorOptions';
 import {
   useCreateTransfer,
   useInventoryMeta,
@@ -84,6 +86,11 @@ export default function TransfersPage() {
     toWarehouseId: filters.toWarehouseId || undefined,
   });
   const createTransferMutation = useCreateTransfer();
+  const itemOptionsQuery = useItemSelectorOptions({
+    includeCost: true,
+    includeStock: true,
+    warehouseId: formState.fromWarehouseId || undefined,
+  });
 
   const transfers = transfersQuery.data?.data ?? [];
   const pagination = transfersQuery.data?.pagination;
@@ -515,25 +522,30 @@ export default function TransfersPage() {
 
             {formState.items.map((itemRow, index) => (
               <div key={`${index}-${itemRow.itemId}`} className="grid gap-3 xl:grid-cols-[1.2fr_120px_140px_1fr_auto]">
-                <select
+                <ItemSelectorField
                   value={itemRow.itemId}
-                  onChange={(event) =>
+                  options={itemOptionsQuery.data ?? []}
+                  loading={itemOptionsQuery.isLoading}
+                  errorMessage={itemOptionsQuery.error?.message ?? null}
+                  emptyMessage="No transfer items are available for the selected source warehouse."
+                  onChange={(nextItemId) =>
                     setFormState((current) => ({
                       ...current,
-                      items: current.items.map((row, rowIndex) =>
-                        rowIndex === index ? { ...row, itemId: event.target.value } : row,
-                      ),
+                      items: current.items.map((row, rowIndex) => {
+                        if (rowIndex !== index) return row;
+                        const selectedItem = itemOptionsQuery.data?.find((item) => item.id === nextItemId) ?? null;
+                        return {
+                          ...row,
+                          itemId: nextItemId,
+                          unitCost:
+                            selectedItem?.currentInventoryCost !== null && selectedItem?.currentInventoryCost !== undefined
+                              ? String(selectedItem.currentInventoryCost)
+                              : row.unitCost,
+                        };
+                      }),
                     }))
                   }
-                  className="surface-input-soft"
-                >
-                  <option value="">Select item</option>
-                  {metaQuery.data?.items.map((item) => (
-                    <option key={item.id} value={item.id}>
-                      {item.code} - {item.name}
-                    </option>
-                  ))}
-                </select>
+                />
                 <input
                   min="0.001"
                   step="0.001"

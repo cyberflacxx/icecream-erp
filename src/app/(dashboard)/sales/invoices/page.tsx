@@ -8,6 +8,7 @@ import { PageHeader } from '@/components/dashboard/page-header';
 import { SalesNav } from '@/components/sales/sales-nav';
 import { createSalesLineDraft, normalizeSalesLines, SalesLineItemsEditor } from '@/components/sales/sales-line-items-editor';
 import { Button } from '@/components/ui/button';
+import { useItemSelectorOptions } from '@/hooks/useItemSelectorOptions';
 import { DataTable, EmptyState, FormDrawer, LoadingState, StatCard } from '@/components/ui-library';
 import { type InvoiceListItem, useInvoices } from '@/hooks/sales/useInvoices';
 import { type RecordPaymentResponse, useRecordPayment } from '@/hooks/sales/useRecordPayment';
@@ -57,6 +58,11 @@ export default function InvoicesPage() {
   const [formError, setFormError] = useState<string | null>(null);
   const [receiptSubmitMode, setReceiptSubmitMode] = useState<'save' | 'print'>('save');
   const [receiptContext, setReceiptContext] = useState<InvoiceListItem | null>(null);
+  const itemOptionsQuery = useItemSelectorOptions({
+    includePrice: true,
+    includeStock: true,
+    warehouseId: invoiceForm.warehouseId || undefined,
+  });
 
   async function refresh() {
     await queryClient.invalidateQueries({ queryKey: ['sales'] });
@@ -298,7 +304,14 @@ export default function InvoicesPage() {
             </label>
           </div>
           {!invoiceForm.salesOrderId ? (
-            <SalesLineItemsEditor items={metaQuery.data?.items ?? []} lines={invoiceForm.items} onChange={(items) => setInvoiceForm((current) => ({ ...current, items }))} />
+            <SalesLineItemsEditor
+              items={itemOptionsQuery.data ?? []}
+              loading={itemOptionsQuery.isLoading}
+              errorMessage={itemOptionsQuery.error?.message ?? null}
+              emptyMessage="No invoice items are available for the selected warehouse."
+              lines={invoiceForm.items}
+              onChange={(items) => setInvoiceForm((current) => ({ ...current, items }))}
+            />
           ) : null}
           <div className="grid gap-5 sm:grid-cols-2">
             <label className="space-y-2 text-sm text-muted">

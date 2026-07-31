@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 
 import {
   SUPPLIER_IMPORT_TEMPLATE_HEADERS,
@@ -2782,4 +2783,18 @@ test('fetchGoodsReceivedNoteDetail still returns header data when item loading f
   assert.deepEqual(detail.items, []);
   assert.deepEqual(detail.line_items, []);
   assert.deepEqual(detail.lineItems, []);
+});
+
+test('procurement requisitions, purchase orders, and GRNs use the shared item selector controls', () => {
+  const requisitionsPage = fs.readFileSync('src/app/(dashboard)/procurement/requisitions/page.tsx', 'utf8');
+  const purchaseOrdersPage = fs.readFileSync('src/app/(dashboard)/procurement/purchase-orders/page.tsx', 'utf8');
+  const goodsReceivedPage = fs.readFileSync('src/app/(dashboard)/procurement/goods-received/page.tsx', 'utf8');
+
+  for (const page of [requisitionsPage, purchaseOrdersPage, goodsReceivedPage]) {
+    assert.match(page, /useItemSelectorOptions/);
+    assert.match(page, /ItemSelectorField/);
+  }
+
+  assert.match(goodsReceivedPage, /Select a warehouse first\./);
+  assert.match(purchaseOrdersPage, /Search item/);
 });

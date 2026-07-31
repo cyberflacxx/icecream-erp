@@ -7,8 +7,10 @@ import { useQueryClient } from '@tanstack/react-query';
 
 import { PageHeader } from '@/components/dashboard/page-header';
 import { ProductionNav } from '@/components/production/production-nav';
+import { ItemSelectorField } from '@/components/shared/item-selector-field';
 import { Button } from '@/components/ui/button';
 import { DataTable, EmptyState, FormDrawer, LoadingState, StatusBadge } from '@/components/ui-library';
+import { type ItemSelectorOption, useItemSelectorOptions } from '@/hooks/useItemSelectorOptions';
 import { useBatches } from '@/hooks/production/useBatches';
 import { useProductionMeta } from '@/hooks/production/useProductionMeta';
 import { useProductionRequest } from '@/hooks/production/useProductionRequest';
@@ -22,6 +24,9 @@ type FormulaLine = {
   unitId: string;
   wastageAllowancePercent: string;
 };
+const finishedGoodItemTypes = ['FINISHED_GOOD', 'FINISHED'] as const;
+const ingredientItemTypes = ['RAW', 'RAW_MATERIAL', 'INGREDIENT', 'CONSUMABLE', 'STOCK'] as const;
+const packagingItemTypes = ['PACKAGING', 'PACKAGING_MATERIAL'] as const;
 
 function createFormulaLine(): FormulaLine {
   return {
@@ -60,6 +65,22 @@ export default function ProductionRecipesPage() {
   const query = useRecipes();
   const batchesQuery = useBatches({ limit: 20 });
   const metaQuery = useProductionMeta();
+  const finishedGoodsQuery = useItemSelectorOptions({
+    includeCost: true,
+    includePrice: true,
+    includeStock: true,
+    itemType: Array.from(finishedGoodItemTypes),
+  });
+  const ingredientItemsQuery = useItemSelectorOptions({
+    includeCost: true,
+    includeStock: true,
+    itemType: Array.from(ingredientItemTypes),
+  });
+  const packagingItemsQuery = useItemSelectorOptions({
+    includeCost: true,
+    includeStock: true,
+    itemType: Array.from(packagingItemTypes),
+  });
   const request = useProductionRequest();
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
@@ -526,17 +547,15 @@ export default function ProductionRecipesPage() {
             </label>
             <label className="space-y-2 text-sm text-muted">
               <span>Finished Product</span>
-              <select
-                required
-                className="surface-input-soft"
+              <ItemSelectorField
+                emptyMessage="No finished goods available."
+                errorMessage={finishedGoodsQuery.error instanceof Error ? finishedGoodsQuery.error.message : null}
+                loading={finishedGoodsQuery.isLoading}
+                options={finishedGoodsQuery.data ?? []}
                 value={formState.finishedItemId}
-                onChange={(event) => setFormState((current) => ({ ...current, finishedItemId: event.target.value }))}
-              >
-                <option value="">Select product</option>
-                {(metaQuery.data?.finishedGoods ?? []).map((item) => (
-                  <option key={item.id} value={item.id}>{String(item.code ?? '')} - {item.name}</option>
-                ))}
-              </select>
+                onChange={(value) => setFormState((current) => ({ ...current, finishedItemId: value }))}
+                placeholder="Search finished product"
+              />
             </label>
             <label className="space-y-2 text-sm text-muted">
               <span>Output Unit</span>
@@ -578,7 +597,9 @@ export default function ProductionRecipesPage() {
           <FormulaLines
             title="Raw Materials Formula"
             lines={formState.ingredients}
-            items={metaQuery.data?.rawMaterials ?? []}
+            options={ingredientItemsQuery.data ?? []}
+            loading={ingredientItemsQuery.isLoading}
+            errorMessage={ingredientItemsQuery.error instanceof Error ? ingredientItemsQuery.error.message : null}
             units={units}
             onAdd={() => addLine('ingredients')}
             onRemove={(index) => removeLine('ingredients', index)}
@@ -588,7 +609,9 @@ export default function ProductionRecipesPage() {
           <FormulaLines
             title="Packaging Formula"
             lines={formState.packagingItems}
-            items={metaQuery.data?.packagingItems ?? []}
+            options={packagingItemsQuery.data ?? []}
+            loading={packagingItemsQuery.isLoading}
+            errorMessage={packagingItemsQuery.error instanceof Error ? packagingItemsQuery.error.message : null}
             units={units}
             onAdd={() => addLine('packagingItems')}
             onRemove={(index) => removeLine('packagingItems', index)}
@@ -701,19 +724,23 @@ function InfoCard({ lines, title }: { lines: string[]; title: string }) {
 }
 
 function FormulaLines({
-  items,
+  errorMessage,
   lines,
+  loading,
   onAdd,
   onRemove,
   onUpdate,
+  options,
   title,
   units,
 }: {
-  items: Array<Record<string, unknown>>;
+  errorMessage?: string | null;
   lines: FormulaLine[];
+  loading?: boolean;
   onAdd: () => void;
   onRemove: (index: number) => void;
   onUpdate: (index: number, next: Partial<FormulaLine>) => void;
+  options: ItemSelectorOption[];
   title: string;
   units: Array<Record<string, unknown>>;
 }) {
@@ -726,12 +753,15 @@ function FormulaLines({
       {lines.length === 0 ? <p className="text-sm text-muted">No lines added.</p> : null}
       {lines.map((line, index) => (
         <div key={line.rowId} className="grid gap-3 md:grid-cols-[1fr_120px_120px_120px_auto]">
-          <select className="surface-input-soft" value={line.itemId} onChange={(event) => onUpdate(index, { itemId: event.target.value })}>
-            <option value="">Select item</option>
-            {items.map((item) => (
-              <option key={String(item.id)} value={String(item.id)}>{String(item.code ?? '')} - {String(item.name ?? '')}</option>
-            ))}
-          </select>
+          <ItemSelectorField
+            emptyMessage="No items available."
+            errorMessage={errorMessage}
+            loading={loading}
+            options={options}
+            value={line.itemId}
+            onChange={(value) => onUpdate(index, { itemId: value })}
+            placeholder="Search item"
+          />
           <input className="surface-input-soft" min="0.001" step="0.001" type="number" value={line.quantityRequired} onChange={(event) => onUpdate(index, { quantityRequired: event.target.value })} />
           <select className="surface-input-soft" value={line.unitId} onChange={(event) => onUpdate(index, { unitId: event.target.value })}>
             <option value="">Unit</option>

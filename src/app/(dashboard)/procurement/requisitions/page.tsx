@@ -5,6 +5,7 @@ import { Plus } from 'lucide-react';
 import { type FormEvent, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 
+import { ItemSelectorField } from '@/components/shared/item-selector-field';
 import { DataTable, EmptyState, FilterBar, FormDrawer, StatusBadge } from '@/components/ui-library';
 import { PageHeader } from '@/components/dashboard/page-header';
 import { PaginationControls } from '@/components/inventory/pagination-controls';
@@ -12,6 +13,7 @@ import { ProcurementNav } from '@/components/procurement/procurement-nav';
 import { TransactionShortcuts } from '@/components/procurement/transaction-shortcuts';
 import { Button } from '@/components/ui/button';
 import { useUserContext } from '@/contexts/UserContext';
+import { useItemSelectorOptions } from '@/hooks/useItemSelectorOptions';
 import {
   useProcurementMeta,
   useProcurementRequest,
@@ -126,6 +128,10 @@ export default function RequisitionsPage() {
   const queryClient = useQueryClient();
   const request = useProcurementRequest();
   const metaQuery = useProcurementMeta();
+  const itemOptionsQuery = useItemSelectorOptions({
+    includeCost: true,
+    includeStock: true,
+  });
   const requisitionsQuery = useRequisitions({
     department: filters.department || undefined,
     endDate: filters.endDate || undefined,
@@ -137,9 +143,9 @@ export default function RequisitionsPage() {
 
   const requisitions = requisitionsQuery.data?.data ?? [];
   const pagination = requisitionsQuery.data?.pagination;
-  const itemOptions = metaQuery.data?.items ?? [];
+  const itemOptions = itemOptionsQuery.data ?? [];
   const unitOptions = metaQuery.data?.units ?? [];
-  const itemLoadFailed = metaQuery.isError && itemOptions.length === 0;
+  const itemLoadFailed = itemOptionsQuery.isError && itemOptions.length === 0;
   const unitLoadFailed = metaQuery.isError && unitOptions.length === 0;
   const selectedItems = formState.items.map(
     (item) => itemOptions.find((candidate) => candidate.id === item.itemId) ?? null,
@@ -718,44 +724,32 @@ export default function RequisitionsPage() {
                       <label className="block text-xs font-semibold uppercase tracking-[0.18em] text-muted">
                         Item
                       </label>
-                      <select
+                      <ItemSelectorField
                         value={item.itemId}
-                        onChange={(event) => {
-                          const nextSelectedItem = itemOptions.find((candidate) => candidate.id === event.target.value);
+                        options={itemOptions}
+                        loading={itemOptionsQuery.isLoading}
+                        errorMessage={itemOptionsQuery.error?.message ?? null}
+                        emptyMessage="No requisition items are available."
+                        onChange={(nextItemId) => {
+                          const nextSelectedItem = itemOptions.find((candidate) => candidate.id === nextItemId);
                           setFormState((current) => ({
                             ...current,
                             items: current.items.map((row, rowIndex) =>
                               rowIndex === index
                                 ? {
                                     ...row,
-                                    itemId: event.target.value,
-                                    unitOfMeasureId: nextSelectedItem?.unitOfMeasureId ?? row.unitOfMeasureId,
+                                    estimatedUnitCost:
+                                      nextSelectedItem?.currentInventoryCost !== null && nextSelectedItem?.currentInventoryCost !== undefined
+                                        ? String(nextSelectedItem.currentInventoryCost)
+                                        : row.estimatedUnitCost,
+                                    itemId: nextItemId,
+                                    unitOfMeasureId: nextSelectedItem?.unitId ?? row.unitOfMeasureId,
                                   }
                                 : row,
                             ),
                           }));
                         }}
-                        className="surface-input-soft min-w-0"
-                        disabled={metaQuery.isLoading || itemLoadFailed || itemOptions.length === 0}
-                      >
-                        <option value="">
-                          {metaQuery.isLoading
-                            ? 'Loading items...'
-                            : itemLoadFailed
-                              ? 'Items unavailable'
-                              : itemOptions.length === 0
-                                ? 'No items found'
-                                : 'Select item'}
-                        </option>
-                        {item.itemId && !itemOptions.some((candidate) => candidate.id === item.itemId) ? (
-                          <option value={item.itemId}>Saved item selection</option>
-                        ) : null}
-                        {itemOptions.map((row) => (
-                          <option key={row.id} value={row.id}>
-                            {row.label ?? (row.code ? `${row.code} - ${row.name}` : row.name)}
-                          </option>
-                        ))}
-                      </select>
+                      />
                     </div>
                     <div className="flex flex-wrap items-center gap-2 lg:justify-end">
                       {selectedItem?.code ? (
@@ -901,7 +895,7 @@ export default function RequisitionsPage() {
                         <div className="min-w-0 rounded-2xl border border-border/60 bg-white px-3 py-3">
                           <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted">Description</p>
                           <p className="mt-2 break-words text-sm text-foreground">
-                            {selectedItem.description || 'Not set'}
+                            {selectedItem.categoryName || 'Not set'}
                           </p>
                         </div>
                         <div className="rounded-2xl border border-border/60 bg-white px-3 py-3">
@@ -911,42 +905,42 @@ export default function RequisitionsPage() {
                         <div className="rounded-2xl border border-border/60 bg-white px-3 py-3">
                           <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted">Unit Of Measure</p>
                           <p className="mt-2 text-sm text-foreground">
-                            {selectedItem.unitOfMeasureName ?? selectedItem.uomName ?? selectedItem.unit_of_measure_name ?? 'Not set'}
+                            {selectedItem.unitName ?? selectedItem.unitAbbreviation ?? 'Not set'}
                           </p>
                         </div>
                         <div className="rounded-2xl border border-border/60 bg-white px-3 py-3">
                           <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted">Estimated Price</p>
-                          <p className="mt-2 text-sm text-foreground">{item.estimatedUnitCost || '0'}</p>
+                          <p className="mt-2 text-sm text-foreground">
+                            {selectedItem.currentInventoryCost !== null && selectedItem.currentInventoryCost !== undefined
+                              ? selectedItem.currentInventoryCost.toFixed(2)
+                              : (item.estimatedUnitCost || '0')}
+                          </p>
                         </div>
                         <div className="rounded-2xl border border-border/60 bg-white px-3 py-3">
                           <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted">Stock On Hand</p>
-                          <p className="mt-2 text-sm text-foreground">{formatQuantityLabel(selectedItem.inventory.currentStock)}</p>
+                          <p className="mt-2 text-sm text-foreground">{formatQuantityLabel(selectedItem.branchQuantity ?? selectedItem.warehouseQuantity ?? 0)}</p>
                         </div>
                         <div className="rounded-2xl border border-border/60 bg-white px-3 py-3">
                           <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted">On Order</p>
-                          <p className="mt-2 text-sm text-foreground">{formatQuantityLabel(selectedItem.inventory.quantityOnOrder)}</p>
+                          <p className="mt-2 text-sm text-foreground">n/a</p>
                         </div>
                         <div className="rounded-2xl border border-border/60 bg-white px-3 py-3">
                           <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted">Received Today</p>
-                          <p className="mt-2 text-sm text-foreground">{formatQuantityLabel(selectedItem.inventory.quantityReceivedToday)}</p>
+                          <p className="mt-2 text-sm text-foreground">n/a</p>
                         </div>
                         <div className="rounded-2xl border border-border/60 bg-white px-3 py-3">
                           <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted">Reorder Level</p>
-                          <p className="mt-2 text-sm text-foreground">{formatQuantityLabel(selectedItem.inventory.reorderLevel)}</p>
+                          <p className="mt-2 text-sm text-foreground">n/a</p>
                         </div>
                         <div className="rounded-2xl border border-border/60 bg-white px-3 py-3">
                           <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted">Store / Warehouse</p>
-                          <p className={`mt-2 break-words text-sm ${selectedItem.inventory.isLowStock ? 'font-semibold text-rose-700' : 'text-foreground'}`}>
-                            {selectedItem.inventory.primaryWarehouseName ?? 'Not set'}
+                          <p className="mt-2 break-words text-sm text-foreground">
+                            {selectedItem.itemType ? formatItemTypeLabel(selectedItem.itemType) : 'Not set'}
                           </p>
                         </div>
                         <div className="rounded-2xl border border-border/60 bg-white px-3 py-3 md:col-span-2 xl:col-span-3">
-                          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted">Last Receipt</p>
-                          <p className="mt-2 text-sm text-foreground">
-                            {selectedItem.inventory.lastReceivedDate
-                              ? new Date(selectedItem.inventory.lastReceivedDate).toLocaleDateString()
-                              : 'Not set'}
-                          </p>
+                          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted">Selling Price</p>
+                          <p className="mt-2 text-sm text-foreground">{selectedItem.sellingPrice?.toFixed(2) ?? 'Not set'}</p>
                         </div>
                       </div>
                     ) : (

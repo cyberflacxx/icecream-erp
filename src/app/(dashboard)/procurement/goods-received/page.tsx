@@ -17,8 +17,10 @@ import { WarehouseSelect } from '@/components/inventory/warehouse-select';
 import { ProcurementNav } from '@/components/procurement/procurement-nav';
 import { SupplierSelect } from '@/components/procurement/supplier-select';
 import { TransactionShortcuts } from '@/components/procurement/transaction-shortcuts';
+import { ItemSelectorField } from '@/components/shared/item-selector-field';
 import { Button } from '@/components/ui/button';
 import { useUserContext } from '@/contexts/UserContext';
+import { useItemSelectorOptions } from '@/hooks/useItemSelectorOptions';
 import {
   useGRNs,
   useProcurementMeta,
@@ -68,6 +70,16 @@ const currencyFormatter = new Intl.NumberFormat('en-US', {
   currency: 'USD',
   minimumFractionDigits: 2,
 });
+const grnItemTypes = [
+  'RAW',
+  'RAW_MATERIAL',
+  'PACKAGING',
+  'PACKAGING_MATERIAL',
+  'INGREDIENT',
+  'CONSUMABLE',
+  'GENERAL',
+  'STOCK',
+] as const;
 
 function createGrnRowId() {
   return `grn-line-${Math.random().toString(36).slice(2, 10)}`;
@@ -127,6 +139,13 @@ export default function GoodsReceivedPage() {
   const queryClient = useQueryClient();
   const request = useProcurementRequest();
   const metaQuery = useProcurementMeta();
+  const itemSelectorQuery = useItemSelectorOptions({
+    includeCost: true,
+    includePrice: true,
+    includeStock: true,
+    itemType: Array.from(grnItemTypes),
+    warehouseId: formState.warehouseId || undefined,
+  });
   const grnsQuery = useGRNs({
     page: filters.page,
     pageSize: filters.pageSize,
@@ -135,10 +154,10 @@ export default function GoodsReceivedPage() {
   });
   const purchaseOrderQuery = usePurchaseOrder(formState.purchaseOrderId || undefined);
   const purchaseOrderOptions = metaQuery.data?.purchaseOrders ?? [];
-  const itemOptions = metaQuery.data?.items ?? [];
+  const itemOptions = itemSelectorQuery.data ?? [];
   const unitOptions = metaQuery.data?.units ?? [];
   const purchaseOrderLoadFailed = metaQuery.isError && purchaseOrderOptions.length === 0;
-  const itemLoadFailed = metaQuery.isError && itemOptions.length === 0;
+  const itemLoadFailed = itemSelectorQuery.isError && itemOptions.length === 0;
   const unitLoadFailed = metaQuery.isError && unitOptions.length === 0;
   const workflowAccess = {
     canApprove,
@@ -817,52 +836,31 @@ export default function GoodsReceivedPage() {
               <div key={item.rowId} className="space-y-3 rounded-2xl border border-border/70 bg-white/90 p-3">
                 <div className="grid gap-3 md:grid-cols-[1.2fr_96px_96px_96px_96px_96px_110px_110px_110px]">
                   <div className="space-y-2">
-                    <select
+                    <ItemSelectorField
+                      disabled={formState.entryMode === 'PO_LINKED' || !formState.warehouseId}
+                      emptyMessage={formState.warehouseId ? 'No items found for this warehouse.' : 'Select a warehouse first.'}
+                      errorMessage={itemSelectorQuery.error instanceof Error ? itemSelectorQuery.error.message : null}
+                      loading={itemSelectorQuery.isLoading}
+                      options={itemOptions}
                       value={item.itemId}
-                      disabled={formState.entryMode === 'PO_LINKED' || metaQuery.isLoading || itemLoadFailed || itemOptions.length === 0}
-                      onChange={(event) =>
+                      onChange={(value) =>
                         setLineItems((current) => {
-                          const selectedItem = itemOptions.find((row) => row.id === event.target.value) ?? null;
+                          const selectedItem = itemOptions.find((row) => row.id === value) ?? null;
 
                           return current.map((row, rowIndex) =>
                             rowIndex === index
                               ? {
                                   ...row,
-                                  itemId: event.target.value,
-                                  unitCost: String(
-                                    selectedItem?.purchase_price ??
-                                      selectedItem?.cost_price ??
-                                      selectedItem?.unit_cost ??
-                                      selectedItem?.default_purchase_price ??
-                                      0,
-                                  ),
-                                  unitOfMeasureId: selectedItem?.unitOfMeasureId ?? row.unitOfMeasureId,
+                                  itemId: value,
+                                  unitCost: String(selectedItem?.currentInventoryCost ?? 0),
+                                  unitOfMeasureId: selectedItem?.unitId ?? row.unitOfMeasureId,
                                 }
                               : row,
                           );
                         })
                       }
-                      className="surface-input-soft"
-                    >
-                      <option value="">
-                        {metaQuery.isLoading
-                          ? 'Loading items...'
-                          : itemLoadFailed
-                            ? 'Items unavailable'
-                            : itemOptions.length === 0
-                              ? 'No items found'
-                              : 'Select item'}
-                      </option>
-                      {item.itemId &&
-                      !itemOptions.some((candidate) => candidate.id === item.itemId) ? (
-                        <option value={item.itemId}>Saved item selection</option>
-                      ) : null}
-                      {itemOptions.map((row) => (
-                        <option key={row.id} value={row.id}>
-                          {row.label ?? (row.code ? `${row.code} - ${row.name}` : row.name)}
-                        </option>
-                      ))}
-                    </select>
+                      placeholder="Search item"
+                    />
                     <div className="grid gap-2 text-xs text-muted sm:grid-cols-2">
                       <span>Item Code: {getSelectedItemMeta(item.itemId)?.code ?? 'Pending'}</span>
                       <span>Item Name: {getSelectedItemMeta(item.itemId)?.name ?? 'Select an item'}</span>
@@ -1023,12 +1021,12 @@ export default function GoodsReceivedPage() {
                   size="sm"
                   variant="outline"
                   className="h-7 px-2 text-[11px]"
-                  onClick={() => void metaQuery.refetch()}
+                  onClick={() => void itemSelectorQuery.refetch()}
                 >
                   Retry
                 </Button>
               </div>
-            ) : !metaQuery.isLoading && itemOptions.length === 0 ? (
+            ) : !itemSelectorQuery.isLoading && itemOptions.length === 0 ? (
               <div className="rounded-xl border border-border/60 bg-white/90 px-3 py-2 text-xs text-muted">
                 No items found. Create an item first.
               </div>

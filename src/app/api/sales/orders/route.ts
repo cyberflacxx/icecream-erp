@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
+import { resolveRequestedBranchId } from '@/lib/branch-access';
 import { isCustomerInactiveStatus } from '@/lib/sales-customers';
 import { isMissingSalesColumn, salesErrorMessage } from '@/lib/sales-server';
 import { createServiceRoleClient } from '@/lib/supabase/server';
@@ -171,9 +172,34 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // Branch access check
-  if (ctx.isBranchScoped && ctx.branchId && body.branchId && ctx.branchId !== body.branchId) {
-    return NextResponse.json({ error: 'This role is limited to its assigned branch.' }, { status: 403 });
+  const branchRows = body.branchId
+    ? await service
+        .schema('icecream_erp')
+        .from('branches')
+        .select('id, organization_id, status')
+        .eq('organization_id', ctx.organizationId)
+        .eq('id', body.branchId)
+    : { data: [], error: null };
+  if (branchRows.error) return serverError(branchRows.error.message);
+
+  const branchAuthorization = resolveRequestedBranchId(
+    {
+      branchAssignments: ctx.branchAssignments,
+      branchId: ctx.branchId,
+      isBranchScoped: ctx.isBranchScoped,
+      organizationId: ctx.organizationId,
+      permissions: ctx.permissions,
+    },
+    body.branchId,
+    (branchRows.data ?? []).map((branch) => ({
+      id: String(branch.id),
+      organizationId: String(branch.organization_id ?? ''),
+      status: branch.status ? String(branch.status) : null,
+    })),
+    { includeInactive: false },
+  );
+  if (!branchAuthorization.ok && body.branchId) {
+    return NextResponse.json({ error: branchAuthorization.message }, { status: branchAuthorization.status });
   }
 
   // Verify customer
@@ -207,7 +233,11 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'This role is limited to its assigned branch.' }, { status: 403 });
   }
 
-  if (body.branchId && wh.branch_id !== body.branchId) {
+  const resolvedBranchId = branchAuthorization.ok && branchAuthorization.branchId
+    ? branchAuthorization.branchId
+    : (wh.branch_id ? String(wh.branch_id) : null);
+
+  if (resolvedBranchId && wh.branch_id && String(wh.branch_id) !== resolvedBranchId) {
     return NextResponse.json(
       { error: 'Selected warehouse does not belong to the selected branch.' },
       { status: 400 },
@@ -249,7 +279,7 @@ export async function POST(request: NextRequest) {
     order_number: orderNumber,
     customer_id: body.customerId,
     warehouse_id: body.warehouseId,
-    branch_id: body.branchId ?? wh.branch_id ?? null,
+    branch_id: resolvedBranchId,
     quotation_id: body.quotationId ?? null,
     order_date: body.orderDate ?? new Date().toISOString().slice(0, 10),
     delivery_date: body.requiredDate ?? null,

@@ -35,6 +35,10 @@ import {
   mapCompatibleStockMovementRows,
   recordStockMovement,
 } from '../src/lib/inventory-server';
+import {
+  buildItemSelectorLabel,
+  buildItemSelectorOptions,
+} from '../src/lib/item-selector';
 
 test('deriveSupplierShortages returns open shortages from ordered versus received quantities', () => {
   const rows = deriveSupplierShortages([
@@ -726,4 +730,84 @@ test('inventory adjustment route does not emit serverError is not defined in fai
 
   assert.doesNotMatch(route, /serverError is not defined/);
   assert.match(route, /const dbMessage = error instanceof Error \? error\.message/);
+});
+
+test('item selector helper preserves missing cost and price values while aggregating stock by branch and warehouse', () => {
+  const options = buildItemSelectorOptions({
+    branchId: 'branch-1',
+    items: [
+      {
+        categoryId: 'cat-1',
+        categoryName: 'Raw Materials',
+        code: 'RAW-001',
+        currentInventoryCost: null,
+        id: 'item-1',
+        isActive: true,
+        itemType: 'RAW_MATERIAL',
+        name: 'Milk Base',
+        sellingPrice: null,
+        unitAbbreviation: 'kg',
+        unitId: 'uom-1',
+        unitName: 'Kilogram',
+      },
+    ],
+    stockRows: [
+      {
+        averageCost: 4.25,
+        itemId: 'item-1',
+        quantityAvailable: 12,
+        quantityOnHand: 12,
+        warehouseId: 'wh-1',
+      },
+    ],
+    warehouseId: 'wh-1',
+    warehousesById: new Map([
+      ['wh-1', { branchId: 'branch-1', id: 'wh-1' }],
+    ]),
+  });
+
+  assert.equal(options[0]?.branchQuantity, 12);
+  assert.equal(options[0]?.warehouseQuantity, 12);
+  assert.equal(options[0]?.currentInventoryCost, 4.25);
+  assert.equal(options[0]?.sellingPrice, null);
+  assert.match(options[0]?.label ?? '', /Stock 12\.000/);
+});
+
+test('item selector label shows missing configuration explicitly instead of masking it with zeroes', () => {
+  const label = buildItemSelectorLabel({
+    branchQuantity: null,
+    code: 'FG-001',
+    currentInventoryCost: null,
+    itemType: 'FINISHED_GOOD',
+    name: 'Vanilla Tub',
+    sellingPrice: null,
+    unitAbbreviation: 'ea',
+    unitName: 'Each',
+    warehouseQuantity: null,
+  });
+
+  assert.match(label, /Stock n\/a/);
+  assert.match(label, /Cost n\/a/);
+  assert.match(label, /Price n\/a/);
+});
+
+test('inventory items route exposes selector mode with branch and warehouse aware filters', () => {
+  const route = fs.readFileSync('src/app/api/inventory/items/route.ts', 'utf8');
+
+  assert.match(route, /selector/);
+  assert.match(route, /resolveRequestedBranchId/);
+  assert.match(route, /include_stock/);
+  assert.match(route, /warehouse_id/);
+  assert.match(route, /buildItemSelectorOptions/);
+});
+
+test('inventory stores and transfers pages use the shared selector hook and searchable item field', () => {
+  const storesPage = fs.readFileSync('src/app/(dashboard)/inventory/stores/page.tsx', 'utf8');
+  const transfersPage = fs.readFileSync('src/app/(dashboard)/inventory/transfers/page.tsx', 'utf8');
+
+  assert.match(storesPage, /useItemSelectorOptions/);
+  assert.match(storesPage, /ItemSelectorField/);
+  assert.match(storesPage, /Select a warehouse first\./);
+  assert.match(transfersPage, /useItemSelectorOptions/);
+  assert.match(transfersPage, /ItemSelectorField/);
 });

@@ -24,14 +24,15 @@ import { PaginationControls } from '@/components/inventory/pagination-controls';
 import { ProcurementNav } from '@/components/procurement/procurement-nav';
 import { SupplierSelect } from '@/components/procurement/supplier-select';
 import { TransactionShortcuts } from '@/components/procurement/transaction-shortcuts';
+import { ItemSelectorField } from '@/components/shared/item-selector-field';
 import { Button } from '@/components/ui/button';
 import { useUserContext } from '@/contexts/UserContext';
+import { type ItemSelectorOption, useItemSelectorOptions } from '@/hooks/useItemSelectorOptions';
 import {
   buildPurchaseOrderDraftPayload,
   formatPurchaseOrderStatusLabel,
   extractRequisitionLineItems,
   mapRequisitionItemToPurchaseOrderLine,
-  resolvePurchaseOrderItemUnitPrice,
 } from '@/lib/procurement-purchase-orders';
 import {
   formatProcurementWorkflowStatusLabel,
@@ -63,89 +64,8 @@ const purchasableItemTypes = new Set([
   'STOCK',
 ]);
 
-interface PurchaseOrderItemOption {
-  code: string;
-  costPrice?: number;
-  defaultPurchasePrice?: number;
+interface PurchaseOrderItemOption extends ItemSelectorOption {
   description?: string | null;
-  id: string;
-  inventory?: {
-    currentStock: number;
-    isLowStock: boolean;
-    lastReceivedDate: string | null;
-    primaryWarehouseName: string | null;
-    quantityOnOrder: number;
-    quantityReceivedToday: number;
-    reorderLevel: number;
-    warehouses: Array<{
-      code: string;
-      id: string;
-      name: string;
-      quantity: number;
-    }>;
-  };
-  itemType: string | null;
-  name: string;
-  purchasePrice?: number;
-  sellingPrice?: number;
-  standardCost?: number;
-  unitOfMeasureId: string | null;
-  unitOfMeasureName?: string | null;
-}
-
-function normalizePurchaseOrderItemsResponse(payload: unknown): PurchaseOrderItemOption[] {
-  const container = payload && typeof payload === 'object' ? (payload as Record<string, unknown>) : null;
-  const source =
-    Array.isArray(payload)
-      ? payload
-      : Array.isArray(container?.data)
-        ? container.data
-        : Array.isArray(container?.items)
-          ? container.items
-          : [];
-
-  const normalized = source
-    .map((item): PurchaseOrderItemOption | null => {
-      if (!item || typeof item !== 'object') return null;
-
-      const row = item as Record<string, unknown>;
-      const unitOfMeasure =
-        row.unitOfMeasure && typeof row.unitOfMeasure === 'object'
-          ? (row.unitOfMeasure as Record<string, unknown>)
-          : null;
-      const itemType = String(row.itemType ?? row.item_type ?? row.type ?? '').trim().toUpperCase() || null;
-      const isActive = row.isActive !== false && row.is_active !== false;
-
-      if (!isActive) {
-        return null;
-      }
-
-      if (itemType && (itemType === 'FINISHED_GOOD' || itemType === 'FINISHED')) {
-        return null;
-      }
-
-      if (itemType && !purchasableItemTypes.has(itemType) && itemType.startsWith('FINISHED')) {
-        return null;
-      }
-
-      return {
-        code: String(row.code ?? ''),
-        costPrice: Number(row.cost_price ?? row.costPrice ?? row.unit_cost ?? row.unitCost ?? row.standard_cost ?? row.standardCost ?? 0),
-        defaultPurchasePrice: Number(row.default_purchase_price ?? row.defaultPurchasePrice ?? row.purchase_price ?? row.purchasePrice ?? row.cost_price ?? row.costPrice ?? row.unit_cost ?? row.unitCost ?? row.standard_cost ?? row.standardCost ?? row.price ?? row.selling_price ?? row.sellingPrice ?? 0),
-        description: typeof row.description === 'string' ? row.description : typeof row.item_name === 'string' ? row.item_name : typeof row.name === 'string' ? row.name : null,
-        id: String(row.id ?? ''),
-        itemType,
-        name: String(row.name ?? row.code ?? 'Unnamed item'),
-        purchasePrice: Number(row.purchase_price ?? row.purchasePrice ?? row.cost_price ?? row.costPrice ?? row.unit_cost ?? row.unitCost ?? row.standard_cost ?? row.standardCost ?? row.default_purchase_price ?? row.defaultPurchasePrice ?? row.price ?? row.selling_price ?? row.sellingPrice ?? 0),
-        sellingPrice: Number(row.selling_price ?? row.sellingPrice ?? row.price ?? 0),
-        standardCost: Number(row.standard_cost ?? row.standardCost ?? 0),
-        unitOfMeasureId: String(row.unitOfMeasureId ?? unitOfMeasure?.id ?? row.unit_of_measure_id ?? row.unit_id ?? '') || null,
-        unitOfMeasureName: String(row.unitOfMeasureName ?? row.uomName ?? unitOfMeasure?.name ?? ''),
-      };
-    })
-    .filter((item): item is PurchaseOrderItemOption => Boolean(item?.id));
-
-  return normalized.sort((left, right) => left.name.localeCompare(right.name));
 }
 
 function createLineItemDraft() {
@@ -293,9 +213,11 @@ export default function PurchaseOrdersPage() {
   const request = useProcurementRequest();
   const metaQuery = useProcurementMeta();
   const supplierOptionsQuery = useSupplierOptions();
-  const inventoryItemsQuery = useQuery({
-    queryKey: ['procurement', 'purchase-order-item-options'],
-    queryFn: () => request<unknown>('/api/inventory/items?page=1&pageSize=100&status=active'),
+  const itemSelectorQuery = useItemSelectorOptions({
+    includeCost: true,
+    includePrice: true,
+    includeStock: true,
+    itemType: Array.from(purchasableItemTypes),
   });
   const requisitionPickerQuery = useQuery({
     queryKey: ['procurement', 'purchase-order-requisition-picker'],
@@ -325,14 +247,6 @@ export default function PurchaseOrdersPage() {
     }));
     setIsDrawerOpen(true);
   }, [requisitionIdParam]);
-
-  useEffect(() => {
-    if (!isDrawerOpen) {
-      return;
-    }
-
-    void inventoryItemsQuery.refetch();
-  }, [inventoryItemsQuery, isDrawerOpen]);
 
   async function loadRequisitionIntoForm(requisitionId: string) {
     if (!requisitionId) {
@@ -380,29 +294,10 @@ export default function PurchaseOrdersPage() {
   const purchaseOrderItems = (() => {
     const merged = new Map<string, PurchaseOrderItemOption>();
 
-    for (const item of normalizePurchaseOrderItemsResponse(inventoryItemsQuery.data)) {
-      merged.set(item.id, item);
-    }
-
-    for (const item of metaQuery.data?.items ?? []) {
-      if (!item.id) continue;
-      const itemType = item.itemType ? String(item.itemType).trim().toUpperCase() : null;
-      if (itemType && (itemType === 'FINISHED_GOOD' || itemType === 'FINISHED')) continue;
-
+    for (const item of itemSelectorQuery.data ?? []) {
       merged.set(item.id, {
-        code: item.code,
-        costPrice: Number(item.cost_price ?? item.costPrice ?? item.unit_cost ?? item.unitCost ?? item.standard_cost ?? item.standardCost ?? 0),
-        defaultPurchasePrice: Number(item.default_purchase_price ?? item.defaultPurchasePrice ?? item.purchase_price ?? item.purchasePrice ?? item.cost_price ?? item.costPrice ?? item.unit_cost ?? item.unitCost ?? item.standard_cost ?? item.standardCost ?? item.price ?? item.selling_price ?? item.sellingPrice ?? 0),
-        description: item.description ?? item.name,
-        id: item.id,
-        inventory: item.inventory,
-        itemType,
-        name: item.name,
-        purchasePrice: Number(item.purchase_price ?? item.purchasePrice ?? item.cost_price ?? item.costPrice ?? item.unit_cost ?? item.unitCost ?? item.standard_cost ?? item.standardCost ?? item.default_purchase_price ?? item.defaultPurchasePrice ?? item.price ?? item.selling_price ?? item.sellingPrice ?? 0),
-        sellingPrice: Number(item.selling_price ?? item.sellingPrice ?? 0),
-        standardCost: Number(item.standard_cost ?? item.standardCost ?? 0),
-        unitOfMeasureId: item.unitOfMeasureId,
-        unitOfMeasureName: item.unitOfMeasureName ?? item.uomName ?? item.unit_of_measure_name ?? null,
+        ...item,
+        description: item.name,
       });
     }
 
@@ -593,7 +488,7 @@ export default function PurchaseOrdersPage() {
 
         if (field === 'itemId') {
           const matchedItem = purchaseOrderItems.find((item) => item.id === value);
-          const derivedUnitCost = resolvePurchaseOrderItemUnitPrice(matchedItem as unknown as Record<string, unknown> | null);
+          const derivedUnitCost = matchedItem?.currentInventoryCost ?? matchedItem?.sellingPrice ?? 0;
 
           return {
             ...row,
@@ -602,8 +497,8 @@ export default function PurchaseOrdersPage() {
             itemId: value,
             itemName: matchedItem?.name ?? '',
             unitCost: String(derivedUnitCost),
-            unitOfMeasureId: matchedItem?.unitOfMeasureId || row.unitOfMeasureId || '',
-            unitOfMeasureName: matchedItem?.unitOfMeasureName ?? '',
+            unitOfMeasureId: matchedItem?.unitId || row.unitOfMeasureId || '',
+            unitOfMeasureName: matchedItem?.unitName ?? '',
           };
         }
 
@@ -1153,21 +1048,19 @@ export default function PurchaseOrdersPage() {
                       <label className="text-xs font-semibold uppercase tracking-[0.18em] text-muted xl:hidden">
                         Item
                       </label>
-                      <select
+                      <ItemSelectorField
+                        disabled={!isDrawerOpen}
+                        emptyMessage="No purchasable items available."
+                        errorMessage={itemSelectorQuery.error instanceof Error ? itemSelectorQuery.error.message : null}
+                        loading={itemSelectorQuery.isLoading}
+                        options={purchaseOrderItems}
                         value={item.itemId}
-                        onChange={(event) => updateLineItem(item.rowId, 'itemId', event.target.value)}
-                        className="surface-input-soft"
-                      >
-                        <option value="">Select item</option>
-                        {purchaseOrderItems.map((row) => (
-                          <option key={row.id} value={row.id}>
-                            {row.code} - {row.name}
-                          </option>
-                        ))}
-                      </select>
+                        onChange={(value) => updateLineItem(item.rowId, 'itemId', value)}
+                        placeholder="Search item"
+                      />
                       <div className="rounded-2xl border border-border/60 bg-white/90 px-3 py-2 text-xs text-muted">
                         {selectedMetaItem
-                          ? `${selectedMetaItem.description ?? 'No saved item description.'}${selectedMetaItem.unitOfMeasureName ? ` • UOM: ${selectedMetaItem.unitOfMeasureName}` : ''}`
+                          ? `${selectedMetaItem.description ?? 'No saved item description.'}${selectedMetaItem.unitName ? ` | UOM: ${selectedMetaItem.unitName}` : ''}`
                           : 'Select an item to auto-fill the saved description, UOM, and default purchase price.'}
                       </div>
                     </div>
@@ -1235,15 +1128,13 @@ export default function PurchaseOrdersPage() {
                   <div className="mt-3 rounded-2xl border border-border/60 bg-white/90 px-3 py-2 text-xs text-muted">
                     {selectedMetaItem ? (
                       <div className="grid gap-1 sm:grid-cols-2 xl:grid-cols-3">
-                        <span>Default Price: {currencyFormatter.format(resolvePurchaseOrderItemUnitPrice(selectedMetaItem as unknown as Record<string, unknown> | null))}</span>
-                        <span>Current: {Number(selectedMetaItem.inventory?.currentStock ?? 0).toFixed(3)}</span>
-                        <span>Reorder: {Number(selectedMetaItem.inventory?.reorderLevel ?? 0).toFixed(3)}</span>
-                        <span>On Order: {Number(selectedMetaItem.inventory?.quantityOnOrder ?? 0).toFixed(3)}</span>
-                        <span>Received Today: {Number(selectedMetaItem.inventory?.quantityReceivedToday ?? 0).toFixed(3)}</span>
-                        <span>Last Receipt: {selectedMetaItem.inventory?.lastReceivedDate ? new Date(selectedMetaItem.inventory.lastReceivedDate).toLocaleDateString() : 'None'}</span>
-                        <span className={selectedMetaItem.inventory?.isLowStock ? 'font-semibold text-rose-700' : ''}>
-                          Store: {selectedMetaItem.inventory?.primaryWarehouseName ?? 'No balance'}
-                        </span>
+                        <span>Default Price: {currencyFormatter.format(selectedMetaItem.currentInventoryCost ?? selectedMetaItem.sellingPrice ?? 0)}</span>
+                        <span>Stock: {Number(selectedMetaItem.branchQuantity ?? selectedMetaItem.warehouseQuantity ?? 0).toFixed(3)}</span>
+                        <span>Inventory Cost: {selectedMetaItem.currentInventoryCost === null ? 'n/a' : currencyFormatter.format(selectedMetaItem.currentInventoryCost)}</span>
+                        <span>Selling Price: {selectedMetaItem.sellingPrice === null ? 'n/a' : currencyFormatter.format(selectedMetaItem.sellingPrice)}</span>
+                        <span>Type: {selectedMetaItem.itemType.replaceAll('_', ' ')}</span>
+                        <span>Category: {selectedMetaItem.categoryName ?? 'Uncategorized'}</span>
+                        <span>Unit: {selectedMetaItem.unitAbbreviation ?? selectedMetaItem.unitName ?? 'Unit'}</span>
                       </div>
                     ) : (
                       'Live stock, reorder, and receipt context appears here after item selection.'
