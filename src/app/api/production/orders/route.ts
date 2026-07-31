@@ -3,7 +3,12 @@ import { NextRequest, NextResponse } from 'next/server';
 import { badRequest, can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
 import { ensurePositiveQuantity } from '@/lib/inventory';
 import { mapProductionRpcError, savePlannedProductionOrder } from '@/lib/production-orders-server';
-import { isMissingProductionTable, productionErrorMessage, productionService } from '@/lib/production-server';
+import {
+  isMissingProductionTable,
+  productionErrorMessage,
+  productionService,
+  resolveAuthorizedProductionCreateBranchId,
+} from '@/lib/production-server';
 
 export async function GET(request: NextRequest) {
   const ctx = await getAuthContext(request);
@@ -66,9 +71,13 @@ export async function POST(request: NextRequest) {
     if (!body.productionWarehouseId) return badRequest('productionWarehouseId is required.');
     if (!body.finishedGoodsWarehouseId) return badRequest('finishedGoodsWarehouseId is required.');
     const plannedQuantity = ensurePositiveQuantity(body.plannedQuantity, 'plannedQuantity');
+    const branchAuthorization = await resolveAuthorizedProductionCreateBranchId(body.branchId, ctx);
+    if (!branchAuthorization.ok) {
+      return NextResponse.json({ error: branchAuthorization.message }, { status: branchAuthorization.status });
+    }
 
     const result = await savePlannedProductionOrder({
-      branchId: body.branchId ?? ctx.branchId,
+      branchId: branchAuthorization.value.branchId,
       finishedGoodsWarehouseId: body.finishedGoodsWarehouseId,
       plannedDueDate: body.plannedDueDate ?? null,
       plannedQuantity,

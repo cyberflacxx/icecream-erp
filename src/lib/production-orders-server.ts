@@ -147,3 +147,51 @@ export async function closeProductionOrder(input: {
   if (error) throw error;
   return data as ProductionRpcResult;
 }
+
+export async function reverseProductionIssue(input: {
+  issueId: string;
+  reason: string;
+}, ctx: AuthContext) {
+  const service = productionService();
+  const { data, error } = await service.rpc('reverse_production_issue', {
+    p_actor_user_account_id: userAccountId(ctx),
+    p_actor_user_profile_id: ctx.userId,
+    p_issue_id: input.issueId,
+    p_organization_id: ctx.organizationId,
+    p_reason: input.reason,
+  });
+  if (error) throw error;
+  return data as ProductionRpcResult;
+}
+
+export async function reverseProductionReceipt(input: {
+  reason: string;
+  receiptId: string;
+}, ctx: AuthContext) {
+  const service = productionService();
+  const { data, error } = await service.rpc('reverse_production_receipt', {
+    p_actor_user_account_id: userAccountId(ctx),
+    p_actor_user_profile_id: ctx.userId,
+    p_organization_id: ctx.organizationId,
+    p_reason: input.reason,
+    p_receipt_id: input.receiptId,
+  });
+  if (error) throw error;
+  return data as ProductionRpcResult;
+}
+
+export async function reopenProductionOrder(input: {
+  orderId: string;
+  reason: string;
+}, ctx: AuthContext) {
+  const service = productionService();
+  const { data, error } = await service.rpc('reopen_production_order', {
+    p_actor_user_account_id: userAccountId(ctx),
+    p_actor_user_profile_id: ctx.userId,
+    p_order_id: input.orderId,
+    p_organization_id: ctx.organizationId,
+    p_reason: input.reason,
+  });
+  if (error) throw error;
+  return data as ProductionRpcResult;
+}

@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 
 import { useAppAuth } from '@/hooks/useAppAuth';
 import { API_ROUTES } from '@/lib/shared';
@@ -7,88 +7,46 @@ import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/lib/api';
 
 export interface ProductionDashboardResponse {
-  stats: {
-    plannedBatches: number;
-    inProgressBatches: number;
-    completedToday: number;
-    avgEfficiency: number;
-    totalWastage: number;
-  };
-  charts: {
-    outputLast7Days: Array<{
-      day: string;
-      output: number;
-    }>;
-    statusBreakdown: Array<{
-      status: string;
-      count: number;
-    }>;
-  };
-  openBatches: Array<{
-    batchNumber: string;
-    finishedAt: string | null;
-    output: number;
-    productionDate: string;
-    productionLine: string;
-    runHours: number | null;
-    shift: string;
-    startedAt: string | null;
+  recentIssues: Array<{
+    documentDate: string;
+    documentNumber: string;
+    id: string;
+    postingStatus: string;
+    productionOrderId: string;
+    quantity: number;
+    warehouseName: string | null;
+  }>;
+  recentOrders: Array<{
+    actualCost: number;
+    id: string;
+    plannedCost: number;
+    productionOrderNumber: string;
+    productDescription: string;
+    productNumber: string;
+    remainingQuantity: number;
+    releasedQuantity: number;
     status: string;
   }>;
-  materialFlow: {
-    damagedToday: number;
-    consumed: number;
-    issued: number;
-    receivedIntoProductionToday: number;
-    returnedToStoresToday: number;
-    surplus: number;
-  };
-  materialsAtRisk: Array<{
-    item: string;
-    warehouse: string;
-    available: number;
-    reorderLevel: number;
-    deficit: number;
+  recentReceipts: Array<{
+    documentDate: string;
+    documentNumber: string;
+    id: string;
+    postingStatus: string;
+    productionOrderId: string;
+    quantity: number;
+    warehouseName: string | null;
   }>;
-  qualityAlerts: {
-    failed: number;
-    pending: number;
+  stats: {
+    actualCost: number;
+    closedOrders: number;
+    costVariance: number;
+    ordersRequiringMaterials: number;
+    outstandingFinishedGoodsReceiptQuantity: number;
+    outstandingMaterialQuantity: number;
+    plannedCost: number;
+    plannedOrders: number;
+    releasedOrders: number;
   };
-  salesPlanning: {
-    bestSellingProducts: Array<{
-      currentStock: number;
-      itemId: string;
-      productCode: string | null;
-      productName: string;
-      quantitySoldLast7Days: number;
-      quantitySoldToday: number;
-      suggestedProductionQuantity: number;
-    }>;
-    demandSignals: Array<{
-      currentStock: number;
-      productCode: string | null;
-      productName: string;
-      quantitySoldLast7Days: number;
-      suggestedProductionQuantity: number;
-    }>;
-    last7DaysSalesByProduct: Array<{
-      productCode: string | null;
-      productName: string;
-      quantity: number;
-    }>;
-    todaySalesByProduct: Array<{
-      productCode: string | null;
-      productName: string;
-      quantity: number;
-    }>;
-  };
-  shiftSummary: Array<{
-    batches: number;
-    date: string;
-    output: number;
-    shift: string;
-    wastage: number;
-  }>;
 }
 
 export function useProductionDashboard() {

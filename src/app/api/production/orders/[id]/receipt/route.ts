@@ -3,6 +3,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { badRequest, can, forbidden, getAuthContext, unauthorized } from '@/lib/api-auth';
 import { ensureNonNegative } from '@/lib/inventory';
 import { mapProductionRpcError, postProductionReceipt } from '@/lib/production-orders-server';
+import { isProductionDocumentDateInFuture } from '@/lib/production';
+import { authorizeProductionOrderWriteAccess } from '@/lib/production-server';
 
 export async function POST(
   request: NextRequest,
@@ -14,6 +16,10 @@ export async function POST(
 
   try {
     const { id } = await params;
+    const authorization = await authorizeProductionOrderWriteAccess(id, ctx);
+    if (!authorization.ok) {
+      return NextResponse.json({ error: authorization.message }, { status: authorization.status });
+    }
     const body = await request.json() as {
       batchNumber?: string | null;
       completedQuantity?: number;
@@ -28,6 +34,9 @@ export async function POST(
     const completedQuantity = ensureNonNegative(body.completedQuantity ?? 0, 'completedQuantity');
     const rejectedQuantity = ensureNonNegative(body.rejectedQuantity ?? 0, 'rejectedQuantity');
     const wastageQuantity = ensureNonNegative(body.wastageQuantity ?? 0, 'wastageQuantity');
+    if (isProductionDocumentDateInFuture(body.receiptDate ?? null)) {
+      return badRequest('receiptDate cannot be in the future.');
+    }
     if (completedQuantity + rejectedQuantity + wastageQuantity <= 0) {
       return badRequest('Receipt must include completed, rejected, or wastage quantity.');
     }

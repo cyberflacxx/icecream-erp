@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { badRequest, can, forbidden, getAuthContext, unauthorized } from '@/lib/api-auth';
 import { ensurePositiveQuantity } from '@/lib/inventory';
 import { mapProductionRpcError, releaseProductionOrder } from '@/lib/production-orders-server';
+import { authorizeProductionOrderWriteAccess } from '@/lib/production-server';
 
 export async function POST(
   request: NextRequest,
@@ -14,6 +15,10 @@ export async function POST(
 
   try {
     const { id } = await params;
+    const authorization = await authorizeProductionOrderWriteAccess(id, ctx);
+    if (!authorization.ok) {
+      return NextResponse.json({ error: authorization.message }, { status: authorization.status });
+    }
     const body = await request.json() as { allowOverRelease?: boolean; releaseNotes?: string | null; releasedQuantity?: number };
     if (body.releasedQuantity === undefined) return badRequest('releasedQuantity is required.');
     const releasedQuantity = ensurePositiveQuantity(body.releasedQuantity, 'releasedQuantity');

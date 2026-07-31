@@ -1,17 +1,21 @@
 'use client';
 
 import Link from 'next/link';
-import { AlertCircle, ArrowRight, Boxes, Factory, FileSpreadsheet, Gauge, PackageOpen, Scale, ShieldAlert, TriangleAlert, TrendingUp, Undo2 } from 'lucide-react';
+import { AlertCircle, ArrowRight, Boxes, ClipboardList, Factory, FileSpreadsheet, PackageCheck, ScrollText, TrendingUp } from 'lucide-react';
 import type { ReactNode } from 'react';
-import { Bar, BarChart, CartesianGrid, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 
 import { PageHeader } from '@/components/dashboard/page-header';
 import { ProductionNav } from '@/components/production/production-nav';
 import { useProductionDashboard } from '@/hooks/production/useProduction';
-import { ChartCard, DataTable, EmptyState, LoadingState, StatCard } from '@/components/ui-library';
+import { Button } from '@/components/ui/button';
+import { DataTable, EmptyState, LoadingState, StatCard, StatusBadge } from '@/components/ui-library';
 
 function formatNumber(value: number) {
   return value.toLocaleString(undefined, { maximumFractionDigits: 2 });
+}
+
+function formatMoney(value: number) {
+  return value.toLocaleString(undefined, { style: 'currency', currency: 'USD' });
 }
 
 export function ProductionDashboard() {
@@ -29,179 +33,102 @@ export function ProductionDashboard() {
     );
   }
 
-  const { stats, charts, openBatches, materialFlow, materialsAtRisk, qualityAlerts, salesPlanning, shiftSummary } = dashboardQuery.data;
+  const { recentIssues, recentOrders, recentReceipts, stats } = dashboardQuery.data;
 
   return (
     <div className="space-y-8">
       <PageHeader
-        title="Production Module"
-        description="Run production in one straight line: define the BOM, issue raw materials from the production warehouse, then release finished goods back into production inventory."
+        title="Production Dashboard"
+        description="Production Orders are the operational source of truth for planning, issue posting, receipt posting, reversals, and close/reopen control."
+        actions={(
+          <Button asChild size="sm">
+            <Link href="/production/orders/new">
+              <ClipboardList className="mr-2 h-4 w-4" />
+              Planned Production
+            </Link>
+          </Button>
+        )}
       />
       <ProductionNav />
 
-      <section className="grid gap-4 md:grid-cols-3">
+      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <WorkflowCard
-          description="Define the raw materials and standard quantity required per finished unit."
-          href="/production/recipes"
-          icon={<FileSpreadsheet className="h-5 w-5" />}
-          label="1. BOM"
+          description="Create a planned production order from the latest active BOM."
+          href="/production/orders/new"
+          icon={<ClipboardList className="h-5 w-5" />}
+          label="Planned Production"
         />
         <WorkflowCard
-          description="Enter quantity to produce and issue raw materials from the production warehouse."
-          href="/production/batches?stage=issue"
-          icon={<Scale className="h-5 w-5" />}
-          label="2. Issues"
+          description="Open released orders that are ready for material issue posting."
+          href="/production/orders?workflow=issue&status=RELEASED"
+          icon={<Factory className="h-5 w-5" />}
+          label="Issues"
         />
         <WorkflowCard
-          description="Release actual finished output back into the production warehouse inventory."
-          href="/production/batches?stage=release"
-          icon={<PackageOpen className="h-5 w-5" />}
-          label="3. Release"
-        />
-      </section>
-
-      <section className="grid gap-4 md:grid-cols-3">
-        <WorkflowCard
-          description="See the current stock held inside production-controlled inventory."
-          href="/inventory/stock-balances"
-          icon={<Boxes className="h-5 w-5" />}
-          label="Stock Balance"
+          description="Open released orders that are ready for finished-goods receipt posting."
+          href="/production/orders?workflow=receipt&status=RELEASED"
+          icon={<PackageCheck className="h-5 w-5" />}
+          label="Receipts"
         />
         <WorkflowCard
-          description="Receive materials into production and transfer completed output onward."
-          href="/production/transfers"
-          icon={<ArrowRight className="h-5 w-5" />}
-          label="Transfers In"
-        />
-        <WorkflowCard
-          description="Review variance, material usage, yield, and costing reports."
+          description="Review costing, traceability, and operational reporting."
           href="/production/reports"
-          icon={<Gauge className="h-5 w-5" />}
+          icon={<FileSpreadsheet className="h-5 w-5" />}
           label="Reports"
         />
       </section>
 
-      <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-5">
-        <StatCard title="Planned Batches" value={formatNumber(stats.plannedBatches)} icon={<PackageOpen className="h-5 w-5" />} />
-        <StatCard title="In Progress" value={formatNumber(stats.inProgressBatches)} icon={<Factory className="h-5 w-5" />} color="warning" />
-        <StatCard title="Completed Today" value={formatNumber(stats.completedToday)} icon={<ShieldAlert className="h-5 w-5" />} color="success" />
-        <StatCard title="Avg Efficiency" value={`${formatNumber(stats.avgEfficiency)}%`} icon={<Gauge className="h-5 w-5" />} color="brown" />
-        <StatCard title="Total Wastage" value={formatNumber(stats.totalWastage)} icon={<TriangleAlert className="h-5 w-5" />} color="warning" />
+      <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-3">
+        <StatCard title="Planned Orders" value={formatNumber(stats.plannedOrders)} icon={<ClipboardList className="h-5 w-5" />} />
+        <StatCard title="Released Orders" value={formatNumber(stats.releasedOrders)} icon={<Factory className="h-5 w-5" />} color="warning" />
+        <StatCard title="Closed Orders" value={formatNumber(stats.closedOrders)} icon={<ScrollText className="h-5 w-5" />} color="success" />
+        <StatCard title="Orders Requiring Materials" value={formatNumber(stats.ordersRequiringMaterials)} icon={<Boxes className="h-5 w-5" />} color="warning" />
+        <StatCard title="Outstanding Material Qty" value={formatNumber(stats.outstandingMaterialQuantity)} icon={<Boxes className="h-5 w-5" />} color="brown" />
+        <StatCard title="Outstanding Receipt Qty" value={formatNumber(stats.outstandingFinishedGoodsReceiptQuantity)} icon={<PackageCheck className="h-5 w-5" />} color="brown" />
+        <StatCard title="Planned Cost" value={formatMoney(stats.plannedCost)} icon={<TrendingUp className="h-5 w-5" />} />
+        <StatCard title="Actual Cost" value={formatMoney(stats.actualCost)} icon={<TrendingUp className="h-5 w-5" />} color="warning" />
+        <StatCard title="Cost Variance" value={formatMoney(stats.costVariance)} icon={<TrendingUp className="h-5 w-5" />} color={stats.costVariance > 0 ? 'warning' : 'success'} />
       </div>
 
-      <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-6">
-        <StatCard title="Received Today" value={formatNumber(materialFlow.receivedIntoProductionToday)} icon={<Boxes className="h-5 w-5" />} />
-        <StatCard title="Issued" value={formatNumber(materialFlow.issued)} icon={<Scale className="h-5 w-5" />} color="brown" />
-        <StatCard title="Consumed" value={formatNumber(materialFlow.consumed)} icon={<Factory className="h-5 w-5" />} color="brown" />
-        <StatCard title="Surplus" value={formatNumber(materialFlow.surplus)} icon={<Undo2 className="h-5 w-5" />} color="success" />
-        <StatCard title="Returned Today" value={formatNumber(materialFlow.returnedToStoresToday)} icon={<Undo2 className="h-5 w-5" />} color="success" />
-        <StatCard title="Damaged Today" value={formatNumber(materialFlow.damagedToday)} icon={<TriangleAlert className="h-5 w-5" />} color="warning" />
-      </div>
-
-      <div className="grid gap-6 xl:grid-cols-2">
-        <ChartCard title="Output Last 7 Days">
-          <div className="h-72">
-            <ResponsiveContainer width="100%" height="100%" initialDimension={{ width: 1, height: 1 }}>
-              <BarChart data={charts.outputLast7Days}>
-                <CartesianGrid strokeDasharray="3 3" stroke="var(--dashboard-card-grid)" />
-                <XAxis dataKey="day" stroke="var(--dashboard-card-axis)" fontSize={12} />
-                <YAxis stroke="var(--dashboard-card-axis)" fontSize={12} />
-                <Tooltip />
-                <Bar dataKey="output" fill="var(--dashboard-card-fill)" radius={[10, 10, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        </ChartCard>
-
-        <ChartCard title="Batch Status Breakdown">
-          <div className="h-72">
-            <ResponsiveContainer width="100%" height="100%" initialDimension={{ width: 1, height: 1 }}>
-              <PieChart>
-                <Tooltip />
-                <Pie data={charts.statusBreakdown} dataKey="count" nameKey="status" outerRadius={105} fill="var(--dashboard-card-fill)" />
-              </PieChart>
-            </ResponsiveContainer>
-          </div>
-        </ChartCard>
-      </div>
-
-      <div className="grid gap-6 xl:grid-cols-2">
+      <div className="grid gap-6 xl:grid-cols-3">
         <DataTable
           columns={[
-            { key: 'batchNumber', header: 'Batch #' },
-            { key: 'productionDate', header: 'Date' },
-            { key: 'shift', header: 'Shift' },
-            { key: 'productionLine', header: 'Line' },
-            { key: 'status', header: 'Status' },
-            { key: 'runHours', header: 'Run Hrs' },
-            { key: 'output', header: 'Output' },
+            {
+              key: 'productionOrderNumber',
+              header: 'Order #',
+              render: (row) => <Link className="font-semibold text-[color:var(--app-accent-strong)]" href={`/production/orders/${row.id}`}>{row.productionOrderNumber}</Link>,
+            },
+            { key: 'productNumber', header: 'Product #' },
+            { key: 'status', header: 'Status', render: (row) => <StatusBadge status={row.status} /> },
+            { key: 'releasedQuantity', header: 'Released', render: (row) => formatNumber(Number(row.releasedQuantity ?? 0)) },
+            { key: 'remainingQuantity', header: 'Remaining', render: (row) => formatNumber(Number(row.remainingQuantity ?? 0)) },
           ]}
-          data={openBatches}
-          emptyState={<EmptyState icon={<AlertCircle className="h-6 w-6" />} title="No open batches" description="All batches are currently closed or completed." />}
+          data={recentOrders}
+          emptyState={<EmptyState icon={<ScrollText className="h-6 w-6" />} title="No recent production orders" description="Planned, released, and closed production orders will appear here." />}
         />
 
         <DataTable
           columns={[
-            { key: 'item', header: 'Raw Material' },
-            { key: 'warehouse', header: 'Warehouse' },
-            { key: 'available', header: 'Available' },
-            { key: 'reorderLevel', header: 'Reorder Level' },
-            { key: 'deficit', header: 'Deficit' },
+            { key: 'documentNumber', header: 'Issue #' },
+            { key: 'documentDate', header: 'Date' },
+            { key: 'postingStatus', header: 'Status', render: (row) => <StatusBadge status={row.postingStatus} /> },
+            { key: 'quantity', header: 'Quantity', render: (row) => formatNumber(Number(row.quantity ?? 0)) },
+            { key: 'warehouseName', header: 'Warehouse', render: (row) => String(row.warehouseName ?? '') },
           ]}
-          data={materialsAtRisk}
-          emptyState={<EmptyState icon={<AlertCircle className="h-6 w-6" />} title="No material risk" description="No raw materials are currently below reorder level." />}
-        />
-      </div>
-
-      <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
-        <StatCard title="Quality Pending" value={formatNumber(qualityAlerts.pending)} icon={<ShieldAlert className="h-5 w-5" />} color="brown" />
-        <StatCard title="Quality Failed" value={formatNumber(qualityAlerts.failed)} icon={<TriangleAlert className="h-5 w-5" />} color="warning" />
-      </div>
-
-      <div className="grid gap-6 xl:grid-cols-2">
-        <DataTable
-          columns={[
-            { key: 'productName', header: 'Today Sales' },
-            { key: 'quantity', header: 'Qty' },
-          ]}
-          data={salesPlanning.todaySalesByProduct}
-          emptyState={<EmptyState icon={<TrendingUp className="h-6 w-6" />} title="No product sales posted today" description="Today&apos;s product sales will appear here for production demand tracking." />}
+          data={recentIssues}
+          emptyState={<EmptyState icon={<Factory className="h-6 w-6" />} title="No recent issues" description="Posted production issue documents will appear here." />}
         />
 
         <DataTable
           columns={[
-            { key: 'productName', header: 'Best Seller' },
-            { key: 'quantitySoldLast7Days', header: 'Last 7 Days' },
-            { key: 'currentStock', header: 'FG Stock' },
-            { key: 'suggestedProductionQuantity', header: 'Suggested Qty' },
+            { key: 'documentNumber', header: 'Receipt #' },
+            { key: 'documentDate', header: 'Date' },
+            { key: 'postingStatus', header: 'Status', render: (row) => <StatusBadge status={row.postingStatus} /> },
+            { key: 'quantity', header: 'Completed', render: (row) => formatNumber(Number(row.quantity ?? 0)) },
+            { key: 'warehouseName', header: 'Warehouse', render: (row) => String(row.warehouseName ?? '') },
           ]}
-          data={salesPlanning.bestSellingProducts}
-          emptyState={<EmptyState icon={<TrendingUp className="h-6 w-6" />} title="No sales demand yet" description="Best-selling products appear once branch sales start posting." />}
-        />
-      </div>
-
-      <div className="grid gap-6 xl:grid-cols-2">
-        <DataTable
-          columns={[
-            { key: 'productName', header: 'Demand Signal' },
-            { key: 'quantitySoldLast7Days', header: '7 Day Sales' },
-            { key: 'currentStock', header: 'Current Stock' },
-            { key: 'suggestedProductionQuantity', header: 'Suggested Production' },
-          ]}
-          data={salesPlanning.demandSignals}
-          emptyState={<EmptyState icon={<Boxes className="h-6 w-6" />} title="No demand signals" description="Demand planning appears once production and sales history exist together." />}
-        />
-
-        <DataTable
-          columns={[
-            { key: 'date', header: 'Date' },
-            { key: 'shift', header: 'Shift' },
-            { key: 'batches', header: 'Batches' },
-            { key: 'output', header: 'Output' },
-            { key: 'wastage', header: 'Wastage' },
-          ]}
-          data={shiftSummary}
-          emptyState={<EmptyState icon={<Factory className="h-6 w-6" />} title="No shift summary" description="Shift-level output and wastage appear here across the selected period." />}
+          data={recentReceipts}
+          emptyState={<EmptyState icon={<PackageCheck className="h-6 w-6" />} title="No recent receipts" description="Posted production receipt documents will appear here." />}
         />
       </div>
     </div>

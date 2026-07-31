@@ -3,7 +3,12 @@ import { NextRequest, NextResponse } from 'next/server';
 import { badRequest, can, forbidden, getAuthContext, notFound, serverError, unauthorized } from '@/lib/api-auth';
 import { ensurePositiveQuantity } from '@/lib/inventory';
 import { mapProductionRpcError, savePlannedProductionOrder } from '@/lib/production-orders-server';
-import { isMissingProductionTable, productionErrorMessage, productionService } from '@/lib/production-server';
+import {
+  isMissingProductionTable,
+  productionErrorMessage,
+  productionService,
+  resolveAuthorizedProductionUpdateBranchId,
+} from '@/lib/production-server';
 
 export async function GET(
   request: NextRequest,
@@ -36,8 +41,28 @@ export async function GET(
 
     const [components, issues, receipts, relationshipMap, history, costs] = await Promise.all([
       service.from('production_order_components').select('*').eq('production_order_id', id).order('created_at'),
-      service.from('production_issues').select('*, lines:production_issue_lines(*)').eq('production_order_id', id).order('issue_date', { ascending: false }),
-      service.from('production_receipts').select('*, lines:production_receipt_lines(*)').eq('production_order_id', id).order('receipt_date', { ascending: false }),
+      service
+        .from('production_issues')
+        .select(`
+          *,
+          production_warehouse:warehouses!production_issues_production_warehouse_id_fkey(id, name, code),
+          issued_by_user:users!production_issues_issued_by_fkey(id, full_name, first_name, last_name),
+          reversed_by_user:users!production_issues_reversed_by_fkey(id, full_name, first_name, last_name),
+          lines:production_issue_lines(*)
+        `)
+        .eq('production_order_id', id)
+        .order('issue_date', { ascending: false }),
+      service
+        .from('production_receipts')
+        .select(`
+          *,
+          finished_goods_warehouse:warehouses!production_receipts_finished_goods_warehouse_id_fkey(id, name, code),
+          received_by_user:users!production_receipts_received_by_fkey(id, full_name, first_name, last_name),
+          reversed_by_user:users!production_receipts_reversed_by_fkey(id, full_name, first_name, last_name),
+          lines:production_receipt_lines(*)
+        `)
+        .eq('production_order_id', id)
+        .order('receipt_date', { ascending: false }),
       service.from('production_order_relationship_map').select('*').eq('production_order_id', id).order('sort_order'),
       service.from('production_order_status_history').select('*').eq('production_order_id', id).order('changed_at', { ascending: false }),
       service.from('production_order_cost_summary').select('*').eq('production_order_id', id).maybeSingle(),
@@ -83,6 +108,17 @@ export async function PUT(
       productionWarehouseId?: string;
       remarks?: string | null;
     };
+    const requestedBranchId = Object.prototype.hasOwnProperty.call(body, 'branchId')
+      ? (body.branchId ?? null)
+      : undefined;
+    const branchAuthorization = await resolveAuthorizedProductionUpdateBranchId({
+      ctx,
+      orderId: id,
+      requestedBranchId,
+    });
+    if (!branchAuthorization.ok) {
+      return NextResponse.json({ error: branchAuthorization.message }, { status: branchAuthorization.status });
+    }
 
     if (!body.productId) return badRequest('productId is required.');
     if (!body.productionWarehouseId) return badRequest('productionWarehouseId is required.');
@@ -90,7 +126,7 @@ export async function PUT(
     const plannedQuantity = ensurePositiveQuantity(body.plannedQuantity, 'plannedQuantity');
 
     const result = await savePlannedProductionOrder({
-      branchId: body.branchId ?? ctx.branchId,
+      branchId: branchAuthorization.value.branchId,
       finishedGoodsWarehouseId: body.finishedGoodsWarehouseId,
       orderId: id,
       plannedDueDate: body.plannedDueDate ?? null,

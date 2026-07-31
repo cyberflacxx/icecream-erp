@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
+import { selectLatestActiveBom } from '@/lib/production';
 import { isMissingProductionTable, productionErrorMessage, productionService } from '@/lib/production-server';
 
 export async function GET(request: NextRequest) {
@@ -35,23 +36,26 @@ export async function GET(request: NextRequest) {
     const bomResult = productIds.length
       ? await service
         .from('recipes')
-        .select('id, code, version, expected_output_quantity, output_unit_id, status, finished_item_id')
+        .select('id, code, version, expected_output_quantity, output_unit_id, status, finished_item_id, updated_at')
         .eq('organization_id', ctx.organizationId)
         .in('finished_item_id', productIds)
         .eq('status', 'ACTIVE')
         .is('deleted_at', null)
         .order('version', { ascending: false })
+        .order('updated_at', { ascending: false })
+        .order('id', { ascending: false })
       : { data: [], error: null };
     if (bomResult.error) throw bomResult.error;
 
-    const bomByProductId = new Map<string, Record<string, unknown>>();
+    const bomsByProductId = new Map<string, Array<Record<string, unknown>>>();
     for (const bom of (bomResult.data ?? []) as Array<Record<string, unknown>>) {
       const productId = String(bom.finished_item_id ?? '');
-      if (productId && !bomByProductId.has(productId)) bomByProductId.set(productId, bom);
+      if (!productId) continue;
+      bomsByProductId.set(productId, [...(bomsByProductId.get(productId) ?? []), bom]);
     }
 
     const products = rows.map((row) => {
-      const activeBom = bomByProductId.get(String(row.id)) ?? null;
+      const activeBom = selectLatestActiveBom(bomsByProductId.get(String(row.id)) ?? []);
       return {
         ...row,
         activeBom,

@@ -36,6 +36,12 @@ export type ProductionMetaWarehouse = Record<string, unknown> & {
 };
 
 export type ProductionMetaResponse = {
+  branches: Array<Record<string, unknown> & {
+    code?: string | null;
+    id: string;
+    name: string;
+    status?: string | null;
+  }>;
   categories: Array<Record<string, unknown>>;
   chocolateTypes: Array<Record<string, unknown>>;
   employees: Array<Record<string, unknown>>;
@@ -44,6 +50,7 @@ export type ProductionMetaResponse = {
   items: ProductionMetaItem[];
   mainWarehouses?: ProductionMetaWarehouse[];
   packagingItems: ProductionMetaItem[];
+  products?: Array<Record<string, unknown>>;
   productionFinishedWarehouses?: ProductionMetaWarehouse[];
   productionMaterialWarehouses?: ProductionMetaWarehouse[];
   productionCategories: Array<{ label: string; value: string }>;
