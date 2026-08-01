@@ -426,11 +426,13 @@ with account_definitions(code, parent_code) as (
 update icecream_erp.accounts child
 set parent_id = parent.id,
     updated_at = now()
-from account_definitions definition
+from icecream_erp.accounts current_child
+join account_definitions definition
+  on definition.code = current_child.code
 left join icecream_erp.accounts parent
-  on parent.organization_id = child.organization_id
+  on parent.organization_id = current_child.organization_id
  and parent.code = definition.parent_code
-where child.code = definition.code
+where child.id = current_child.id
   and child.organization_id in (select id from icecream_erp.organizations)
   and child.parent_id is distinct from parent.id;
 
@@ -478,11 +480,13 @@ with base_cost_centres(code, parent_code) as (
 update icecream_erp.cost_centres child
 set parent_id = parent.id,
     updated_at = now()
-from base_cost_centres centre
+from icecream_erp.cost_centres current_child
+join base_cost_centres centre
+  on centre.code = current_child.code
 left join icecream_erp.cost_centres parent
-  on parent.organization_id = child.organization_id
+  on parent.organization_id = current_child.organization_id
  and parent.code = centre.parent_code
-where child.code = centre.code
+where child.id = current_child.id
   and child.branch_id is null
   and child.parent_id is distinct from parent.id;
 
