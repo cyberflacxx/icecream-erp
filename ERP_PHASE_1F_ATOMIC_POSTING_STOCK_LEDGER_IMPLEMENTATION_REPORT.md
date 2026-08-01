@@ -1,0 +1,283 @@
+# ERP Phase 1F Atomic Posting Stock Ledger Implementation Report
+
+Date: 2026-08-01
+Branch: `fix/sales-invoice-production`
+Migration created: `migrations/044_atomic_inventory_posting_and_stock_ledger.sql`
+
+## Scope completed
+
+Phase 1F completed the main transactional hardening and operator-facing ledger/reporting work for inventory-finance posting:
+
+- database-level atomic posting RPC foundation for GRN, inventory adjustment, stock take, write-off, transfer dispatch, and transfer receipt
+- stock-take document workflow foundation and idempotency support
+- transfer workflow consistency so create does not bypass finance posting
+- stock movement ledger UI and export alignment
+- inventory reconciliation report and finance export support
+- dashboard shortcuts and clearer sidebar grouping
+- manual SQL companions for migration verification, rollback, and VPS smoke testing
+
+Phase 1A through Phase 1E behavior was preserved.
+
+## Audit findings addressed
+
+- GRN posting no longer depends on application-side journal cleanup as the primary transaction boundary.
+- inventory adjustment, stock take, write-off, and transfer completion now post through inventory RPC wrappers instead of separate app-side stock and journal legs
+- direct transfer creation in `COMPLETED` status is blocked; only `DRAFT`, `PENDING_APPROVAL`, and `APPROVED` may be created
+- partial transfer receipt is now supported in the UI and uses the same atomic completion route
+- stock movement export now uses the standardized ledger mapping instead of a stale raw movement extract
+- finance reports and stock ledger print views now hide dashboard navigation and include report metadata
+- dashboard shortcuts are now role-filtered and permission-filtered
+- sidebar grouping is clearer across dashboard, operations, finance, reports, and administration
+
+## Migration filename
+
+- `migrations/044_atomic_inventory_posting_and_stock_ledger.sql`
+- rollback: `migrations/manual/044_atomic_inventory_posting_and_stock_ledger.rollback.sql`
+- verification: `migrations/manual/044_atomic_inventory_posting_and_stock_ledger.verify.sql`
+- VPS smoke test: `migrations/manual/044_atomic_inventory_posting_and_stock_ledger.vps-transaction-test.sql`
+
+## Atomic RPCs created or used
+
+Defined in migration `044`:
+
+- `icecream_erp.post_goods_received_note_atomic`
+- `icecream_erp.post_inventory_adjustment_atomic`
+- `icecream_erp.post_inventory_stock_take_atomic`
+- `icecream_erp.post_inventory_write_off_atomic`
+- `icecream_erp.dispatch_stock_transfer_atomic`
+- `icecream_erp.receive_stock_transfer_atomic`
+- helper functions:
+  - `icecream_erp.inventory_next_document_number`
+  - `icecream_erp.inventory_advisory_lock`
+  - `icecream_erp.inventory_create_posted_journal`
+
+Application routes updated to use atomic posting:
+
+- `src/app/api/procurement/grns/[id]/post/route.ts`
+- `src/app/api/inventory/adjustments/route.ts`
+- `src/app/api/inventory/stock-take/route.ts`
+- `src/app/api/inventory/write-off/route.ts`
+- `src/app/api/inventory/transfers/[id]/complete/route.ts`
+
+Shared RPC helper added:
+
+- `src/lib/inventory-posting-server.ts`
+
+## Stock-take schema foundation
+
+Migration `044` extends the stock-take workflow with:
+
+- organization, branch, document number, count date, and note fields
+- created/submitted/approved/posted/reversed metadata
+- idempotency key support
+- line-level unit cost, variance value, reason, batch, expiry, and posted movement linkage
+
+Application route behavior:
+
+- creating a stock take without posting now creates a proper `DRAFT` header and lines
+- posting requires the approved path in the route flow
+- zero-variance stock takes can close without generating unnecessary journals
+
+## Transfer consistency
+
+Updated:
+
+- `src/app/api/inventory/transfers/route.ts`
+- `src/app/api/inventory/transfers/[id]/complete/route.ts`
+- `src/app/(dashboard)/inventory/transfers/page.tsx`
+
+Behavior:
+
+- transfer creation cannot insert `COMPLETED`
+- dispatch and receipt use the same atomic RPC path
+- dispatch posts source inventory to goods in transit
+- receipt posts goods in transit to destination inventory
+- duplicate dispatch and receipt protection is delegated to RPC idempotency and document locks
+- partial receipt is now exposed in the UI through a receipt drawer that sends explicit `receiptLines`
+
+## Stock ledger behavior
+
+Updated:
+
+- `src/lib/inventory.ts`
+- `src/lib/inventory-server.ts`
+- `src/app/api/inventory/stock-movements/route.ts`
+- `src/app/api/inventory/export/[reportType]/route.ts`
+- `src/app/(dashboard)/inventory/stock-movements/page.tsx`
+
+Behavior:
+
+- movement aliases and in/out classification expanded to support transfer, valuation, correction, and reversal scenarios
+- ledger rows now expose movement number, posting date, posting status, journal link, running value, branch context, and reversal reference
+- stock movement export now uses the same standardized ledger mapping as the UI
+- stock ledger print view now includes generated date, generated by, filters, and top-level totals
+
+## Reconciliation behavior
+
+Added:
+
+- `src/app/api/finance/reports/inventory-reconciliation/route.ts`
+
+Updated:
+
+- `src/app/api/finance/export/[reportType]/route.ts`
+- `src/app/(dashboard)/finance/reports/page.tsx`
+- `src/lib/shared/api-routes.ts`
+
+Behavior:
+
+- compares stock quantity, stock balance value, movement-derived value, and journal-linked value
+- reports statuses:
+  - `MATCHED`
+  - `QUANTITY_VARIANCE`
+  - `VALUE_VARIANCE`
+  - `GL_VARIANCE`
+  - `MISSING_COST`
+  - `MISSING_MAPPING`
+- variances remain visible; they are not suppressed
+
+## Export and print behavior
+
+Updated:
+
+- `src/app/(dashboard)/finance/reports/page.tsx`
+- `src/app/(dashboard)/inventory/stock-movements/page.tsx`
+- `src/app/api/finance/export/[reportType]/route.ts`
+- `src/app/api/inventory/export/[reportType]/route.ts`
+
+Behavior:
+
+- finance report sections keep CSV export and print actions
+- finance print pack now includes company label, generated date, generated by, and active filters
+- stock movement ledger export now matches the standardized ledger column set
+- stock movement print layout now hides navigation and includes filter metadata and summary totals
+
+## Sidebar changes
+
+Updated:
+
+- `src/components/dashboard/sidebar.tsx`
+
+Behavior:
+
+- section grouping changed to `Dashboard`, `Operations`, `Finance`, `Reports`, `Administration`
+- report navigation is separated from operational navigation
+- active items now expose `aria-current="page"`
+- link titles provide lightweight hover context for compact navigation
+
+## Shortcut changes
+
+Added:
+
+- `src/lib/dashboard-shortcuts.ts`
+
+Updated:
+
+- `src/components/dashboard/dashboard-overview.tsx`
+
+Behavior:
+
+- shortcuts are now filtered by dashboard persona and explicit permission checks
+- branch manager, procurement, production, finance, and administrator shortcut sets are covered
+- dashboard cards use real route targets already present in the application
+
+## Files changed in this Phase 1F batch
+
+- `ERP_PHASE_1F_ATOMIC_POSTING_STOCK_LEDGER_AUDIT.md`
+- `ERP_PHASE_1F_ATOMIC_POSTING_STOCK_LEDGER_IMPLEMENTATION_REPORT.md`
+- `migrations/044_atomic_inventory_posting_and_stock_ledger.sql`
+- `migrations/manual/044_atomic_inventory_posting_and_stock_ledger.rollback.sql`
+- `migrations/manual/044_atomic_inventory_posting_and_stock_ledger.verify.sql`
+- `migrations/manual/044_atomic_inventory_posting_and_stock_ledger.vps-transaction-test.sql`
+- `src/lib/inventory.ts`
+- `src/lib/inventory-server.ts`
+- `src/lib/inventory-posting-server.ts`
+- `src/lib/dashboard-shortcuts.ts`
+- `src/lib/shared/api-routes.ts`
+- `src/app/api/procurement/grns/[id]/post/route.ts`
+- `src/app/api/inventory/adjustments/route.ts`
+- `src/app/api/inventory/stock-take/route.ts`
+- `src/app/api/inventory/write-off/route.ts`
+- `src/app/api/inventory/transfers/route.ts`
+- `src/app/api/inventory/transfers/[id]/complete/route.ts`
+- `src/app/api/inventory/export/[reportType]/route.ts`
+- `src/app/api/finance/reports/inventory-reconciliation/route.ts`
+- `src/app/api/finance/export/[reportType]/route.ts`
+- `src/app/(dashboard)/inventory/transfers/page.tsx`
+- `src/app/(dashboard)/inventory/stock-movements/page.tsx`
+- `src/app/(dashboard)/finance/reports/page.tsx`
+- `src/components/dashboard/dashboard-overview.tsx`
+- `src/components/dashboard/sidebar.tsx`
+- `tests/branch-helpers.test.ts`
+- `tests/inventory-helpers.test.ts`
+
+## Tests added or expanded
+
+- `tests/inventory-helpers.test.ts`
+  - atomic adjustment route assertions
+  - standardized stock movement export assertions
+  - transfer receipt drawer and `receiptLines` assertions
+- `tests/branch-helpers.test.ts`
+  - dashboard shortcut definition coverage
+  - dashboard/sidebar structural assertions
+
+## Validation results
+
+Executed successfully:
+
+- `npm run test:finance`
+- `npm run test:procurement`
+- `npm run test:production`
+- `npm run test:inventory`
+- `npm run test:sales`
+- `npm run test:branches`
+- `npm run lint`
+- `npm run build`
+- `git diff --check`
+
+Observed notes:
+
+- `npm run lint` passed with two pre-existing warnings in unrelated files:
+  - `src/app/(dashboard)/maintenance/machines/page.tsx`
+  - `src/app/(dashboard)/sales/customers/page.tsx`
+- `git diff --check` exited cleanly for whitespace defects and emitted LF-to-CRLF normalization warnings only
+
+## Transaction guarantees
+
+This batch improves guarantees to database-level atomic posting inside the new inventory-finance RPC wrappers:
+
+- document validation, stock mutation, movement creation, journal creation, relationship insertion, and posting-run recording now happen inside the database transaction per RPC
+- idempotency keys are persisted and reused through `inventory_posting_runs` plus source-document idempotency columns
+- transfer create no longer permits a bypass status that would skip finance posting
+- transfer dispatch and receipt share one completion flow and now support partial receipt quantities from the UI
+
+## Deployment order
+
+1. deploy preserved Phase 1A through Phase 1E code and migration assets
+2. apply `migrations/043_finance_chart_of_accounts_foundation.sql`
+3. run `migrations/manual/043_finance_chart_of_accounts_foundation.verify.sql`
+4. apply `migrations/044_atomic_inventory_posting_and_stock_ledger.sql`
+5. run `migrations/manual/044_atomic_inventory_posting_and_stock_ledger.verify.sql`
+6. deploy the Phase 1F application batch
+7. run targeted GRN, adjustment, stock take, write-off, transfer dispatch, transfer receipt, ledger export, and finance reconciliation smoke tests
+
+## Rollback steps
+
+1. stop new posting traffic
+2. revert the Phase 1F application batch
+3. if required, execute `migrations/manual/044_atomic_inventory_posting_and_stock_ledger.rollback.sql` in a controlled maintenance window
+4. re-run the Phase 1D and Phase 1F verification SQL
+5. inspect any operational documents created during testing before reopening users to posting
+
+## Known risks
+
+1. Phase 1F reversal RPC coverage is not complete for GRN, stock adjustment, write-off, and transfer dispatch/receipt. The schema and audit fields are prepared, but full reversal workflows still need a later batch.
+2. The finance reconciliation report derives GL value from journal-linked movement totals, not item-granular GL allocation, because the journal line model is not item-granular.
+3. `git status --short` is still noisy because the branch already contained substantial preserved Phase 1C through Phase 1E work outside the new Phase 1F files.
+4. Print views are improved for finance reports and the stock ledger, but the broader report estate still relies on existing page-specific print behavior.
+
+## Next recommended batch
+
+1. implement operational reversal RPCs and routes for GRN, stock adjustment, write-off, transfer dispatch, and transfer receipt
+2. extend standardized print/export behavior across the remaining report modules
+3. add integration-level concurrency tests against a real PostgreSQL environment for duplicate post and over-receipt races

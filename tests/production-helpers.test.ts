@@ -56,9 +56,79 @@ function loadRouteModule<T>(modulePath: string, mocks: Record<string, unknown>):
   });
 
   const module = { exports: {} as T };
+  const commonMocks: Record<string, unknown> = {
+    '@/lib/finance-foundation-server': {
+      async findOpenFiscalPeriod() {
+        return { id: 'period-1' };
+      },
+      getFinanceModuleDefaultCostCentreCodes() {
+        return ['FACTORY'];
+      },
+      async resolveFinanceCostCentreCode() {
+        return 'FACTORY';
+      },
+      async resolveFinancePostingAccount() {
+        return { id: 'acct-1' };
+      },
+    },
+    '@/lib/finance-integration': {
+      collapseFinancePostingLines(lines: unknown[]) {
+        return lines;
+      },
+      resolveInventoryPostingMappingKey() {
+        return 'RAW_MATERIAL_INVENTORY';
+      },
+      resolveProductionCostCentrePriority() {
+        return ['FACTORY'];
+      },
+      toDateOnly(value: string) {
+        return value;
+      },
+    },
+    '@/lib/finance-server': {
+      async deleteFinanceJournalById() {
+        return null;
+      },
+      async findJournalBySource() {
+        return null;
+      },
+      async loadLedgerLines() {
+        return [];
+      },
+      async postFinanceDocument() {
+        return { entryNumber: 'JE-00001', id: 'journal-1' };
+      },
+    },
+    '@/lib/supabase/server': {
+      createServiceRoleClient() {
+        return {
+          schema() {
+            return this;
+          },
+          from() {
+            return {
+              eq() {
+                return this;
+              },
+              in() {
+                return this;
+              },
+              select() {
+                return this;
+              },
+              single: async () => ({ data: null, error: null }),
+            };
+          },
+        };
+      },
+    },
+  };
   const scopedRequire = (request: string) => {
     if (Object.prototype.hasOwnProperty.call(mocks, request)) {
       return mocks[request];
+    }
+    if (Object.prototype.hasOwnProperty.call(commonMocks, request)) {
+      return commonMocks[request];
     }
 
     return nodeRequire(request);

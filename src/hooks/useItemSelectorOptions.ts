@@ -27,6 +27,7 @@ export interface ItemSelectorOption {
 export interface UseItemSelectorOptionsInput {
   branchId?: string | null;
   category?: string | null;
+  customerId?: string | null;
   includeCost?: boolean;
   includeInactive?: boolean;
   includePrice?: boolean;
@@ -49,6 +50,7 @@ export function useItemSelectorOptions(input: UseItemSelectorOptionsInput = {}) 
 
       if (input.branchId) searchParams.set('branch_id', input.branchId);
       if (input.category) searchParams.set('category', input.category);
+      if (input.customerId) searchParams.set('customer_id', input.customerId);
       if (input.includeCost) searchParams.set('include_cost', 'true');
       if (input.includeInactive) searchParams.set('includeInactive', 'true');
       if (input.includePrice) searchParams.set('include_price', 'true');

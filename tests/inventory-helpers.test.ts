@@ -717,19 +717,114 @@ test('inventory adjustment failure helper returns staged stock movement diagnost
   assert.equal(failure.details.totalValue, 0);
 });
 
-test('inventory adjustment route no longer references undefined serverError and supports reload fallback', () => {
+test('inventory adjustment route posts through the atomic RPC path', () => {
   const route = fs.readFileSync('src/app/api/inventory/adjustments/route.ts', 'utf8');
 
-  assert.doesNotMatch(route, /return serverError\(/);
-  assert.match(route, /warning:\s*'Stock adjustment posted but updated balance could not be fully reloaded'/);
-  assert.match(route, /adjustmentPosted:\s*true/);
+  assert.match(route, /invokeInventoryPostingRpc/);
+  assert.match(route, /post_inventory_adjustment_atomic/);
+  assert.match(route, /buildInventoryPostingIdempotencyKey/);
 });
 
-test('inventory adjustment route does not emit serverError is not defined in failure payloads', () => {
+test('inventory adjustment route returns fiscal period and adjustment identifiers after atomic posting', () => {
   const route = fs.readFileSync('src/app/api/inventory/adjustments/route.ts', 'utf8');
 
-  assert.doesNotMatch(route, /serverError is not defined/);
-  assert.match(route, /const dbMessage = error instanceof Error \? error\.message/);
+  assert.match(route, /fiscalPeriodId/);
+  assert.match(route, /adjustmentId/);
+  assert.match(route, /quantityOnHand/);
+});
+
+test('stock movement export route reuses the standardized ledger mapping instead of raw movement rows', () => {
+  const route = fs.readFileSync('src/app/api/inventory/export/[reportType]/route.ts', 'utf8');
+
+  assert.match(route, /listCompatibleStockMovements/);
+  assert.match(route, /mapCompatibleStockMovementRows/);
+  assert.match(route, /movementNumber/);
+  assert.match(route, /runningQuantity/);
+  assert.match(route, /journalEntryId/);
+});
+
+test('transfer page collects receipt lines before calling the atomic completion route', () => {
+  const page = fs.readFileSync('src/app/(dashboard)/inventory/transfers/page.tsx', 'utf8');
+
+  assert.match(page, /Transfer Receipt/);
+  assert.match(page, /receiptLines/);
+  assert.match(page, /Dispatch & Receive/);
+  assert.match(page, /Receive Remaining/);
+  assert.match(page, /\/api\/inventory\/transfers\/\$\{receiptState\.transferId\}\/complete/);
+});
+
+test('phase 1g reversal migration keeps RPCs schema-local and enforces transfer unwind order', () => {
+  const migration = fs.readFileSync('migrations/045_inventory_operational_reversals.sql', 'utf8');
+
+  assert.match(migration, /create table if not exists icecream_erp\.inventory_reversal_runs/i);
+  assert.match(migration, /create or replace function icecream_erp\.reverse_goods_received_note_atomic/i);
+  assert.match(migration, /create or replace function icecream_erp\.reverse_inventory_adjustment_atomic/i);
+  assert.match(migration, /create or replace function icecream_erp\.reverse_inventory_write_off_atomic/i);
+  assert.match(migration, /create or replace function icecream_erp\.reverse_stock_transfer_dispatch_atomic/i);
+  assert.match(migration, /create or replace function icecream_erp\.reverse_stock_transfer_receipt_atomic/i);
+  assert.match(migration, /Transfer receipt must be reversed before dispatch can be reversed\./i);
+  assert.match(migration, /set status = 'IN_TRANSIT'/i);
+  assert.match(migration, /notify pgrst, 'reload schema'/i);
+  assert.doesNotMatch(migration, /alter\s+role\s+authenticator/i);
+  assert.doesNotMatch(migration, /pgrst\.db_schemas/i);
+});
+
+test('phase 1g reversal routes and transfer UI use dedicated reverse APIs', () => {
+  const grnReverseRoute = fs.readFileSync('src/app/api/procurement/grns/[id]/reverse/route.ts', 'utf8');
+  const adjustmentReverseRoute = fs.readFileSync('src/app/api/inventory/adjustments/[id]/reverse/route.ts', 'utf8');
+  const writeOffReverseRoute = fs.readFileSync('src/app/api/inventory/write-off/[id]/reverse/route.ts', 'utf8');
+  const transferDispatchReverseRoute = fs.readFileSync('src/app/api/inventory/transfers/[id]/reverse-dispatch/route.ts', 'utf8');
+  const transferReceiptReverseRoute = fs.readFileSync('src/app/api/inventory/transfers/[id]/reverse-receipt/route.ts', 'utf8');
+  const helper = fs.readFileSync('src/lib/inventory-reversal-server.ts', 'utf8');
+  const transfersPage = fs.readFileSync('src/app/(dashboard)/inventory/transfers/page.tsx', 'utf8');
+
+  assert.match(grnReverseRoute, /reverseGoodsReceivedNote/);
+  assert.match(adjustmentReverseRoute, /reverseInventoryAdjustment/);
+  assert.match(writeOffReverseRoute, /reverseInventoryWriteOff/);
+  assert.match(transferDispatchReverseRoute, /reverseStockTransferDispatch/);
+  assert.match(transferReceiptReverseRoute, /reverseStockTransferReceipt/);
+  assert.match(helper, /invokeInventoryReversalRpc<InventoryReversalResult>\(service, 'reverse_goods_received_note_atomic'/);
+  assert.match(helper, /invokeInventoryReversalRpc<InventoryReversalResult>\(service, 'reverse_inventory_adjustment_atomic'/);
+  assert.match(helper, /invokeInventoryReversalRpc<InventoryReversalResult>\(service, 'reverse_inventory_write_off_atomic'/);
+  assert.match(helper, /invokeInventoryReversalRpc<InventoryReversalResult>\(service, 'reverse_stock_transfer_dispatch_atomic'/);
+  assert.match(helper, /invokeInventoryReversalRpc<InventoryReversalResult>\(service, 'reverse_stock_transfer_receipt_atomic'/);
+  assert.match(transfersPage, /row\.dispatchReversal/);
+  assert.match(transfersPage, /row\.receiptReversal/);
+  assert.match(transfersPage, /Reverse Dispatch/);
+  assert.match(transfersPage, /Reverse Receipt/);
+});
+
+test('phase 1g deployment assets and gated db test scripts are present', () => {
+  const packageJson = fs.readFileSync('package.json', 'utf8');
+  const dbScript = fs.readFileSync('scripts/run-phase-1g-reversal-db-tests.mjs', 'utf8');
+  const verifySql = fs.readFileSync('migrations/manual/045_inventory_operational_reversals.verify.sql', 'utf8');
+  const rollbackSql = fs.readFileSync('migrations/manual/045_inventory_operational_reversals.rollback.sql', 'utf8');
+  const transactionSql = fs.readFileSync('migrations/manual/045_inventory_operational_reversals.vps-transaction-test.sql', 'utf8');
+  const concurrencySql = fs.readFileSync('migrations/manual/045_inventory_operational_reversals.vps-concurrency-test.sql', 'utf8');
+  const checklist = fs.readFileSync('deployment/PHASE_1G_PRODUCTION_DEPLOYMENT_CHECKLIST.md', 'utf8');
+  const predeploy = fs.readFileSync('deployment/phase-1g-predeploy.sql', 'utf8');
+  const postdeploy = fs.readFileSync('deployment/phase-1g-postdeploy.sql', 'utf8');
+  const smoke = fs.readFileSync('deployment/phase-1g-smoke-test.ps1', 'utf8');
+  const deploy = fs.readFileSync('deployment/phase-1g-vps-deploy.sh', 'utf8');
+
+  assert.match(packageJson, /"test:inventory:db"/);
+  assert.match(packageJson, /"test:inventory:concurrency"/);
+  assert.match(packageJson, /integration --required/);
+  assert.match(packageJson, /concurrency --required/);
+  assert.match(dbScript, /PHASE_1G_DB_TESTS/);
+  assert.match(dbScript, /PHASE_1G_DB_ISOLATED/);
+  assert.match(dbScript, /requires PHASE_1G_DB_TESTS=1/);
+  assert.match(verifySql, /VERIFY 045/);
+  assert.match(rollbackSql, /Manual rollback for 045_inventory_operational_reversals\.sql/);
+  assert.match(transactionSql, /SMOKE 045/);
+  assert.match(concurrencySql, /CONCURRENCY 045/);
+  assert.match(checklist, /migrations\/045_inventory_operational_reversals\.sql/);
+  assert.match(predeploy, /PREDEPLOY/);
+  assert.match(postdeploy, /POSTDEPLOY/);
+  assert.match(smoke, /043_finance_chart_of_accounts_foundation\.verify\.sql/);
+  assert.match(smoke, /045_inventory_operational_reversals\.verify\.sql/);
+  assert.match(deploy, /Apply 045/);
+  assert.match(deploy, /pg_dump/);
 });
 
 test('item selector helper preserves missing cost and price values while aggregating stock by branch and warehouse', () => {

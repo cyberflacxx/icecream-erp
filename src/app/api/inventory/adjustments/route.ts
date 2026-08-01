@@ -1,64 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+import { badRequest, can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
 import {
-  badRequest,
-  can,
-  forbidden,
-  getAuthContext,
-  unauthorized,
-} from '@/lib/api-auth';
+  findOpenFiscalPeriod,
+  getFinanceModuleDefaultCostCentreCodes,
+  resolveFinanceCostCentreCode,
+  resolveFinancePostingAccount,
+} from '@/lib/finance-foundation-server';
+import { resolveInventoryPostingMappingKey, toDateOnly } from '@/lib/finance-integration';
 import {
-  resolveInventoryUnitCost,
-  resolveInventoryValue,
-  toNumber,
-} from '@/lib/inventory';
-import {
-  applyInventoryDelta,
-  buildInventoryAdjustmentFailureResponse,
-  createInventoryAdjustmentRecord,
-  recordStockMovement,
-  requireItem,
-  requireWarehouseAccess,
-  writeInventoryAuditLog,
-} from '@/lib/inventory-server';
+  buildInventoryPostingIdempotencyKey,
+  invokeInventoryPostingRpc,
+  loadWarehouseBranchId,
+} from '@/lib/inventory-posting-server';
+import { getBalance, requireItem, requireWarehouseAccess } from '@/lib/inventory-server';
 import { createServiceRoleClient } from '@/lib/supabase/server';
-
-function inventoryAdjustmentFailedResponse(input: {
-  dbMessage?: string | null;
-  itemId?: string | null;
-  quantity?: number | null;
-  stage: string;
-  totalValue?: number | null;
-  unitCost?: number | null;
-  warehouseId?: string | null;
-}) {
-  return NextResponse.json(buildInventoryAdjustmentFailureResponse(input), { status: 500 });
-}
-
-function inventoryAdjustmentSuccessWarningResponse(input: {
-  adjustmentId: string;
-  itemId: string;
-  quantity: number;
-  totalValue: number;
-  unitCost: number;
-  warehouseId: string;
-  warning: string;
-}) {
-  return NextResponse.json(
-    {
-      adjustmentPosted: true,
-      id: input.adjustmentId,
-      itemId: input.itemId,
-      quantity: input.quantity,
-      success: true,
-      totalValue: input.totalValue,
-      unitCost: input.unitCost,
-      warehouseId: input.warehouseId,
-      warning: input.warning,
-    },
-    { status: 201 },
-  );
-}
 
 export async function POST(request: NextRequest) {
   const ctx = await getAuthContext();
@@ -66,205 +22,273 @@ export async function POST(request: NextRequest) {
   if (!can(ctx, 'inventory.write')) return forbidden();
 
   const service = createServiceRoleClient();
-  let stage = 'READ_REQUEST';
-
-  const body = (await request.json()) as {
+  const body = (await request.json().catch(() => ({}))) as {
     itemId?: string;
-    organizationId?: string;
-    warehouseId?: string;
     quantity?: number;
-    stockValue?: number;
+    reason?: string;
     transactionAt?: string;
-    totalCost?: number;
-    totalValue?: number;
     type?: 'ADJUSTMENT_IN' | 'ADJUSTMENT_OUT';
     unitCost?: number;
-    unit_cost?: number;
-    total_cost?: number;
-    total_value?: number;
-    stock_value?: number;
-    value?: number;
-    reason?: string;
+    warehouseId?: string;
   };
 
   const { itemId, warehouseId, quantity, transactionAt, type, reason } = body;
-
   if (!itemId || !warehouseId || quantity === undefined || !type || !reason || !transactionAt) {
     return badRequest('itemId, warehouseId, quantity, type, reason, and transactionAt are required.');
   }
 
-  if (type !== 'ADJUSTMENT_IN' && type !== 'ADJUSTMENT_OUT') {
+  if (!['ADJUSTMENT_IN', 'ADJUSTMENT_OUT'].includes(type)) {
     return badRequest('type must be ADJUSTMENT_IN or ADJUSTMENT_OUT.');
   }
 
   const qty = Number(quantity);
-  if (isNaN(qty) || qty <= 0) {
+  if (Number.isNaN(qty) || qty <= 0) {
     return badRequest('quantity must be a positive number.');
   }
 
-  let resolvedUnitCost = 0;
-  let resolvedTotalValue = 0;
-
   try {
-    stage = 'PARSE_TRANSACTION_DATE';
     const parsedTransactionAt = new Date(transactionAt);
     if (Number.isNaN(parsedTransactionAt.getTime())) {
       return badRequest('transactionAt must be a valid ISO date-time.');
     }
 
-    stage = 'LOAD_ITEM_AND_WAREHOUSE';
     const [item, warehouse] = await Promise.all([
       requireItem(service, itemId),
       requireWarehouseAccess(service, warehouseId, ctx.branchId, ctx.isBranchScoped, ctx.warehouseAssignments),
     ]);
-    resolvedUnitCost = resolveInventoryUnitCost(body, toNumber(item.unit_cost));
-    resolvedTotalValue = Math.max(0, resolveInventoryValue(body, qty * resolvedUnitCost));
+    const branchId = await loadWarehouseBranchId(service as never, warehouseId);
+    const unitCost = Number(body.unitCost ?? item.unit_cost ?? 0);
+    const totalValue = Math.max(0, qty * unitCost);
+    const balance = await getBalance(service, itemId, warehouseId);
+    const available = Number(balance?.quantity_available ?? balance?.quantity_on_hand ?? balance?.quantity ?? 0);
 
-    stage = 'LOAD_BALANCE';
-    const { data: balance, error: balanceError } = await service
-      .from('stock_balances')
-      .select('id, quantity_on_hand, quantity_available, quantity_reserved')
-      .eq('item_id', itemId)
-      .eq('warehouse_id', warehouseId)
-      .maybeSingle();
-    if (balanceError) {
-      return inventoryAdjustmentFailedResponse({
-        dbMessage: balanceError.message,
-        itemId,
-        quantity: qty,
-        stage,
-        totalValue: resolvedTotalValue,
-        unitCost: resolvedUnitCost,
-        warehouseId,
-      });
-    }
-
-    const currentOnHand = Number(balance?.quantity_on_hand ?? 0);
-    const currentReserved = Number(balance?.quantity_reserved ?? 0);
-    const currentAvailable = Number(balance?.quantity_available ?? (currentOnHand - currentReserved));
-
-    if (type === 'ADJUSTMENT_OUT' && currentAvailable < qty) {
+    if (type === 'ADJUSTMENT_OUT' && available < qty) {
       return badRequest(
-        `Insufficient stock for ${item.name}. Available: ${currentAvailable.toFixed(3)}, Required: ${qty.toFixed(3)}`,
+        `Insufficient stock for ${item.name}. Available: ${available.toFixed(3)}, Required: ${qty.toFixed(3)}`,
       );
     }
 
-    stage = 'CREATE_ADJUSTMENT_RECORD';
-    const adjustment = await createInventoryAdjustmentRecord(service, {
-      adjustmentDate: parsedTransactionAt.toISOString(),
-      createdBy: ctx.userId,
-      itemId,
-      movementType: type,
-      organizationId: ctx.organizationId ?? body.organizationId,
-      quantity: qty,
-      reason,
-      unitCost: resolvedUnitCost,
-      warehouseId,
-    });
-
-    stage = 'UPDATE_STOCK_BALANCE';
-    await applyInventoryDelta(service, {
-      itemId,
-      organizationId: ctx.organizationId ?? body.organizationId ?? String(item.organization_id ?? warehouse.organization_id ?? ''),
-      quantityDelta: type === 'ADJUSTMENT_IN' ? qty : -qty,
-      totalValue: resolvedTotalValue,
-      unitCost: resolvedUnitCost,
-      warehouseId,
-    });
-
-    stage = 'STOCK_MOVEMENT_INSERT_FAILED';
-    await recordStockMovement(service, {
-      createdAt: parsedTransactionAt.toISOString(),
-      createdBy: ctx.userId,
-      itemId,
-      movementType: type,
-      notes: reason,
-      organizationId: ctx.organizationId ?? body.organizationId ?? String(item.organization_id ?? warehouse.organization_id ?? ''),
-      quantity: qty,
-      referenceId: String(adjustment.id),
-      referenceType: 'stock_adjustment',
-      stockValue: body.stockValue ?? body.stock_value,
-      totalCost: body.totalCost ?? body.total_cost,
-      totalValue: body.totalValue ?? body.total_value,
-      unitCost: resolvedUnitCost,
-      value: body.value,
-      warehouseId,
-    });
-
-    stage = 'WRITE_AUDIT_LOG';
-    await writeInventoryAuditLog(service, {
-      action: 'STOCK_ADJUSTMENT_POSTED',
-      details: {
-        itemCode: item.code,
-        itemName: item.name,
-        quantity: qty,
-        reason,
-        totalValue: resolvedTotalValue,
-        transactionAt: parsedTransactionAt.toISOString(),
-        type,
-        unitCost: resolvedUnitCost,
-        warehouseCode: warehouse.code ?? null,
-        warehouseName: warehouse.name,
-      },
-      entityId: String(adjustment.id),
-      entityType: 'stock_adjustment',
-      userProfileId: ctx.userId,
-    });
-
-    stage = 'FETCH_UPDATED_BALANCE';
-    const { data: updatedBalance, error: fetchErr } = await service
-      .from('stock_balances')
-      .select(
-        `id, quantity_on_hand, quantity_available, quantity_reserved, last_updated,
-         items!item_id(id, code, name, item_type, reorder_level,
-           units_of_measure!unit_of_measure_id(id, name, abbreviation)),
-         warehouses!warehouse_id(id, code, name,
-           branches!branch_id(id, name))`,
-      )
-      .eq('item_id', itemId)
-      .eq('warehouse_id', warehouseId)
-      .single();
-    if (fetchErr) {
-      const fallbackBalanceResult = await service
-        .from('stock_balances')
-        .select('id, quantity_on_hand, quantity_available, quantity_reserved, total_value, average_cost, avg_cost, last_updated, updated_at')
-        .eq('item_id', itemId)
-        .eq('warehouse_id', warehouseId)
-        .maybeSingle();
-
-      if (!fallbackBalanceResult.error && fallbackBalanceResult.data) {
-        return NextResponse.json(
-          {
-            ...fallbackBalanceResult.data,
-            adjustmentPosted: true,
-            warning: 'Stock adjustment posted but updated balance could not be fully reloaded',
-          },
-          { status: 201 },
-        );
-      }
-
-      return inventoryAdjustmentSuccessWarningResponse({
-        adjustmentId: String(adjustment.id),
-        itemId,
-        quantity: qty,
-        totalValue: resolvedTotalValue,
-        unitCost: resolvedUnitCost,
-        warehouseId,
-        warning: 'Stock adjustment posted but updated balance could not be reloaded',
-      });
+    const postingDate = toDateOnly(parsedTransactionAt.toISOString());
+    const period = await findOpenFiscalPeriod(ctx.organizationId, postingDate);
+    if (!period) {
+      return badRequest(`No open fiscal period exists for ${postingDate}.`);
     }
 
-    return NextResponse.json(updatedBalance, { status: 201 });
-  } catch (error) {
-    const dbMessage = error instanceof Error ? error.message : 'Failed to post stock adjustment.';
-    return inventoryAdjustmentFailedResponse({
-      dbMessage,
-      itemId,
-      quantity: qty,
-      stage,
-      totalValue: resolvedTotalValue,
-      unitCost: resolvedUnitCost,
-      warehouseId,
+    const costCenterCode = await resolveFinanceCostCentreCode(ctx.organizationId, {
+      branchId,
+      preferredCodes: getFinanceModuleDefaultCostCentreCodes('inventory'),
     });
+    const mappingKey = resolveInventoryPostingMappingKey({
+      itemCategoryName: null,
+      itemType: String(item.item_type ?? ''),
+    });
+    const inventoryAccount = await resolveFinancePostingAccount(ctx.organizationId, mappingKey, {
+      branchId,
+      fallbackAccountCode: mappingKey === 'PACKAGING_INVENTORY' ? '1217' : '1210',
+      transactionType: 'STOCK_ADJUSTMENT',
+    });
+    const varianceAccount = await resolveFinancePostingAccount(ctx.organizationId, 'INVENTORY_VARIANCE', {
+      branchId,
+      fallbackAccountCode: '1270',
+      transactionType: 'STOCK_ADJUSTMENT',
+    });
+    const financeLines = type === 'ADJUSTMENT_IN'
+      ? [
+          {
+            accountId: inventoryAccount.id,
+            branchId,
+            costCenterCode,
+            creditAmount: 0,
+            debitAmount: totalValue,
+            description: `Inventory gain for ${item.name}`,
+          },
+          {
+            accountId: varianceAccount.id,
+            branchId,
+            costCenterCode,
+            creditAmount: totalValue,
+            debitAmount: 0,
+            description: `Inventory gain offset for ${item.name}`,
+          },
+        ]
+      : [
+          {
+            accountId: varianceAccount.id,
+            branchId,
+            costCenterCode,
+            creditAmount: 0,
+            debitAmount: totalValue,
+            description: `Inventory loss for ${item.name}`,
+          },
+          {
+            accountId: inventoryAccount.id,
+            branchId,
+            costCenterCode,
+            creditAmount: totalValue,
+            debitAmount: 0,
+            description: `Inventory reduction for ${item.name}`,
+          },
+        ];
+
+    const postingResult = await invokeInventoryPostingRpc<{
+      adjustmentId: string;
+      adjustmentNumber: string;
+      journal: { entryNumber: string; id: string };
+      movementId: string;
+      movementType: string;
+      quantityOnHand: number;
+      stockValue: number;
+      success: boolean;
+    }>(service as never, 'post_inventory_adjustment_atomic', {
+      p_actor_user_id: ctx.userId,
+      p_branch_id: branchId,
+      p_cost_center_code: costCenterCode,
+      p_finance_lines: financeLines,
+      p_idempotency_key: buildInventoryPostingIdempotencyKey({
+        actorUserId: ctx.userId,
+        documentId: `${warehouseId}:${itemId}:${postingDate}:${type}`,
+        operation: 'stock_adjustment_post',
+      }),
+      p_item_id: itemId,
+      p_journal_date: postingDate,
+      p_movement_type: type,
+      p_organization_id: ctx.organizationId,
+      p_quantity: qty,
+      p_reason: reason,
+      p_unit_cost: unitCost,
+      p_warehouse_id: warehouseId,
+    });
+
+    return NextResponse.json(
+      {
+        ...postingResult,
+        fiscalPeriodId: String(period.id ?? ''),
+        itemId,
+        warehouseId,
+      },
+      { status: 201 },
+    );
+  } catch (error) {
+    return serverError(error instanceof Error ? error.message : 'Failed to post stock adjustment.');
+  }
+}
+
+export async function GET(request: NextRequest) {
+  const ctx = await getAuthContext();
+  if (!ctx) return unauthorized();
+  if (!can(ctx, 'inventory.adjustment.view', 'inventory.read')) return forbidden();
+
+  const service = createServiceRoleClient();
+  const { searchParams } = new URL(request.url);
+  const page = Math.max(1, parseInt(searchParams.get('page') ?? '1'));
+  const pageSize = Math.min(25, parseInt(searchParams.get('pageSize') ?? '10'));
+  const from = (page - 1) * pageSize;
+
+  try {
+    const { loadInventoryReversalSnapshots } = await import('@/lib/inventory-reversal-server');
+    const query = service
+      .from('stock_adjustments')
+      .select('id, adjustment_number, adjustment_date, status, reason, warehouse_id, journal_entry_id, posted_at, reversed_at, reversal_reason, created_at', {
+        count: 'exact',
+      })
+      .eq('organization_id', ctx.organizationId)
+      .order('created_at', { ascending: false })
+      .range(from, from + pageSize - 1);
+    const { data, count, error } = await query;
+    if (error) {
+      return serverError(error.message);
+    }
+
+    const adjustmentIds = (data ?? []).map((row) => String(row.id ?? ''));
+    const warehouseIds = [...new Set((data ?? []).map((row) => String(row.warehouse_id ?? '')).filter(Boolean))];
+    const [linesResult, itemsResult, warehousesResult, reversalMap] = await Promise.all([
+      adjustmentIds.length
+        ? service.from('stock_adjustment_items').select('adjustment_id, item_id, quantity_adjusted, movement_type, unit_cost').in('adjustment_id', adjustmentIds)
+        : Promise.resolve({ data: [], error: null }),
+      adjustmentIds.length
+        ? service
+            .from('stock_adjustment_items')
+            .select('adjustment_id, item_id, items!item_id(id, code, name)')
+            .in('adjustment_id', adjustmentIds)
+        : Promise.resolve({ data: [], error: null }),
+      warehouseIds.length
+        ? service.from('warehouses').select('id, name').in('id', warehouseIds)
+        : Promise.resolve({ data: [], error: null }),
+      loadInventoryReversalSnapshots(service, 'stock_adjustment', adjustmentIds),
+    ]);
+
+    if (linesResult.error) return serverError(linesResult.error.message);
+    if (itemsResult.error) return serverError(itemsResult.error.message);
+    if (warehousesResult.error) return serverError(warehousesResult.error.message);
+
+    const lineByAdjustmentId = new Map(
+      (linesResult.data ?? []).map((row) => [String(row.adjustment_id ?? ''), row] as const),
+    );
+    const itemByAdjustmentId = new Map(
+      (itemsResult.data ?? []).map((row) => {
+        const item = Array.isArray(row.items) ? row.items[0] : row.items;
+        return [String(row.adjustment_id ?? ''), item ?? null] as const;
+      }),
+    );
+    const warehousesById = new Map(
+      (warehousesResult.data ?? []).map((row) => [String(row.id ?? ''), String(row.name ?? 'Unknown warehouse')] as const),
+    );
+
+    return NextResponse.json({
+      data: (data ?? []).map((row) => {
+        const id = String(row.id ?? '');
+        const line = lineByAdjustmentId.get(id) as Record<string, unknown> | undefined;
+        const item = itemByAdjustmentId.get(id) as Record<string, unknown> | null | undefined;
+        const reversal = reversalMap.get(id)?.[0] ?? null;
+        return {
+          id,
+          adjustmentDate: row.adjustment_date ? String(row.adjustment_date) : null,
+          adjustmentNumber: String(row.adjustment_number ?? ''),
+          item: item
+            ? {
+                code: String(item.code ?? ''),
+                id: String(item.id ?? ''),
+                name: String(item.name ?? 'Unknown item'),
+              }
+            : null,
+          journalEntryId: row.journal_entry_id ? String(row.journal_entry_id) : null,
+          movementType: line?.movement_type ? String(line.movement_type) : null,
+          quantity: Number(line?.quantity_adjusted ?? 0),
+          reason: String(row.reason ?? ''),
+          reversal: reversal
+            ? {
+                approvedBy: reversal.approvedBy,
+                approvedByName: reversal.approvedByName,
+                id: reversal.id,
+                originalJournalId: reversal.originalJournalId,
+                originalMovementIds: reversal.originalMovementIds,
+                postedAt: reversal.postedAt,
+                postedBy: reversal.postedBy,
+                postedByName: reversal.postedByName,
+                reason: reversal.reason,
+                requestedBy: reversal.requestedBy,
+                requestedByName: reversal.requestedByName,
+                reversalJournalId: reversal.reversalJournalId,
+                reversalJournalNumber: reversal.reversalJournalNumber,
+                reversalMovementIds: reversal.movementIds,
+                reversalNumber: reversal.reversalNumber,
+                reversalReference: reversal.reversalReference,
+                status: reversal.status,
+              }
+            : null,
+          status: reversal ? 'REVERSED' : String(row.status ?? ''),
+          unitCost: Number(line?.unit_cost ?? 0),
+          warehouse: row.warehouse_id
+            ? {
+                id: String(row.warehouse_id),
+                name: warehousesById.get(String(row.warehouse_id)) ?? 'Unknown warehouse',
+              }
+            : null,
+        };
+      }),
+      pagination: { page, pageSize, total: count ?? 0 },
+    });
+  } catch (error) {
+    return serverError(error instanceof Error ? error.message : 'Failed to load stock adjustments.');
   }
 }

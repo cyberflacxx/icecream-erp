@@ -11,6 +11,10 @@ import {
   resolveLedgerDebit,
   validateJournalLines,
 } from '@/lib/finance';
+import {
+  canFinanceAccountReceivePosting,
+  normalizeFinanceAccountRecord,
+} from '@/lib/finance-foundation';
 
 type FinanceRow = Record<string, unknown>;
 
@@ -19,7 +23,9 @@ export type LedgerLine = {
   accountId: string;
   accountName: string;
   accountType: string;
+  branchId: string | null;
   creditAmount: number;
+  costCenterCode: string | null;
   debitAmount: number;
   description: string | null;
   entryDate: string | null;
@@ -33,13 +39,18 @@ export type LedgerLine = {
 };
 
 export type FinancePostingInput = {
+  branchId?: string | null;
+  costCenterCode?: string | null;
   createdBy: string;
+  currencyCode?: string | null;
   description: string;
   journalDate?: string | null;
   lines: Array<{
     accountCode?: string;
     accountId?: string;
+    branchId?: string | null;
     creditAmount: number;
+    costCenterCode?: string | null;
     debitAmount: number;
     description?: string | null;
   }>;
@@ -323,19 +334,52 @@ export async function loadCashAccountsCompatibility(
   return [];
 }
 
-export async function loadLedgerLines(organizationId: string, postedOnly = true) {
+export async function loadLedgerLines(
+  organizationId: string,
+  postedOnly = true,
+  options?: {
+    accountCode?: string | null;
+    branchId?: string | null;
+    costCenterCode?: string | null;
+    endDate?: string | null;
+    startDate?: string | null;
+  },
+) {
   const service = financeService();
-  const modern = await service
+  let modernQuery = service
     .from('journal_entry_lines')
     .select(
-      'id, journal_entry_id, account_id, description, debit_amount, credit_amount, accounts(id, account_code, account_name, account_type), journal_entries!inner(id, entry_number, entry_date, organization_id, is_posted, status, reference_type, reference_id)',
+      'id, journal_entry_id, account_id, branch_id, cost_center_code, description, debit_amount, credit_amount, accounts(id, account_code, account_name, account_type), journal_entries!inner(id, entry_number, entry_date, organization_id, branch_id, cost_center_code, is_posted, status, reference_type, reference_id)',
     )
     .eq('journal_entries.organization_id', organizationId);
+  if (options?.startDate) modernQuery = modernQuery.gte('journal_entries.entry_date', options.startDate);
+  if (options?.endDate) modernQuery = modernQuery.lte('journal_entries.entry_date', options.endDate);
+  const modern = await modernQuery;
 
   if (!modern.error) {
     const rows = (modern.data ?? []).filter((row) => {
       const entry = mapNestedRow(row.journal_entries as FinanceRow | FinanceRow[] | null);
-      return !postedOnly || entry?.is_posted === true || isPostedJournalStatus(String(entry?.status ?? ''));
+      if (postedOnly && entry?.is_posted !== true && !isPostedJournalStatus(String(entry?.status ?? ''))) {
+        return false;
+      }
+
+      const branchId = String(row.branch_id ?? entry?.branch_id ?? '').trim();
+      if (options?.branchId && branchId !== options.branchId) {
+        return false;
+      }
+
+      const costCenterCode = String(row.cost_center_code ?? entry?.cost_center_code ?? '').trim();
+      if (options?.costCenterCode && costCenterCode !== options.costCenterCode) {
+        return false;
+      }
+
+      const account = mapNestedRow(row.accounts as FinanceRow | FinanceRow[] | null);
+      const accountCode = String(account?.account_code ?? account?.code ?? '').trim().toUpperCase();
+      if (options?.accountCode && accountCode !== String(options.accountCode).trim().toUpperCase()) {
+        return false;
+      }
+
+      return true;
     });
     return rows.map((row) => mapModernLedgerLine(row as FinanceRow));
   }
@@ -357,17 +401,40 @@ export async function loadLedgerLines(organizationId: string, postedOnly = true)
     throw modern.error;
   }
 
-  const legacy = await service
+  let legacyQuery = service
     .from('journal_lines')
     .select(
-      'id, entry_id, account_id, description, debit, credit, sort_order, accounts(id, code, name, type), journal_entries!inner(id, entry_number, entry_date, organization_id, status, reference)',
+      'id, entry_id, account_id, description, debit, credit, sort_order, accounts(id, code, name, type), journal_entries!inner(id, entry_number, entry_date, organization_id, branch_id, cost_center_code, status, reference)',
     )
     .eq('journal_entries.organization_id', organizationId);
+  if (options?.startDate) legacyQuery = legacyQuery.gte('journal_entries.entry_date', options.startDate);
+  if (options?.endDate) legacyQuery = legacyQuery.lte('journal_entries.entry_date', options.endDate);
+  const legacy = await legacyQuery;
 
   if (!legacy.error) {
     const rows = (legacy.data ?? []).filter((row) => {
       const entry = mapNestedRow(row.journal_entries as FinanceRow | FinanceRow[] | null);
-      return !postedOnly || isPostedJournalStatus(String(entry?.status ?? ''));
+      if (postedOnly && !isPostedJournalStatus(String(entry?.status ?? ''))) {
+        return false;
+      }
+
+      const branchId = String(entry?.branch_id ?? '').trim();
+      if (options?.branchId && branchId !== options.branchId) {
+        return false;
+      }
+
+      const costCenterCode = String(entry?.cost_center_code ?? '').trim();
+      if (options?.costCenterCode && costCenterCode !== options.costCenterCode) {
+        return false;
+      }
+
+      const account = mapNestedRow(row.accounts as FinanceRow | FinanceRow[] | null);
+      const accountCode = String(account?.account_code ?? account?.code ?? '').trim().toUpperCase();
+      if (options?.accountCode && accountCode !== String(options.accountCode).trim().toUpperCase()) {
+        return false;
+      }
+
+      return true;
     });
     return rows.map((row) => mapLegacyLedgerLine(row as FinanceRow));
   }
@@ -386,7 +453,7 @@ export async function loadLedgerLines(organizationId: string, postedOnly = true)
     throw legacy.error;
   }
 
-  return loadAccountsOnlyLedgerFallback(service, organizationId);
+  return loadAccountsOnlyLedgerFallback(service, organizationId, options?.accountCode ?? null);
 }
 
 export async function findJournalBySource(
@@ -475,10 +542,13 @@ export async function postFinanceDocument(input: FinancePostingInput) {
   const modernInsert = await service
     .from('journal_entries')
     .insert({
+      branch_id: input.branchId ?? null,
+      cost_center_code: input.costCenterCode ?? null,
       organization_id: input.organizationId,
       entry_number: entryNumber,
       entry_date: journalDate,
       description: input.description,
+      currency_code: input.currencyCode ?? 'USD',
       reference_type: input.sourceDocumentType,
       reference_id: input.sourceDocumentId,
       status: 'APPROVED',
@@ -509,6 +579,8 @@ export async function postFinanceDocument(input: FinancePostingInput) {
     const legacyInsert = await service
       .from('journal_entries')
       .insert({
+        branch_id: input.branchId ?? null,
+        cost_center_code: input.costCenterCode ?? null,
         organization_id: input.organizationId,
         entry_number: entryNumber,
         entry_date: journalDate,
@@ -545,8 +617,10 @@ export async function postFinanceDocument(input: FinancePostingInput) {
       )
     : await service.from('journal_entry_lines').insert(
         resolvedLines.map((line) => ({
+          branch_id: line.branchId ?? input.branchId ?? null,
           journal_entry_id: journal!.id,
           account_id: line.accountId,
+          cost_center_code: line.costCenterCode ?? input.costCenterCode ?? null,
           credit_amount: Number(line.creditAmount ?? 0),
           debit_amount: Number(line.debitAmount ?? 0),
           description: line.description ?? null,
@@ -579,6 +653,34 @@ export async function postFinanceDocument(input: FinancePostingInput) {
     totalCredit,
     totalDebit,
   };
+}
+
+export async function deleteFinanceJournalById(journalId: string) {
+  const service = financeService();
+
+  const modernDelete = await service
+    .from('journal_entry_lines')
+    .delete()
+    .eq('journal_entry_id', journalId);
+  if (modernDelete.error && !isMissingFinanceTable(modernDelete.error)) {
+    throw modernDelete.error;
+  }
+
+  const legacyDelete = await service
+    .from('journal_lines')
+    .delete()
+    .eq('entry_id', journalId);
+  if (legacyDelete.error && !isMissingFinanceTable(legacyDelete.error)) {
+    throw legacyDelete.error;
+  }
+
+  const headerDelete = await service
+    .from('journal_entries')
+    .delete()
+    .eq('id', journalId);
+  if (headerDelete.error && !isMissingFinanceTable(headerDelete.error)) {
+    throw headerDelete.error;
+  }
 }
 
 export async function createLinkedFinanceTransaction(input: {
@@ -686,14 +788,14 @@ async function resolvePostingAccounts(
   if (ids.length > 0) {
     const byIds = await service
       .from('accounts')
-      .select('id, organization_id, account_code, account_name, account_type, code, name, type, is_active')
+      .select('id, organization_id, account_code, account_name, account_type, code, name, type, is_active, allow_posting, normal_balance, balance, parent_id, description')
       .eq('organization_id', organizationId)
       .in('id', ids);
 
     if (byIds.error) {
       const fallback = await service
         .from('accounts')
-        .select('id, organization_id, code, name, type, is_active')
+        .select('id, organization_id, code, name, type, is_active, balance, parent_id, description')
         .eq('organization_id', organizationId)
         .in('id', ids);
       if (fallback.error) throw fallback.error;
@@ -706,13 +808,13 @@ async function resolvePostingAccounts(
   if (codes.length > 0) {
     let byCodesResult = await service
       .from('accounts')
-      .select('id, organization_id, account_code, account_name, account_type, code, name, type, is_active')
+      .select('id, organization_id, account_code, account_name, account_type, code, name, type, is_active, allow_posting, normal_balance, balance, parent_id, description')
       .eq('organization_id', organizationId)
       .in('account_code', codes);
     if (byCodesResult.error && isMissingFinanceColumn(byCodesResult.error, 'accounts', 'account_code')) {
       byCodesResult = await service
         .from('accounts')
-        .select('id, organization_id, code, name, type, is_active')
+        .select('id, organization_id, code, name, type, is_active, balance, parent_id, description')
         .eq('organization_id', organizationId)
         .in('code', codes) as typeof byCodesResult;
     }
@@ -728,8 +830,10 @@ async function resolvePostingAccounts(
     if (!account) {
       throw new Error(`Finance account ${line.accountCode ?? line.accountId ?? ''} was not found.`);
     }
-    if (account.is_active === false) {
-      throw new Error(`Finance account ${account.account_code ?? account.code ?? account.id} is inactive.`);
+    const normalizedAccount = normalizeFinanceAccountRecord(account);
+    const postingError = canFinanceAccountReceivePosting(normalizedAccount);
+    if (postingError) {
+      throw new Error(postingError);
     }
     return {
       ...line,
@@ -753,7 +857,9 @@ function mapModernLedgerLine(row: FinanceRow): LedgerLine {
     accountId: String(row.account_id ?? account?.id ?? ''),
     accountName: normalized.accountName,
     accountType: normalized.accountType,
+    branchId: row.branch_id ? String(row.branch_id) : entry?.branch_id ? String(entry.branch_id) : null,
     creditAmount: normalized.credit,
+    costCenterCode: row.cost_center_code ? String(row.cost_center_code) : entry?.cost_center_code ? String(entry.cost_center_code) : null,
     debitAmount: normalized.debit,
     description: row.description ? String(row.description) : null,
     entryDate: entry?.entry_date ? String(entry.entry_date) : null,
@@ -783,7 +889,9 @@ function mapLegacyLedgerLine(row: FinanceRow): LedgerLine {
     accountId: String(row.account_id ?? account?.id ?? ''),
     accountName: normalized.accountName,
     accountType: normalized.accountType,
+    branchId: entry?.branch_id ? String(entry.branch_id) : null,
     creditAmount: normalized.credit,
+    costCenterCode: entry?.cost_center_code ? String(entry.cost_center_code) : null,
     debitAmount: normalized.debit,
     description: row.description ? String(row.description) : null,
     entryDate: entry?.entry_date ? String(entry.entry_date) : null,
@@ -800,6 +908,7 @@ function mapLegacyLedgerLine(row: FinanceRow): LedgerLine {
 async function loadAccountsOnlyLedgerFallback(
   service: ReturnType<typeof financeService>,
   organizationId: string,
+  accountCode?: string | null,
 ) {
   const attempts = [
     'id, organization_id, account_code, account_name, account_type, is_active',
@@ -819,6 +928,11 @@ async function loadAccountsOnlyLedgerFallback(
       return (result.data ?? [])
         .map((row) => row as FinanceRow)
         .filter((row) => row.is_active !== false)
+        .filter((row) => {
+          if (!accountCode) return true;
+          const normalizedCode = String(row.account_code ?? row.code ?? '').trim().toUpperCase();
+          return normalizedCode === String(accountCode).trim().toUpperCase();
+        })
         .map((row) => {
           const normalized = normalizeTrialBalanceRow(row);
           return {
@@ -826,7 +940,9 @@ async function loadAccountsOnlyLedgerFallback(
             accountId: normalized.accountId,
             accountName: normalized.accountName || 'Unknown account',
             accountType: normalized.accountType,
+            branchId: null,
             creditAmount: 0,
+            costCenterCode: null,
             debitAmount: 0,
             description: null,
             entryDate: null,

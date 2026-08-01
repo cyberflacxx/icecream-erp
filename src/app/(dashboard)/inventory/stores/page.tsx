@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { AlertTriangle, Boxes, ClipboardCheck, Factory, PackagePlus, RotateCcw, Scale, SlidersHorizontal, TriangleAlert, Undo2 } from 'lucide-react';
 import { type FormEvent, type ReactNode, useState } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { PageHeader } from '@/components/dashboard/page-header';
 import { ItemSelectorField } from '@/components/shared/item-selector-field';
@@ -12,6 +12,7 @@ import { Button } from '@/components/ui/button';
 import { EmptyState, LoadingState } from '@/components/ui-library';
 import { useInventoryDashboard, useInventoryMeta, useInventoryRequest } from '@/hooks/inventory';
 import { useItemSelectorOptions } from '@/hooks/useItemSelectorOptions';
+import { usePermission } from '@/hooks/usePermission';
 import { useSalesMeta } from '@/hooks/sales/useSalesMeta';
 
 const adjustmentTypes = [
@@ -85,11 +86,53 @@ interface FeedbackState {
   tone: 'error' | 'success';
 }
 
+interface RecentAdjustmentRow {
+  adjustmentDate: string | null;
+  adjustmentNumber: string;
+  id: string;
+  item: { code: string; id: string; name: string } | null;
+  movementType: string | null;
+  quantity: number;
+  reason: string;
+  reversal?: {
+    id: string;
+    originalJournalId: string | null;
+    originalMovementIds: string[];
+    reason: string;
+    reversalJournalId: string | null;
+    reversalJournalNumber: string | null;
+    reversalMovementIds: string[];
+  } | null;
+  status: string;
+  warehouse: { id: string; name: string } | null;
+}
+
+interface RecentWriteOffRow {
+  batchId: string;
+  batchNumber: string;
+  id?: string;
+  item: { code: string; id: string; name: string } | null;
+  quantity: number;
+  reversal?: {
+    id: string;
+    originalJournalId: string | null;
+    originalMovementIds: string[];
+    reason: string;
+    reversalJournalId: string | null;
+    reversalJournalNumber: string | null;
+    reversalMovementIds: string[];
+  } | null;
+  status: string;
+  warehouse: { id: string; name: string } | null;
+}
+
 export default function InventoryStoresPage() {
   const inventoryMetaQuery = useInventoryMeta();
   const salesMetaQuery = useSalesMeta();
   const dashboardQuery = useInventoryDashboard();
   const request = useInventoryRequest();
+  const canReverseAdjustment = usePermission(['inventory.adjustment.reverse', 'inventory.write']);
+  const canReverseWriteOff = usePermission(['inventory.writeoff.reverse', 'inventory.write_off.reverse', 'inventory.write']);
   const queryClient = useQueryClient();
   const [adjustmentState, setAdjustmentState] = useState(initialAdjustmentState);
   const [stockTakeState, setStockTakeState] = useState(initialStockTakeState);
@@ -129,6 +172,14 @@ export default function InventoryStoresPage() {
     includeStock: true,
     itemType: Array.from(finishedGoodsItemTypes),
     warehouseId: finishedGoodsReceiptState.destinationWarehouseId || undefined,
+  });
+  const recentAdjustmentsQuery = useQuery({
+    queryKey: ['inventory', 'recent-adjustments'],
+    queryFn: () => request<{ data: RecentAdjustmentRow[] }>('/api/inventory/adjustments?page=1&pageSize=6'),
+  });
+  const recentWriteOffsQuery = useQuery({
+    queryKey: ['inventory', 'recent-write-offs'],
+    queryFn: () => request<{ data: RecentWriteOffRow[] }>('/api/inventory/write-off?page=1&pageSize=6'),
   });
 
   if (inventoryMetaQuery.isLoading || salesMetaQuery.isLoading || dashboardQuery.isLoading) return <LoadingState />;
@@ -343,6 +394,138 @@ export default function InventoryStoresPage() {
           <CrossLinkTile href="/production/transfers" label="Production Release" helper="Push completed finished goods from production into stores" />
           <CrossLinkTile href="/quality/returns" label="Quality Returns" helper="Review returned or quarantined stock actions" />
         </div>
+      </div>
+
+      <div className="grid gap-6 xl:grid-cols-2">
+        <section className="rounded-3xl border border-border bg-white p-5">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <h2 className="text-lg font-semibold text-brown">Recent Stock Adjustments</h2>
+              <p className="mt-1 text-sm text-muted">Reverse posted gain or loss adjustments with their journal and movement trail.</p>
+            </div>
+          </div>
+          <div className="mt-4 space-y-3">
+            {(recentAdjustmentsQuery.data?.data ?? []).length ? (
+              (recentAdjustmentsQuery.data?.data ?? []).map((adjustment) => (
+                <div key={adjustment.id} className="rounded-2xl border border-border bg-white px-4 py-3 text-sm">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <p className="font-semibold text-brown">{adjustment.adjustmentNumber}</p>
+                      <p className="text-xs text-muted">
+                        {adjustment.item?.code ?? adjustment.item?.id ?? 'Item'} · {adjustment.item?.name ?? 'Unknown item'} · {adjustment.warehouse?.name ?? 'Unknown warehouse'}
+                      </p>
+                      <p className="mt-1 text-xs text-muted">
+                        {adjustment.movementType ?? 'Adjustment'} · Qty {adjustment.quantity.toFixed(3)} · {adjustment.reason}
+                      </p>
+                    </div>
+                    <div className="flex flex-col items-end gap-2">
+                      <span className="text-xs font-medium text-muted">{adjustment.status}</span>
+                      {canReverseAdjustment && adjustment.status === 'POSTED' ? (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={pendingAction === `reverse-adjustment:${adjustment.id}`}
+                          onClick={() => {
+                            const reason = window.prompt('Enter the stock adjustment reversal reason.');
+                            if (!reason || !reason.trim()) return;
+                            void runAction(`reverse-adjustment:${adjustment.id}`, 'Stock adjustment reversed.', async () => {
+                              await request(`/api/inventory/adjustments/${adjustment.id}/reverse`, {
+                                body: JSON.stringify({ reason: reason.trim() }),
+                                method: 'POST',
+                              });
+                            });
+                          }}
+                        >
+                          {pendingAction === `reverse-adjustment:${adjustment.id}` ? 'Reversing...' : 'Reverse Adjustment'}
+                        </Button>
+                      ) : null}
+                    </div>
+                  </div>
+                  {adjustment.reversal ? (
+                    <div className="mt-3 space-y-1 text-xs text-muted">
+                      <p>{adjustment.reversal.reason}</p>
+                      <p>
+                        Original journal: {adjustment.reversal.originalJournalId ?? '-'} · Reversal journal: {adjustment.reversal.reversalJournalNumber ?? adjustment.reversal.reversalJournalId ?? '-'}
+                      </p>
+                      <p>
+                        Movements: {adjustment.reversal.originalMovementIds.length} original / {adjustment.reversal.reversalMovementIds.length} reversal
+                      </p>
+                    </div>
+                  ) : null}
+                </div>
+              ))
+            ) : (
+              <EmptyState
+                icon={<SlidersHorizontal className="h-6 w-6" />}
+                title="No recent adjustments"
+                description="Posted stock adjustments will appear here for review and reversal."
+              />
+            )}
+          </div>
+        </section>
+
+        <section className="rounded-3xl border border-border bg-white p-5">
+          <div>
+            <h2 className="text-lg font-semibold text-brown">Recent Write-Offs</h2>
+            <p className="mt-1 text-sm text-muted">Review write-offs and restore stock when an operational correction is required.</p>
+          </div>
+          <div className="mt-4 space-y-3">
+            {(recentWriteOffsQuery.data?.data ?? []).length ? (
+              (recentWriteOffsQuery.data?.data ?? []).map((writeOff) => (
+                <div key={writeOff.batchId} className="rounded-2xl border border-border bg-white px-4 py-3 text-sm">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <p className="font-semibold text-brown">{writeOff.batchNumber || writeOff.batchId}</p>
+                      <p className="text-xs text-muted">
+                        {writeOff.item?.code ?? writeOff.item?.id ?? 'Item'} · {writeOff.item?.name ?? 'Unknown item'} · {writeOff.warehouse?.name ?? 'Unknown warehouse'}
+                      </p>
+                      <p className="mt-1 text-xs text-muted">Qty {writeOff.quantity.toFixed(3)}</p>
+                    </div>
+                    <div className="flex flex-col items-end gap-2">
+                      <span className="text-xs font-medium text-muted">{writeOff.status}</span>
+                      {canReverseWriteOff && writeOff.status === 'POSTED' ? (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={pendingAction === `reverse-writeoff:${writeOff.batchId}`}
+                          onClick={() => {
+                            const reason = window.prompt('Enter the inventory write-off reversal reason.');
+                            if (!reason || !reason.trim()) return;
+                            void runAction(`reverse-writeoff:${writeOff.batchId}`, 'Inventory write-off reversed.', async () => {
+                              await request(`/api/inventory/write-off/${writeOff.batchId}/reverse`, {
+                                body: JSON.stringify({ reason: reason.trim() }),
+                                method: 'POST',
+                              });
+                            });
+                          }}
+                        >
+                          {pendingAction === `reverse-writeoff:${writeOff.batchId}` ? 'Reversing...' : 'Reverse Write-Off'}
+                        </Button>
+                      ) : null}
+                    </div>
+                  </div>
+                  {writeOff.reversal ? (
+                    <div className="mt-3 space-y-1 text-xs text-muted">
+                      <p>{writeOff.reversal.reason}</p>
+                      <p>
+                        Original journal: {writeOff.reversal.originalJournalId ?? '-'} · Reversal journal: {writeOff.reversal.reversalJournalNumber ?? writeOff.reversal.reversalJournalId ?? '-'}
+                      </p>
+                      <p>
+                        Movements: {writeOff.reversal.originalMovementIds.length} original / {writeOff.reversal.reversalMovementIds.length} reversal
+                      </p>
+                    </div>
+                  ) : null}
+                </div>
+              ))
+            ) : (
+              <EmptyState
+                icon={<TriangleAlert className="h-6 w-6" />}
+                title="No recent write-offs"
+                description="Inventory write-offs will appear here once batches are posted out."
+              />
+            )}
+          </div>
+        </section>
       </div>
 
       <div className="grid gap-6 xl:grid-cols-3">

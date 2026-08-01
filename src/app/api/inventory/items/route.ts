@@ -10,6 +10,7 @@ import {
 } from '@/lib/api-auth';
 import { resolveRequestedBranchId } from '@/lib/branch-access';
 import { buildItemSelectorOptions } from '@/lib/item-selector';
+import { loadResolvedSalesItemPricing, loadSalesCustomerPricingContext } from '@/lib/sales-pricing';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
 function normalizeItem(row: Record<string, unknown>, categories = new Map<string, Record<string, unknown>>(), units = new Map<string, Record<string, unknown>>()) {
@@ -64,6 +65,7 @@ export async function GET(request: NextRequest) {
   const type = searchParams.get('type') ?? '';
   const selector = searchParams.get('selector') === 'true';
   const branchIdParam = searchParams.get('branch_id') ?? searchParams.get('branchId');
+  const customerIdParam = searchParams.get('customer_id') ?? searchParams.get('customerId');
   const warehouseId = searchParams.get('warehouse_id') ?? searchParams.get('warehouseId');
   const includeStock = searchParams.get('include_stock') === 'true' || searchParams.get('includeStock') === 'true';
   const includeCost = searchParams.get('include_cost') === 'true' || searchParams.get('includeCost') === 'true';
@@ -211,15 +213,31 @@ export async function GET(request: NextRequest) {
       ]),
     );
 
+    const customerPricing = customerIdParam
+      ? await loadSalesCustomerPricingContext(service, ctx.organizationId, customerIdParam)
+      : null;
+    const resolvedPricing = await loadResolvedSalesItemPricing({
+      branchId: effectiveBranchId,
+      customer: customerPricing,
+      documentDate: new Date().toISOString().slice(0, 10),
+      itemIds: selectorRows.map((row) => String(row.id)),
+      organizationId: ctx.organizationId,
+      service,
+      warehouseId: authorizedWarehouseId,
+    });
+
     const options = buildItemSelectorOptions({
       branchId: effectiveBranchId,
       items: selectorRows.map((row) => {
         const categoryName = categoryById.get(String(row.category_id ?? '')) ?? null;
         const unit = unitById.get(String(row.unit_id ?? row.unit_of_measure_id ?? '')) ?? null;
+        const resolved = resolvedPricing.get(String(row.id));
         const rawCost = includeCost
-          ? Number(row.unit_cost ?? row.standard_cost ?? row.cost_price ?? row.purchase_price)
+          ? resolved?.currentInventoryCost ?? Number(row.unit_cost ?? row.standard_cost ?? row.cost_price ?? row.purchase_price)
           : null;
-        const rawPrice = includePrice ? Number(row.selling_price) : null;
+        const rawPrice = includePrice
+          ? resolved?.sellingPrice ?? Number(row.selling_price)
+          : null;
         return {
           categoryId: row.category_id ? String(row.category_id) : null,
           categoryName,

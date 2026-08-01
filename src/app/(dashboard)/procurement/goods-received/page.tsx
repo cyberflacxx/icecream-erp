@@ -131,6 +131,7 @@ export default function GoodsReceivedPage() {
   const canCreate = usePermission([PERMISSIONS.goodsReceived.create, 'procurement.write']);
   const canApprove = usePermission(['stores.grn.approve', 'procurement.approve']);
   const canPost = usePermission(['stores.grn.post', 'procurement.grn.post', 'inventory.write']);
+  const canReverse = usePermission(['goods_receipt.reverse', 'stores.grn.reverse', 'inventory.write']);
   const { currentUser } = useUserContext();
   const [filters, setFilters] = useState({
     page: 1,
@@ -586,6 +587,11 @@ export default function GoodsReceivedPage() {
                   <p className="text-xs text-muted">
                     Quality: {row.qualityStatus ?? 'Pending'}
                   </p>
+                  {row.reversal ? (
+                    <p className="text-xs text-muted">
+                      Reversed {row.reversal.postedAt ? new Date(row.reversal.postedAt).toLocaleString() : ''} {row.reversal.reversalJournalNumber ? `· ${row.reversal.reversalJournalNumber}` : ''}
+                    </p>
+                  ) : null}
                 </div>
               );
             }
@@ -650,7 +656,7 @@ export default function GoodsReceivedPage() {
                 );
               }
 
-              if (actionState.canPost || actionState.canOpenPurchaseOrder) {
+              if (actionState.canPost || actionState.canOpenPurchaseOrder || (canReverse && row.stockPosted && row.status !== 'REVERSED')) {
                 return (
                   <div className="flex flex-wrap gap-2">
                     {actionState.canPost ? (
@@ -668,11 +674,45 @@ export default function GoodsReceivedPage() {
                         {pendingAction === `post:${row.id}` ? 'Posting...' : 'Post to HQ Inventory'}
                       </Button>
                     ) : null}
+                    {canReverse && row.stockPosted && row.status !== 'REVERSED' ? (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={pendingAction === `reverse:${row.id}`}
+                        onClick={() => {
+                          const reason = window.prompt('Enter the GRN reversal reason.');
+                          if (!reason || !reason.trim()) return;
+                          void runRowAction(`reverse:${row.id}`, 'GRN reversal posted.', async () => {
+                            await request(`/api/procurement/grns/${row.id}/reverse`, {
+                              body: JSON.stringify({ reason: reason.trim() }),
+                              method: 'POST',
+                            });
+                            await refresh();
+                          });
+                        }}
+                      >
+                        {pendingAction === `reverse:${row.id}` ? 'Reversing...' : 'Reverse GRN'}
+                      </Button>
+                    ) : null}
                     {actionState.canOpenPurchaseOrder && row.purchaseOrder?.id ? (
                       <Button asChild size="sm" variant="outline">
                         <Link href={`/procurement/purchase-orders/${row.purchaseOrder.id}`}>Open PO</Link>
                       </Button>
                     ) : null}
+                  </div>
+                );
+              }
+
+              if (row.reversal) {
+                return (
+                  <div className="space-y-1 text-xs text-muted">
+                    <p>{row.reversal.reason}</p>
+                    <p>
+                      Original journal: {row.reversal.originalJournalId ?? '-'} · Reversal journal: {row.reversal.reversalJournalNumber ?? row.reversal.reversalJournalId ?? '-'}
+                    </p>
+                    <p>
+                      Movements: {row.reversal.originalMovementIds.length} original / {row.reversal.reversalMovementIds.length} reversal
+                    </p>
                   </div>
                 );
               }

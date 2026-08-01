@@ -1,42 +1,54 @@
-﻿'use client';
+'use client';
 
-import { ArrowRightLeft, History } from 'lucide-react';
-import { useState } from 'react';
 import { format } from 'date-fns';
+import { ArrowRightLeft, Download, History, Printer } from 'lucide-react';
+import { useState } from 'react';
 
-import { DataTable, EmptyState, FilterBar, StatusBadge } from '@/components/ui-library';
-
+import { PageHeader } from '@/components/dashboard/page-header';
 import { InventoryNav } from '@/components/inventory/inventory-nav';
 import { PaginationControls } from '@/components/inventory/pagination-controls';
-import { PageHeader } from '@/components/dashboard/page-header';
+import { Button } from '@/components/ui/button';
+import { DataTable, EmptyState, FilterBar, StatusBadge } from '@/components/ui-library';
+import { useUserContext } from '@/contexts/UserContext';
 import { useInventoryMeta, useStockMovements, type StockMovementRow } from '@/hooks/inventory';
+import { downloadFromUrl } from '@/lib/export';
+import { API_ROUTES } from '@/lib/shared';
 
 const currencyFormatter = new Intl.NumberFormat('en-US', {
-  style: 'currency',
   currency: 'USD',
-  minimumFractionDigits: 2
+  minimumFractionDigits: 2,
+  style: 'currency',
 });
 
 const quantityFormatter = new Intl.NumberFormat('en-US', {
+  maximumFractionDigits: 3,
   minimumFractionDigits: 0,
-  maximumFractionDigits: 3
 });
 
 const movementTypeOptions = [
+  'OPENING_BALANCE',
   'PURCHASE_RECEIVE',
+  'PURCHASE_RETURN',
   'PRODUCTION_ISSUE',
   'PRODUCTION_OUTPUT',
+  'GOODS_IN_TRANSIT',
   'TRANSFER_OUT',
   'TRANSFER_IN',
   'SALES_ISSUE',
   'RETURN_IN',
   'ADJUSTMENT_IN',
   'ADJUSTMENT_OUT',
+  'STOCK_ADJUSTMENT_GAIN',
+  'STOCK_ADJUSTMENT_LOSS',
+  'WRITE_OFF',
   'DAMAGE',
-  'EXPIRY_WRITE_OFF'
+  'EXPIRY_WRITE_OFF',
+  'WASTAGE',
+  'COST_CORRECTION',
+  'REVERSAL',
 ].map((value) => ({
   label: value.replaceAll('_', ' ').toLowerCase().replace(/\b\w/g, (character) => character.toUpperCase()),
-  value
+  value,
 }));
 
 function formatLabel(value: string | null | undefined) {
@@ -50,6 +62,7 @@ function formatMovementDate(value: string | null | undefined) {
 }
 
 export default function StockMovementsPage() {
+  const { currentUser } = useUserContext();
   const [filters, setFilters] = useState({
     endDate: '',
     itemId: '',
@@ -57,7 +70,7 @@ export default function StockMovementsPage() {
     pageSize: 10,
     startDate: '',
     type: '',
-    warehouseId: ''
+    warehouseId: '',
   });
 
   const metaQuery = useInventoryMeta();
@@ -68,83 +81,161 @@ export default function StockMovementsPage() {
     pageSize: filters.pageSize,
     startDate: filters.startDate || undefined,
     type: filters.type || undefined,
-    warehouseId: filters.warehouseId || undefined
+    warehouseId: filters.warehouseId || undefined,
   });
 
   const movements = movementsQuery.data?.data ?? [];
   const pagination = movementsQuery.data?.pagination;
+  const summary = movements.reduce(
+    (accumulator, movement) => ({
+      quantityIn: accumulator.quantityIn + Number(movement.quantityIn ?? 0),
+      quantityOut: accumulator.quantityOut + Number(movement.quantityOut ?? 0),
+      rows: accumulator.rows + 1,
+      runningValue: Number(movement.runningValue ?? accumulator.runningValue),
+    }),
+    { quantityIn: 0, quantityOut: 0, rows: 0, runningValue: 0 },
+  );
+
+  async function handleExport() {
+    const search = new URLSearchParams();
+    if (filters.startDate) search.set('startDate', filters.startDate);
+    if (filters.endDate) search.set('endDate', filters.endDate);
+    if (filters.itemId) search.set('itemId', filters.itemId);
+    if (filters.type) search.set('type', filters.type);
+    if (filters.warehouseId) search.set('warehouseId', filters.warehouseId);
+
+    await downloadFromUrl(`${API_ROUTES.INVENTORY.EXPORT('stock-movement')}?${search.toString()}`, {
+      filename: `stock-ledger-${new Date().toISOString().slice(0, 10)}.csv`,
+    });
+  }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 print:space-y-4">
       <PageHeader
         title="Stock Movements"
         description="Review every receipt, issue, transfer, and adjustment recorded by the inventory engine, including who triggered it, the warehouse touched, and the reference trail behind it."
-      />
-
-      <InventoryNav />
-
-      <FilterBar
-        filters={[
-          {
-            key: 'startDate',
-            label: 'Start date',
-            type: 'date',
-            value: filters.startDate
-          },
-          {
-            key: 'endDate',
-            label: 'End date',
-            type: 'date',
-            value: filters.endDate
-          },
-          {
-            key: 'warehouseId',
-            label: 'Warehouse',
-            type: 'select',
-            value: filters.warehouseId,
-            options:
-              metaQuery.data?.warehouses.map((warehouse) => ({
-                label: warehouse.name,
-                value: warehouse.id
-              })) ?? []
-          },
-          {
-            key: 'itemId',
-            label: 'Item',
-            type: 'select',
-            value: filters.itemId,
-            options:
-              metaQuery.data?.items.map((item) => ({
-                label: `${item.code} - ${item.name}`,
-                value: item.id
-              })) ?? []
-          },
-          {
-            key: 'type',
-            label: 'Movement type',
-            type: 'select',
-            value: filters.type,
-            options: movementTypeOptions
-          }
-        ]}
-        onFilterChange={(key, value) =>
-          setFilters((current) => ({
-            ...current,
-            [key]: value,
-            page: 1
-          }))
+        actions={
+          <div className="flex gap-2 print:hidden">
+            <Button type="button" size="sm" variant="outline" onClick={() => void handleExport()}>
+              <Download className="mr-2 h-4 w-4" />
+              Export CSV
+            </Button>
+            <Button type="button" size="sm" variant="outline" onClick={() => window.print()}>
+              <Printer className="mr-2 h-4 w-4" />
+              Print
+            </Button>
+          </div>
         }
       />
 
+      <div className="print:hidden">
+        <InventoryNav />
+      </div>
+
+      <div className="hidden rounded-2xl border border-border bg-white px-4 py-3 text-sm text-muted print:block">
+        <p className="font-semibold text-brown">Absolute Ice Cream ERP</p>
+        <p className="mt-1">
+          Stock Movement Ledger
+          {' | '}
+          Generated {format(new Date(), 'dd MMM yyyy HH:mm')}
+          {currentUser?.profile?.fullName ? ` | Generated by ${currentUser.profile.fullName}` : ''}
+          {filters.startDate || filters.endDate ? ` | Period ${filters.startDate || 'Start'} to ${filters.endDate || 'Today'}` : ''}
+          {filters.warehouseId ? ` | Warehouse ${filters.warehouseId}` : ''}
+          {filters.itemId ? ` | Item ${filters.itemId}` : ''}
+          {filters.type ? ` | Type ${filters.type}` : ''}
+        </p>
+      </div>
+
+      <div className="grid gap-3 print:grid-cols-4 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="rounded-2xl border border-border bg-white px-4 py-3">
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted">Rows</p>
+          <p className="mt-2 text-xl font-semibold text-brown">{summary.rows}</p>
+        </div>
+        <div className="rounded-2xl border border-border bg-white px-4 py-3">
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted">Qty In</p>
+          <p className="mt-2 text-xl font-semibold text-brown">{quantityFormatter.format(summary.quantityIn)}</p>
+        </div>
+        <div className="rounded-2xl border border-border bg-white px-4 py-3">
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted">Qty Out</p>
+          <p className="mt-2 text-xl font-semibold text-brown">{quantityFormatter.format(summary.quantityOut)}</p>
+        </div>
+        <div className="rounded-2xl border border-border bg-white px-4 py-3">
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted">Closing Value</p>
+          <p className="mt-2 text-xl font-semibold text-brown">{currencyFormatter.format(summary.runningValue)}</p>
+        </div>
+      </div>
+
+      <div className="print:hidden">
+        <FilterBar
+          filters={[
+            {
+              key: 'startDate',
+              label: 'Start date',
+              type: 'date',
+              value: filters.startDate,
+            },
+            {
+              key: 'endDate',
+              label: 'End date',
+              type: 'date',
+              value: filters.endDate,
+            },
+            {
+              key: 'warehouseId',
+              label: 'Warehouse',
+              type: 'select',
+              value: filters.warehouseId,
+              options:
+                metaQuery.data?.warehouses.map((warehouse) => ({
+                  label: warehouse.name,
+                  value: warehouse.id,
+                })) ?? [],
+            },
+            {
+              key: 'itemId',
+              label: 'Item',
+              type: 'select',
+              value: filters.itemId,
+              options:
+                metaQuery.data?.items.map((item) => ({
+                  label: `${item.code} - ${item.name}`,
+                  value: item.id,
+                })) ?? [],
+            },
+            {
+              key: 'type',
+              label: 'Movement type',
+              type: 'select',
+              value: filters.type,
+              options: movementTypeOptions,
+            },
+          ]}
+          onFilterChange={(key, value) =>
+            setFilters((current) => ({
+              ...current,
+              [key]: value,
+              page: 1,
+            }))
+          }
+        />
+      </div>
+
       <DataTable<StockMovementRow>
-        data={movements}
-        loading={movementsQuery.isLoading}
-        pagination={pagination}
         columns={[
           {
             key: 'date',
-            header: 'Date',
-            render: (row) => formatMovementDate(row.date)
+            header: 'Transaction Date',
+            render: (row) => formatMovementDate(row.date),
+          },
+          {
+            key: 'postingDate',
+            header: 'Posting Date',
+            render: (row) => (row.postingDate ? formatMovementDate(row.postingDate) : '-'),
+          },
+          {
+            key: 'movementNumber',
+            header: 'Movement #',
+            render: (row) => row.movementNumber ?? row.id,
           },
           {
             key: 'item',
@@ -154,32 +245,57 @@ export default function StockMovementsPage() {
                 <p className="font-medium text-brown">{row.item?.name ?? 'Unknown item'}</p>
                 <p className="text-xs text-muted">{row.item?.code ?? '--'}</p>
               </div>
-            )
+            ),
           },
           {
             key: 'warehouse',
             header: 'Warehouse',
-            render: (row) => row.warehouse?.name ?? 'Unknown warehouse'
+            render: (row) => row.warehouse?.name ?? 'Unknown warehouse',
+          },
+          {
+            key: 'route',
+            header: 'Source / Destination',
+            render: (row) => (
+              <div>
+                <p className="text-xs text-muted">{row.sourceWarehouse?.name ?? '-'}</p>
+                <p className="text-xs text-muted">{row.destinationWarehouse?.name ?? '-'}</p>
+              </div>
+            ),
           },
           {
             key: 'type',
-            header: 'Type Badge',
-            render: (row) => <StatusBadge status={formatLabel(row.type)} variant="info" />
+            header: 'Movement',
+            render: (row) => <StatusBadge status={formatLabel(row.type)} variant="info" />,
           },
           {
-            key: 'quantity',
-            header: 'Quantity',
-            render: (row) => quantityFormatter.format(row.quantity)
+            key: 'quantityIn',
+            header: 'Qty In',
+            render: (row) => quantityFormatter.format(Number(row.quantityIn ?? 0)),
+          },
+          {
+            key: 'quantityOut',
+            header: 'Qty Out',
+            render: (row) => quantityFormatter.format(Number(row.quantityOut ?? 0)),
           },
           {
             key: 'runningBalance',
-            header: 'Running Balance',
-            render: (row) => quantityFormatter.format(row.runningBalance)
+            header: 'Running Qty',
+            render: (row) => quantityFormatter.format(row.runningBalance),
           },
           {
             key: 'unitCost',
             header: 'Unit Cost',
-            render: (row) => currencyFormatter.format(Number(row.unitCost ?? 0))
+            render: (row) => currencyFormatter.format(Number(row.unitCost ?? 0)),
+          },
+          {
+            key: 'totalValue',
+            header: 'Value',
+            render: (row) => currencyFormatter.format(Number(row.totalValue ?? row.totalCost ?? 0)),
+          },
+          {
+            key: 'runningValue',
+            header: 'Running Value',
+            render: (row) => currencyFormatter.format(Number(row.runningValue ?? 0)),
           },
           {
             key: 'reference',
@@ -187,45 +303,60 @@ export default function StockMovementsPage() {
             render: (row) => (
               <div>
                 <p className="font-medium text-brown">{formatLabel(row.reference?.type)}</p>
-                <p className="text-xs text-muted">{row.reference?.id ?? '--'}</p>
+                <p className="text-xs text-muted">{row.reference?.number ?? row.reference?.id ?? '--'}</p>
               </div>
-            )
+            ),
+          },
+          {
+            key: 'postingStatus',
+            header: 'Posting',
+            render: (row) => <StatusBadge status={formatLabel(row.postingStatus)} variant="success" />,
+          },
+          {
+            key: 'journal',
+            header: 'Journal',
+            render: (row) => row.journalEntryId ?? '-',
           },
           {
             key: 'createdBy',
-            header: 'Created By',
-            render: (row) => row.createdBy?.name || 'System'
+            header: 'User',
+            render: (row) => row.createdBy?.name || 'System',
           },
           {
             key: 'notes',
             header: 'Notes',
-            render: (row) => row.notes || '-'
+            render: (row) => row.notes || '-',
           },
         ]}
+        data={movements}
         emptyState={
           <EmptyState
+            description="Clear or widen the filters to inspect the movement trail again."
             icon={<History className="h-6 w-6" />}
             title="No stock movements found"
-            description="Clear or widen the filters to inspect the movement trail again."
           />
         }
+        loading={movementsQuery.isLoading}
+        pagination={pagination}
       />
 
       {pagination ? (
-        <PaginationControls
-          page={pagination.page}
-          pageSize={pagination.pageSize}
-          total={pagination.total}
-          onPageChange={(page) =>
-            setFilters((current) => ({
-              ...current,
-              page
-            }))
-          }
-        />
+        <div className="print:hidden">
+          <PaginationControls
+            onPageChange={(page) =>
+              setFilters((current) => ({
+                ...current,
+                page,
+              }))
+            }
+            page={pagination.page}
+            pageSize={pagination.pageSize}
+            total={pagination.total}
+          />
+        </div>
       ) : null}
 
-      <div className="surface-card">
+      <div className="surface-card print:hidden">
         <div className="flex items-center gap-3">
           <ArrowRightLeft className="h-5 w-5 text-orange" />
           <h2 className="text-lg font-semibold text-brown">Audit trail posture</h2>
@@ -241,13 +372,9 @@ export default function StockMovementsPage() {
           </div>
           <div className="surface-tile">
             <p className="text-sm font-medium text-brown">By reference</p>
-            <p className="mt-2 text-sm text-muted">Each movement keeps its reference type, reference id, user, and notes for audit follow-through.</p>
+            <p className="mt-2 text-sm text-muted">Each movement keeps its document number, posting state, journal link, and user trail.</p>
           </div>
         </div>
-        <p className="mt-3 max-w-3xl text-sm leading-7 text-muted">
-          Every inventory movement is tied to a user, a reference type, a reference id, and an exact timestamp.
-          This table is the operational trail for production consumption, transfers, and valuation checks.
-        </p>
       </div>
     </div>
   );

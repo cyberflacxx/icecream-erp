@@ -187,16 +187,32 @@ test('warehouse authorization helper allows assigned-branch warehouses and expli
 test('branch selector and sales order routes use shared authorization-aware branch validation', () => {
   const branchesRoute = fs.readFileSync('src/app/api/branches/route.ts', 'utf8');
   const salesOrdersRoute = fs.readFileSync('src/app/api/sales/orders/route.ts', 'utf8');
+  const invoicePaymentRoute = fs.readFileSync('src/app/api/sales/invoices/[id]/payment/route.ts', 'utf8');
   const grnCreateRoute = fs.readFileSync('src/app/api/procurement/grns/route.ts', 'utf8');
   const grnApproveRoute = fs.readFileSync('src/app/api/procurement/grns/[id]/approve/route.ts', 'utf8');
   const goodsReceivingStatusRoute = fs.readFileSync('src/app/api/procurement/goods-receiving-status/route.ts', 'utf8');
+  const dashboardOverview = fs.readFileSync('src/components/dashboard/dashboard-overview.tsx', 'utf8');
+  const dashboardShortcuts = fs.readFileSync('src/lib/dashboard-shortcuts.ts', 'utf8');
+  const sidebar = fs.readFileSync('src/components/dashboard/sidebar.tsx', 'utf8');
 
   assert.match(branchesRoute, /filterAuthorizedBranches/);
   assert.match(branchesRoute, /organization_id/);
   assert.match(branchesRoute, /selector/);
   assert.match(salesOrdersRoute, /resolveRequestedBranchId/);
+  assert.match(salesOrdersRoute, /isWarehouseAvailableToContext/);
   assert.match(salesOrdersRoute, /Selected warehouse does not belong to the selected branch/);
+  assert.match(invoicePaymentRoute, /branch_id/);
+  assert.match(invoicePaymentRoute, /organization_id/);
   assert.match(grnCreateRoute, /isWarehouseAvailableToContext/);
   assert.match(grnApproveRoute, /isWarehouseAvailableToContext/);
   assert.match(goodsReceivingStatusRoute, /organization_id/);
+  assert.match(dashboardShortcuts, /label: 'New Sale'/);
+  assert.match(dashboardShortcuts, /label: 'Receive Stock Transfer'/);
+  assert.match(dashboardShortcuts, /label: 'Chart of Accounts'/);
+  assert.match(dashboardShortcuts, /label: 'Users'/);
+  assert.match(dashboardShortcuts, /shortcut\.personas\.includes\(persona\)/);
+  assert.match(dashboardOverview, /resolveDashboardShortcuts/);
+  assert.match(dashboardOverview, /Operational shortcuts/);
+  assert.match(sidebar, /'Dashboard', 'Operations', 'Finance', 'Reports', 'Administration'/);
+  assert.match(sidebar, /aria-current=\{isActive \? 'page' : undefined\}/);
 });

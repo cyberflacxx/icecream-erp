@@ -1,41 +1,34 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 
 import { can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
-import { calculateBranchCostSummary } from '@/lib/finance';
-import { financeService } from '@/lib/finance-server';
+import { summarizeBranchProfitAndLossFromLedger } from '@/lib/finance';
+import { financeErrorMessage, loadLedgerLines } from '@/lib/finance-server';
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   const ctx = await getAuthContext();
   if (!ctx) return unauthorized();
   if (!can(ctx, 'finance.read', 'reports.read')) return forbidden();
 
   try {
-    const service = financeService();
-    const { data, error } = await service
-      .from('branch_reconciliations')
-      .select('branch_id, sales_total, expense_total, profitability_amount, cash_variance, stock_variance')
-      .order('created_at', { ascending: false });
-    if (error) throw error;
-
-    const rows = (data ?? []).map((row) => {
-      const summary = calculateBranchCostSummary(
-        Number(row.sales_total ?? 0),
-        0,
-        Number(row.expense_total ?? 0),
-        0,
-      );
-      return {
-        branchId: row.branch_id,
-        cashVariance: Number(row.cash_variance ?? 0),
-        expenseTotal: Number(row.expense_total ?? 0),
-        grossProfit: summary.grossProfit,
-        netProfit: summary.netProfit,
-        salesTotal: Number(row.sales_total ?? 0),
-        stockVariance: Number(row.stock_variance ?? 0),
-      };
+    const { searchParams } = new URL(request.url);
+    const requestedBranchId = searchParams.get('branchId') ?? undefined;
+    const branchId = ctx.isBranchScoped && ctx.branchId ? ctx.branchId : requestedBranchId;
+    const startDate = searchParams.get('startDate') ?? undefined;
+    const endDate = searchParams.get('endDate') ?? undefined;
+    const rows = summarizeBranchProfitAndLossFromLedger(await loadLedgerLines(ctx.organizationId, true, {
+      branchId,
+      endDate,
+      startDate,
+    }));
+    return NextResponse.json({
+      filters: {
+        branchId: branchId ?? null,
+        endDate: endDate ?? null,
+        startDate: startDate ?? null,
+      },
+      rows,
     });
-    return NextResponse.json(rows);
   } catch (err) {
-    return serverError(err instanceof Error ? err.message : 'Internal server error');
+    return serverError(financeErrorMessage(err) || 'Internal server error');
   }
 }

@@ -211,6 +211,8 @@ export interface StockBalanceRow {
 export interface StockMovementRow {
   id: string;
   date: string;
+  postingDate?: string | null;
+  movementNumber?: string | null;
   item: {
     id: string;
     code: string;
@@ -220,15 +222,32 @@ export interface StockMovementRow {
     id: string;
     name: string;
   };
+  sourceWarehouse?: {
+    id: string;
+    name: string;
+  } | null;
+  destinationWarehouse?: {
+    id: string;
+    name: string;
+  } | null;
   type: string;
   quantity: number;
+  quantityIn?: number;
+  quantityOut?: number;
   runningBalance: number;
+  runningValue?: number;
   unitCost: number;
   totalCost: number;
+  totalValue?: number;
   reference: {
-    id: string;
+    id: string | null;
     type: string;
+    number?: string | null;
   };
+  sourceModule?: string | null;
+  postingStatus?: string | null;
+  journalEntryId?: string | null;
+  reversalReference?: string | null;
   createdBy: {
     id: string;
     name: string;
@@ -251,6 +270,28 @@ export interface StockTransferRow {
   status: string;
   itemsCount: number;
   notes: string | null;
+  reversal?: {
+    approvedBy?: string | null;
+    approvedByName?: string | null;
+    id: string;
+    operationType: string;
+    originalJournalId: string | null;
+    originalMovementIds: string[];
+    postedAt: string | null;
+    postedBy?: string | null;
+    postedByName?: string | null;
+    reason: string;
+    reversalJournalId: string | null;
+    reversalJournalNumber: string | null;
+    reversalMovementIds: string[];
+    reversalNumber: string | null;
+    reversalReference: string | null;
+    requestedBy?: string | null;
+    requestedByName?: string | null;
+    status: string;
+  } | null;
+  dispatchReversal?: StockTransferRow['reversal'];
+  receiptReversal?: StockTransferRow['reversal'];
 }
 
 export interface WarehouseCard {

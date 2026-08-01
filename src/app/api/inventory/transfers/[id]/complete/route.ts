@@ -1,18 +1,36 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+import { badRequest, can, forbidden, getAuthContext, notFound, serverError, unauthorized } from '@/lib/api-auth';
 import {
-  badRequest,
-  can,
-  forbidden,
-  getAuthContext,
-  notFound,
-  serverError,
-  unauthorized,
-} from '@/lib/api-auth';
-import { applyInventoryDelta, getBalance, recordStockMovement, requireItem } from '@/lib/inventory-server';
+  findOpenFiscalPeriod,
+  getFinanceModuleDefaultCostCentreCodes,
+  resolveFinanceCostCentreCode,
+  resolveFinancePostingAccount,
+} from '@/lib/finance-foundation-server';
+import { toDateOnly } from '@/lib/finance-integration';
+import {
+  buildInventoryPostingIdempotencyKey,
+  invokeInventoryPostingRpc,
+  loadWarehouseBranchId,
+} from '@/lib/inventory-posting-server';
 import { normalizeTransferStatus } from '@/lib/inventory';
+import { requireWarehouseAccess } from '@/lib/inventory-server';
 import { recordAuditLog } from '@/lib/security-server';
 import { createServiceRoleClient } from '@/lib/supabase/server';
+
+type TransferItemRow = {
+  id: string;
+  item_id: string;
+  quantity_received: number | null;
+  quantity_requested: number | null;
+  quantity_sent: number | null;
+  unit_cost: number | null;
+};
+
+function toTransferQuantity(value: unknown) {
+  const numeric = Number(value ?? 0);
+  return Number.isFinite(numeric) ? numeric : 0;
+}
 
 export async function POST(
   request: NextRequest,
@@ -21,6 +39,10 @@ export async function POST(
   const ctx = await getAuthContext();
   if (!ctx) return unauthorized();
   if (!can(ctx, 'inventory.transfer.complete', 'inventory.write', 'stock_transfer.approve')) return forbidden();
+
+  const body = (await request.json().catch(() => ({}))) as {
+    receiptLines?: Array<{ quantityReceived?: number; transferItemId?: string }>;
+  };
 
   const { id } = await params;
   const service = createServiceRoleClient();
@@ -35,120 +57,225 @@ export async function POST(
 
     if (transferError) return serverError(transferError.message);
     if (!transfer) return notFound('Stock transfer not found.');
-    if (normalizeTransferStatus(String(transfer.status ?? '')) === 'COMPLETED') {
+
+    const normalizedStatus = normalizeTransferStatus(String(transfer.status ?? ''));
+    if (normalizedStatus === 'COMPLETED') {
       return badRequest('This transfer has already been completed.');
     }
-    if (String(transfer.status ?? '').toUpperCase() === 'CANCELLED') {
+    if (normalizedStatus === 'CANCELLED') {
       return badRequest('Cancelled transfers cannot be completed.');
     }
 
-    const { data: existingMovements, error: existingMovementsError } = await service
-      .from('stock_movements')
-      .select('id')
-      .eq('reference_type', 'stock_transfer')
-      .eq('reference_id', id)
-      .limit(1);
-    if (existingMovementsError) return serverError(existingMovementsError.message);
-    if ((existingMovements ?? []).length > 0) {
-      return badRequest('Inventory movements already exist for this transfer.');
-    }
+    await Promise.all([
+      requireWarehouseAccess(
+        service,
+        String(transfer.from_warehouse_id),
+        ctx.branchId,
+        ctx.isBranchScoped,
+        ctx.warehouseAssignments,
+      ),
+      requireWarehouseAccess(
+        service,
+        String(transfer.to_warehouse_id),
+        ctx.branchId,
+        ctx.isBranchScoped,
+        ctx.warehouseAssignments,
+      ),
+    ]);
 
     const { data: transferItems, error: transferItemsError } = await service
       .from('stock_transfer_items')
-      .select('id, item_id, quantity_requested')
+      .select('id, item_id, quantity_requested, quantity_sent, quantity_received, unit_cost')
       .eq('transfer_id', id);
     if (transferItemsError) return serverError(transferItemsError.message);
     if ((transferItems ?? []).length === 0) return badRequest('Transfer has no items.');
 
-    for (const row of transferItems ?? []) {
-      const item = await requireItem(service, String(row.item_id));
-      const quantity = Number(row.quantity_requested ?? 0);
-      const sourceBalance = await getBalance(service, item.id, String(transfer.from_warehouse_id));
-      const sourceAvailable = Number(sourceBalance?.quantity_available ?? 0);
-
-      if (quantity <= 0) {
-        return badRequest(`Transfer line for ${item.name} must be greater than zero.`);
-      }
-
-      if (sourceAvailable < quantity) {
-        return badRequest(`Insufficient stock for ${item.name}. Available: ${sourceAvailable.toFixed(3)}, Required: ${quantity.toFixed(3)}`);
-      }
+    const sourceBranchId = await loadWarehouseBranchId(service as never, String(transfer.from_warehouse_id));
+    const destinationBranchId = await loadWarehouseBranchId(service as never, String(transfer.to_warehouse_id));
+    const postingDate = toDateOnly(new Date().toISOString());
+    const period = await findOpenFiscalPeriod(ctx.organizationId, postingDate);
+    if (!period) {
+      return badRequest(`No open fiscal period exists for ${postingDate}.`);
     }
 
-    for (const row of transferItems ?? []) {
-      const quantity = Number(row.quantity_requested ?? 0);
-      const itemId = String(row.item_id);
+    const [goodsInTransitAccount, branchInventoryAccount, sourceCostCenterCode, destinationCostCenterCode] = await Promise.all([
+      resolveFinancePostingAccount(ctx.organizationId, 'GOODS_IN_TRANSIT', {
+        branchId: sourceBranchId,
+        fallbackAccountCode: '1260',
+        transactionType: 'BRANCH_TRANSFER',
+      }),
+      resolveFinancePostingAccount(ctx.organizationId, 'BRANCH_INVENTORY', {
+        branchId: destinationBranchId,
+        fallbackAccountCode: '1250',
+        transactionType: 'BRANCH_TRANSFER',
+      }),
+      resolveFinanceCostCentreCode(ctx.organizationId, {
+        branchId: sourceBranchId,
+        preferredCodes: getFinanceModuleDefaultCostCentreCodes('inventory'),
+      }),
+      resolveFinanceCostCentreCode(ctx.organizationId, {
+        branchId: destinationBranchId,
+        preferredCodes: getFinanceModuleDefaultCostCentreCodes('inventory'),
+      }),
+    ]);
 
-      await applyInventoryDelta(service, {
-        itemId,
-        organizationId: ctx.organizationId,
-        quantityDelta: -quantity,
-        warehouseId: String(transfer.from_warehouse_id),
-      });
-      await applyInventoryDelta(service, {
-        itemId,
-        organizationId: ctx.organizationId,
-        quantityDelta: quantity,
-        warehouseId: String(transfer.to_warehouse_id),
-      });
+    let dispatchResult: null | {
+      journal: { entryNumber: string; id: string };
+      movementIds: string[];
+      status: string;
+      transferId: string;
+    } = null;
 
-      await recordStockMovement(service, {
-        createdBy: ctx.userId,
-        destinationWarehouseId: String(transfer.to_warehouse_id),
-        itemId,
-        movementType: 'TRANSFER_OUT',
-        notes: String(transfer.notes ?? ''),
-        organizationId: ctx.organizationId,
-        quantity,
-        referenceId: id,
-        referenceType: 'stock_transfer',
-        sourceWarehouseId: String(transfer.from_warehouse_id),
-        warehouseId: String(transfer.from_warehouse_id),
+    if (normalizedStatus === 'APPROVED' || normalizedStatus === 'DRAFT') {
+      const dispatchValue = (transferItems ?? []).reduce(
+        (sum, row) => sum + (toTransferQuantity(row.quantity_requested) * toTransferQuantity(row.unit_cost)),
+        0,
+      );
+      dispatchResult = await invokeInventoryPostingRpc<{
+        journal: { entryNumber: string; id: string };
+        movementIds: string[];
+        status: string;
+        transferId: string;
+      }>(service as never, 'dispatch_stock_transfer_atomic', {
+        p_actor_user_id: ctx.userId,
+        p_branch_id: sourceBranchId,
+        p_cost_center_code: sourceCostCenterCode,
+        p_finance_lines: [
+          {
+            accountId: goodsInTransitAccount.id,
+            branchId: sourceBranchId,
+            costCenterCode: sourceCostCenterCode,
+            creditAmount: 0,
+            debitAmount: dispatchValue,
+            description: `Goods in transit dispatch for transfer ${String(transfer.transfer_number ?? id)}`,
+          },
+          {
+            accountId: branchInventoryAccount.id,
+            branchId: sourceBranchId,
+            costCenterCode: sourceCostCenterCode,
+            creditAmount: dispatchValue,
+            debitAmount: 0,
+            description: `Source inventory dispatch for transfer ${String(transfer.transfer_number ?? id)}`,
+          },
+        ],
+        p_idempotency_key: buildInventoryPostingIdempotencyKey({
+          actorUserId: ctx.userId,
+          documentId: id,
+          operation: 'stock_transfer_dispatch',
+        }),
+        p_journal_date: postingDate,
+        p_organization_id: ctx.organizationId,
+        p_transfer_id: id,
       });
-      await recordStockMovement(service, {
-        createdBy: ctx.userId,
-        destinationWarehouseId: String(transfer.to_warehouse_id),
-        itemId,
-        movementType: 'TRANSFER_IN',
-        notes: String(transfer.notes ?? ''),
-        organizationId: ctx.organizationId,
-        quantity,
-        referenceId: id,
-        referenceType: 'stock_transfer',
-        sourceWarehouseId: String(transfer.from_warehouse_id),
-        warehouseId: String(transfer.to_warehouse_id),
-      });
-
-      await service
-        .from('stock_transfer_items')
-        .update({
-          quantity_received: quantity,
-          quantity_sent: quantity,
-        })
-        .eq('id', row.id);
     }
 
-    const { data: updated, error: updateError } = await service
-      .from('stock_transfers')
-      .update({ status: 'COMPLETED', approved_by: ctx.userId })
-      .eq('id', id)
-      .select()
-      .single();
+    const latestStatus = dispatchResult?.status ?? normalizedStatus;
+    if (!['IN_TRANSIT', 'PARTIALLY_RECEIVED'].includes(latestStatus)) {
+      return badRequest('Transfer is not ready for receipt posting.');
+    }
 
-    if (updateError) return serverError(updateError.message);
+    const transferItemsById = new Map(
+      ((transferItems ?? []) as TransferItemRow[]).map((row) => [String(row.id), row] as const),
+    );
+    const requestedReceiptLines = (body.receiptLines ?? [])
+      .map((line) => ({
+        quantityReceived: toTransferQuantity(line.quantityReceived),
+        transferItemId: String(line.transferItemId ?? ''),
+      }))
+      .filter((line) => line.transferItemId && line.quantityReceived > 0);
+
+    const receiptLines = (requestedReceiptLines.length > 0
+      ? requestedReceiptLines
+      : ((transferItems ?? []) as TransferItemRow[]).map((row) => ({
+          quantityReceived: Math.max(
+            0,
+            (toTransferQuantity(row.quantity_sent) || toTransferQuantity(row.quantity_requested)) -
+              toTransferQuantity(row.quantity_received),
+          ),
+          transferItemId: String(row.id),
+        }))
+    ).filter((line) => line.quantityReceived > 0);
+
+    if (receiptLines.length === 0) {
+      return badRequest('No remaining in-transit quantity is available for receipt.');
+    }
+
+    let receiptValue = 0;
+    for (const line of receiptLines) {
+      const transferItem = transferItemsById.get(line.transferItemId);
+      if (!transferItem) {
+        return badRequest('Receipt line references an invalid transfer item.');
+      }
+      receiptValue += line.quantityReceived * toTransferQuantity(transferItem.unit_cost);
+    }
+
+    const receiptResult = await invokeInventoryPostingRpc<{
+      journal: { entryNumber: string; id: string };
+      movementIds: string[];
+      remainingInTransitQuantity: number;
+      status: string;
+      transferId: string;
+    }>(service as never, 'receive_stock_transfer_atomic', {
+      p_actor_user_id: ctx.userId,
+      p_branch_id: destinationBranchId,
+      p_cost_center_code: destinationCostCenterCode,
+      p_finance_lines: [
+        {
+          accountId: branchInventoryAccount.id,
+          branchId: destinationBranchId,
+          costCenterCode: destinationCostCenterCode,
+          creditAmount: 0,
+          debitAmount: receiptValue,
+          description: `Destination inventory receipt for transfer ${String(transfer.transfer_number ?? id)}`,
+        },
+        {
+          accountId: goodsInTransitAccount.id,
+          branchId: destinationBranchId,
+          costCenterCode: destinationCostCenterCode,
+          creditAmount: receiptValue,
+          debitAmount: 0,
+          description: `Goods in transit clearance for transfer ${String(transfer.transfer_number ?? id)}`,
+        },
+      ],
+      p_idempotency_key: buildInventoryPostingIdempotencyKey({
+        actorUserId: ctx.userId,
+        documentId: id,
+        operation: 'stock_transfer_receipt',
+        suffix: receiptLines.map((line) => `${line.transferItemId}:${line.quantityReceived}`).join('|'),
+      }),
+      p_journal_date: postingDate,
+      p_organization_id: ctx.organizationId,
+      p_receipt_lines: receiptLines,
+      p_transfer_id: id,
+    });
 
     await recordAuditLog({
-      action: 'INVENTORY_TRANSFER_COMPLETED',
+      action: receiptResult.status === 'COMPLETED' ? 'INVENTORY_TRANSFER_COMPLETED' : 'INVENTORY_TRANSFER_PARTIALLY_RECEIVED',
       entityId: id,
       entityType: 'stock_transfer',
-      newValues: { status: 'COMPLETED', transferNumber: transfer.transfer_number },
+      newValues: {
+        dispatchJournalEntryId: dispatchResult?.journal.id ?? null,
+        dispatchJournalNumber: dispatchResult?.journal.entryNumber ?? null,
+        fiscalPeriodId: String(period.id ?? ''),
+        receiptJournalEntryId: receiptResult.journal.id,
+        receiptJournalNumber: receiptResult.journal.entryNumber,
+        receiptLines,
+        remainingInTransitQuantity: receiptResult.remainingInTransitQuantity,
+        status: receiptResult.status,
+        transferNumber: transfer.transfer_number,
+      },
       organizationId: ctx.organizationId,
       userProfileId: ctx.userId,
       ipAddress: request.headers.get('x-forwarded-for'),
       userAgent: request.headers.get('user-agent'),
     });
 
-    return NextResponse.json(updated);
+    return NextResponse.json({
+      dispatch: dispatchResult,
+      fiscalPeriodId: String(period.id ?? ''),
+      receipt: receiptResult,
+      transferId: id,
+    });
   } catch (error) {
     return serverError(error instanceof Error ? error.message : 'Failed to complete stock transfer.');
   }

@@ -117,6 +117,25 @@ export interface GRNRow {
   grnNumber: string;
   entryMode: string;
   inventoryValue?: number;
+  reversal?: {
+    approvedBy?: string | null;
+    approvedByName?: string | null;
+    id: string;
+    originalJournalId: string | null;
+    originalMovementIds: string[];
+    postedAt: string | null;
+    postedBy?: string | null;
+    postedByName?: string | null;
+    reason: string;
+    reversalJournalId: string | null;
+    reversalJournalNumber: string | null;
+    reversalMovementIds: string[];
+    reversalNumber: string | null;
+    reversalReference: string | null;
+    requestedBy?: string | null;
+    requestedByName?: string | null;
+    status: string;
+  } | null;
   purchaseOrder: {
     id: string;
     poNumber: string;

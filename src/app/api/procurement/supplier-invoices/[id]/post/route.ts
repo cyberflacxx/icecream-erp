@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { badRequest, can, forbidden, getAuthContext, notFound, serverError, unauthorized } from '@/lib/api-auth';
+import { resolveFinancePostingAccount } from '@/lib/finance-foundation-server';
 import { postFinanceDocument } from '@/lib/finance-server';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
@@ -35,19 +36,24 @@ export async function POST(
   }
 
   try {
+    const debitAccount = invoice.purchase_order_id || invoice.goods_received_note_id
+      ? await resolveFinancePostingAccount(ctx.organizationId, 'RAW_MATERIAL_INVENTORY', { fallbackAccountCode: '1210' })
+      : await resolveFinancePostingAccount(ctx.organizationId, 'PRODUCTION_OVERHEAD', { fallbackAccountCode: '6100' });
+    const payableAccount = await resolveFinancePostingAccount(ctx.organizationId, 'SUPPLIER_PAYABLES', { fallbackAccountCode: '2110' });
+
     const journal = await postFinanceDocument({
       createdBy: ctx.userId,
       description: `Supplier invoice ${String(invoice.invoice_number ?? invoice.id)}`,
       journalDate: String(invoice.invoice_date ?? new Date().toISOString().slice(0, 10)),
       lines: [
         {
-          accountCode: invoice.purchase_order_id || invoice.goods_received_note_id ? '1200' : '6100',
+          accountId: debitAccount.id,
           creditAmount: 0,
           debitAmount: amount,
           description: invoice.purchase_order_id || invoice.goods_received_note_id ? 'Inventory or receipt accrual clearing' : 'Supplier expense recognition',
         },
         {
-          accountCode: '2000',
+          accountId: payableAccount.id,
           creditAmount: amount,
           debitAmount: 0,
           description: `Accounts payable for supplier invoice ${String(invoice.invoice_number ?? invoice.id)}`,

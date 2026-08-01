@@ -31,16 +31,16 @@ import { hasAnyPermission, isSuperAdminPermissions, resolveDashboardPersona, typ
 import { logoutAndRedirect } from '@/lib/logout';
 import { PERMISSIONS } from '@/lib/shared';
 
-type NavSection = 'Overview' | 'Operations' | 'Control' | 'Platform';
+type NavSection = 'Dashboard' | 'Operations' | 'Finance' | 'Reports' | 'Administration';
 
-const navSections: NavSection[] = ['Overview', 'Operations', 'Control', 'Platform'];
+const navSections: NavSection[] = ['Dashboard', 'Operations', 'Finance', 'Reports', 'Administration'];
 
 const navItems = [
   {
     href: '/dashboard',
     icon: LayoutDashboard,
     label: 'Dashboard',
-    section: 'Overview',
+    section: 'Dashboard',
     permissions: [
       PERMISSIONS.dashboard.read,
       'sales.read',
@@ -58,7 +58,7 @@ const navItems = [
     href: '/notifications',
     icon: Bell,
     label: 'Notifications',
-    section: 'Overview',
+    section: 'Dashboard',
     permissions: [
       PERMISSIONS.dashboard.read,
       'sales.read',
@@ -76,7 +76,7 @@ const navItems = [
     href: '/reports',
     icon: BarChart3,
     label: 'Reports',
-    section: 'Overview',
+    section: 'Reports',
     permissions: [PERMISSIONS.reports.read, 'reports.read'],
     personas: ['system_admin', 'branch_manager', 'operations_manager', 'production_manager', 'sales_lead', 'finance_lead', 'procurement_lead', 'inventory_lead', 'hr_lead', 'quality_lead', 'operations_specialist'],
   },
@@ -132,7 +132,7 @@ const navItems = [
     href: '/finance',
     icon: Wallet,
     label: 'Finance',
-    section: 'Control',
+    section: 'Finance',
     permissions: [PERMISSIONS.finance.read, 'finance.read', 'budget.read'],
     personas: ['system_admin', 'finance_lead'],
   },
@@ -140,7 +140,7 @@ const navItems = [
     href: '/cost-accounting',
     icon: DollarSign,
     label: 'Cost Accounting',
-    section: 'Control',
+    section: 'Finance',
     permissions: [PERMISSIONS.finance.read, 'finance.read'],
     personas: ['system_admin', 'finance_lead'],
   },
@@ -148,7 +148,7 @@ const navItems = [
     href: '/budget',
     icon: Receipt,
     label: 'Budget',
-    section: 'Control',
+    section: 'Finance',
     permissions: [PERMISSIONS.finance.read, 'budget.read', 'finance.read'],
     personas: ['system_admin', 'finance_lead'],
   },
@@ -156,7 +156,7 @@ const navItems = [
     href: '/hr',
     icon: UsersRound,
     label: 'HR & Payroll',
-    section: 'Control',
+    section: 'Administration',
     permissions: ['hr.read', 'payroll.read'],
     personas: ['system_admin', 'hr_lead'],
   },
@@ -164,7 +164,7 @@ const navItems = [
     href: '/quality',
     icon: FlaskConical,
     label: 'Quality Control',
-    section: 'Control',
+    section: 'Operations',
     permissions: ['quality.read', PERMISSIONS.productionQuality.read],
     personas: ['system_admin', 'quality_lead', 'production_manager', 'operations_manager'],
   },
@@ -172,7 +172,7 @@ const navItems = [
     href: '/admin/migration',
     icon: ServerCog,
     label: 'Admin Ops',
-    section: 'Platform',
+    section: 'Administration',
     permissions: [PERMISSIONS.settings.manage, 'manage_roles'],
     personas: ['system_admin'],
   },
@@ -180,7 +180,7 @@ const navItems = [
     href: '/testing',
     icon: ClipboardCheck,
     label: 'Testing & UAT',
-    section: 'Platform',
+    section: 'Administration',
     permissions: [PERMISSIONS.reports.read, 'testing.read', 'reports.read'],
     personas: ['system_admin'],
   },
@@ -188,7 +188,7 @@ const navItems = [
     href: '/workflows',
     icon: GitBranchPlus,
     label: 'Workflows',
-    section: 'Platform',
+    section: 'Administration',
     permissions: [PERMISSIONS.settings.manage, 'manage_roles'],
     personas: ['system_admin'],
   },
@@ -196,7 +196,7 @@ const navItems = [
     href: '/settings',
     icon: Settings,
     label: 'Settings',
-    section: 'Platform',
+    section: 'Administration',
     permissions: [PERMISSIONS.settings.manage, 'manage_roles'],
     personas: ['system_admin'],
   },
@@ -283,7 +283,7 @@ export function Sidebar() {
 
             return (
               <section key={section}>
-                <p className="px-2.5 text-[10px] font-semibold uppercase tracking-[0.2em] text-blue-100/52 dark:text-[color:var(--app-subtle)]">
+                <p className="px-2.5 text-[10px] font-semibold uppercase tracking-[0.2em] text-blue-100/60 dark:text-[color:var(--app-subtle)]">
                   {section}
                 </p>
                 <div className="mt-1.5 space-y-1">
@@ -295,12 +295,14 @@ export function Sidebar() {
                       <Link
                         key={item.label}
                         href={item.href}
+                        aria-current={isActive ? 'page' : undefined}
                         className={cn(
                           'group flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13px] transition-all duration-150',
                           isActive
                             ? 'border border-white/20 bg-white text-slate-900 shadow-[0_10px_24px_rgba(2,6,23,0.18)] dark:border-[color:var(--app-border-strong)] dark:bg-[color:var(--app-accent-soft)] dark:text-[color:var(--app-accent-strong)] dark:shadow-[var(--app-shadow-sm)]'
                             : 'border border-transparent text-blue-50/84 hover:border-white/12 hover:bg-white/10 hover:text-white dark:text-[color:var(--app-muted)] dark:hover:border-[color:var(--app-border-muted)] dark:hover:bg-[color:var(--app-bg-subtle)] dark:hover:text-[color:var(--app-text)]',
                         )}
+                        title={item.label}
                       >
                         <div
                           className={cn(

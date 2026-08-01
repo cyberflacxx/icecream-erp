@@ -1,6 +1,6 @@
 'use client';
 
-import { type FormEvent, useState } from 'react';
+import { type FormEvent, useEffect, useMemo, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { AlertCircle, Plus, ReceiptText, WalletCards } from 'lucide-react';
 
@@ -8,6 +8,7 @@ import { PageHeader } from '@/components/dashboard/page-header';
 import { SalesNav } from '@/components/sales/sales-nav';
 import { createSalesLineDraft, normalizeSalesLines, SalesLineItemsEditor } from '@/components/sales/sales-line-items-editor';
 import { Button } from '@/components/ui/button';
+import { useAuthorizedBranches } from '@/hooks/useAuthorizedBranches';
 import { useItemSelectorOptions } from '@/hooks/useItemSelectorOptions';
 import { DataTable, EmptyState, FormDrawer, LoadingState, StatCard } from '@/components/ui-library';
 import { type InvoiceListItem, useInvoices } from '@/hooks/sales/useInvoices';
@@ -24,6 +25,7 @@ const currency = new Intl.NumberFormat('en-US', {
 });
 
 const initialInvoiceForm = {
+  branchId: '',
   customerId: '',
   discountAmount: '0',
   dueDate: '',
@@ -48,6 +50,7 @@ const initialReceiptForm = {
 export default function InvoicesPage() {
   const query = useInvoices();
   const metaQuery = useSalesMeta();
+  const branchesQuery = useAuthorizedBranches();
   const request = useSalesRequest();
   const recordPayment = useRecordPayment();
   const queryClient = useQueryClient();
@@ -59,10 +62,30 @@ export default function InvoicesPage() {
   const [receiptSubmitMode, setReceiptSubmitMode] = useState<'save' | 'print'>('save');
   const [receiptContext, setReceiptContext] = useState<InvoiceListItem | null>(null);
   const itemOptionsQuery = useItemSelectorOptions({
+    branchId: invoiceForm.branchId || undefined,
+    customerId: invoiceForm.customerId || undefined,
     includePrice: true,
     includeStock: true,
     warehouseId: invoiceForm.warehouseId || undefined,
   });
+  const branchOptions = useMemo(() => branchesQuery.data ?? [], [branchesQuery.data]);
+  const warehouseOptions = useMemo(
+    () => (metaQuery.data?.warehouses ?? []).filter((warehouse) => !invoiceForm.branchId || warehouse.branchId === invoiceForm.branchId),
+    [invoiceForm.branchId, metaQuery.data?.warehouses],
+  );
+
+  useEffect(() => {
+    if (branchOptions.length !== 1) return;
+    const onlyBranch = branchOptions[0];
+    setInvoiceForm((current) => {
+      if (current.branchId === onlyBranch.id && current.warehouseId) return current;
+      return {
+        ...current,
+        branchId: onlyBranch.id,
+        warehouseId: current.warehouseId || onlyBranch.defaultWarehouseId || '',
+      };
+    });
+  }, [branchOptions]);
 
   async function refresh() {
     await queryClient.invalidateQueries({ queryKey: ['sales'] });
@@ -87,12 +110,14 @@ export default function InvoicesPage() {
     try {
       await request(API_ROUTES.SALES.INVOICES, {
         body: JSON.stringify({
+          branchId: invoiceForm.branchId || undefined,
           customerId: invoiceForm.customerId,
           discountAmount: Number(invoiceForm.discountAmount || 0),
           dueDate: invoiceForm.dueDate || null,
           invoiceDate: invoiceForm.invoiceDate || null,
           items: invoiceForm.salesOrderId ? undefined : lines,
           notes: invoiceForm.notes || null,
+          postInventory: true,
           salesOrderId: invoiceForm.salesOrderId || undefined,
           taxAmount: Number(invoiceForm.taxAmount || 0),
           warehouseId: invoiceForm.warehouseId || undefined,
@@ -111,6 +136,10 @@ export default function InvoicesPage() {
   async function approveInvoice(id: string) {
     await request(API_ROUTES.SALES.INVOICE_APPROVE(id), { body: JSON.stringify({}), method: 'POST' });
     await refresh();
+  }
+
+  function openInvoicePreview(id: string) {
+    window.open(`/sales/invoices/${id}`, '_blank', 'noopener,noreferrer');
   }
 
   function openReceiptDrawer(row: InvoiceListItem) {
@@ -224,9 +253,14 @@ export default function InvoicesPage() {
               const status = row.status.toLowerCase();
               return (
                 <div className="flex flex-wrap gap-2">
-                  {!['approved', 'paid', 'cancelled', 'fully_dispatched'].includes(status) ? (
+                  {!['approved', 'posted', 'partially_paid', 'paid', 'cancelled', 'fully_dispatched'].includes(status) ? (
                     <Button type="button" size="sm" variant="outline" onClick={() => approveInvoice(row.id)}>
                       Approve/Reserve
+                    </Button>
+                  ) : null}
+                  {!['draft', 'cancelled', 'voided', 'reversed'].includes(status) ? (
+                    <Button type="button" size="sm" variant="outline" onClick={() => openInvoicePreview(row.id)}>
+                      Preview / Print
                     </Button>
                   ) : null}
                   {row.balanceDue > 0 ? (
@@ -256,13 +290,14 @@ export default function InvoicesPage() {
               const order = metaQuery.data?.salesOrders.find((row) => row.id === event.target.value);
               setInvoiceForm((current) => ({
                 ...current,
+                branchId: order?.branchId ?? current.branchId,
                 customerId: order?.customerId ?? current.customerId,
                 salesOrderId: event.target.value,
                 warehouseId: order?.warehouseId ?? current.warehouseId,
               }));
             }}>
               <option value="">Direct invoice / no order</option>
-              {metaQuery.data?.salesOrders.filter((order) => !['cancelled', 'invoiced'].includes(order.status.toLowerCase())).map((order) => (
+              {metaQuery.data?.salesOrders.filter((order) => ['confirmed', 'approved', 'dispatched'].includes(order.status.toLowerCase())).map((order) => (
                 <option key={order.id} value={order.id}>
                   {order.orderNumber} - {currency.format(order.total)}
                 </option>
@@ -270,6 +305,27 @@ export default function InvoicesPage() {
             </select>
           </label>
           <div className="grid gap-5 sm:grid-cols-2">
+            {!invoiceForm.salesOrderId ? (
+              <label className="space-y-2 text-sm text-muted">
+                <span>Branch</span>
+                <select className="surface-input-soft" required value={invoiceForm.branchId} onChange={(event) => {
+                  const branch = branchOptions.find((row) => row.id === event.target.value);
+                  setInvoiceForm((current) => ({
+                    ...current,
+                    branchId: event.target.value,
+                    warehouseId: branch?.defaultWarehouseId ?? '',
+                  }));
+                }}>
+                  <option value="">Select branch</option>
+                  {branchOptions.map((branch) => (
+                    <option key={branch.id} value={branch.id}>
+                      {branch.code ? `${branch.code} - ` : ''}
+                      {branch.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
             <label className="space-y-2 text-sm text-muted">
               <span>Customer</span>
               <select className="surface-input-soft" required value={invoiceForm.customerId} onChange={(event) => setInvoiceForm((current) => ({ ...current, customerId: event.target.value }))}>
@@ -286,7 +342,7 @@ export default function InvoicesPage() {
               <span>Warehouse</span>
               <select className="surface-input-soft" value={invoiceForm.warehouseId} onChange={(event) => setInvoiceForm((current) => ({ ...current, warehouseId: event.target.value }))}>
                 <option value="">Select warehouse</option>
-                {metaQuery.data?.warehouses.map((warehouse) => (
+                {warehouseOptions.map((warehouse) => (
                   <option key={warehouse.id} value={warehouse.id}>
                     {warehouse.code ? `${warehouse.code} - ` : ''}
                     {warehouse.name}

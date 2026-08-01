@@ -12,6 +12,8 @@
     "cleanup:demo-data": "node scripts/cleanup-demo-data.mjs",
     "typecheck": "tsc --noEmit --incremental false",
     "test:inventory": "tsc --outDir .tmp-tests tests/inventory-helpers.test.ts src/lib/inventory.ts --module commonjs --target es2020 --esModuleInterop --skipLibCheck && node --test .tmp-tests/tests/inventory-helpers.test.js",
+    "test:inventory:db": "node scripts/run-phase-1g-reversal-db-tests.mjs integration --required",
+    "test:inventory:concurrency": "node scripts/run-phase-1g-reversal-db-tests.mjs concurrency --required",
     "test:procurement": "tsc --outDir .tmp-tests tests/procurement-helpers.test.ts src/lib/procurement.ts src/lib/inventory.ts --module commonjs --target es2020 --esModuleInterop --skipLibCheck && node --test .tmp-tests/tests/procurement-helpers.test.js",
     "test:production": "tsc --outDir .tmp-tests tests/production-helpers.test.ts src/lib/production.ts src/lib/inventory.ts --module commonjs --target es2020 --esModuleInterop --skipLibCheck && node --test .tmp-tests/tests/production-helpers.test.js",
     "test:sales": "tsc --outDir .tmp-tests tests/sales-helpers.test.ts src/lib/sales.ts src/lib/inventory.ts --module commonjs --target es2020 --esModuleInterop --skipLibCheck && node --test .tmp-tests/tests/sales-helpers.test.js",

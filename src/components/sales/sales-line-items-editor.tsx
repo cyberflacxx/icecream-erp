@@ -101,10 +101,11 @@ export function SalesLineItemsEditor({
               <input
                 className="surface-input-soft"
                 min="0"
+                readOnly
                 step="0.01"
                 type="number"
                 value={line.unitPrice}
-                onChange={(event) => updateLine(index, { unitPrice: event.target.value })}
+                onChange={() => undefined}
               />
               <input
                 className="surface-input-soft"

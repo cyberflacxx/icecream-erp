@@ -19,6 +19,11 @@ import {
   validateCustomerImportRows,
   validatePriceImportRows,
 } from '../src/lib/sales';
+import {
+  deriveSalesInvoiceStatus,
+  isSalesInvoicePrintable,
+  isSalesOrderInvoiceable,
+} from '../src/lib/sales-workflow';
 
 test('calculateInvoiceTotals derives gross, discounts, tax, and total', () => {
   const totals = calculateInvoiceTotals([
@@ -107,6 +112,31 @@ test('sales payment tender helpers validate split totals and posting roles', () 
   );
 });
 
+test('sales workflow helpers normalize printable posted invoice and invoiceable order states', () => {
+  assert.equal(
+    deriveSalesInvoiceStatus({
+      amountPaid: 0,
+      balanceDue: 120,
+      postedAt: '2026-08-01T10:00:00Z',
+      status: 'SENT',
+      total: 120,
+    }),
+    'POSTED',
+  );
+  assert.equal(
+    deriveSalesInvoiceStatus({
+      amountPaid: 20,
+      balanceDue: 100,
+      status: 'PARTIAL_PAID',
+      total: 120,
+    }),
+    'PARTIALLY_PAID',
+  );
+  assert.equal(isSalesInvoicePrintable({ postedAt: '2026-08-01T10:00:00Z', status: 'SENT', total: 120 }), true);
+  assert.equal(isSalesOrderInvoiceable('CONFIRMED'), true);
+  assert.equal(isSalesOrderInvoiceable('DRAFT'), false);
+});
+
 test('sales finance transaction migration stays schema-local and RPC gated', () => {
   const root = process.cwd();
   const migration = readFileSync(join(root, 'migrations', '040_sales_finance_transaction_engine.sql'), 'utf8');
@@ -163,12 +193,24 @@ test('sales quotations, orders, and invoices use the shared searchable item sele
   const quotationsPage = readFileSync(join('src', 'app', '(dashboard)', 'sales', 'quotations', 'page.tsx'), 'utf8');
   const ordersPage = readFileSync(join('src', 'app', '(dashboard)', 'sales', 'orders', 'page.tsx'), 'utf8');
   const invoicesPage = readFileSync(join('src', 'app', '(dashboard)', 'sales', 'invoices', 'page.tsx'), 'utf8');
+  const invoicePreviewPage = readFileSync(join('src', 'app', '(dashboard)', 'sales', 'invoices', '[id]', 'page.tsx'), 'utf8');
   const lineEditor = readFileSync(join('src', 'components', 'sales', 'sales-line-items-editor.tsx'), 'utf8');
+  const invoiceRoute = readFileSync(join('src', 'app', 'api', 'sales', 'invoices', 'route.ts'), 'utf8');
+  const itemSelectorRoute = readFileSync(join('src', 'app', 'api', 'inventory', 'items', 'route.ts'), 'utf8');
 
   for (const page of [quotationsPage, ordersPage, invoicesPage]) {
     assert.match(page, /useItemSelectorOptions/);
   }
 
+  assert.match(ordersPage, /useAuthorizedBranches/);
+  assert.match(invoicesPage, /useAuthorizedBranches/);
+  assert.match(invoicesPage, /Preview \/ Print/);
+  assert.match(invoicePreviewPage, /window\.print/);
   assert.match(lineEditor, /ItemSelectorField/);
+  assert.match(lineEditor, /readOnly/);
   assert.match(lineEditor, /No saleable items are available\./);
+  assert.match(invoiceRoute, /loadResolvedSalesItemPricing/);
+  assert.match(invoiceRoute, /postInventory !== false/);
+  assert.match(itemSelectorRoute, /customer_id/);
+  assert.match(itemSelectorRoute, /loadResolvedSalesItemPricing/);
 });

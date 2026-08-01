@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { can, forbidden, getAuthContext, notFound, serverError, unauthorized } from '@/lib/api-auth';
+import { resolveFinancePostingAccount } from '@/lib/finance-foundation-server';
 import { buildFinanceSourceReference } from '@/lib/finance';
 import { createLinkedFinanceTransaction, financeErrorMessage, isMissingFinanceTable, postFinanceDocument } from '@/lib/finance-server';
 import { isSalesTransactionRpcUnavailable, postSalesPaymentTransaction, shouldRequireSalesTransactionRpc } from '@/lib/sales-transactions-server';
@@ -40,6 +41,7 @@ export async function POST(
     .schema('icecream_erp')
     .from('invoices')
     .select('*')
+    .eq('organization_id', ctx.organizationId)
     .eq('id', params.id)
     .is('deleted_at', null)
     .single();
@@ -50,7 +52,11 @@ export async function POST(
 
   // Branch scoping check via linked sales order
   const linkedOrderId = inv.sales_order_id ?? inv.order_id;
-  if (ctx.isBranchScoped && ctx.branchId && linkedOrderId) {
+  const invoiceBranchId = inv.branch_id ? String(inv.branch_id) : null;
+  if (ctx.isBranchScoped && ctx.branchId && invoiceBranchId && invoiceBranchId !== ctx.branchId) {
+    return NextResponse.json({ error: 'This role is limited to its assigned branch.' }, { status: 403 });
+  }
+  if (ctx.isBranchScoped && ctx.branchId && linkedOrderId && !invoiceBranchId) {
     const { data: order } = await service
       .schema('icecream_erp')
       .from('sales_orders')
@@ -122,7 +128,7 @@ export async function POST(
     const transaction = await postSalesPaymentTransaction(
       {
         amount: body.amount,
-        branchId: body.branchId ?? null,
+        branchId: invoiceBranchId ?? body.branchId ?? null,
         costCenterCode: body.costCenterCode ?? null,
         currencyCode: body.currencyCode ?? null,
         departmentId: body.departmentId ?? null,
@@ -260,19 +266,27 @@ export async function POST(
   let linkedTransaction: { id: string; table: string } | null = null;
   try {
     const sourceReference = buildFinanceSourceReference('sales', 'invoice_payment', String(payment.id));
+    const tenderAccount =
+      paymentMethod === 'BANK'
+        ? await resolveFinancePostingAccount(ctx.organizationId, 'BANK_ACCOUNT', { fallbackAccountCode: '1120' })
+        : paymentMethod === 'PETTY_CASH'
+          ? await resolveFinancePostingAccount(ctx.organizationId, 'PETTY_CASH_ACCOUNT', { fallbackAccountCode: '1130' })
+          : await resolveFinancePostingAccount(ctx.organizationId, 'CASH_ACCOUNT', { fallbackAccountCode: '1110' });
+    const receivableAccount = await resolveFinancePostingAccount(ctx.organizationId, 'ACCOUNTS_RECEIVABLE', { fallbackAccountCode: '1140' });
+
     journal = await postFinanceDocument({
       createdBy: ctx.userId,
       description: `Customer payment for invoice ${String(inv.invoice_number ?? params.id)}`,
       journalDate: body.paymentDate,
       lines: [
         {
-          accountCode: paymentMethod === 'BANK' ? '1000' : '1010',
+          accountId: tenderAccount.id,
           creditAmount: 0,
           debitAmount: Number(body.amount),
           description: `Customer payment via ${paymentMethod}`,
         },
         {
-          accountCode: '1100',
+          accountId: receivableAccount.id,
           creditAmount: Number(body.amount),
           debitAmount: 0,
           description: `Reduce accounts receivable for invoice ${String(inv.invoice_number ?? params.id)}`,

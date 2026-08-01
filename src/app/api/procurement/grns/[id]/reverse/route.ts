@@ -1,0 +1,75 @@
+import { NextRequest, NextResponse } from 'next/server';
+
+import { badRequest, can, forbidden, getAuthContext, notFound, unauthorized } from '@/lib/api-auth';
+import {
+  getFinanceModuleDefaultCostCentreCodes,
+  resolveFinanceCostCentreCode,
+} from '@/lib/finance-foundation-server';
+import { toDateOnly } from '@/lib/finance-integration';
+import { buildInventoryPostingIdempotencyKey, loadWarehouseBranchId } from '@/lib/inventory-posting-server';
+import { mapInventoryReversalError, reverseGoodsReceivedNote } from '@/lib/inventory-reversal-server';
+import { requireWarehouseAccess } from '@/lib/inventory-server';
+import { createServiceRoleClient } from '@/lib/supabase/server';
+
+function parseReason(value: unknown) {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+export async function POST(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const ctx = await getAuthContext();
+  if (!ctx) return unauthorized();
+  if (!can(ctx, 'goods_receipt.reverse', 'stores.grn.reverse', 'inventory.write')) return forbidden();
+
+  try {
+    const { id } = await params;
+    const service = createServiceRoleClient();
+    const { data: grn, error } = await service
+      .from('goods_received_notes')
+      .select('id, organization_id, warehouse_id, receiving_warehouse_id')
+      .eq('organization_id', ctx.organizationId)
+      .eq('id', id)
+      .maybeSingle();
+
+    if (error) throw error;
+    if (!grn) return notFound('Goods received note not found.');
+
+    const warehouseId = String(grn.receiving_warehouse_id ?? grn.warehouse_id ?? '').trim();
+    if (!warehouseId) {
+      return badRequest('Goods received note is missing its receiving warehouse.');
+    }
+
+    await requireWarehouseAccess(service, warehouseId, ctx.branchId, ctx.isBranchScoped, ctx.warehouseAssignments);
+    const branchId = await loadWarehouseBranchId(service as never, warehouseId);
+    const costCenterCode = await resolveFinanceCostCentreCode(ctx.organizationId, {
+      branchId,
+      preferredCodes: getFinanceModuleDefaultCostCentreCodes('procurement'),
+    });
+
+    const body = await request.json().catch(() => ({})) as { reason?: string | null; reversalReason?: string | null };
+    const reason = parseReason(body.reason ?? body.reversalReason);
+    if (!reason) return badRequest('Reversal reason is required.');
+
+    const result = await reverseGoodsReceivedNote({
+      actorUserId: ctx.userId,
+      branchId,
+      costCenterCode,
+      grnId: id,
+      idempotencyKey: buildInventoryPostingIdempotencyKey({
+        actorUserId: ctx.userId,
+        documentId: id,
+        operation: 'goods_received_note_reverse',
+      }),
+      journalDate: toDateOnly(new Date().toISOString()),
+      organizationId: ctx.organizationId,
+      reason,
+    });
+
+    return NextResponse.json(result, { status: result.success === false && result.code === 'CONFLICT' ? 409 : 200 });
+  } catch (error) {
+    const mapped = mapInventoryReversalError(error);
+    return NextResponse.json({ error: mapped.message }, { status: mapped.status });
+  }
+}

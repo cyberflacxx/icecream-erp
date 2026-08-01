@@ -1,6 +1,6 @@
 'use client';
 
-import { type FormEvent, useState } from 'react';
+import { type FormEvent, useEffect, useMemo, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { AlertCircle, Plus } from 'lucide-react';
 
@@ -8,6 +8,7 @@ import { PageHeader } from '@/components/dashboard/page-header';
 import { SalesNav } from '@/components/sales/sales-nav';
 import { createSalesLineDraft, normalizeSalesLines, SalesLineItemsEditor, type SalesLineDraft } from '@/components/sales/sales-line-items-editor';
 import { Button } from '@/components/ui/button';
+import { useAuthorizedBranches } from '@/hooks/useAuthorizedBranches';
 import { useItemSelectorOptions } from '@/hooks/useItemSelectorOptions';
 import { DataTable, EmptyState, FormDrawer, LoadingState } from '@/components/ui-library';
 import { useCreateSalesOrder } from '@/hooks/sales/useCreateSalesOrder';
@@ -41,6 +42,7 @@ function validSalesLines(lines: SalesLineDraft[]) {
 export default function SalesOrdersPage() {
   const query = useSalesOrders();
   const metaQuery = useSalesMeta();
+  const branchesQuery = useAuthorizedBranches();
   const createOrder = useCreateSalesOrder();
   const request = useSalesRequest();
   const queryClient = useQueryClient();
@@ -49,10 +51,29 @@ export default function SalesOrdersPage() {
   const [formError, setFormError] = useState<string | null>(null);
   const itemOptionsQuery = useItemSelectorOptions({
     branchId: formState.branchId || undefined,
+    customerId: formState.customerId || undefined,
     includePrice: true,
     includeStock: true,
     warehouseId: formState.warehouseId || undefined,
   });
+  const branchOptions = useMemo(() => branchesQuery.data ?? [], [branchesQuery.data]);
+  const warehouseOptions = useMemo(
+    () => (metaQuery.data?.warehouses ?? []).filter((warehouse) => !formState.branchId || warehouse.branchId === formState.branchId),
+    [formState.branchId, metaQuery.data?.warehouses],
+  );
+
+  useEffect(() => {
+    if (branchOptions.length !== 1) return;
+    const onlyBranch = branchOptions[0];
+    setFormState((current) => {
+      if (current.branchId === onlyBranch.id && current.warehouseId) return current;
+      return {
+        ...current,
+        branchId: onlyBranch.id,
+        warehouseId: current.warehouseId || onlyBranch.defaultWarehouseId || '',
+      };
+    });
+  }, [branchOptions]);
 
   async function refresh() {
     await queryClient.invalidateQueries({ queryKey: ['sales'] });
@@ -107,16 +128,19 @@ export default function SalesOrdersPage() {
 
   async function createInvoice(row: SalesOrderListItem) {
     if (!row.customer?.id) return;
-    await request(API_ROUTES.SALES.INVOICES, {
-      body: JSON.stringify({
-        customerId: row.customer.id,
-        discountAmount: 0,
-        invoiceDate: new Date().toISOString().slice(0, 10),
-        salesOrderId: row.id,
-        taxAmount: 0,
-      }),
-      method: 'POST',
-    });
+      await request(API_ROUTES.SALES.INVOICES, {
+        body: JSON.stringify({
+          branchId: row.branchId ?? undefined,
+          customerId: row.customer.id,
+          discountAmount: 0,
+          invoiceDate: new Date().toISOString().slice(0, 10),
+          postInventory: true,
+          salesOrderId: row.id,
+          taxAmount: 0,
+          warehouseId: row.warehouseId ?? undefined,
+        }),
+        method: 'POST',
+      });
     await refresh();
   }
 
@@ -166,7 +190,7 @@ export default function SalesOrdersPage() {
                       Confirm
                     </Button>
                   ) : null}
-                  {!['cancelled', 'invoiced'].includes(status) ? (
+                  {['confirmed', 'approved', 'dispatched'].includes(status) ? (
                     <Button type="button" size="sm" variant="outline" onClick={() => createInvoice(row)}>
                       Create Invoice
                     </Button>
@@ -189,6 +213,25 @@ export default function SalesOrdersPage() {
           ) : null}
           <div className="grid gap-5 sm:grid-cols-2">
             <label className="space-y-2 text-sm text-muted">
+              <span>Branch</span>
+              <select className="surface-input-soft" required value={formState.branchId} onChange={(event) => {
+                const branch = branchOptions.find((row) => row.id === event.target.value);
+                setFormState((current) => ({
+                  ...current,
+                  branchId: event.target.value,
+                  warehouseId: branch?.defaultWarehouseId ?? '',
+                }));
+              }}>
+                <option value="">Select branch</option>
+                {branchOptions.map((branch) => (
+                  <option key={branch.id} value={branch.id}>
+                    {branch.code ? `${branch.code} - ` : ''}
+                    {branch.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="space-y-2 text-sm text-muted">
               <span>Customer</span>
               <select className="surface-input-soft" required value={formState.customerId} onChange={(event) => setFormState((current) => ({ ...current, customerId: event.target.value }))}>
                 <option value="">Select customer</option>
@@ -203,11 +246,11 @@ export default function SalesOrdersPage() {
             <label className="space-y-2 text-sm text-muted">
               <span>Warehouse</span>
               <select className="surface-input-soft" required value={formState.warehouseId} onChange={(event) => {
-                const warehouse = metaQuery.data?.warehouses.find((row) => row.id === event.target.value);
+                const warehouse = warehouseOptions.find((row) => row.id === event.target.value);
                 setFormState((current) => ({ ...current, branchId: warehouse?.branchId ?? '', warehouseId: event.target.value }));
               }}>
                 <option value="">Select warehouse</option>
-                {metaQuery.data?.warehouses.map((warehouse) => (
+                {warehouseOptions.map((warehouse) => (
                   <option key={warehouse.id} value={warehouse.id}>
                     {warehouse.code ? `${warehouse.code} - ` : ''}
                     {warehouse.name}

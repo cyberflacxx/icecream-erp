@@ -84,6 +84,10 @@ export function useChartOfAccounts() {
   return useFinanceCollectionQuery<Record<string, unknown>>('chart-of-accounts', '/api/finance/chart-of-accounts');
 }
 
+export function useOpeningBalances() {
+  return useFinanceCollectionQuery<Record<string, unknown>>('opening-balances', API_ROUTES.FINANCE.OPENING_BALANCES);
+}
+
 export function useFiscalPeriods() {
   return useFinanceCollectionQuery<Record<string, unknown>>('fiscal-periods', '/api/finance/fiscal-periods');
 }
@@ -130,6 +134,9 @@ export function useFinanceMeta() {
     bankAccounts: Array<Record<string, unknown>>;
     branches: Array<Record<string, unknown>>;
     cashAccounts: Array<Record<string, unknown>>;
+    costCentres: Array<Record<string, unknown>>;
+    currencies: Array<Record<string, unknown>>;
+    fiscalPeriods: Array<Record<string, unknown>>;
   }>('meta', API_ROUTES.FINANCE.META);
 }
 
