@@ -1,3 +1,5 @@
+import { derivePurchaseOrderStatus, isPurchaseOrderEligibleForGoodsReceived } from './procurement-purchase-orders';
+
 type WorkflowBadgeVariant = 'error' | 'info' | 'neutral' | 'success' | 'warning';
 
 export interface ProcurementWorkflowAccess {
@@ -21,6 +23,7 @@ interface RequisitionLike {
 }
 
 interface PurchaseOrderLike {
+  approvalStatus?: unknown;
   approvedAt?: unknown;
   approvedBy?: unknown;
   approverName?: string | null;
@@ -32,6 +35,7 @@ interface PurchaseOrderLike {
 interface GoodsReceivedLike {
   purchaseOrder?: { id?: string | null } | null;
   qualityStatus?: unknown;
+  stockPosted?: unknown;
   status?: unknown;
 }
 
@@ -159,7 +163,7 @@ export function getRequisitionActionState(row: RequisitionLike, access: Procurem
 
   return {
     canApprove: normalizedStatus === 'PENDING_APPROVAL' && roleAccess.canApprove,
-    canCreatePo: (normalizedStatus === 'APPROVED' || normalizedStatus === 'PO_CREATED') && roleAccess.canCreateOrders,
+    canCreatePo: normalizedStatus === 'APPROVED' && roleAccess.canCreateOrders,
     canEditDraft: normalizedStatus === 'DRAFT' && roleAccess.canCreateDrafts,
     canReject: normalizedStatus === 'PENDING_APPROVAL' && roleAccess.canApprove,
     canSubmit: normalizedStatus === 'DRAFT' && roleAccess.canCreateDrafts,
@@ -169,37 +173,14 @@ export function getRequisitionActionState(row: RequisitionLike, access: Procurem
 }
 
 export function derivePurchaseOrderWorkflowStatus(input: PurchaseOrderLike) {
-  const normalizedStatus = normalizeStatusCode(input.status);
-
-  if (hasTimestamp(input.rejectedAt) || normalizedStatus === 'REJECTED' || normalizedStatus === 'CANCELLED') {
-    return normalizedStatus === 'CANCELLED' ? 'CANCELLED' : 'REJECTED';
-  }
-
-  if (['FULLY_RECEIVED', 'RECEIVED'].includes(normalizedStatus)) {
-    return 'FULLY_RECEIVED';
-  }
-
-  if (['PARTIAL_RECEIVED', 'PARTIALLY_RECEIVED'].includes(normalizedStatus)) {
-    return 'PARTIAL_RECEIVED';
-  }
-
-  if (hasTimestamp(input.sentAt) || ['SENT', 'SENT_TO_SUPPLIER'].includes(normalizedStatus)) {
-    return 'SENT_TO_SUPPLIER';
-  }
-
-  if (
-    hasTimestamp(input.approvedAt) ||
-    hasTimestamp(input.approvedBy) ||
-    ['APPROVED', 'LEVEL1_APPROVED', 'LEVEL2_APPROVED'].includes(normalizedStatus)
-  ) {
-    return 'APPROVED';
-  }
-
-  if (['PENDING_APPROVAL', 'AWAITING_APPROVAL', 'SUBMITTED'].includes(normalizedStatus)) {
-    return 'PENDING_APPROVAL';
-  }
-
-  return 'DRAFT';
+  return derivePurchaseOrderStatus({
+    approvalStatus: input.approvalStatus,
+    approvedAt: input.approvedAt,
+    approvedBy: input.approvedBy,
+    rejectedAt: input.rejectedAt,
+    sentAt: input.sentAt,
+    status: input.status,
+  });
 }
 
 export function getPurchaseOrderStatusVariant(status: string): WorkflowBadgeVariant {
@@ -243,7 +224,15 @@ export function getPurchaseOrderActionState(row: PurchaseOrderLike, access: Proc
   return {
     canApprove: ['DRAFT', 'PENDING_APPROVAL'].includes(normalizedStatus) && roleAccess.canApprove,
     canEdit: ['DRAFT', 'PENDING_APPROVAL'].includes(normalizedStatus) && roleAccess.canCreateOrders,
-    canRecordGrn: ['APPROVED', 'SENT_TO_SUPPLIER', 'PARTIAL_RECEIVED'].includes(normalizedStatus) && roleAccess.canReceiveGoods,
+    canRecordGrn:
+      isPurchaseOrderEligibleForGoodsReceived({
+        approvalStatus: row.approvalStatus,
+        approvedAt: row.approvedAt,
+        approvedBy: row.approvedBy,
+        rejectedAt: row.rejectedAt,
+        sentAt: row.sentAt,
+        status: row.status,
+      }) && roleAccess.canReceiveGoods,
     canReject: ['DRAFT', 'PENDING_APPROVAL', 'APPROVED'].includes(normalizedStatus) && roleAccess.canApprove,
     canSend: normalizedStatus === 'APPROVED' && roleAccess.canSendOrders,
     normalizedStatus,
@@ -252,6 +241,10 @@ export function getPurchaseOrderActionState(row: PurchaseOrderLike, access: Proc
 }
 
 export function deriveGoodsReceivedWorkflowStatus(input: GoodsReceivedLike) {
+  if (input.stockPosted === true) {
+    return 'POSTED';
+  }
+
   const candidates = [input.qualityStatus, input.status].map(normalizeStatusCode);
 
   if (candidates.includes('POSTED')) {

@@ -158,3 +158,17 @@ test('sales import validators reject incomplete rows and keep valid ones', () =>
   assert.equal(balanceRows.errors.length, 2);
   assert.equal(balanceRows.rows.length, 1);
 });
+
+test('sales quotations, orders, and invoices use the shared searchable item selector', () => {
+  const quotationsPage = readFileSync(join('src', 'app', '(dashboard)', 'sales', 'quotations', 'page.tsx'), 'utf8');
+  const ordersPage = readFileSync(join('src', 'app', '(dashboard)', 'sales', 'orders', 'page.tsx'), 'utf8');
+  const invoicesPage = readFileSync(join('src', 'app', '(dashboard)', 'sales', 'invoices', 'page.tsx'), 'utf8');
+  const lineEditor = readFileSync(join('src', 'components', 'sales', 'sales-line-items-editor.tsx'), 'utf8');
+
+  for (const page of [quotationsPage, ordersPage, invoicesPage]) {
+    assert.match(page, /useItemSelectorOptions/);
+  }
+
+  assert.match(lineEditor, /ItemSelectorField/);
+  assert.match(lineEditor, /No saleable items are available\./);
+});

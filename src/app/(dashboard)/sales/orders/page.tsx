@@ -8,6 +8,7 @@ import { PageHeader } from '@/components/dashboard/page-header';
 import { SalesNav } from '@/components/sales/sales-nav';
 import { createSalesLineDraft, normalizeSalesLines, SalesLineItemsEditor, type SalesLineDraft } from '@/components/sales/sales-line-items-editor';
 import { Button } from '@/components/ui/button';
+import { useItemSelectorOptions } from '@/hooks/useItemSelectorOptions';
 import { DataTable, EmptyState, FormDrawer, LoadingState } from '@/components/ui-library';
 import { useCreateSalesOrder } from '@/hooks/sales/useCreateSalesOrder';
 import { useSalesMeta } from '@/hooks/sales/useSalesMeta';
@@ -46,6 +47,12 @@ export default function SalesOrdersPage() {
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [formState, setFormState] = useState(initialOrderForm);
   const [formError, setFormError] = useState<string | null>(null);
+  const itemOptionsQuery = useItemSelectorOptions({
+    branchId: formState.branchId || undefined,
+    includePrice: true,
+    includeStock: true,
+    warehouseId: formState.warehouseId || undefined,
+  });
 
   async function refresh() {
     await queryClient.invalidateQueries({ queryKey: ['sales'] });
@@ -217,7 +224,14 @@ export default function SalesOrdersPage() {
               <input className="surface-input-soft" type="date" value={formState.requiredDate} onChange={(event) => setFormState((current) => ({ ...current, requiredDate: event.target.value }))} />
             </label>
           </div>
-          <SalesLineItemsEditor items={metaQuery.data?.items ?? []} lines={formState.items} onChange={(items) => setFormState((current) => ({ ...current, items }))} />
+          <SalesLineItemsEditor
+            items={itemOptionsQuery.data ?? []}
+            loading={itemOptionsQuery.isLoading}
+            errorMessage={itemOptionsQuery.error?.message ?? null}
+            emptyMessage="No saleable items are available for the selected warehouse."
+            lines={formState.items}
+            onChange={(items) => setFormState((current) => ({ ...current, items }))}
+          />
           <div className="grid gap-5 sm:grid-cols-2">
             <label className="space-y-2 text-sm text-muted">
               <span>Discount amount</span>

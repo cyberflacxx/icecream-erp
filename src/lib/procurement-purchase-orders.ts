@@ -1,14 +1,7 @@
-type RawStatus = 'approved' | 'cancelled' | 'draft' | 'sent_to_supplier';
+type RawStatus = 'approved' | 'cancelled' | 'draft' | 'rejected' | 'sent_to_supplier';
 
-const APPROVED_REQUISITION_STATUSES = [
-  'APPROVED',
-  'APPROVED_FOR_PO',
-  'OPEN',
-  'LEVEL1_APPROVED',
-  'LEVEL2_APPROVED',
-  'PENDING_APPROVAL',
-  'SUBMITTED',
-] as const;
+const APPROVED_REQUISITION_STATUSES = ['APPROVED'] as const;
+const RECEIVABLE_PURCHASE_ORDER_STATUSES = ['APPROVED', 'PARTIAL_RECEIVED', 'SENT_TO_SUPPLIER'] as const;
 
 const STATUS_LABELS: Record<string, string> = {
   APPROVED: 'Approved',
@@ -43,36 +36,50 @@ export function isApprovedRequisitionStatus(status: unknown, approvalStatus?: un
 }
 
 export function derivePurchaseOrderStatus(input: {
+  approvalStatus?: unknown;
   approvedAt?: unknown;
   approvedBy?: unknown;
   rejectedAt?: unknown;
   sentAt?: unknown;
   status?: unknown;
 }) {
-  const normalized = normalizePurchaseOrderStatus(input.status);
+  const statusCandidates = [input.status, input.approvalStatus].map(normalizePurchaseOrderStatus);
+  const normalized = statusCandidates.find(Boolean) ?? 'DRAFT';
 
-  if (input.rejectedAt) {
+  if (input.rejectedAt || statusCandidates.includes('REJECTED')) {
     return 'REJECTED';
   }
 
-  if (input.sentAt && normalized === 'APPROVED') {
-    return 'SENT_TO_SUPPLIER';
+  if (statusCandidates.includes('CANCELLED')) {
+    return 'CANCELLED';
   }
 
-  if ((input.approvedAt || input.approvedBy) && ['DRAFT', 'OPEN', 'CREATED', 'SUBMITTED', 'PENDING_APPROVAL'].includes(normalized)) {
-    return 'APPROVED';
+  if (statusCandidates.includes('CLOSED')) {
+    return 'CLOSED';
   }
 
-  if (['SENT', 'SENT_TO_SUPPLIER'].includes(normalized)) {
-    return 'SENT_TO_SUPPLIER';
-  }
-
-  if (normalized === 'RECEIVED') {
+  if (statusCandidates.some((candidate) => ['FULLY_RECEIVED', 'RECEIVED'].includes(candidate))) {
     return 'FULLY_RECEIVED';
   }
 
-  if (normalized === 'PARTIALLY_RECEIVED') {
+  if (statusCandidates.some((candidate) => ['PARTIAL_RECEIVED', 'PARTIALLY_RECEIVED'].includes(candidate))) {
     return 'PARTIAL_RECEIVED';
+  }
+
+  if (input.sentAt || statusCandidates.some((candidate) => ['SENT', 'SENT_TO_SUPPLIER'].includes(candidate))) {
+    return 'SENT_TO_SUPPLIER';
+  }
+
+  if (
+    input.approvedAt ||
+    input.approvedBy ||
+    statusCandidates.includes('APPROVED')
+  ) {
+    return 'APPROVED';
+  }
+
+  if (statusCandidates.some((candidate) => ['PENDING_APPROVAL', 'AWAITING_APPROVAL', 'SUBMITTED'].includes(candidate))) {
+    return 'PENDING_APPROVAL';
   }
 
   return normalized || 'DRAFT';
@@ -89,19 +96,151 @@ export function formatPurchaseOrderDbStatus(target: RawStatus, sampleStatus: unk
   return nextStatus;
 }
 
-export function isPurchaseOrderSentLike(status: unknown) {
-  const normalized = normalizePurchaseOrderStatus(status);
-  return (
-    normalized === 'APPROVED' ||
-    normalized === 'CREATED' ||
-    normalized === 'DRAFT' ||
-    normalized === 'OPEN' ||
-    normalized === 'SUBMITTED' ||
-    normalized === 'SENT' ||
-    normalized === 'SENT_TO_SUPPLIER' ||
-    normalized === 'PARTIAL_RECEIVED' ||
-    normalized === 'PARTIALLY_RECEIVED'
+export interface PurchaseOrderReceivingLine {
+  id: string;
+  itemCode: string | null;
+  itemId: string;
+  itemName: string | null;
+  lineTotal: number;
+  orderedQuantity: number;
+  remainingQuantity: number;
+  unit: string | null;
+  unitPrice: number;
+  previouslyPostedReceivedQuantity: number;
+}
+
+export function buildPurchaseOrderReceivingLine(input: Record<string, unknown> | null | undefined): PurchaseOrderReceivingLine | null {
+  const row = input ?? {};
+  const item = row.items && typeof row.items === 'object' && !Array.isArray(row.items) ? row.items as Record<string, unknown> : null;
+  const unit = row.units_of_measure && typeof row.units_of_measure === 'object' && !Array.isArray(row.units_of_measure)
+    ? row.units_of_measure as Record<string, unknown>
+    : row.unitOfMeasure && typeof row.unitOfMeasure === 'object' && !Array.isArray(row.unitOfMeasure)
+      ? row.unitOfMeasure as Record<string, unknown>
+      : null;
+  const itemId = String(row.item_id ?? row.itemId ?? item?.id ?? '').trim();
+  if (!itemId) {
+    return null;
+  }
+
+  const orderedQuantity = firstFiniteNumber(
+    row.quantity_ordered,
+    row.quantityOrdered,
+    row.quantity,
+    row.qty,
   );
+  const previouslyPostedReceivedQuantity = firstFiniteNumber(
+    row.quantity_received,
+    row.quantityReceived,
+    row.received_qty,
+    row.receivedQty,
+    row.previously_posted_received_quantity,
+    row.previouslyPostedReceivedQuantity,
+  );
+  const reversedPostedQuantity = firstFiniteNumber(
+    row.reversed_posted_quantity,
+    row.reversedPostedQuantity,
+  );
+  const remainingQuantity = Math.max(0, orderedQuantity - previouslyPostedReceivedQuantity + reversedPostedQuantity);
+  const unitPrice = firstFiniteNumber(
+    row.unit_price,
+    row.unitPrice,
+    row.unit_cost,
+    row.unitCost,
+    row.price,
+    row.cost,
+  );
+  const lineTotal = firstFiniteNumber(
+    row.line_total,
+    row.lineTotal,
+    row.total_cost,
+    row.totalCost,
+    row.total_ex_vat,
+    row.totalExVat,
+    orderedQuantity * unitPrice,
+  );
+
+  return {
+    id: String(row.id ?? row.purchase_order_item_id ?? row.purchaseOrderItemId ?? itemId).trim(),
+    itemCode: String(row.item_code ?? row.itemCode ?? item?.code ?? '').trim() || null,
+    itemId,
+    itemName: String(row.item_name ?? row.itemName ?? item?.name ?? '').trim() || null,
+    lineTotal,
+    orderedQuantity,
+    remainingQuantity,
+    unit: String(
+      row.unit_of_measure_name ??
+        row.unitOfMeasureName ??
+        row.uomName ??
+        unit?.abbreviation ??
+        unit?.name ??
+        '',
+    ).trim() || null,
+    unitPrice,
+    previouslyPostedReceivedQuantity,
+  };
+}
+
+export function getPurchaseOrderReceivingLines(lines: Array<Record<string, unknown> | null | undefined>) {
+  return lines
+    .map((line) => buildPurchaseOrderReceivingLine(line))
+    .filter((line): line is PurchaseOrderReceivingLine => Boolean(line))
+    .filter((line) => line.remainingQuantity > 0);
+}
+
+export function isPurchaseOrderEligibleForGoodsReceived(input: {
+  approvalStatus?: unknown;
+  approvedAt?: unknown;
+  approvedBy?: unknown;
+  lines?: Array<Record<string, unknown> | null | undefined>;
+  rejectedAt?: unknown;
+  sentAt?: unknown;
+  status?: unknown;
+  supplierActive?: boolean;
+}) {
+  const derivedStatus = derivePurchaseOrderStatus(input);
+  const statusEligible = RECEIVABLE_PURCHASE_ORDER_STATUSES.includes(
+    derivedStatus as (typeof RECEIVABLE_PURCHASE_ORDER_STATUSES)[number],
+  );
+
+  if (!statusEligible) {
+    return false;
+  }
+
+  if (input.supplierActive === false) {
+    return false;
+  }
+
+  if (input.lines) {
+    return getPurchaseOrderReceivingLines(input.lines).length > 0;
+  }
+
+  return true;
+}
+
+export function isPurchaseOrderSentLike(input: {
+  approvalStatus?: unknown;
+  approvedAt?: unknown;
+  approvedBy?: unknown;
+  lines?: Array<Record<string, unknown> | null | undefined>;
+  rejectedAt?: unknown;
+  sentAt?: unknown;
+  status?: unknown;
+  supplierActive?: boolean;
+} | unknown) {
+  if (input && typeof input === 'object' && !Array.isArray(input)) {
+    return isPurchaseOrderEligibleForGoodsReceived(input as {
+      approvalStatus?: unknown;
+      approvedAt?: unknown;
+      approvedBy?: unknown;
+      lines?: Array<Record<string, unknown> | null | undefined>;
+      rejectedAt?: unknown;
+      sentAt?: unknown;
+      status?: unknown;
+      supplierActive?: boolean;
+    });
+  }
+
+  return isPurchaseOrderEligibleForGoodsReceived({ status: input });
 }
 
 export function isPurchaseOrderRejectable(status: unknown) {

@@ -5,9 +5,12 @@ import { type FormEvent, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useQueryClient } from '@tanstack/react-query';
 
+import { ItemSelectorField } from '@/components/shared/item-selector-field';
 import { Button } from '@/components/ui/button';
 import { EmptyState, LoadingState } from '@/components/ui-library';
+import { useAuthorizedBranches } from '@/hooks/useAuthorizedBranches';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
+import { useItemSelectorOptions } from '@/hooks/useItemSelectorOptions';
 import { usePermission } from '@/hooks/usePermission';
 import { useProductionMeta } from '@/hooks/production/useProductionMeta';
 import { useProductionOrderProducts } from '@/hooks/production/useProductionOrders';
@@ -104,6 +107,7 @@ export function ProductionOrderPlanningForm({
   const currentUserQuery = useCurrentUser();
   const metaQuery = useProductionMeta();
   const productsQuery = useProductionOrderProducts();
+  const branchesQuery = useAuthorizedBranches();
   const request = useProductionRequest();
   const router = useRouter();
   const queryClient = useQueryClient();
@@ -114,12 +118,24 @@ export function ProductionOrderPlanningForm({
 
   const branchId = currentUserQuery.data?.branch?.id ?? null;
   const isBranchScoped = currentUserQuery.data?.isBranchScoped ?? false;
+  const productOptionsQuery = useItemSelectorOptions({
+    branchId: isBranchScoped ? branchId : form.branchId || undefined,
+    includeCost: true,
+    itemType: ['FINISHED_GOOD', 'FINISHED'],
+  });
 
   useEffect(() => {
     setForm(buildInitialValues(existingOrder, branchId));
   }, [branchId, existingOrder]);
 
-  const branches = useMemo(() => metaQuery.data?.branches ?? [], [metaQuery.data?.branches]);
+  useEffect(() => {
+    if (mode !== 'create') return;
+    const onlyBranchId = branchesQuery.data?.length === 1 ? branchesQuery.data[0]?.id ?? '' : '';
+    if (!onlyBranchId) return;
+    setForm((current) => (current.branchId ? current : { ...current, branchId: onlyBranchId }));
+  }, [branchesQuery.data, mode]);
+
+  const branches = useMemo(() => branchesQuery.data ?? [], [branchesQuery.data]);
   const warehouses = useMemo(() => metaQuery.data?.warehouses ?? [], [metaQuery.data?.warehouses]);
   const productionWarehouses = useMemo(
     () => warehouses.filter((warehouse) => warehouse.isProductionMaterialWarehouse || warehouse.isProductionWarehouse),
@@ -132,8 +148,16 @@ export function ProductionOrderPlanningForm({
 
   const products = useMemo(() => {
     const byId = new Map<string, ProductOption>();
-    for (const product of metaQuery.data?.products ?? []) {
-      byId.set(String(product.id ?? ''), product as ProductOption);
+    for (const product of productOptionsQuery.data ?? []) {
+      const id = String(product.id ?? '');
+      byId.set(id, {
+        code: product.code,
+        description: product.name,
+        id,
+        name: product.name,
+        standard_cost: product.currentInventoryCost,
+        unit_cost: product.currentInventoryCost,
+      });
     }
     for (const product of productsQuery.data ?? []) {
       const id = String(product.id ?? '');
@@ -142,7 +166,7 @@ export function ProductionOrderPlanningForm({
     return Array.from(byId.values())
       .filter((product) => product.id)
       .sort((left, right) => String(left.code ?? '').localeCompare(String(right.code ?? '')));
-  }, [metaQuery.data?.products, productsQuery.data]);
+  }, [productOptionsQuery.data, productsQuery.data]);
 
   const selectedProduct = useMemo(
     () => products.find((product) => product.id === form.productId) ?? null,
@@ -300,18 +324,14 @@ export function ProductionOrderPlanningForm({
           <div className="grid gap-4 md:grid-cols-2">
             <label className="space-y-2 text-sm text-muted">
               <span>Product Number</span>
-              <select
-                className="surface-input-soft"
+              <ItemSelectorField
                 value={form.productId}
-                onChange={(event) => setForm((current) => ({ ...current, productId: event.target.value }))}
-              >
-                <option value="">Select product</option>
-                {products.map((product) => (
-                  <option key={product.id} value={product.id}>
-                    {String(product.code ?? '')} - {String(product.name ?? product.description ?? '')}
-                  </option>
-                ))}
-              </select>
+                options={productOptionsQuery.data ?? []}
+                loading={productOptionsQuery.isLoading}
+                errorMessage={productOptionsQuery.error?.message ?? null}
+                emptyMessage="No production products are available."
+                onChange={(nextProductId) => setForm((current) => ({ ...current, productId: nextProductId }))}
+              />
             </label>
 
             <label className="space-y-2 text-sm text-muted">

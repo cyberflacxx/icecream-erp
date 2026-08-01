@@ -2,6 +2,11 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
 import { getErrorMessage, isMissingColumnError } from '@/lib/postgrest-compat';
+import {
+  derivePurchaseOrderStatus,
+  getPurchaseOrderReceivingLines,
+  isPurchaseOrderEligibleForGoodsReceived,
+} from '@/lib/procurement-purchase-orders';
 import { getSafeSupplierErrorDetails, listSupplierOptionRecords } from '@/lib/procurement-suppliers';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
@@ -21,19 +26,6 @@ function mapItemType(value: unknown) {
 
 function mapUnitLabel(unit: Record<string, unknown>) {
   return String(unit.name ?? unit.abbreviation ?? unit.code ?? 'Unit');
-}
-
-function mapPurchaseOrderStatus(value: unknown) {
-  const normalized = normalizeStatus(value);
-  if (normalized === 'SENT_TO_SUPPLIER' || normalized === 'SENT') return 'SENT_TO_SUPPLIER';
-  if (normalized === 'APPROVED' || normalized === 'LEVEL1_APPROVED' || normalized === 'LEVEL2_APPROVED') return 'APPROVED';
-  if (normalized === 'PARTIAL_RECEIVED' || normalized === 'PARTIALLY_RECEIVED') return 'PARTIAL_RECEIVED';
-  if (normalized === 'FULLY_RECEIVED' || normalized === 'RECEIVED') return 'FULLY_RECEIVED';
-  return normalized;
-}
-
-function isReceivablePurchaseOrderStatus(value: unknown) {
-  return new Set(['APPROVED', 'SENT_TO_SUPPLIER', 'PARTIAL_RECEIVED']).has(mapPurchaseOrderStatus(value));
 }
 
 async function loadItems(service: ReturnType<typeof createServiceRoleClient>, organizationId: string) {
@@ -163,12 +155,14 @@ async function loadApprovers(service: ReturnType<typeof createServiceRoleClient>
   return filtered.length > 0 ? filtered : rows;
 }
 
-export async function GET(_request: NextRequest) {
+export async function GET(request: NextRequest) {
   const ctx = await getAuthContext();
   if (!ctx) return unauthorized();
   if (!can(ctx, 'procurement.read')) return forbidden();
 
   const service = createServiceRoleClient();
+  const { searchParams } = new URL(request.url);
+  const purchaseOrderScope = searchParams.get('purchaseOrderScope') === 'receiving' ? 'receiving' : 'all';
 
   try {
     let warehouseQuery = service
@@ -199,7 +193,7 @@ export async function GET(_request: NextRequest) {
       warehouseQuery.order('name'),
       service
         .from('purchase_orders')
-        .select('id, po_number, status, supplier_id, suppliers(id, name)')
+        .select('id, po_number, status, approval_status, approved_at, approved_by, sent_at, rejected_at, supplier_id, suppliers(id, name)')
         .eq('organization_id', ctx.organizationId)
         .order('created_at', { ascending: false }),
       service
@@ -286,7 +280,47 @@ export async function GET(_request: NextRequest) {
         .filter((unit) => unit.is_active !== false && unit.deleted_at == null)
         .map((unit) => [String(unit.id), unit]),
     );
-    const receivablePurchaseOrders = purchaseOrdersRows.filter((row) => isReceivablePurchaseOrderStatus(row.status));
+    const purchaseOrderIds = new Set(purchaseOrdersRows.map((row) => String(row.id ?? '')).filter(Boolean));
+    const purchaseOrderItemsByOrderId = new Map<string, Array<Record<string, unknown>>>();
+    for (const row of purchaseOrderItemsRows) {
+      const orderId = String(row.po_id ?? row.purchase_order_id ?? '').trim();
+      if (!orderId || !purchaseOrderIds.has(orderId)) continue;
+      purchaseOrderItemsByOrderId.set(orderId, [...(purchaseOrderItemsByOrderId.get(orderId) ?? []), row]);
+    }
+
+    const allPurchaseOrders = purchaseOrdersRows.map((row) => {
+      const supplier = Array.isArray(row.suppliers) ? row.suppliers[0] : row.suppliers;
+      const lines = purchaseOrderItemsByOrderId.get(String(row.id ?? '')) ?? [];
+      const derivedStatus = derivePurchaseOrderStatus({
+        approvalStatus: row.approval_status,
+        approvedAt: row.approved_at,
+        approvedBy: row.approved_by,
+        rejectedAt: row.rejected_at,
+        sentAt: row.sent_at,
+        status: row.status,
+      });
+
+      return {
+        ...row,
+        derivedStatus,
+        lines,
+        receivingLines: getPurchaseOrderReceivingLines(lines),
+        supplier,
+      };
+    });
+    const receivablePurchaseOrders = allPurchaseOrders.filter((row) =>
+      isPurchaseOrderEligibleForGoodsReceived({
+        approvalStatus: row.approval_status,
+        approvedAt: row.approved_at,
+        approvedBy: row.approved_by,
+        lines: row.lines,
+        rejectedAt: row.rejected_at,
+        sentAt: row.sent_at,
+        status: row.status,
+        supplierActive: Boolean(row.supplier_id ?? (row.supplier as Record<string, unknown> | null)?.id),
+      }),
+    );
+    const purchaseOrdersForResponse = purchaseOrderScope === 'receiving' ? receivablePurchaseOrders : allPurchaseOrders;
     const receivablePurchaseOrderIds = new Set(receivablePurchaseOrders.map((row) => String(row.id ?? '')));
     const itemInventory = new Map<
       string,
@@ -339,9 +373,8 @@ export async function GET(_request: NextRequest) {
       const itemId = String(row.item_id ?? '');
       if (!poId || !itemId || !receivablePurchaseOrderIds.has(poId)) continue;
 
-      const ordered = toNumber(row.quantity_ordered ?? row.quantity);
-      const received = toNumber(row.quantity_received ?? row.received_qty);
-      const outstanding = Math.max(0, ordered - received);
+      const outstandingLine = getPurchaseOrderReceivingLines([row])[0];
+      const outstanding = outstandingLine?.remainingQuantity ?? 0;
       if (outstanding <= 0) continue;
 
       const summary = itemInventory.get(itemId) ?? {
@@ -438,9 +471,8 @@ export async function GET(_request: NextRequest) {
             sellingPrice: toNumber(item.selling_price ?? item.price),
           };
         }),
-      purchaseOrders: receivablePurchaseOrders.map((row) => {
-        const supplier = Array.isArray(row.suppliers) ? row.suppliers[0] : row.suppliers;
-        const supplierRecord = supplier && typeof supplier === 'object' ? (supplier as Record<string, unknown>) : null;
+      purchaseOrders: purchaseOrdersForResponse.map((row) => {
+        const supplierRecord = row.supplier && typeof row.supplier === 'object' ? (row.supplier as Record<string, unknown>) : null;
         const poNumber = String(row.po_number ?? 'Purchase order');
         const supplierName = String(supplierRecord?.name ?? 'Unknown supplier');
         const supplierId = supplierRecord?.id ? String(supplierRecord.id) : row.supplier_id ? String(row.supplier_id) : null;
@@ -449,7 +481,19 @@ export async function GET(_request: NextRequest) {
           label: `${poNumber} - ${supplierName}`,
           poNumber,
           purchase_order_id: String(row.id),
-          status: mapPurchaseOrderStatus(row.status),
+          status: row.derivedStatus,
+          remainingLines: row.receivingLines.map((line) => ({
+            id: line.id,
+            itemCode: line.itemCode,
+            itemId: line.itemId,
+            itemName: line.itemName,
+            lineTotal: line.lineTotal,
+            orderedQuantity: line.orderedQuantity,
+            previouslyPostedReceivedQuantity: line.previouslyPostedReceivedQuantity,
+            remainingQuantity: line.remainingQuantity,
+            unit: line.unit,
+            unitPrice: line.unitPrice,
+          })),
           supplier: supplierId ? { id: supplierId, name: supplierName } : null,
           supplierId,
           supplierName,

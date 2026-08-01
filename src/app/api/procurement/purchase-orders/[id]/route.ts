@@ -9,10 +9,10 @@ import {
 import { isMissingColumnError } from '@/lib/postgrest-compat';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
-const PURCHASE_ORDER_DETAIL_SELECT_BASE = `id, po_number, order_date, expected_delivery_date, status,
+const PURCHASE_ORDER_DETAIL_SELECT_BASE = `id, po_number, order_date, expected_delivery_date, status, approval_status,
          subtotal, tax_amount, discount_amount, total, notes, approved_at, approved_by, approver_user_id, sent_at, rejected_at, requisition_id, supplier_id,
          suppliers(id, name, email, phone, address)`;
-const PURCHASE_ORDER_DETAIL_SELECT_WITH_APPROVER_DETAILS = `id, po_number, order_date, expected_delivery_date, status,
+const PURCHASE_ORDER_DETAIL_SELECT_WITH_APPROVER_DETAILS = `id, po_number, order_date, expected_delivery_date, status, approval_status,
          subtotal, tax_amount, discount_amount, total, notes, approved_at, approved_by, approver_user_id, approver_name, approver_email, approval_notes, sent_at, rejected_at, requisition_id, supplier_id,
          suppliers(id, name, email, phone, address)`;
 
@@ -130,6 +130,9 @@ export async function GET(
       orderDate: o.order_date,
       expectedDeliveryDate: o.expected_delivery_date,
       status: derivePurchaseOrderStatus({
+        approvalStatus: o.approval_status,
+        approvedAt: o.approved_at,
+        approvedBy: o.approved_by,
         rejectedAt: o.rejected_at,
         sentAt: o.sent_at,
         status: o.status,
@@ -169,7 +172,9 @@ export async function GET(
           description: item.description ? String(item.description) : product?.description ? String((product as Record<string, unknown>).description ?? '') : product?.name ? String((product as Record<string, unknown>).name ?? '') : '',
           quantityOrdered: Number(item.quantity_ordered ?? 0),
           quantityReceived: Number(item.quantity_received ?? 0),
+          previouslyPostedReceivedQuantity: Number(item.quantity_received ?? 0),
           outstandingQuantity: Math.max(0, Number(item.quantity_ordered ?? 0) - Number(item.quantity_received ?? 0)),
+          remainingQuantity: Math.max(0, Number(item.quantity_ordered ?? 0) - Number(item.quantity_received ?? 0)),
           taxRate: Number(item.tax_rate ?? 0),
           totalCost: Number(item.total_ex_vat ?? item.total_cost ?? 0),
           unitCost: Number(item.unit_price ?? item.unit_cost ?? 0),

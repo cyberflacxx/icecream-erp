@@ -42,11 +42,12 @@ export async function POST(
     if (
       !['DRAFT', 'PENDING_APPROVAL'].includes(
         derivePurchaseOrderStatus({
+          approvalStatus: order.approval_status,
           approvedAt: order.approved_at,
           approvedBy: order.approved_by,
           rejectedAt: order.rejected_at,
           sentAt: order.sent_at,
-          status: order.approval_status ?? order.status,
+          status: order.status,
         }),
       )
     ) {

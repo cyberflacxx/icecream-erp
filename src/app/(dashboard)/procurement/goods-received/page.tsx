@@ -17,8 +17,10 @@ import { WarehouseSelect } from '@/components/inventory/warehouse-select';
 import { ProcurementNav } from '@/components/procurement/procurement-nav';
 import { SupplierSelect } from '@/components/procurement/supplier-select';
 import { TransactionShortcuts } from '@/components/procurement/transaction-shortcuts';
+import { ItemSelectorField } from '@/components/shared/item-selector-field';
 import { Button } from '@/components/ui/button';
 import { useUserContext } from '@/contexts/UserContext';
+import { useItemSelectorOptions } from '@/hooks/useItemSelectorOptions';
 import {
   useGRNs,
   useProcurementMeta,
@@ -47,15 +49,21 @@ type GrnLineItem = {
   damagedQuantity: string;
   expiryDate: string;
   itemId: string;
+  itemCode?: string;
+  itemName?: string;
+  orderedQuantity: number;
   poItemId?: string;
+  previouslyReceivedQuantity: number;
   qualityNotes: string;
   quantityExpected: number;
   quantityReceived: string;
   quantityRejected: string;
+  remainingQuantity: number;
   reason: string;
   rowId: string;
   unitCost: string;
   unitOfMeasureId: string;
+  unitOfMeasureName?: string;
 };
 
 interface FeedbackState {
@@ -68,6 +76,16 @@ const currencyFormatter = new Intl.NumberFormat('en-US', {
   currency: 'USD',
   minimumFractionDigits: 2,
 });
+const grnItemTypes = [
+  'RAW',
+  'RAW_MATERIAL',
+  'PACKAGING',
+  'PACKAGING_MATERIAL',
+  'INGREDIENT',
+  'CONSUMABLE',
+  'GENERAL',
+  'STOCK',
+] as const;
 
 function createGrnRowId() {
   return `grn-line-${Math.random().toString(36).slice(2, 10)}`;
@@ -79,10 +97,13 @@ function buildEmptyGrnLineItem(): GrnLineItem {
     damagedQuantity: '0',
     expiryDate: '',
     itemId: '',
+    orderedQuantity: 0,
+    previouslyReceivedQuantity: 0,
     qualityNotes: '',
     quantityExpected: 0,
     quantityReceived: '0',
     quantityRejected: '0',
+    remainingQuantity: 0,
     reason: '',
     rowId: createGrnRowId(),
     unitCost: '0',
@@ -126,7 +147,14 @@ export default function GoodsReceivedPage() {
 
   const queryClient = useQueryClient();
   const request = useProcurementRequest();
-  const metaQuery = useProcurementMeta();
+  const metaQuery = useProcurementMeta({ purchaseOrderScope: 'receiving' });
+  const itemSelectorQuery = useItemSelectorOptions({
+    includeCost: true,
+    includePrice: true,
+    includeStock: true,
+    itemType: Array.from(grnItemTypes),
+    warehouseId: formState.warehouseId || undefined,
+  });
   const grnsQuery = useGRNs({
     page: filters.page,
     pageSize: filters.pageSize,
@@ -135,10 +163,10 @@ export default function GoodsReceivedPage() {
   });
   const purchaseOrderQuery = usePurchaseOrder(formState.purchaseOrderId || undefined);
   const purchaseOrderOptions = metaQuery.data?.purchaseOrders ?? [];
-  const itemOptions = metaQuery.data?.items ?? [];
+  const itemOptions = itemSelectorQuery.data ?? [];
   const unitOptions = metaQuery.data?.units ?? [];
   const purchaseOrderLoadFailed = metaQuery.isError && purchaseOrderOptions.length === 0;
-  const itemLoadFailed = metaQuery.isError && itemOptions.length === 0;
+  const itemLoadFailed = itemSelectorQuery.isError && itemOptions.length === 0;
   const unitLoadFailed = metaQuery.isError && unitOptions.length === 0;
   const workflowAccess = {
     canApprove,
@@ -160,16 +188,20 @@ export default function GoodsReceivedPage() {
   useEffect(() => {
     const order = purchaseOrderQuery.data as
       | {
+          supplier?: { id: string } | null;
           items: Array<{
             id: string;
-            item: { id: string } | null;
+            item: { code?: string | null; id: string; name?: string | null } | null;
+            orderedQuantity?: number;
+            previouslyPostedReceivedQuantity?: number;
             quantityOrdered: number;
             quantityReceived: number;
+            remainingQuantity?: number;
             unitCost?: number;
             unit_cost?: number;
             unitPrice?: number;
             unit_price?: number;
-            unitOfMeasure?: { id: string } | null;
+            unitOfMeasure?: { abbreviation?: string | null; id: string } | null;
           }>;
         }
       | undefined;
@@ -180,23 +212,48 @@ export default function GoodsReceivedPage() {
     }
 
     setLineItems(
-      order.items.map((item) => ({
-        batchNumber: '',
-        damagedQuantity: '0',
-        expiryDate: '',
-        itemId: item.item?.id ?? '',
-        poItemId: item.id,
-        qualityNotes: '',
-        quantityExpected: Math.max(0, item.quantityOrdered - item.quantityReceived),
-        quantityReceived: String(Math.max(0, item.quantityOrdered - item.quantityReceived)),
-        quantityRejected: '0',
-        reason: '',
-        rowId: createGrnRowId(),
-        unitCost: String(item.unitCost ?? item.unit_cost ?? item.unitPrice ?? item.unit_price ?? 0),
-        unitOfMeasureId: item.unitOfMeasure?.id ?? '',
-      })),
+      order.items
+        .filter((item) => Math.max(0, Number(item.remainingQuantity ?? item.quantityOrdered - item.quantityReceived)) > 0)
+        .map((item) => ({
+          batchNumber: '',
+          damagedQuantity: '0',
+          expiryDate: '',
+          itemId: item.item?.id ?? '',
+          itemCode: item.item?.code ?? '',
+          itemName: item.item?.name ?? '',
+          orderedQuantity: Number(item.orderedQuantity ?? 0),
+          poItemId: item.id,
+          previouslyReceivedQuantity: Number(item.previouslyPostedReceivedQuantity ?? item.quantityReceived ?? 0),
+          qualityNotes: '',
+          quantityExpected: Math.max(0, Number(item.remainingQuantity ?? item.quantityOrdered - item.quantityReceived)),
+          quantityReceived: String(Math.max(0, Number(item.remainingQuantity ?? item.quantityOrdered - item.quantityReceived))),
+          quantityRejected: '0',
+          remainingQuantity: Math.max(0, Number(item.remainingQuantity ?? item.quantityOrdered - item.quantityReceived)),
+          reason: '',
+          rowId: createGrnRowId(),
+          unitCost: String(item.unitCost ?? item.unit_cost ?? item.unitPrice ?? item.unit_price ?? 0),
+          unitOfMeasureId: item.unitOfMeasure?.id ?? '',
+          unitOfMeasureName: item.unitOfMeasure?.abbreviation ?? '',
+        })),
     );
   }, [purchaseOrderQuery.data, formState.entryMode]);
+
+  useEffect(() => {
+    if (formState.entryMode !== 'PO_LINKED') {
+      return;
+    }
+
+    const order = purchaseOrderQuery.data as { supplier?: { id: string } | null } | undefined;
+    const defaultWarehouseId = !formState.warehouseId && (metaQuery.data?.warehouses?.length ?? 0) === 1
+      ? metaQuery.data?.warehouses?.[0]?.id ?? ''
+      : formState.warehouseId;
+
+    setFormState((current) => ({
+      ...current,
+      supplierId: order?.supplier?.id ?? current.supplierId,
+      warehouseId: defaultWarehouseId,
+    }));
+  }, [formState.entryMode, formState.warehouseId, metaQuery.data?.warehouses, purchaseOrderQuery.data]);
 
   useEffect(() => {
     if (formState.entryMode === 'MANUAL' && lineItems.length === 0) {
@@ -338,12 +395,10 @@ export default function GoodsReceivedPage() {
       lineItems.some(
         (item) =>
           formState.entryMode === 'PO_LINKED' &&
-          Number(item.quantityExpected) > 0 &&
-          Number(item.quantityReceived) > Number(item.quantityExpected) &&
-          !String(item.reason ?? '').trim(),
+          Number(item.quantityReceived) > Number(item.remainingQuantity),
       )
     ) {
-      setFormError('Provide an over-receive reason whenever the received quantity exceeds the outstanding PO quantity.');
+      setFormError('Received quantity cannot exceed the remaining purchase-order quantity.');
       return;
     }
 
@@ -687,7 +742,7 @@ export default function GoodsReceivedPage() {
                 disabled={formState.entryMode !== 'PO_LINKED' || metaQuery.isLoading || purchaseOrderLoadFailed || purchaseOrderOptions.length === 0}
                 value={formState.purchaseOrderId}
                 onChange={(event) =>
-                  setFormState((current) => ({ ...current, purchaseOrderId: event.target.value }))
+                  setFormState((current) => ({ ...current, purchaseOrderId: event.target.value, supplierId: '' }))
                 }
                 className="surface-input-soft"
               >
@@ -697,7 +752,7 @@ export default function GoodsReceivedPage() {
                     : purchaseOrderLoadFailed
                       ? 'Purchase orders unavailable'
                       : purchaseOrderOptions.length === 0
-                        ? 'No purchase orders available'
+                        ? 'No approved purchase orders with remaining quantity'
                         : 'Select PO'}
                 </option>
                 {formState.purchaseOrderId &&
@@ -725,7 +780,7 @@ export default function GoodsReceivedPage() {
                 </div>
               ) : !metaQuery.isLoading && purchaseOrderOptions.length === 0 ? (
                 <div className="rounded-xl border border-border/60 bg-white/90 px-3 py-2 text-xs text-muted">
-                  No purchase orders available for receiving.
+                  No approved purchase orders with remaining quantity are available for receiving.
                 </div>
               ) : null}
             </label>
@@ -802,10 +857,12 @@ export default function GoodsReceivedPage() {
             <div>
               <p className="text-sm font-semibold uppercase tracking-[0.18em] text-orange">Received Lines</p>
             </div>
-            <div className="hidden gap-3 px-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-muted md:grid md:grid-cols-[minmax(0,1.2fr)_96px_96px_96px_96px_96px_110px_110px_110px]">
+            <div className="hidden gap-3 px-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-muted md:grid md:grid-cols-[minmax(0,1.2fr)_96px_96px_96px_96px_96px_96px_110px_110px_110px]">
               <span>Item Name</span>
               <span>UOM</span>
               <span>Ordered Qty</span>
+              <span>Prev Received</span>
+              <span>Remaining</span>
               <span>Received Qty</span>
               <span>Rejected Qty</span>
               <span>Damaged Qty</span>
@@ -815,54 +872,33 @@ export default function GoodsReceivedPage() {
             </div>
             {lineItems.map((item, index) => (
               <div key={item.rowId} className="space-y-3 rounded-2xl border border-border/70 bg-white/90 p-3">
-                <div className="grid gap-3 md:grid-cols-[1.2fr_96px_96px_96px_96px_96px_110px_110px_110px]">
+                <div className="grid gap-3 md:grid-cols-[1.2fr_96px_96px_96px_96px_96px_96px_110px_110px_110px]">
                   <div className="space-y-2">
-                    <select
+                    <ItemSelectorField
+                      disabled={formState.entryMode === 'PO_LINKED' || !formState.warehouseId}
+                      emptyMessage={formState.warehouseId ? 'No items found for this warehouse.' : 'Select a warehouse first.'}
+                      errorMessage={itemSelectorQuery.error instanceof Error ? itemSelectorQuery.error.message : null}
+                      loading={itemSelectorQuery.isLoading}
+                      options={itemOptions}
                       value={item.itemId}
-                      disabled={formState.entryMode === 'PO_LINKED' || metaQuery.isLoading || itemLoadFailed || itemOptions.length === 0}
-                      onChange={(event) =>
+                      onChange={(value) =>
                         setLineItems((current) => {
-                          const selectedItem = itemOptions.find((row) => row.id === event.target.value) ?? null;
+                          const selectedItem = itemOptions.find((row) => row.id === value) ?? null;
 
                           return current.map((row, rowIndex) =>
                             rowIndex === index
                               ? {
                                   ...row,
-                                  itemId: event.target.value,
-                                  unitCost: String(
-                                    selectedItem?.purchase_price ??
-                                      selectedItem?.cost_price ??
-                                      selectedItem?.unit_cost ??
-                                      selectedItem?.default_purchase_price ??
-                                      0,
-                                  ),
-                                  unitOfMeasureId: selectedItem?.unitOfMeasureId ?? row.unitOfMeasureId,
+                                  itemId: value,
+                                  unitCost: String(selectedItem?.currentInventoryCost ?? 0),
+                                  unitOfMeasureId: selectedItem?.unitId ?? row.unitOfMeasureId,
                                 }
                               : row,
                           );
                         })
                       }
-                      className="surface-input-soft"
-                    >
-                      <option value="">
-                        {metaQuery.isLoading
-                          ? 'Loading items...'
-                          : itemLoadFailed
-                            ? 'Items unavailable'
-                            : itemOptions.length === 0
-                              ? 'No items found'
-                              : 'Select item'}
-                      </option>
-                      {item.itemId &&
-                      !itemOptions.some((candidate) => candidate.id === item.itemId) ? (
-                        <option value={item.itemId}>Saved item selection</option>
-                      ) : null}
-                      {itemOptions.map((row) => (
-                        <option key={row.id} value={row.id}>
-                          {row.label ?? (row.code ? `${row.code} - ${row.name}` : row.name)}
-                        </option>
-                      ))}
-                    </select>
+                      placeholder="Search item"
+                    />
                     <div className="grid gap-2 text-xs text-muted sm:grid-cols-2">
                       <span>Item Code: {getSelectedItemMeta(item.itemId)?.code ?? 'Pending'}</span>
                       <span>Item Name: {getSelectedItemMeta(item.itemId)?.name ?? 'Select an item'}</span>
@@ -900,17 +936,32 @@ export default function GoodsReceivedPage() {
                     ))}
                   </select>
                   <input
-                    value={item.quantityExpected}
+                    value={item.orderedQuantity}
                     readOnly={formState.entryMode === 'PO_LINKED'}
                     onChange={(event) =>
                       setLineItems((current) =>
                         current.map((row, rowIndex) =>
                           rowIndex === index
-                            ? { ...row, quantityExpected: Number(event.target.value) || 0 }
+                            ? {
+                                ...row,
+                                orderedQuantity: Number(event.target.value) || 0,
+                                quantityExpected: Number(event.target.value) || 0,
+                                remainingQuantity: Number(event.target.value) || 0,
+                              }
                             : row,
                         ),
                       )
                     }
+                    className="surface-input-soft"
+                  />
+                  <input
+                    value={item.previouslyReceivedQuantity}
+                    readOnly
+                    className="surface-input-soft"
+                  />
+                  <input
+                    value={item.remainingQuantity}
+                    readOnly
                     className="surface-input-soft"
                   />
                   <input
@@ -919,11 +970,16 @@ export default function GoodsReceivedPage() {
                     type="number"
                     value={item.quantityReceived}
                     onChange={(event) =>
-                      setLineItems((current) =>
-                        current.map((row, rowIndex) =>
-                          rowIndex === index ? { ...row, quantityReceived: event.target.value } : row,
-                        ),
-                      )
+                      setLineItems((current) => {
+                        const requested = Math.max(0, Number(event.target.value) || 0);
+                        const capped = formState.entryMode === 'PO_LINKED'
+                          ? Math.min(requested, Number(current[index]?.remainingQuantity ?? requested))
+                          : requested;
+
+                        return current.map((row, rowIndex) =>
+                          rowIndex === index ? { ...row, quantityExpected: row.remainingQuantity, quantityReceived: String(capped) } : row,
+                        );
+                      })
                     }
                     className="surface-input-soft"
                   />
@@ -995,24 +1051,13 @@ export default function GoodsReceivedPage() {
                     className="surface-input-soft"
                   />
                 </div>
-                <div className="grid gap-2 text-xs text-muted md:grid-cols-4">
+                <div className="grid gap-2 text-xs text-muted md:grid-cols-5">
                   <span>Accepted Qty: {getAcceptedLineQuantity(item).toFixed(3)}</span>
+                  <span>Remaining Qty: {Number(item.remainingQuantity ?? 0).toFixed(3)}</span>
                   <span>Line Value: {formatCurrency(getLineValue(item))}</span>
                   <span>Batch No.: {item.batchNumber || 'Pending'}</span>
                   <span>Expiry Date: {item.expiryDate || 'Not set'}</span>
                 </div>
-                <input
-                  placeholder="Over-receive reason (required if over ordered)"
-                  value={item.reason}
-                  onChange={(event) =>
-                    setLineItems((current) =>
-                      current.map((row, rowIndex) =>
-                        rowIndex === index ? { ...row, reason: event.target.value } : row,
-                      ),
-                    )
-                  }
-                  className="surface-input-soft"
-                />
               </div>
             ))}
             {itemLoadFailed ? (
@@ -1023,12 +1068,12 @@ export default function GoodsReceivedPage() {
                   size="sm"
                   variant="outline"
                   className="h-7 px-2 text-[11px]"
-                  onClick={() => void metaQuery.refetch()}
+                  onClick={() => void itemSelectorQuery.refetch()}
                 >
                   Retry
                 </Button>
               </div>
-            ) : !metaQuery.isLoading && itemOptions.length === 0 ? (
+            ) : !itemSelectorQuery.isLoading && itemOptions.length === 0 ? (
               <div className="rounded-xl border border-border/60 bg-white/90 px-3 py-2 text-xs text-muted">
                 No items found. Create an item first.
               </div>
@@ -1089,7 +1134,9 @@ export default function GoodsReceivedPage() {
             <Button type="button" variant="outline" onClick={() => setIsDrawerOpen(false)}>
               Cancel
             </Button>
-            <Button type="submit">Submit GRN</Button>
+            <Button type="submit" disabled={formState.entryMode === 'PO_LINKED' && purchaseOrderOptions.length === 0}>
+              Submit GRN
+            </Button>
           </div>
         </form>
       </FormDrawer>

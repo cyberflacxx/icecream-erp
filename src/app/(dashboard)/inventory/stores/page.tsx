@@ -6,10 +6,12 @@ import { type FormEvent, type ReactNode, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 
 import { PageHeader } from '@/components/dashboard/page-header';
+import { ItemSelectorField } from '@/components/shared/item-selector-field';
 import { InventoryNav } from '@/components/inventory/inventory-nav';
 import { Button } from '@/components/ui/button';
 import { EmptyState, LoadingState } from '@/components/ui-library';
 import { useInventoryDashboard, useInventoryMeta, useInventoryRequest } from '@/hooks/inventory';
+import { useItemSelectorOptions } from '@/hooks/useItemSelectorOptions';
 import { useSalesMeta } from '@/hooks/sales/useSalesMeta';
 
 const adjustmentTypes = [
@@ -23,6 +25,16 @@ const finalStockActions = [
   { label: 'Damaged', value: 'DAMAGED' },
   { label: 'Waste', value: 'WASTE' },
 ] as const;
+const storesIssueItemTypes = [
+  'RAW',
+  'RAW_MATERIAL',
+  'PACKAGING',
+  'PACKAGING_MATERIAL',
+  'INGREDIENT',
+  'CONSUMABLE',
+  'STOCK',
+] as const;
+const finishedGoodsItemTypes = ['FINISHED_GOOD', 'FINISHED'] as const;
 
 const initialAdjustmentState = {
   itemId: '',
@@ -86,6 +98,38 @@ export default function InventoryStoresPage() {
   const [finishedGoodsReceiptState, setFinishedGoodsReceiptState] = useState(initialFinishedGoodsReceiptState);
   const [pendingAction, setPendingAction] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<FeedbackState | null>(null);
+  const adjustmentItemsQuery = useItemSelectorOptions({
+    includeCost: true,
+    includePrice: true,
+    includeStock: true,
+    warehouseId: adjustmentState.warehouseId || undefined,
+  });
+  const stockTakeItemsQuery = useItemSelectorOptions({
+    includeCost: true,
+    includePrice: true,
+    includeStock: true,
+    warehouseId: stockTakeState.warehouseId || undefined,
+  });
+  const returnItemsQuery = useItemSelectorOptions({
+    includeCost: true,
+    includePrice: true,
+    includeStock: true,
+    itemType: Array.from(finishedGoodsItemTypes),
+    warehouseId: returnState.returnWarehouseId || undefined,
+  });
+  const productionIssueItemsQuery = useItemSelectorOptions({
+    includeCost: true,
+    includeStock: true,
+    itemType: Array.from(storesIssueItemTypes),
+    warehouseId: productionIssueState.sourceWarehouseId || undefined,
+  });
+  const finishedGoodsItemsQuery = useItemSelectorOptions({
+    includeCost: true,
+    includePrice: true,
+    includeStock: true,
+    itemType: Array.from(finishedGoodsItemTypes),
+    warehouseId: finishedGoodsReceiptState.destinationWarehouseId || undefined,
+  });
 
   if (inventoryMetaQuery.isLoading || salesMetaQuery.isLoading || dashboardQuery.isLoading) return <LoadingState />;
   if (inventoryMetaQuery.isError || salesMetaQuery.isError || dashboardQuery.isError) {
@@ -104,7 +148,6 @@ export default function InventoryStoresPage() {
   }
 
   const warehouses = inventoryMetaQuery.data?.warehouses ?? [];
-  const items = inventoryMetaQuery.data?.items ?? [];
   const customers = salesMetaQuery.data?.customers ?? [];
   const metrics = dashboardQuery.data;
 
@@ -319,13 +362,19 @@ export default function InventoryStoresPage() {
               options={warehouses.map((warehouse) => ({ label: warehouse.name, value: warehouse.id }))}
               placeholder="Select warehouse"
             />
-            <SelectField
-              label="Item"
-              value={adjustmentState.itemId}
-              onChange={(value) => setAdjustmentState((current) => ({ ...current, itemId: value }))}
-              options={items.map((item) => ({ label: `${item.code} - ${item.name}`, value: item.id }))}
-              placeholder="Select item"
-            />
+            <div className="space-y-2 text-sm text-muted">
+              <span>Item</span>
+              <ItemSelectorField
+                disabled={!adjustmentState.warehouseId}
+                emptyMessage={adjustmentState.warehouseId ? 'No items found for this warehouse.' : 'Select a warehouse first.'}
+                errorMessage={adjustmentItemsQuery.error instanceof Error ? adjustmentItemsQuery.error.message : null}
+                loading={adjustmentItemsQuery.isLoading}
+                options={adjustmentItemsQuery.data ?? []}
+                value={adjustmentState.itemId}
+                onChange={(value) => setAdjustmentState((current) => ({ ...current, itemId: value }))}
+                placeholder="Search item"
+              />
+            </div>
             <SelectField
               label="Adjustment Type"
               value={adjustmentState.type}
@@ -349,7 +398,17 @@ export default function InventoryStoresPage() {
               value={adjustmentState.reason}
               onChange={(value) => setAdjustmentState((current) => ({ ...current, reason: value }))}
             />
-            <Button type="submit" className="w-full" disabled={pendingAction === 'adjustment'}>
+            <Button
+              type="submit"
+              className="w-full"
+              disabled={
+                pendingAction === 'adjustment'
+                || !adjustmentState.itemId
+                || !adjustmentState.warehouseId
+                || Number(adjustmentState.quantity) <= 0
+                || !adjustmentState.reason
+              }
+            >
               {pendingAction === 'adjustment' ? 'Posting...' : 'Post Adjustment'}
             </Button>
           </form>
@@ -371,13 +430,19 @@ export default function InventoryStoresPage() {
               options={warehouses.map((warehouse) => ({ label: warehouse.name, value: warehouse.id }))}
               placeholder="Select warehouse"
             />
-            <SelectField
-              label="Item"
-              value={stockTakeState.itemId}
-              onChange={(value) => setStockTakeState((current) => ({ ...current, itemId: value }))}
-              options={items.map((item) => ({ label: `${item.code} - ${item.name}`, value: item.id }))}
-              placeholder="Select item"
-            />
+            <div className="space-y-2 text-sm text-muted">
+              <span>Item</span>
+              <ItemSelectorField
+                disabled={!stockTakeState.warehouseId}
+                emptyMessage={stockTakeState.warehouseId ? 'No items found for this warehouse.' : 'Select a warehouse first.'}
+                errorMessage={stockTakeItemsQuery.error instanceof Error ? stockTakeItemsQuery.error.message : null}
+                loading={stockTakeItemsQuery.isLoading}
+                options={stockTakeItemsQuery.data ?? []}
+                value={stockTakeState.itemId}
+                onChange={(value) => setStockTakeState((current) => ({ ...current, itemId: value }))}
+                placeholder="Search item"
+              />
+            </div>
             <InputField
               label="Physical Quantity"
               type="number"
@@ -398,7 +463,16 @@ export default function InventoryStoresPage() {
               />
               Post variance immediately
             </label>
-            <Button type="submit" className="w-full" disabled={pendingAction === 'stock-take'}>
+            <Button
+              type="submit"
+              className="w-full"
+              disabled={
+                pendingAction === 'stock-take'
+                || !stockTakeState.itemId
+                || !stockTakeState.warehouseId
+                || Number(stockTakeState.physicalQuantity) < 0
+              }
+            >
               {pendingAction === 'stock-take' ? 'Saving...' : 'Save Stock Take'}
             </Button>
           </form>
@@ -427,13 +501,19 @@ export default function InventoryStoresPage() {
               options={warehouses.map((warehouse) => ({ label: warehouse.name, value: warehouse.id }))}
               placeholder="Select warehouse"
             />
-            <SelectField
-              label="Item"
-              value={returnState.itemId}
-              onChange={(value) => setReturnState((current) => ({ ...current, itemId: value }))}
-              options={items.map((item) => ({ label: `${item.code} - ${item.name}`, value: item.id }))}
-              placeholder="Select item"
-            />
+            <div className="space-y-2 text-sm text-muted">
+              <span>Item</span>
+              <ItemSelectorField
+                disabled={!returnState.returnWarehouseId}
+                emptyMessage={returnState.returnWarehouseId ? 'No finished goods found for this warehouse.' : 'Select a warehouse first.'}
+                errorMessage={returnItemsQuery.error instanceof Error ? returnItemsQuery.error.message : null}
+                loading={returnItemsQuery.isLoading}
+                options={returnItemsQuery.data ?? []}
+                value={returnState.itemId}
+                onChange={(value) => setReturnState((current) => ({ ...current, itemId: value }))}
+                placeholder="Search finished good"
+              />
+            </div>
             <InputField
               label="Quantity"
               type="number"
@@ -456,7 +536,18 @@ export default function InventoryStoresPage() {
               value={returnState.qcNote}
               onChange={(value) => setReturnState((current) => ({ ...current, qcNote: value }))}
             />
-            <Button type="submit" className="w-full" disabled={pendingAction === 'goods-return'}>
+            <Button
+              type="submit"
+              className="w-full"
+              disabled={
+                pendingAction === 'goods-return'
+                || !returnState.customerId
+                || !returnState.returnWarehouseId
+                || !returnState.itemId
+                || Number(returnState.quantity) <= 0
+                || !returnState.reason
+              }
+            >
               {pendingAction === 'goods-return' ? 'Posting...' : 'Post Customer Return'}
             </Button>
           </form>
@@ -487,13 +578,19 @@ export default function InventoryStoresPage() {
               options={warehouses.map((warehouse) => ({ label: warehouse.name, value: warehouse.id }))}
               placeholder="Select production warehouse"
             />
-            <SelectField
-              label="Item"
-              value={productionIssueState.itemId}
-              onChange={(value) => setProductionIssueState((current) => ({ ...current, itemId: value }))}
-              options={items.map((item) => ({ label: `${item.code} - ${item.name}`, value: item.id }))}
-              placeholder="Select item"
-            />
+            <div className="space-y-2 text-sm text-muted">
+              <span>Item</span>
+              <ItemSelectorField
+                disabled={!productionIssueState.sourceWarehouseId}
+                emptyMessage={productionIssueState.sourceWarehouseId ? 'No production issue items found for this warehouse.' : 'Select a source warehouse first.'}
+                errorMessage={productionIssueItemsQuery.error instanceof Error ? productionIssueItemsQuery.error.message : null}
+                loading={productionIssueItemsQuery.isLoading}
+                options={productionIssueItemsQuery.data ?? []}
+                value={productionIssueState.itemId}
+                onChange={(value) => setProductionIssueState((current) => ({ ...current, itemId: value }))}
+                placeholder="Search item"
+              />
+            </div>
             <InputField
               label="Quantity"
               type="number"
@@ -510,7 +607,17 @@ export default function InventoryStoresPage() {
               value={productionIssueState.notes}
               onChange={(value) => setProductionIssueState((current) => ({ ...current, notes: value }))}
             />
-            <Button type="submit" className="w-full" disabled={pendingAction === 'production-issue'}>
+            <Button
+              type="submit"
+              className="w-full"
+              disabled={
+                pendingAction === 'production-issue'
+                || !productionIssueState.sourceWarehouseId
+                || !productionIssueState.productionWarehouseId
+                || !productionIssueState.itemId
+                || Number(productionIssueState.quantity) <= 0
+              }
+            >
               {pendingAction === 'production-issue' ? 'Posting...' : 'Post Production Issue'}
             </Button>
           </form>
@@ -532,13 +639,19 @@ export default function InventoryStoresPage() {
               options={warehouses.map((warehouse) => ({ label: warehouse.name, value: warehouse.id }))}
               placeholder="Select destination warehouse"
             />
-            <SelectField
-              label="Finished Good Item"
-              value={finishedGoodsReceiptState.itemId}
-              onChange={(value) => setFinishedGoodsReceiptState((current) => ({ ...current, itemId: value }))}
-              options={items.map((item) => ({ label: `${item.code} - ${item.name}`, value: item.id }))}
-              placeholder="Select finished good"
-            />
+            <div className="space-y-2 text-sm text-muted">
+              <span>Finished Good Item</span>
+              <ItemSelectorField
+                disabled={!finishedGoodsReceiptState.destinationWarehouseId}
+                emptyMessage={finishedGoodsReceiptState.destinationWarehouseId ? 'No finished goods found for this warehouse.' : 'Select a destination warehouse first.'}
+                errorMessage={finishedGoodsItemsQuery.error instanceof Error ? finishedGoodsItemsQuery.error.message : null}
+                loading={finishedGoodsItemsQuery.isLoading}
+                options={finishedGoodsItemsQuery.data ?? []}
+                value={finishedGoodsReceiptState.itemId}
+                onChange={(value) => setFinishedGoodsReceiptState((current) => ({ ...current, itemId: value }))}
+                placeholder="Search finished good"
+              />
+            </div>
             <InputField
               label="Accepted Quantity"
               type="number"
@@ -555,7 +668,16 @@ export default function InventoryStoresPage() {
               value={finishedGoodsReceiptState.notes}
               onChange={(value) => setFinishedGoodsReceiptState((current) => ({ ...current, notes: value }))}
             />
-            <Button type="submit" className="w-full" disabled={pendingAction === 'finished-goods-receipt'}>
+            <Button
+              type="submit"
+              className="w-full"
+              disabled={
+                pendingAction === 'finished-goods-receipt'
+                || !finishedGoodsReceiptState.destinationWarehouseId
+                || !finishedGoodsReceiptState.itemId
+                || Number(finishedGoodsReceiptState.quantityAccepted) <= 0
+              }
+            >
               {pendingAction === 'finished-goods-receipt' ? 'Posting...' : 'Post Finished Goods Receipt'}
             </Button>
           </form>

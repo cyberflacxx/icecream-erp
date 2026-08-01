@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 
 import {
   calculateBranchProfitability,
@@ -14,6 +15,12 @@ import {
   validateBranchOpeningBalanceImportRows,
   validateBranchSaleQuantity,
 } from '../src/lib/branches';
+import {
+  filterAuthorizedBranches,
+  filterAuthorizedWarehouses,
+  isWarehouseAvailableToContext,
+  resolveRequestedBranchId,
+} from '../src/lib/branch-access';
 
 test('branch stock and cash calculations derive closure metrics', () => {
   const expectedStock = calculateExpectedClosingStock(100, 20, 5, 40, 10, 2);
@@ -75,4 +82,121 @@ test('branch import validators return row level errors', () => {
   assert.equal(customerRows.rows.length, 1);
   assert.equal(balanceRows.errors.length, 3);
   assert.equal(balanceRows.rows.length, 1);
+});
+
+test('branch authorization helper auto-applies a single assigned branch and blocks overrides', () => {
+  const ctx = {
+    branchAssignments: ['branch-1'],
+    branchId: 'branch-1',
+    isBranchScoped: true,
+    organizationId: 'org-1',
+    permissions: [],
+  };
+  const branches = [
+    { id: 'branch-1', organizationId: 'org-1', status: 'ACTIVE' },
+    { id: 'branch-2', organizationId: 'org-1', status: 'ACTIVE' },
+  ];
+
+  assert.deepEqual(
+    filterAuthorizedBranches(ctx, branches),
+    [{ id: 'branch-1', organizationId: 'org-1', status: 'ACTIVE' }],
+  );
+  assert.deepEqual(resolveRequestedBranchId(ctx, null, branches), { branchId: 'branch-1', ok: true });
+  assert.deepEqual(resolveRequestedBranchId(ctx, 'branch-2', branches), {
+    message: 'This role is limited to its assigned branch.',
+    ok: false,
+    status: 403,
+  });
+});
+
+test('global branch access can select any active branch in the organization', () => {
+  const ctx = {
+    branchAssignments: [],
+    branchId: null,
+    isBranchScoped: false,
+    organizationId: 'org-1',
+    permissions: ['view_all_branches'],
+  };
+  const branches = [
+    { id: 'branch-1', organizationId: 'org-1', status: 'ACTIVE' },
+    { id: 'branch-2', organizationId: 'org-1', status: 'INACTIVE' },
+  ];
+
+  assert.deepEqual(resolveRequestedBranchId(ctx, 'branch-1', branches), { branchId: 'branch-1', ok: true });
+  assert.deepEqual(resolveRequestedBranchId(ctx, 'branch-2', branches), {
+    message: 'Selected branch is not available.',
+    ok: false,
+    status: 400,
+  });
+});
+
+test('branch-scoped users with no assigned branch receive a clear authorization error', () => {
+  const result = resolveRequestedBranchId({
+    branchAssignments: [],
+    branchId: null,
+    isBranchScoped: true,
+    organizationId: 'org-1',
+    permissions: [],
+  }, null, []);
+
+  assert.deepEqual(result, {
+    message: 'No branch assignment is available for this user.',
+    ok: false,
+    status: 403,
+  });
+});
+
+test('inactive branches are excluded from selector results by default', () => {
+  const result = filterAuthorizedBranches({
+    branchAssignments: ['branch-1', 'branch-2'],
+    branchId: 'branch-1',
+    isBranchScoped: true,
+    organizationId: 'org-1',
+    permissions: [],
+  }, [
+    { id: 'branch-1', organizationId: 'org-1', status: 'ACTIVE' },
+    { id: 'branch-2', organizationId: 'org-1', status: 'INACTIVE' },
+  ]);
+
+  assert.deepEqual(result, [{ id: 'branch-1', organizationId: 'org-1', status: 'ACTIVE' }]);
+});
+
+test('warehouse authorization helper allows assigned-branch warehouses and explicit warehouse assignments only', () => {
+  const ctx = {
+    branchAssignments: ['branch-1'],
+    branchId: 'branch-1',
+    isBranchScoped: true,
+    organizationId: 'org-1',
+    permissions: [],
+    warehouseAssignments: ['wh-central'],
+  };
+  const warehouses = [
+    { branchId: 'branch-1', id: 'wh-1', isActive: true, organizationId: 'org-1' },
+    { branchId: 'branch-2', id: 'wh-2', isActive: true, organizationId: 'org-1' },
+    { branchId: null, id: 'wh-central', isActive: true, organizationId: 'org-1' },
+    { branchId: null, id: 'wh-unassigned', isActive: true, organizationId: 'org-1' },
+  ];
+
+  assert.equal(isWarehouseAvailableToContext(ctx, warehouses[0]), true);
+  assert.equal(isWarehouseAvailableToContext(ctx, warehouses[1]), false);
+  assert.equal(isWarehouseAvailableToContext(ctx, warehouses[2]), true);
+  assert.equal(isWarehouseAvailableToContext(ctx, warehouses[3]), false);
+  assert.deepEqual(filterAuthorizedWarehouses(ctx, warehouses), [warehouses[0], warehouses[2]]);
+});
+
+test('branch selector and sales order routes use shared authorization-aware branch validation', () => {
+  const branchesRoute = fs.readFileSync('src/app/api/branches/route.ts', 'utf8');
+  const salesOrdersRoute = fs.readFileSync('src/app/api/sales/orders/route.ts', 'utf8');
+  const grnCreateRoute = fs.readFileSync('src/app/api/procurement/grns/route.ts', 'utf8');
+  const grnApproveRoute = fs.readFileSync('src/app/api/procurement/grns/[id]/approve/route.ts', 'utf8');
+  const goodsReceivingStatusRoute = fs.readFileSync('src/app/api/procurement/goods-receiving-status/route.ts', 'utf8');
+
+  assert.match(branchesRoute, /filterAuthorizedBranches/);
+  assert.match(branchesRoute, /organization_id/);
+  assert.match(branchesRoute, /selector/);
+  assert.match(salesOrdersRoute, /resolveRequestedBranchId/);
+  assert.match(salesOrdersRoute, /Selected warehouse does not belong to the selected branch/);
+  assert.match(grnCreateRoute, /isWarehouseAvailableToContext/);
+  assert.match(grnApproveRoute, /isWarehouseAvailableToContext/);
+  assert.match(goodsReceivingStatusRoute, /organization_id/);
 });

@@ -8,6 +8,7 @@ import { PageHeader } from '@/components/dashboard/page-header';
 import { SalesNav } from '@/components/sales/sales-nav';
 import { createSalesLineDraft, normalizeSalesLines, SalesLineItemsEditor, salesLineTotal, type SalesLineDraft } from '@/components/sales/sales-line-items-editor';
 import { Button } from '@/components/ui/button';
+import { useItemSelectorOptions } from '@/hooks/useItemSelectorOptions';
 import { useSalesReport } from '@/hooks/sales/useSalesReport';
 import { useSalesMeta } from '@/hooks/sales/useSalesMeta';
 import { useSalesRequest } from '@/hooks/sales/useSalesRequest';
@@ -31,6 +32,10 @@ function totalDraft(lines: SalesLineDraft[], discountAmount: string, taxAmount: 
 export default function SalesQuotationsPage() {
   const query = useSalesReport(API_ROUTES.SALES.QUOTATIONS);
   const metaQuery = useSalesMeta();
+  const itemOptionsQuery = useItemSelectorOptions({
+    includePrice: true,
+    includeStock: true,
+  });
   const request = useSalesRequest();
   const queryClient = useQueryClient();
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
@@ -168,7 +173,14 @@ export default function SalesQuotationsPage() {
               <input className="surface-input-soft" type="date" value={formState.validUntil} onChange={(event) => setFormState((current) => ({ ...current, validUntil: event.target.value }))} />
             </label>
           </div>
-          <SalesLineItemsEditor items={metaQuery.data?.items ?? []} lines={formState.items} onChange={(items) => setFormState((current) => ({ ...current, items }))} />
+          <SalesLineItemsEditor
+            items={itemOptionsQuery.data ?? []}
+            loading={itemOptionsQuery.isLoading}
+            errorMessage={itemOptionsQuery.error?.message ?? null}
+            emptyMessage="No saleable items are available for quotation."
+            lines={formState.items}
+            onChange={(items) => setFormState((current) => ({ ...current, items }))}
+          />
           <div className="grid gap-5 sm:grid-cols-3">
             <label className="space-y-2 text-sm text-muted">
               <span>Discount amount</span>

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { badRequest, can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
+import { isWarehouseAvailableToContext } from '@/lib/branch-access';
 import { resolveInventoryValue } from '@/lib/inventory';
 import {
   normalizeGoodsReceivedItemId,
@@ -9,7 +10,10 @@ import {
   normalizeGoodsReceivedWarehouseId,
   normalizeGoodsReceivedUnitOfMeasureId,
 } from '@/lib/procurement-goods-received';
-import { isPurchaseOrderSentLike } from '@/lib/procurement-purchase-orders';
+import {
+  getPurchaseOrderReceivingLines,
+  isPurchaseOrderEligibleForGoodsReceived,
+} from '@/lib/procurement-purchase-orders';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
 function isMissingColumnError(error: unknown, table: string, columnName: string) {
@@ -315,7 +319,7 @@ export async function POST(request: NextRequest) {
     if (!isManualEntry && purchaseOrderId) {
       const { data: purchaseOrder, error: orderErr } = await service
         .from('purchase_orders')
-        .select('id, supplier_id, status, purchase_order_items(*)')
+        .select('id, supplier_id, status, approval_status, approved_at, approved_by, sent_at, rejected_at, purchase_order_items(*)')
         .is('deleted_at', null)
         .eq('organization_id', ctx.organizationId)
         .eq('id', purchaseOrderId)
@@ -326,8 +330,22 @@ export async function POST(request: NextRequest) {
       }
 
       order = purchaseOrder as Record<string, unknown>;
-      if (!isPurchaseOrderSentLike(order.status)) {
-        return badRequest('GRN can only be created for sent or partially received purchase orders.');
+      const orderLines = Array.isArray(order.purchase_order_items)
+        ? (order.purchase_order_items as Record<string, unknown>[])
+        : [];
+      if (
+        !isPurchaseOrderEligibleForGoodsReceived({
+          approvalStatus: order.approval_status,
+          approvedAt: order.approved_at,
+          approvedBy: order.approved_by,
+          lines: orderLines,
+          rejectedAt: order.rejected_at,
+          sentAt: order.sent_at,
+          status: order.status,
+          supplierActive: true,
+        })
+      ) {
+        return badRequest('Only approved, sent to supplier, or partially received purchase orders with remaining quantity can be received.');
       }
     }
 
@@ -379,22 +397,22 @@ export async function POST(request: NextRequest) {
     // branch's warehouse unless explicitly assigned.
     const { data: warehouse, error: whErr } = await service
       .from('warehouses')
-      .select('id, branch_id, type, warehouse_type')
+      .select('id, organization_id, branch_id, type, warehouse_type, is_active, name')
       .eq('id', warehouseId)
       .eq('is_active', true)
       .eq('organization_id', ctx.organizationId)
       .single();
     if (whErr || !warehouse) return badRequest('Warehouse not found or out of scope.');
-    const warehouseBranchId = warehouse.branch_id ? String(warehouse.branch_id) : null;
-    const hasWarehouseAssignment = ctx.warehouseAssignments.includes(warehouseId);
     if (
-      ctx.isBranchScoped &&
-      ctx.branchId &&
-      warehouseBranchId &&
-      warehouseBranchId !== ctx.branchId &&
-      !hasWarehouseAssignment
+      !isWarehouseAvailableToContext(ctx, {
+        branchId: warehouse.branch_id ? String(warehouse.branch_id) : null,
+        id: String(warehouse.id),
+        isActive: warehouse.is_active !== false,
+        name: warehouse.name ? String(warehouse.name) : null,
+        organizationId: String(warehouse.organization_id ?? ''),
+      })
     ) {
-      return badRequest('Warehouse not found or out of scope.');
+      return forbidden();
     }
 
     // Generate GRN number
@@ -460,19 +478,24 @@ export async function POST(request: NextRequest) {
 
     // Build items: use provided or derive from PO items
     const poItems = ((order?.purchase_order_items as Record<string, unknown>[]) ?? []);
+    const receivablePoLines = getPurchaseOrderReceivingLines(poItems);
     const itemsToInsert = normalizedItems.length
       ? normalizedItems
-      : poItems.map((pi) => ({
-          itemId: pi.item_id as string,
-          poItemId: pi.id as string,
-          quantityExpected: Number(pi.quantity_ordered ?? 0) - Number(pi.quantity_received ?? 0),
+      : receivablePoLines.map((pi) => ({
+          itemId: pi.itemId,
+          poItemId: pi.id,
+          quantityExpected: pi.remainingQuantity,
           quantityReceived: 0,
           quantityRejected: 0,
-          unitCost: Number(pi.unit_cost ?? 0),
+          unitCost: pi.unitPrice,
           batchNumber: null,
           expiryDate: null,
           qualityNotes: null,
         }));
+
+    if (!itemsToInsert.length) {
+      return badRequest('Selected purchase order has no remaining quantity to receive.');
+    }
 
     if (itemsToInsert.length > 0) {
       const primaryItems = await service.from('goods_received_note_items').insert(
