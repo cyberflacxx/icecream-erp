@@ -27,6 +27,8 @@ const transferStatusOptions = [
   { label: 'Draft', value: 'DRAFT' },
   { label: 'Pending Approval', value: 'PENDING_APPROVAL' },
   { label: 'Approved', value: 'APPROVED' },
+  { label: 'In Transit', value: 'IN_TRANSIT' },
+  { label: 'Partially Received', value: 'PARTIALLY_RECEIVED' },
   { label: 'Completed', value: 'COMPLETED' },
   { label: 'Cancelled', value: 'CANCELLED' },
 ] as const;
@@ -53,6 +55,26 @@ interface FeedbackState {
   tone: 'error' | 'success';
 }
 
+interface TransferReceiptLineState {
+  itemCode: string;
+  itemId: string;
+  itemName: string;
+  quantityReceived: number;
+  quantityRequested: number;
+  quantitySent: number;
+  receiptQuantity: string;
+  remainingQuantity: number;
+  transferItemId: string;
+  unitCost: number;
+}
+
+interface TransferReceiptState {
+  lines: TransferReceiptLineState[];
+  status: string;
+  transferId: string;
+  transferNumber: string;
+}
+
 function formatTransferStatus(value: string) {
   return value.replaceAll('_', ' ').toLowerCase().replace(/\b\w/g, (character) => character.toUpperCase());
 }
@@ -62,6 +84,8 @@ export default function TransfersPage() {
   const canApproveTransfer = usePermission(['inventory.transfer.approve', 'inventory.write', 'stock_transfer.approve']);
   const canCompleteTransfer = usePermission(['inventory.transfer.complete', 'inventory.write', 'stock_transfer.approve']);
   const canCancelTransfer = usePermission(['inventory.transfer.cancel', 'inventory.write', 'stock_transfer.approve']);
+  const canReverseDispatch = usePermission(['inventory.transfer.reverse_dispatch', 'inventory.write']);
+  const canReverseReceipt = usePermission(['inventory.transfer.reverse_receipt', 'inventory.write']);
   const request = useInventoryRequest();
   const queryClient = useQueryClient();
   const [filters, setFilters] = useState({
@@ -76,6 +100,9 @@ export default function TransfersPage() {
   const [formError, setFormError] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<FeedbackState | null>(null);
   const [pendingAction, setPendingAction] = useState<string | null>(null);
+  const [isReceiptDrawerOpen, setIsReceiptDrawerOpen] = useState(false);
+  const [receiptError, setReceiptError] = useState<string | null>(null);
+  const [receiptState, setReceiptState] = useState<TransferReceiptState | null>(null);
 
   const metaQuery = useInventoryMeta();
   const transfersQuery = useTransfers({
@@ -121,6 +148,114 @@ export default function TransfersPage() {
     } finally {
       setPendingAction(null);
     }
+  }
+
+  async function openReceiptDrawer(transferId: string) {
+    setPendingAction(`load-receipt:${transferId}`);
+    setReceiptError(null);
+
+    try {
+      const transfer = await request<{
+        id: string;
+        status: string;
+        stock_transfer_items?: Array<{
+          id: string;
+          item_id: string;
+          items?: { code?: string | null; name?: string | null } | Array<{ code?: string | null; name?: string | null }>;
+          quantity_received?: number | null;
+          quantity_requested?: number | null;
+          quantity_sent?: number | null;
+          unit_cost?: number | null;
+        }>;
+        transfer_number?: string | null;
+      }>(`/api/inventory/transfers/${transferId}`);
+
+      const lines = (transfer.stock_transfer_items ?? [])
+        .map((line) => {
+          const item = Array.isArray(line.items) ? line.items[0] : line.items;
+          const quantityRequested = Number(line.quantity_requested ?? 0);
+          const rawQuantitySent = Number(line.quantity_sent ?? 0);
+          const quantitySent = rawQuantitySent > 0 ? rawQuantitySent : quantityRequested;
+          const quantityReceived = Number(line.quantity_received ?? 0);
+          const remainingQuantity = Math.max(0, quantitySent - quantityReceived);
+
+          return {
+            itemCode: String(item?.code ?? ''),
+            itemId: String(line.item_id ?? ''),
+            itemName: String(item?.name ?? 'Unknown item'),
+            quantityReceived,
+            quantityRequested,
+            quantitySent,
+            receiptQuantity: remainingQuantity > 0 ? String(remainingQuantity) : '0',
+            remainingQuantity,
+            transferItemId: String(line.id ?? ''),
+            unitCost: Number(line.unit_cost ?? 0),
+          };
+        })
+        .filter((line) => line.remainingQuantity > 0 || transfer.status === 'APPROVED');
+
+      if (!lines.length) {
+        throw new Error('No remaining transfer quantity is available for receipt.');
+      }
+
+      setReceiptState({
+        lines,
+        status: String(transfer.status ?? ''),
+        transferId,
+        transferNumber: String(transfer.transfer_number ?? transferId),
+      });
+      setIsReceiptDrawerOpen(true);
+    } catch (error) {
+      setReceiptError(error instanceof Error ? error.message : 'Unable to load transfer receipt lines.');
+    } finally {
+      setPendingAction(null);
+    }
+  }
+
+  async function handleReceiptSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!receiptState) {
+      return;
+    }
+
+    const receiptLines = receiptState.lines
+      .map((line) => ({
+        quantityReceived: Number(line.receiptQuantity),
+        transferItemId: line.transferItemId,
+      }))
+      .filter((line) => Number.isFinite(line.quantityReceived) && line.quantityReceived > 0);
+
+    if (!receiptLines.length) {
+      setReceiptError('Enter at least one receipt quantity above zero.');
+      return;
+    }
+
+    const invalidLine = receiptState.lines.find((line) => {
+      const quantityReceived = Number(line.receiptQuantity);
+      return quantityReceived < 0 || quantityReceived > line.remainingQuantity;
+    });
+
+    if (invalidLine) {
+      setReceiptError(`Receipt quantity for ${invalidLine.itemName} exceeds the remaining in-transit quantity.`);
+      return;
+    }
+
+    await runTransferAction(
+      `complete:${receiptState.transferId}`,
+      receiptState.status === 'APPROVED'
+        ? 'Transfer dispatched and receipt posted.'
+        : 'Transfer receipt posted.',
+      async () => {
+        await request(`/api/inventory/transfers/${receiptState.transferId}/complete`, {
+          body: JSON.stringify({ receiptLines }),
+          method: 'POST',
+        });
+        setIsReceiptDrawerOpen(false);
+        setReceiptState(null);
+        setReceiptError(null);
+      },
+    );
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -295,7 +430,16 @@ export default function TransfersPage() {
           {
             key: 'status',
             header: 'Status',
-            render: (row) => <StatusBadge status={formatTransferStatus(row.status)} />,
+            render: (row) => (
+              <div className="space-y-1">
+                <StatusBadge status={formatTransferStatus(row.status)} />
+                {row.reversal ? (
+                  <p className="text-xs text-muted">
+                    {row.reversal.operationType.replaceAll('_', ' ').toLowerCase()} · {row.reversal.reversalJournalNumber ?? row.reversal.reversalJournalId ?? row.reversal.id}
+                  </p>
+                ) : null}
+              </div>
+            ),
           },
           {
             key: 'actions',
@@ -330,18 +474,56 @@ export default function TransfersPage() {
                     {pendingAction === `approve:${row.id}` ? 'Approving...' : 'Approve'}
                   </Button>
                 ) : null}
-                {canCompleteTransfer && row.status === 'APPROVED' ? (
+                {canCompleteTransfer && ['APPROVED', 'IN_TRANSIT', 'PARTIALLY_RECEIVED'].includes(row.status) ? (
                   <Button
                     size="sm"
                     variant="outline"
-                    disabled={pendingAction === `complete:${row.id}`}
-                    onClick={() =>
-                      void runTransferAction(`complete:${row.id}`, 'Transfer completed and inventory posted.', async () => {
-                        await request(`/api/inventory/transfers/${row.id}/complete`, { method: 'POST' });
-                      })
-                    }
+                    disabled={pendingAction === `load-receipt:${row.id}` || pendingAction === `complete:${row.id}`}
+                    onClick={() => void openReceiptDrawer(row.id)}
                   >
-                    {pendingAction === `complete:${row.id}` ? 'Completing...' : 'Complete'}
+                    {pendingAction === `load-receipt:${row.id}` || pendingAction === `complete:${row.id}`
+                      ? 'Preparing...'
+                      : row.status === 'APPROVED'
+                        ? 'Dispatch & Receive'
+                        : 'Receive Remaining'}
+                  </Button>
+                ) : null}
+                {canReverseDispatch && row.status === 'IN_TRANSIT' && !row.dispatchReversal ? (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={pendingAction === `reverse-dispatch:${row.id}`}
+                    onClick={() => {
+                      const reason = window.prompt('Enter the transfer dispatch reversal reason.');
+                      if (!reason || !reason.trim()) return;
+                      void runTransferAction(`reverse-dispatch:${row.id}`, 'Transfer dispatch reversed.', async () => {
+                        await request(`/api/inventory/transfers/${row.id}/reverse-dispatch`, {
+                          body: JSON.stringify({ reason: reason.trim() }),
+                          method: 'POST',
+                        });
+                      });
+                    }}
+                  >
+                    {pendingAction === `reverse-dispatch:${row.id}` ? 'Reversing...' : 'Reverse Dispatch'}
+                  </Button>
+                ) : null}
+                {canReverseReceipt && ['COMPLETED', 'PARTIALLY_RECEIVED'].includes(row.status) && !row.receiptReversal ? (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={pendingAction === `reverse-receipt:${row.id}`}
+                    onClick={() => {
+                      const reason = window.prompt('Enter the transfer receipt reversal reason.');
+                      if (!reason || !reason.trim()) return;
+                      void runTransferAction(`reverse-receipt:${row.id}`, 'Transfer receipt reversed.', async () => {
+                        await request(`/api/inventory/transfers/${row.id}/reverse-receipt`, {
+                          body: JSON.stringify({ reason: reason.trim() }),
+                          method: 'POST',
+                        });
+                      });
+                    }}
+                  >
+                    {pendingAction === `reverse-receipt:${row.id}` ? 'Reversing...' : 'Reverse Receipt'}
                   </Button>
                 ) : null}
                 {canCancelTransfer && row.status !== 'COMPLETED' && row.status !== 'CANCELLED' ? (
@@ -361,6 +543,17 @@ export default function TransfersPage() {
                 <Button asChild size="sm" variant="outline">
                   <Link href="/inventory/stock-movements">View Trail</Link>
                 </Button>
+                {row.reversal ? (
+                  <div className="w-full text-xs text-muted">
+                    <p>{row.reversal.reason}</p>
+                    <p>
+                      Original journal: {row.reversal.originalJournalId ?? '-'} · Reversal journal: {row.reversal.reversalJournalNumber ?? row.reversal.reversalJournalId ?? '-'}
+                    </p>
+                    <p>
+                      Movements: {row.reversal.originalMovementIds.length} original / {row.reversal.reversalMovementIds.length} reversal
+                    </p>
+                  </div>
+                ) : null}
               </div>
             ),
           },
@@ -404,7 +597,7 @@ export default function TransfersPage() {
           ) : null}
 
           <div className="rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-800">
-            Save transfers as drafts when users are still preparing them, then move through approval and only post stock on completion.
+            Save transfers as drafts while users prepare them, submit for approval, then post dispatch and receipt through the completion workflow.
           </div>
 
           <div className="grid gap-5 sm:grid-cols-3">
@@ -434,7 +627,7 @@ export default function TransfersPage() {
                 onChange={(event) => setFormState((current) => ({ ...current, status: event.target.value }))}
                 className="surface-input-soft"
               >
-                {transferStatusOptions.map((option) => (
+                {transferStatusOptions.filter((option) => ['DRAFT', 'PENDING_APPROVAL', 'APPROVED'].includes(option.value)).map((option) => (
                   <option key={option.value} value={option.value}>
                     {option.label}
                   </option>
@@ -632,6 +825,103 @@ export default function TransfersPage() {
         </form>
       </FormDrawer>
 
+      <FormDrawer
+        title={receiptState ? `Transfer Receipt - ${receiptState.transferNumber}` : 'Transfer Receipt'}
+        open={isReceiptDrawerOpen}
+        onClose={() => {
+          setIsReceiptDrawerOpen(false);
+          setReceiptError(null);
+          setReceiptState(null);
+        }}
+      >
+        <form className="space-y-5" onSubmit={handleReceiptSubmit}>
+          {receiptError ? (
+            <div className="rounded-2xl border border-error/20 bg-error/5 px-4 py-3 text-sm text-error">
+              {receiptError}
+            </div>
+          ) : null}
+
+          <div className="rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-800">
+            {receiptState?.status === 'APPROVED'
+              ? 'This action will dispatch the approved transfer and then receive only the quantities entered below.'
+              : 'Receive the remaining in-transit quantities below. Enter zero for lines that must stay in transit.'}
+          </div>
+
+          <div className="space-y-4">
+            {receiptState?.lines.map((line) => (
+              <div key={line.transferItemId} className="rounded-2xl border border-border bg-white p-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <p className="font-semibold text-brown">{line.itemName}</p>
+                    <p className="text-xs text-muted">{line.itemCode || line.itemId}</p>
+                  </div>
+                  <div className="grid gap-1 text-right text-xs text-muted sm:grid-cols-4 sm:gap-3">
+                    <span>Requested {line.quantityRequested.toFixed(3)}</span>
+                    <span>Sent {line.quantitySent.toFixed(3)}</span>
+                    <span>Received {line.quantityReceived.toFixed(3)}</span>
+                    <span>Remaining {line.remainingQuantity.toFixed(3)}</span>
+                  </div>
+                </div>
+                <div className="mt-4 grid gap-3 sm:grid-cols-[180px_140px_1fr]">
+                  <label className="space-y-2 text-sm text-muted">
+                    <span>Receipt quantity</span>
+                    <input
+                      className="surface-input-soft"
+                      max={line.remainingQuantity}
+                      min="0"
+                      step="0.001"
+                      type="number"
+                      value={line.receiptQuantity}
+                      onChange={(event) =>
+                        setReceiptState((current) => (
+                          current
+                            ? {
+                                ...current,
+                                lines: current.lines.map((entry) => (
+                                  entry.transferItemId === line.transferItemId
+                                    ? { ...entry, receiptQuantity: event.target.value }
+                                    : entry
+                                )),
+                              }
+                            : current
+                        ))
+                      }
+                    />
+                  </label>
+                  <div className="space-y-2 text-sm text-muted">
+                    <span>Unit cost</span>
+                    <div className="surface-input-soft flex h-10 items-center">{line.unitCost.toFixed(2)}</div>
+                  </div>
+                  <div className="space-y-2 text-sm text-muted">
+                    <span>Receipt value</span>
+                    <div className="surface-input-soft flex h-10 items-center">
+                      {(Math.max(0, Number(line.receiptQuantity) || 0) * line.unitCost).toFixed(2)}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="flex justify-end gap-3">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                setIsReceiptDrawerOpen(false);
+                setReceiptError(null);
+                setReceiptState(null);
+              }}
+            >
+              Cancel
+            </Button>
+            <Button type="submit" disabled={pendingAction === `complete:${receiptState?.transferId ?? ''}`}>
+              {pendingAction === `complete:${receiptState?.transferId ?? ''}` ? 'Posting...' : 'Post Receipt'}
+            </Button>
+          </div>
+        </form>
+      </FormDrawer>
+
       <div className="surface-card">
         <div className="flex items-center gap-3">
           <MoveRight className="h-5 w-5 text-orange" />
@@ -650,14 +940,14 @@ export default function TransfersPage() {
               <Package2 className="h-4 w-4 text-orange" />
               Posted on completion
             </div>
-            <p className="mt-2">Stock only deducts and receipts only post when the transfer reaches completion.</p>
+            <p className="mt-2">Stock only dispatches and receipts only post through the transfer completion workflow.</p>
           </div>
           <div className="rounded-2xl border border-border bg-white px-4 py-3 text-sm text-muted">
             <div className="flex items-center gap-2 text-brown">
               <Truck className="h-4 w-4 text-orange" />
               Traceable actions
             </div>
-            <p className="mt-2">Draft, approval, completion, and cancellation are surfaced directly on the transfer list.</p>
+            <p className="mt-2">Draft, approval, in-transit, partial receipt, completion, and cancellation are surfaced directly on the transfer list.</p>
           </div>
         </div>
       </div>

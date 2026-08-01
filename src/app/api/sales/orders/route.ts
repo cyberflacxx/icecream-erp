@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
-import { resolveRequestedBranchId } from '@/lib/branch-access';
+import { isWarehouseAvailableToContext, resolveRequestedBranchId } from '@/lib/branch-access';
+import { loadResolvedSalesItemPricing, loadSalesCustomerPricingContext } from '@/lib/sales-pricing';
 import { isCustomerInactiveStatus } from '@/lib/sales-customers';
 import { isMissingSalesColumn, salesErrorMessage } from '@/lib/sales-server';
 import { createServiceRoleClient } from '@/lib/supabase/server';
@@ -172,14 +173,17 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const branchRows = body.branchId
-    ? await service
-        .schema('icecream_erp')
-        .from('branches')
-        .select('id, organization_id, status')
-        .eq('organization_id', ctx.organizationId)
-        .eq('id', body.branchId)
-    : { data: [], error: null };
+  let branchLookup = service
+    .schema('icecream_erp')
+    .from('branches')
+    .select('id, organization_id, status, code')
+    .eq('organization_id', ctx.organizationId);
+
+  if (body.branchId) {
+    branchLookup = branchLookup.eq('id', body.branchId);
+  }
+
+  const branchRows = await branchLookup;
   if (branchRows.error) return serverError(branchRows.error.message);
 
   const branchAuthorization = resolveRequestedBranchId(
@@ -198,7 +202,7 @@ export async function POST(request: NextRequest) {
     })),
     { includeInactive: false },
   );
-  if (!branchAuthorization.ok && body.branchId) {
+  if (!branchAuthorization.ok) {
     return NextResponse.json({ error: branchAuthorization.message }, { status: branchAuthorization.status });
   }
 
@@ -206,7 +210,8 @@ export async function POST(request: NextRequest) {
   const { data: customer } = await service
     .schema('icecream_erp')
     .from('customers')
-    .select('id, status')
+    .select('id, organization_id, status')
+    .eq('organization_id', ctx.organizationId)
     .eq('id', body.customerId)
     .single();
 
@@ -219,7 +224,8 @@ export async function POST(request: NextRequest) {
   const { data: warehouse } = await service
     .schema('icecream_erp')
     .from('warehouses')
-    .select('id, branch_id')
+    .select('id, branch_id, organization_id, is_active')
+    .eq('organization_id', ctx.organizationId)
     .eq('id', body.warehouseId)
     .eq('is_active', true)
     .single();
@@ -228,9 +234,23 @@ export async function POST(request: NextRequest) {
 
   const wh = warehouse as Record<string, unknown>;
 
-  // Warehouse branch access
-  if (ctx.isBranchScoped && ctx.branchId && wh.branch_id && wh.branch_id !== ctx.branchId) {
-    return NextResponse.json({ error: 'This role is limited to its assigned branch.' }, { status: 403 });
+  if (!isWarehouseAvailableToContext(
+    {
+      branchAssignments: ctx.branchAssignments,
+      branchId: ctx.branchId,
+      isBranchScoped: ctx.isBranchScoped,
+      organizationId: ctx.organizationId,
+      permissions: ctx.permissions,
+      warehouseAssignments: ctx.warehouseAssignments,
+    },
+    {
+      branchId: wh.branch_id ? String(wh.branch_id) : null,
+      id: String(wh.id),
+      isActive: wh.is_active === true,
+      organizationId: String(wh.organization_id ?? ''),
+    },
+  )) {
+    return NextResponse.json({ error: 'Selected warehouse is not available for this user.' }, { status: 403 });
   }
 
   const resolvedBranchId = branchAuthorization.ok && branchAuthorization.branchId
@@ -244,25 +264,45 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // Validate items
-  const itemIds = [...new Set(body.items.map((i) => i.itemId))];
-  const { data: validItems } = await service
-    .schema('icecream_erp')
-    .from('items')
-    .select('id')
-    .in('id', itemIds);
-
-  if ((validItems?.length ?? 0) !== itemIds.length) {
-    return NextResponse.json({ error: 'One or more sales order items are invalid.' }, { status: 400 });
-  }
-
   const normalizedItems = body.items.map((item) => ({
     discountPercent: item.discountPercent,
-    quantity: item.quantityOrdered,
-    unitPrice: item.unitPrice,
     itemId: item.itemId,
+    quantity: item.quantityOrdered,
   }));
-  const { subtotal, lineDiscountTotal } = mapLineTotals(normalizedItems);
+
+  if (normalizedItems.some((item) => !item.itemId || Number(item.quantity) <= 0)) {
+    return NextResponse.json({ error: 'Ordered quantities must be greater than zero.' }, { status: 400 });
+  }
+
+  const pricingCustomer = await loadSalesCustomerPricingContext(service.schema('icecream_erp'), ctx.organizationId, body.customerId);
+  const resolvedPricing = await loadResolvedSalesItemPricing({
+    branchId: resolvedBranchId,
+    customer: pricingCustomer,
+    documentDate: body.orderDate ?? new Date().toISOString().slice(0, 10),
+    itemIds: [...new Set(normalizedItems.map((item) => item.itemId))],
+    organizationId: ctx.organizationId,
+    service: service.schema('icecream_erp'),
+    warehouseId: body.warehouseId,
+  });
+
+  const pricedItems = [];
+  for (const item of normalizedItems) {
+    const resolved = resolvedPricing.get(item.itemId);
+    if (!resolved || !resolved.isActive) {
+      return NextResponse.json({ error: `The selected item ${item.itemId} is inactive or unavailable.` }, { status: 400 });
+    }
+    if (resolved.sellingPrice === null || resolved.sellingPrice <= 0) {
+      return NextResponse.json({ error: `The selected item ${resolved.code || item.itemId} has no active selling price.` }, { status: 400 });
+    }
+    pricedItems.push({
+      discountPercent: item.discountPercent,
+      itemId: item.itemId,
+      quantity: item.quantity,
+      unitPrice: resolved.sellingPrice,
+    });
+  }
+
+  const { subtotal, lineDiscountTotal } = mapLineTotals(pricedItems);
   const discountAmount = body.discountAmount ?? 0;
   const taxAmount = body.taxAmount ?? 0;
   const total = subtotal + taxAmount - discountAmount - lineDiscountTotal;
@@ -318,7 +358,7 @@ export async function POST(request: NextRequest) {
     .schema('icecream_erp')
     .from('sales_order_items')
     .insert(
-      normalizedItems.map((item) => ({
+      pricedItems.map((item) => ({
         order_id: o.id,
         item_id: item.itemId,
         quantity: item.quantity,

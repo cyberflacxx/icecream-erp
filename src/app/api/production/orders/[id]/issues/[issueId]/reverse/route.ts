@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { badRequest, can, forbidden, getAuthContext, notFound, unauthorized } from '@/lib/api-auth';
+import { loadLedgerLines, findJournalBySource, postFinanceDocument } from '@/lib/finance-server';
 import { mapProductionRpcError, reverseProductionIssue } from '@/lib/production-orders-server';
 import {
   authorizeProductionOrderWriteAccess,
@@ -38,6 +39,34 @@ export async function POST(
     }
 
     const result = await reverseProductionIssue({ issueId, reason }, ctx);
+    if (result.success !== false) {
+      const sourceJournal = await findJournalBySource(ctx.organizationId, 'production', 'production_issue', issueId);
+      if (sourceJournal) {
+        const sourceLines = (await loadLedgerLines(ctx.organizationId, true)).filter((line) => line.journalId === sourceJournal.id);
+        if (sourceLines.length > 0) {
+          const reversalJournal = await postFinanceDocument({
+            branchId: sourceLines[0]?.branchId ?? null,
+            costCenterCode: sourceLines[0]?.costCenterCode ?? null,
+            createdBy: ctx.userId,
+            description: `Production issue reversal ${issueId}`,
+            journalDate: new Date().toISOString().slice(0, 10),
+            lines: sourceLines.map((line) => ({
+              accountId: line.accountId,
+              branchId: line.branchId,
+              costCenterCode: line.costCenterCode,
+              creditAmount: line.debitAmount,
+              debitAmount: line.creditAmount,
+              description: line.description,
+            })),
+            organizationId: ctx.organizationId,
+            sourceDocumentId: issueId,
+            sourceDocumentType: 'production_issue_reversal',
+            sourceModule: 'production',
+          });
+          return NextResponse.json({ ...result, journal: reversalJournal }, { status: result.success === false && result.code === 'CONFLICT' ? 409 : 200 });
+        }
+      }
+    }
     return NextResponse.json(result, { status: result.success === false && result.code === 'CONFLICT' ? 409 : 200 });
   } catch (err) {
     const mapped = mapProductionRpcError(err);

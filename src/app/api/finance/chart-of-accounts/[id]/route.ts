@@ -1,20 +1,30 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { badRequest, can, forbidden, getAuthContext, notFound, serverError, unauthorized } from '@/lib/api-auth';
+import {
+  buildFinanceAccountApiRow,
+  canDeleteFinanceAccount,
+  loadFinanceAccountById,
+  loadFinanceAccounts,
+  upsertFinanceAccount,
+} from '@/lib/finance-foundation-server';
 import { financeService, writeFinanceAuditLog } from '@/lib/finance-server';
 
-function isMissingColumnError(error: unknown, columnName: string) {
-  return error instanceof Error && error.message.includes(`column accounts.${columnName} does not exist`);
-}
+export async function GET(_request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const ctx = await getAuthContext();
+  if (!ctx) return unauthorized();
+  if (!can(ctx, 'finance.read')) return forbidden();
 
-function normalizeAccountRow(row: Record<string, unknown>) {
-  return {
-    ...row,
-    account_code: row.account_code ?? row.code ?? '',
-    account_name: row.account_name ?? row.name ?? '',
-    account_type: row.account_type ?? row.type ?? '',
-    parent_account_id: row.parent_account_id ?? row.parent_id ?? null,
-  };
+  try {
+    const { id } = await params;
+    const account = await loadFinanceAccountById(ctx.organizationId, id);
+    if (!account) return notFound('Account not found.');
+
+    const accounts = await loadFinanceAccounts(ctx.organizationId);
+    return NextResponse.json(buildFinanceAccountApiRow(account, accounts));
+  } catch (error) {
+    return serverError(error instanceof Error ? error.message : 'Failed to load account.');
+  }
 }
 
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -23,62 +33,66 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   if (!can(ctx, 'finance.write')) return forbidden();
 
   try {
-    const service = financeService();
     const { id } = await params;
     const body = await request.json() as {
+      accountCode?: string;
       accountName?: string;
       accountType?: string;
+      allowPosting?: boolean;
+      description?: string | null;
       isActive?: boolean;
       parentAccountId?: string | null;
     };
 
-    const existing = await service
-      .from('accounts')
-      .select('id')
-      .eq('organization_id', ctx.organizationId)
-      .eq('id', id)
-      .single();
-    if (existing.error || !existing.data) return notFound('Account not found');
+    const existing = await loadFinanceAccountById(ctx.organizationId, id);
+    if (!existing) return notFound('Account not found.');
 
-    const primary = await service
-      .from('accounts')
-      .update({
-        account_name: body.accountName,
-        account_type: body.accountType,
-        is_active: body.isActive,
-        parent_account_id: body.parentAccountId,
-      })
-      .eq('organization_id', ctx.organizationId)
-      .eq('id', id)
-      .select()
-      .single();
+    const saved = await upsertFinanceAccount(ctx, {
+      id,
+      accountCode: body.accountCode ?? existing.accountCode,
+      accountName: body.accountName ?? existing.accountName,
+      accountType: body.accountType ?? existing.accountType,
+      allowPosting: body.allowPosting ?? existing.allowPosting,
+      description: body.description ?? existing.description,
+      isActive: body.isActive ?? existing.isActive,
+      parentAccountId: body.parentAccountId === undefined ? existing.parentAccountId : body.parentAccountId,
+    });
 
-    let data = primary.data;
-    let error = primary.error;
+    return NextResponse.json(saved);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to update account.';
+    if (message.toLowerCase().includes('already exists')) {
+      return badRequest(message);
+    }
+    return serverError(message);
+  }
+}
 
-    if (error && (isMissingColumnError(error, 'account_name') || isMissingColumnError(error, 'account_type') || isMissingColumnError(error, 'parent_account_id'))) {
-      const fallback = await service
-        .from('accounts')
-        .update({
-          name: body.accountName,
-          type: body.accountType,
-          is_active: body.isActive,
-          parent_id: body.parentAccountId,
-        })
-        .eq('organization_id', ctx.organizationId)
-        .eq('id', id)
-        .select()
-        .single();
-      data = fallback.data;
-      error = fallback.error;
+export async function DELETE(_request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const ctx = await getAuthContext();
+  if (!ctx) return unauthorized();
+  if (!can(ctx, 'finance.write')) return forbidden();
+
+  try {
+    const { id } = await params;
+    const existing = await loadFinanceAccountById(ctx.organizationId, id);
+    if (!existing) return notFound('Account not found.');
+
+    const deletable = await canDeleteFinanceAccount(ctx.organizationId, id);
+    if (!deletable.allowed) {
+      return badRequest(deletable.reason);
     }
 
-    if (error || !data) throw error ?? new Error('Failed to update account');
+    const result = await financeService()
+      .from('accounts')
+      .delete()
+      .eq('organization_id', ctx.organizationId)
+      .eq('id', id);
+    if (result.error) throw result.error;
 
-    await writeFinanceAuditLog('ACCOUNT_UPDATED', id, ctx.userId, body as Record<string, unknown>, 'account');
-    return NextResponse.json(normalizeAccountRow(data as Record<string, unknown>));
-  } catch (err) {
-    if (err instanceof Error && err.message.includes('23505')) return badRequest('Account code already exists');
-    return serverError(err instanceof Error ? err.message : 'Internal server error');
+    await writeFinanceAuditLog('ACCOUNT_DELETED', id, ctx.userId, { accountCode: existing.accountCode }, 'account');
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    return serverError(error instanceof Error ? error.message : 'Failed to delete account.');
   }
 }

@@ -10,6 +10,7 @@ import {
   unauthorized,
 } from '@/lib/api-auth';
 import { fetchGoodsReceivedNoteDetail, isGrnStockPostingError } from '@/lib/procurement-goods-received';
+import { loadInventoryReversalSnapshots } from '@/lib/inventory-reversal-server';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
 export async function GET(
@@ -27,10 +28,33 @@ export async function GET(
       grnId: id,
       organizationId: ctx.organizationId,
     });
+    const reversalSnapshot = (await loadInventoryReversalSnapshots(service, 'goods_received_note', [id])).get(id)?.[0] ?? null;
+    const reversal = reversalSnapshot
+      ? {
+          approvedBy: reversalSnapshot.approvedBy,
+          approvedByName: reversalSnapshot.approvedByName,
+          id: reversalSnapshot.id,
+          originalJournalId: reversalSnapshot.originalJournalId,
+          originalMovementIds: reversalSnapshot.originalMovementIds,
+          postedAt: reversalSnapshot.postedAt,
+          postedBy: reversalSnapshot.postedBy,
+          postedByName: reversalSnapshot.postedByName,
+          reason: reversalSnapshot.reason,
+          requestedBy: reversalSnapshot.requestedBy,
+          requestedByName: reversalSnapshot.requestedByName,
+          reversalJournalId: reversalSnapshot.reversalJournalId,
+          reversalJournalNumber: reversalSnapshot.reversalJournalNumber,
+          reversalMovementIds: reversalSnapshot.movementIds,
+          reversalNumber: reversalSnapshot.reversalNumber,
+          reversalReference: reversalSnapshot.reversalReference,
+          status: reversalSnapshot.status,
+        }
+      : null;
 
     return NextResponse.json({
       success: true,
       data,
+      reversal,
       ...data,
     });
   } catch (error) {

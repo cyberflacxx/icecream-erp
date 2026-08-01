@@ -1,4 +1,6 @@
 import {
+  STOCK_IN_MOVEMENT_TYPES,
+  STOCK_OUT_MOVEMENT_TYPES,
   buildInventoryAdjustmentFailure,
   ensureNonNegative,
   ensurePositiveQuantity,
@@ -16,10 +18,22 @@ type ServiceClient = {
 
 const OPTIONAL_STOCK_MOVEMENT_COLUMNS = new Set([
   'batch_number',
+  'branch_id',
+  'destination_branch_id',
   'destination_warehouse_id',
+  'journal_entry_id',
+  'movement_number',
+  'posting_date',
+  'posting_status',
   'reference_number',
+  'reversal_of_movement_id',
+  'reversal_reference',
+  'running_value',
+  'source_branch_id',
   'source_document_id',
+  'source_document_number',
   'source_document_type',
+  'source_module',
   'source_warehouse_id',
   'total_value',
 ]);
@@ -31,14 +45,24 @@ const STOCK_MOVEMENT_LIST_COLUMNS = [
   'movement_type',
   'quantity',
   'running_balance',
+  'running_value',
   'unit_cost',
   'total_cost',
   'total_value',
+  'movement_number',
+  'posting_date',
+  'posting_status',
+  'journal_entry_id',
   'reference_id',
   'reference_type',
   'source_document_id',
+  'source_document_number',
   'source_document_type',
+  'source_module',
+  'source_warehouse_id',
+  'destination_warehouse_id',
   'reference_number',
+  'reversal_reference',
   'notes',
   'created_by',
   'created_at',
@@ -251,7 +275,11 @@ export async function mapCompatibleStockMovementRows(
   rows: Array<Record<string, unknown>>,
 ) {
   const itemIds = [...new Set(rows.map((row) => String(row.item_id ?? '')).filter(Boolean))];
-  const warehouseIds = [...new Set(rows.map((row) => String(row.warehouse_id ?? '')).filter(Boolean))];
+  const warehouseIds = [...new Set(rows.flatMap((row) => [
+    String(row.warehouse_id ?? ''),
+    String(row.source_warehouse_id ?? ''),
+    String(row.destination_warehouse_id ?? ''),
+  ]).filter(Boolean))];
   const userIds = [...new Set(rows.map((row) => String(row.created_by ?? '')).filter(Boolean))];
 
   const [itemsResult, warehousesResult, usersResult] = await Promise.all([
@@ -279,10 +307,19 @@ export async function mapCompatibleStockMovementRows(
   return rows.map((row) => {
     const itemId = String(row.item_id ?? '').trim() || null;
     const warehouseId = String(row.warehouse_id ?? '').trim() || null;
+    const sourceWarehouseId = String(row.source_warehouse_id ?? '').trim() || null;
+    const destinationWarehouseId = String(row.destination_warehouse_id ?? '').trim() || null;
     const createdById = String(row.created_by ?? '').trim() || null;
     const user = createdById ? (users.get(createdById) ?? null) as Record<string, unknown> | null : null;
     const item = itemId ? (items.get(itemId) ?? null) as Record<string, unknown> | null : null;
     const warehouse = warehouseId ? (warehouses.get(warehouseId) ?? null) as Record<string, unknown> | null : null;
+    const sourceWarehouse = sourceWarehouseId ? (warehouses.get(sourceWarehouseId) ?? null) as Record<string, unknown> | null : null;
+    const destinationWarehouse = destinationWarehouseId ? (warehouses.get(destinationWarehouseId) ?? null) as Record<string, unknown> | null : null;
+    const movementType = normalizeStockMovementType(String(row.movement_type ?? 'UNKNOWN'));
+    const quantity = toNumber(row.quantity);
+    const quantityIn = STOCK_IN_MOVEMENT_TYPES.has(movementType) ? quantity : 0;
+    const quantityOut = STOCK_OUT_MOVEMENT_TYPES.has(movementType) ? quantity : 0;
+    const totalValue = toNumber(row.total_value ?? row.total_cost);
 
     return {
       createdBy: createdById
@@ -302,22 +339,51 @@ export async function mapCompatibleStockMovementRows(
         : { code: '--', id: itemId ?? '', name: 'Unknown item' },
       item_id: itemId,
       itemId,
+      journalEntryId: row.journal_entry_id ? String(row.journal_entry_id) : null,
+      movementNumber: row.movement_number ? String(row.movement_number) : null,
       notes: row.notes ?? null,
-      quantity: toNumber(row.quantity),
+      postingDate: row.posting_date ? String(row.posting_date) : null,
+      postingStatus: row.posting_status ? String(row.posting_status) : 'POSTED',
+      quantity,
+      quantityIn,
+      quantityOut,
       reference: {
         id: row.source_document_id ? String(row.source_document_id) : row.reference_id ? String(row.reference_id) : null,
-        number: row.reference_number ? String(row.reference_number) : null,
+        number: row.source_document_number
+          ? String(row.source_document_number)
+          : row.reference_number
+            ? String(row.reference_number)
+            : null,
         type: row.source_document_type ? String(row.source_document_type) : row.reference_type ? String(row.reference_type) : 'UNKNOWN',
       },
       runningBalance: toNumber(row.running_balance),
+      runningValue: toNumber(row.running_value ?? row.total_value ?? row.total_cost),
+      sourceModule: row.source_module ? String(row.source_module) : deriveStockMovementSourceModule(row),
       source_document_id: row.source_document_id ? String(row.source_document_id) : row.reference_id ? String(row.reference_id) : null,
       sourceDocumentId: row.source_document_id ? String(row.source_document_id) : row.reference_id ? String(row.reference_id) : null,
       source_document_type: row.source_document_type ? String(row.source_document_type) : row.reference_type ? String(row.reference_type) : 'UNKNOWN',
       sourceDocumentType: row.source_document_type ? String(row.source_document_type) : row.reference_type ? String(row.reference_type) : 'UNKNOWN',
-      totalCost: toNumber(row.total_value ?? row.total_cost),
-      totalValue: toNumber(row.total_value ?? row.total_cost),
-      type: String(row.movement_type ?? 'UNKNOWN'),
+      totalCost: totalValue,
+      totalValue,
+      type: movementType,
       unitCost: toNumber(row.unit_cost),
+      destinationWarehouse: destinationWarehouse
+        ? {
+            id: String(destinationWarehouse.id ?? ''),
+            name: String(destinationWarehouse.name ?? 'Unknown warehouse'),
+          }
+        : destinationWarehouseId
+          ? { id: destinationWarehouseId, name: 'Unknown warehouse' }
+          : null,
+      reversalReference: row.reversal_reference ? String(row.reversal_reference) : null,
+      sourceWarehouse: sourceWarehouse
+        ? {
+            id: String(sourceWarehouse.id ?? ''),
+            name: String(sourceWarehouse.name ?? 'Unknown warehouse'),
+          }
+        : sourceWarehouseId
+          ? { id: sourceWarehouseId, name: 'Unknown warehouse' }
+          : null,
       warehouse: warehouse
         ? {
             id: String(warehouse.id ?? ''),
@@ -328,6 +394,14 @@ export async function mapCompatibleStockMovementRows(
       warehouseId,
     };
   });
+}
+
+function deriveStockMovementSourceModule(row: Record<string, unknown>) {
+  const sourceType = String(row.source_document_type ?? row.reference_type ?? '').toLowerCase();
+  if (sourceType.includes('grn') || sourceType.includes('purchase')) return 'procurement';
+  if (sourceType.includes('production')) return 'production';
+  if (sourceType.includes('sale') || sourceType.includes('dispatch') || sourceType.includes('invoice')) return 'sales';
+  return 'inventory';
 }
 
 export async function applyInventoryDelta(

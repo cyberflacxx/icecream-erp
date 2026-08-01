@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { badRequest, can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
 import { isWarehouseAvailableToContext } from '@/lib/branch-access';
 import { resolveInventoryValue } from '@/lib/inventory';
+import { loadInventoryReversalSnapshots } from '@/lib/inventory-reversal-server';
 import {
   normalizeGoodsReceivedItemId,
   normalizeGoodsReceivedPurchaseOrderId,
@@ -118,18 +119,42 @@ export async function GET(request: NextRequest) {
       if (warehouseLookup.error) return serverError(warehouseLookup.error.message);
       const warehousesById = new Map((warehouseLookup.data ?? []).map((row) => [String(row.id), String(row.name ?? 'Unknown warehouse')]));
 
+      const fallbackGrnIds = (fallback.data ?? []).map((row: Record<string, unknown>) => String(row.id ?? '')).filter(Boolean);
+      const reversalMap = await loadInventoryReversalSnapshots(service, 'goods_received_note', fallbackGrnIds);
       const mappedFallback = (fallback.data ?? []).map((r: Record<string, unknown>) => {
         const po = r.purchase_orders as Record<string, unknown> | null;
         const supplier = po?.suppliers as Record<string, unknown> | null;
         const warehouseId = String(r.warehouse_id ?? '').trim();
+        const reversal = reversalMap.get(String(r.id))?.[0] ?? null;
         return {
           id: r.id,
           grnNumber: r.grn_number,
           receivedDate: r.received_date,
-          status: String(r.status ?? '').toUpperCase(),
+          status: reversal ? 'REVERSED' : String(r.status ?? '').toUpperCase(),
           qualityStatus: null,
           stockPosted: r.stock_posted === true || String(r.status ?? '').toUpperCase() === 'POSTED',
           inventoryValue: resolveInventoryValue(r, 0),
+          reversal: reversal
+            ? {
+                approvedBy: reversal.approvedBy,
+                approvedByName: reversal.approvedByName,
+                id: reversal.id,
+                originalJournalId: reversal.originalJournalId,
+                originalMovementIds: reversal.originalMovementIds,
+                postedAt: reversal.postedAt,
+                postedBy: reversal.postedBy,
+                postedByName: reversal.postedByName,
+                reason: reversal.reason,
+                reversalJournalId: reversal.reversalJournalId,
+                reversalJournalNumber: reversal.reversalJournalNumber,
+                reversalMovementIds: reversal.movementIds,
+                reversalNumber: reversal.reversalNumber,
+                reversalReference: reversal.reversalReference,
+                requestedBy: reversal.requestedBy,
+                requestedByName: reversal.requestedByName,
+                status: reversal.status,
+              }
+            : null,
           warehouse: warehouseId
             ? {
                 id: warehouseId,
@@ -190,10 +215,12 @@ export async function GET(request: NextRequest) {
     if (warehouseLookup.error) return serverError(warehouseLookup.error.message);
     const warehousesById = new Map((warehouseLookup.data ?? []).map((row) => [String(row.id), String(row.name ?? 'Unknown warehouse')]));
 
+    const reversalMap = await loadInventoryReversalSnapshots(service, 'goods_received_note', grnIds);
     const mapped = (primary.data ?? []).map((r: Record<string, unknown>) => {
       const po = r.purchase_orders as Record<string, unknown> | null;
       const supplierId = String(r.supplier_id ?? po?.supplier_id ?? '');
       const warehouseId = String(r.warehouse_id ?? '').trim();
+      const reversal = reversalMap.get(String(r.id))?.[0] ?? null;
       const supplier = supplierId
         ? {
             id: supplierId,
@@ -205,10 +232,31 @@ export async function GET(request: NextRequest) {
         id: r.id,
         grnNumber: r.grn_number,
         receivedDate: r.received_date,
-        status: String(r.status ?? '').toUpperCase(),
+        status: reversal ? 'REVERSED' : String(r.status ?? '').toUpperCase(),
         qualityStatus: r.quality_status ? String(r.quality_status).toUpperCase() : null,
         stockPosted: r.stock_posted === true || String(r.status ?? '').toUpperCase() === 'POSTED',
         inventoryValue: resolveInventoryValue(r, 0),
+        reversal: reversal
+          ? {
+              approvedBy: reversal.approvedBy,
+              approvedByName: reversal.approvedByName,
+              id: reversal.id,
+              originalJournalId: reversal.originalJournalId,
+              originalMovementIds: reversal.originalMovementIds,
+              postedAt: reversal.postedAt,
+              postedBy: reversal.postedBy,
+              postedByName: reversal.postedByName,
+              reason: reversal.reason,
+              reversalJournalId: reversal.reversalJournalId,
+              reversalJournalNumber: reversal.reversalJournalNumber,
+              reversalMovementIds: reversal.movementIds,
+              reversalNumber: reversal.reversalNumber,
+              reversalReference: reversal.reversalReference,
+              requestedBy: reversal.requestedBy,
+              requestedByName: reversal.requestedByName,
+              status: reversal.status,
+            }
+          : null,
         warehouse: warehouseId
           ? {
               id: warehouseId,

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { badRequest, can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
+import { resolveFinancePostingAccount } from '@/lib/finance-foundation-server';
 import { buildFinanceSourceReference } from '@/lib/finance';
 import { createLinkedFinanceTransaction, postFinanceDocument } from '@/lib/finance-server';
 import { canPayInvoice } from '@/lib/procurement';
@@ -207,19 +208,27 @@ export async function POST(request: NextRequest) {
   let journal: { entryNumber: string; id: string } | null = null;
   let linkedTransaction: { id: string; table: string } | null = null;
   try {
+    const payableAccount = await resolveFinancePostingAccount(ctx.organizationId, 'SUPPLIER_PAYABLES', { fallbackAccountCode: '2110' });
+    const tenderAccount =
+      paymentSourceType === 'BANK'
+        ? await resolveFinancePostingAccount(ctx.organizationId, 'BANK_ACCOUNT', { fallbackAccountCode: '1120' })
+        : paymentSourceType === 'PETTY_CASH'
+          ? await resolveFinancePostingAccount(ctx.organizationId, 'PETTY_CASH_ACCOUNT', { fallbackAccountCode: '1130' })
+          : await resolveFinancePostingAccount(ctx.organizationId, 'CASH_ACCOUNT', { fallbackAccountCode: '1110' });
+
     journal = await postFinanceDocument({
       createdBy: ctx.userId,
       description: `Supplier payment ${data.reference_number ?? data.id}`,
       journalDate: String(data.payment_date ?? body.paymentDate ?? new Date().toISOString().slice(0, 10)),
       lines: [
         {
-          accountCode: '2000',
+          accountId: payableAccount.id,
           creditAmount: 0,
           debitAmount: amountPaid,
           description: `Reduce accounts payable for supplier invoice ${supplierInvoiceId}`,
         },
         {
-          accountCode: paymentSourceType === 'BANK' ? '1000' : paymentSourceType === 'CASH' ? '1010' : '1020',
+          accountId: tenderAccount.id,
           creditAmount: amountPaid,
           debitAmount: 0,
           description: `Supplier payment via ${paymentSourceType}`,

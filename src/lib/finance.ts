@@ -86,6 +86,43 @@ export function calculateProductionCostSummary(
   };
 }
 
+export function calculateDetailedProductionCostSummary(input: {
+  acceptedFinishedQuantity: number;
+  labourCost?: number;
+  overheadCost?: number;
+  packagingCost?: number;
+  rawMaterialCost?: number;
+  varianceCost?: number;
+  wastageCost?: number;
+}) {
+  const acceptedFinishedQuantity = ensureNonNegative(input.acceptedFinishedQuantity, 'acceptedFinishedQuantity');
+  const rawMaterialCost = ensureNonNegative(input.rawMaterialCost ?? 0, 'rawMaterialCost');
+  const packagingCost = ensureNonNegative(input.packagingCost ?? 0, 'packagingCost');
+  const labourCost = ensureNonNegative(input.labourCost ?? 0, 'labourCost');
+  const overheadCost = ensureNonNegative(input.overheadCost ?? 0, 'overheadCost');
+  const wastageCost = ensureNonNegative(input.wastageCost ?? 0, 'wastageCost');
+  const varianceCost = ensureNonNegative(input.varianceCost ?? 0, 'varianceCost');
+  const totalProductionCost =
+    rawMaterialCost +
+    packagingCost +
+    labourCost +
+    overheadCost +
+    wastageCost +
+    varianceCost;
+
+  return {
+    acceptedFinishedQuantity,
+    costPerAcceptedUnit: acceptedFinishedQuantity > 0 ? totalProductionCost / acceptedFinishedQuantity : 0,
+    labourCost,
+    overheadCost,
+    packagingCost,
+    rawMaterialCost,
+    totalProductionCost,
+    varianceCost,
+    wastageCost,
+  };
+}
+
 export function calculateBranchCostSummary(
   salesAmount: number,
   costOfGoodsSold: number,
@@ -542,6 +579,92 @@ export function summarizeTrialBalance(
   return { rows, totals };
 }
 
+export function summarizeDetailedTrialBalance(input: {
+  openingLines: Array<{ accountCode: string; accountName: string; creditAmount: number; debitAmount: number }>;
+  periodLines: Array<{ accountCode: string; accountName: string; creditAmount: number; debitAmount: number }>;
+}) {
+  const grouped = new Map<
+    string,
+    {
+      accountCode: string;
+      accountName: string;
+      closingCredit: number;
+      closingDebit: number;
+      openingBalance: number;
+      periodCredit: number;
+      periodDebit: number;
+    }
+  >();
+
+  for (const line of input.openingLines) {
+    const key = `${line.accountCode}::${line.accountName}`;
+    const current = grouped.get(key) ?? {
+      accountCode: line.accountCode,
+      accountName: line.accountName,
+      closingCredit: 0,
+      closingDebit: 0,
+      openingBalance: 0,
+      periodCredit: 0,
+      periodDebit: 0,
+    };
+    current.openingBalance += (Number(line.debitAmount) || 0) - (Number(line.creditAmount) || 0);
+    grouped.set(key, current);
+  }
+
+  for (const line of input.periodLines) {
+    const key = `${line.accountCode}::${line.accountName}`;
+    const current = grouped.get(key) ?? {
+      accountCode: line.accountCode,
+      accountName: line.accountName,
+      closingCredit: 0,
+      closingDebit: 0,
+      openingBalance: 0,
+      periodCredit: 0,
+      periodDebit: 0,
+    };
+    current.periodDebit += Number(line.debitAmount) || 0;
+    current.periodCredit += Number(line.creditAmount) || 0;
+    grouped.set(key, current);
+  }
+
+  const rows = [...grouped.values()]
+    .map((row) => {
+      const closingBalance = row.openingBalance + row.periodDebit - row.periodCredit;
+      return {
+        accountCode: row.accountCode,
+        accountName: row.accountName,
+        closingCredit: closingBalance < 0 ? Math.abs(closingBalance) : 0,
+        closingDebit: closingBalance >= 0 ? closingBalance : 0,
+        openingCredit: row.openingBalance < 0 ? Math.abs(row.openingBalance) : 0,
+        openingDebit: row.openingBalance >= 0 ? row.openingBalance : 0,
+        periodCredit: row.periodCredit,
+        periodDebit: row.periodDebit,
+      };
+    })
+    .sort((left, right) => left.accountCode.localeCompare(right.accountCode));
+
+  const totals = rows.reduce(
+    (sum, row) => ({
+      closingCredit: sum.closingCredit + row.closingCredit,
+      closingDebit: sum.closingDebit + row.closingDebit,
+      openingCredit: sum.openingCredit + row.openingCredit,
+      openingDebit: sum.openingDebit + row.openingDebit,
+      periodCredit: sum.periodCredit + row.periodCredit,
+      periodDebit: sum.periodDebit + row.periodDebit,
+    }),
+    {
+      closingCredit: 0,
+      closingDebit: 0,
+      openingCredit: 0,
+      openingDebit: 0,
+      periodCredit: 0,
+      periodDebit: 0,
+    },
+  );
+
+  return { rows, totals };
+}
+
 export function summarizeProfitAndLoss(revenue: number, costOfGoodsSold: number, operatingExpenses: number) {
   const grossProfit = ensureNonNegative(revenue, 'revenue') - ensureNonNegative(costOfGoodsSold, 'costOfGoodsSold');
   const netProfit = grossProfit - ensureNonNegative(operatingExpenses, 'operatingExpenses');
@@ -608,6 +731,7 @@ export function summarizeBalanceSheetFromLedger(
     const net = debit - credit;
 
     if (type === 'ASSET') totals.assets += net;
+    if (type === 'CONTRA_ASSET') totals.assets += net;
     if (type === 'LIABILITY') totals.liabilities += -net;
     if (type === 'EQUITY') totals.equity += -net;
   }
@@ -633,7 +757,7 @@ export function summarizeProfitAndLossFromLedger(
     const debit = toNumber(line.debitAmount);
     const credit = toNumber(line.creditAmount);
 
-    if (type === 'REVENUE') {
+    if (type === 'REVENUE' || type === 'OTHER_INCOME') {
       revenue += credit - debit;
       continue;
     }
@@ -651,6 +775,99 @@ export function summarizeProfitAndLossFromLedger(
     operatingExpenses,
     revenue,
   };
+}
+
+export function summarizeBranchProfitAndLossFromLedger(
+  lines: Array<{
+    accountCode?: string | null;
+    accountName?: string | null;
+    accountType?: string | null;
+    branchId?: string | null;
+    creditAmount: number;
+    debitAmount: number;
+  }>,
+) {
+  const grouped = new Map<string, { branchId: string; costOfGoodsSold: number; expenses: number; revenue: number }>();
+
+  for (const line of lines) {
+    const branchId = String(line.branchId ?? '').trim();
+    if (!branchId) continue;
+
+    const current = grouped.get(branchId) ?? {
+      branchId,
+      costOfGoodsSold: 0,
+      expenses: 0,
+      revenue: 0,
+    };
+    const type = normalizeFinanceAccountType(line.accountType);
+    const debit = toNumber(line.debitAmount);
+    const credit = toNumber(line.creditAmount);
+
+    if (type === 'REVENUE' || type === 'OTHER_INCOME') {
+      current.revenue += credit - debit;
+    } else if (isCostOfSalesAccount(line)) {
+      current.costOfGoodsSold += debit - credit;
+    } else if (type === 'EXPENSE') {
+      current.expenses += debit - credit;
+    }
+
+    grouped.set(branchId, current);
+  }
+
+  return [...grouped.values()].map((row) => ({
+    branchId: row.branchId,
+    costOfGoodsSold: row.costOfGoodsSold,
+    expenses: row.expenses,
+    grossProfit: row.revenue - row.costOfGoodsSold,
+    netProfit: row.revenue - row.costOfGoodsSold - row.expenses,
+    revenue: row.revenue,
+  }));
+}
+
+export function summarizeCostCentreProfitAndLossFromLedger(
+  lines: Array<{
+    accountCode?: string | null;
+    accountName?: string | null;
+    accountType?: string | null;
+    costCenterCode?: string | null;
+    creditAmount: number;
+    debitAmount: number;
+  }>,
+) {
+  const grouped = new Map<string, { costCenterCode: string; costs: number; expenses: number; revenue: number }>();
+
+  for (const line of lines) {
+    const costCenterCode = String(line.costCenterCode ?? '').trim().toUpperCase();
+    if (!costCenterCode) continue;
+
+    const current = grouped.get(costCenterCode) ?? {
+      costCenterCode,
+      costs: 0,
+      expenses: 0,
+      revenue: 0,
+    };
+    const type = normalizeFinanceAccountType(line.accountType);
+    const debit = toNumber(line.debitAmount);
+    const credit = toNumber(line.creditAmount);
+
+    if (type === 'REVENUE' || type === 'OTHER_INCOME') {
+      current.revenue += credit - debit;
+    } else if (isCostOfSalesAccount(line)) {
+      current.costs += debit - credit;
+    } else if (type === 'EXPENSE') {
+      current.expenses += debit - credit;
+    }
+
+    grouped.set(costCenterCode, current);
+  }
+
+  return [...grouped.values()].map((row) => ({
+    costCenterCode: row.costCenterCode,
+    costs: row.costs,
+    expenses: row.expenses,
+    netResult: row.revenue - row.costs - row.expenses,
+    revenue: row.revenue,
+  }));
 }
 
 export function summarizeCashFlowFromLedger(
@@ -671,7 +888,10 @@ export function summarizeCashFlowFromLedger(
       name.includes('CASH') ||
       name.includes('BANK') ||
       code === '1000' ||
-      code === '1010';
+      code === '1010' ||
+      code === '1110' ||
+      code === '1120' ||
+      code === '1130';
 
     if (!isCashLike) continue;
 
@@ -720,10 +940,11 @@ export function buildFinanceImportTemplate(
       {
         accountCode: '',
         accountName: '',
-        accountType: 'Asset',
+        accountType: 'ASSET',
         isActive: true,
         normalBalance: 'DEBIT',
         parentAccountCode: '',
+        allowPosting: true,
       },
     ]);
   }
@@ -864,13 +1085,24 @@ export function validateChartOfAccountImportRows(
   const errors: FinanceValidationResult<Record<string, unknown>>['errors'] = [];
   const validRows: Array<Record<string, unknown>> = [];
   const seenCodes = new Set<string>();
-  const validTypes = new Set(['Asset', 'Liability', 'Equity', 'Revenue', 'Expense', 'Cost of Sales']);
+  const validTypes = new Set([
+    'ASSET',
+    'LIABILITY',
+    'EQUITY',
+    'REVENUE',
+    'EXPENSE',
+    'COST_OF_SALES',
+    'HEADER',
+    'CONTRA_ASSET',
+    'CONTRA_REVENUE',
+    'OTHER_INCOME',
+  ]);
 
   rows.forEach((row, index) => {
     const rowNumber = index + 2;
     const accountCode = String(row.accountCode ?? '').trim();
     const accountName = String(row.accountName ?? '').trim();
-    const accountType = String(row.accountType ?? '').trim();
+    const accountType = normalizeFinanceAccountType(String(row.accountType ?? '').trim());
 
     if (!accountCode) errors.push({ message: 'accountCode is required', rowNumber });
     if (!accountName) errors.push({ message: 'accountName is required', rowNumber });

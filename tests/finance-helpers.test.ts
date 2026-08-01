@@ -1,8 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 import {
   buildEmptyFinanceDashboardData,
+  calculateDetailedProductionCostSummary,
   buildFinanceSourceReference,
   buildPayablesRows,
   buildReceivablesRows,
@@ -31,6 +34,9 @@ import {
   resolveFinanceSectionResult,
   resolvePettyCashAmount,
   summarizeBalanceSheetFromLedger,
+  summarizeBranchProfitAndLossFromLedger,
+  summarizeCostCentreProfitAndLossFromLedger,
+  summarizeDetailedTrialBalance,
   summarizeCashFlowFromLedger,
   summarizeProfitAndLossFromLedger,
   summarizeProfitAndLoss,
@@ -42,6 +48,21 @@ import {
   validateJournalLines,
   validateOpeningBalanceImportRows,
 } from '../src/lib/finance';
+import {
+  buildBranchCostCentreDefinitions,
+  buildFinanceAccountTree,
+  canFinanceAccountReceivePosting,
+  countHeaderAccounts,
+  countPostingAccounts,
+  DEFAULT_FINANCE_TRANSACTION_MAPPINGS,
+  OFFICIAL_CHART_OF_ACCOUNTS,
+  validateOpeningBalanceDraftLines,
+} from '../src/lib/finance-foundation';
+import {
+  collapseFinancePostingLines,
+  resolveInventoryPostingMappingKey,
+  resolveProductionCostCentrePriority,
+} from '../src/lib/finance-integration';
 
 test('budget and costing helpers derive expected finance metrics', () => {
   const budget = calculateBudgetVariance(1000, 1200);
@@ -59,6 +80,21 @@ test('budget and costing helpers derive expected finance metrics', () => {
   assert.equal(calculatePayableBalance(900, 200, 100), 600);
   assert.equal(calculateInventoryValuation(50, 2.5), 125);
   assert.equal(calculatePettyCashBalance(300, 120), 180);
+});
+
+test('detailed production costing includes wastage and variance in unit cost', () => {
+  const summary = calculateDetailedProductionCostSummary({
+    acceptedFinishedQuantity: 10,
+    labourCost: 20,
+    overheadCost: 10,
+    packagingCost: 15,
+    rawMaterialCost: 55,
+    varianceCost: 5,
+    wastageCost: 5,
+  });
+
+  assert.equal(summary.totalProductionCost, 110);
+  assert.equal(summary.costPerAcceptedUnit, 11);
 });
 
 test('journal helpers summarize balances and profit figures', () => {
@@ -120,6 +156,45 @@ test('ledger summaries derive balance sheet, pnl, and cash flow totals', () => {
   assert.equal(cashFlow.cashIn, 30);
   assert.equal(cashFlow.cashOut, 5);
   assert.equal(cashFlow.netCashFlow, 25);
+});
+
+test('detailed trial balance, branch pnl, and cost centre pnl summarize filtered ledger lines', () => {
+  const detailedTrialBalance = summarizeDetailedTrialBalance({
+    openingLines: [
+      { accountCode: '1140', accountName: 'Accounts Receivable', debitAmount: 100, creditAmount: 0 },
+    ],
+    periodLines: [
+      { accountCode: '4000', accountName: 'Sales Revenue', debitAmount: 0, creditAmount: 150 },
+      { accountCode: '1140', accountName: 'Accounts Receivable', debitAmount: 150, creditAmount: 0 },
+    ],
+  });
+  const branchPnl = summarizeBranchProfitAndLossFromLedger([
+    { accountCode: '4000', accountName: 'Sales', accountType: 'REVENUE', branchId: 'branch-1', debitAmount: 0, creditAmount: 150 },
+    { accountCode: '5110', accountName: 'Cost of Goods Sold', accountType: 'EXPENSE', branchId: 'branch-1', debitAmount: 60, creditAmount: 0 },
+    { accountCode: '6100', accountName: 'Operating Expenses', accountType: 'EXPENSE', branchId: 'branch-1', debitAmount: 20, creditAmount: 0 },
+  ]);
+  const costCentrePnl = summarizeCostCentreProfitAndLossFromLedger([
+    { accountCode: '4000', accountName: 'Sales', accountType: 'REVENUE', costCenterCode: 'SALES', debitAmount: 0, creditAmount: 150 },
+    { accountCode: '5110', accountName: 'Cost of Goods Sold', accountType: 'EXPENSE', costCenterCode: 'SALES', debitAmount: 60, creditAmount: 0 },
+  ]);
+
+  assert.equal(detailedTrialBalance.rows[0]?.closingDebit, 250);
+  assert.equal(detailedTrialBalance.totals.periodCredit, 150);
+  assert.equal(branchPnl[0]?.grossProfit, 90);
+  assert.equal(branchPnl[0]?.netProfit, 70);
+  assert.equal(costCentrePnl[0]?.netResult, 90);
+});
+
+test('finance integration helpers collapse lines and resolve inventory mappings', () => {
+  const collapsed = collapseFinancePostingLines([
+    { accountId: 'acct-1', branchId: 'branch-1', costCenterCode: 'STORES', debitAmount: 10, creditAmount: 0, description: 'same' },
+    { accountId: 'acct-1', branchId: 'branch-1', costCenterCode: 'STORES', debitAmount: 5, creditAmount: 0, description: 'same' },
+  ]);
+
+  assert.equal(collapsed[0]?.debitAmount, 15);
+  assert.equal(resolveInventoryPostingMappingKey({ itemCategoryName: 'Packaging', itemType: 'RAW_MATERIAL' }), 'PACKAGING_INVENTORY');
+  assert.equal(resolveInventoryPostingMappingKey({ itemCategoryName: 'Chocolate', itemType: 'RAW_MATERIAL' }), 'RAW_MATERIAL_INVENTORY');
+  assert.deepEqual(resolveProductionCostCentrePriority('night shift'), ['PRODUCTION_NIGHT', 'FACTORY']);
 });
 
 test('receivables and payables builders normalize report rows', () => {
@@ -328,4 +403,158 @@ test('finance import validators return row level errors', () => {
   assert.equal(accounts.rows.length, 1);
   assert.equal(openingBalances.errors.length, 3);
   assert.equal(openingBalances.rows.length, 1);
+});
+
+test('official chart definitions keep unique codes and posting-header counts', () => {
+  const codes = OFFICIAL_CHART_OF_ACCOUNTS.map((account) => account.code);
+  assert.equal(new Set(codes).size, codes.length);
+  assert.equal(countHeaderAccounts() > 0, true);
+  assert.equal(countPostingAccounts() > countHeaderAccounts(), true);
+  assert.equal(DEFAULT_FINANCE_TRANSACTION_MAPPINGS.some((mapping) => mapping.key === 'DEFAULT_SALES_REVENUE' && mapping.fallbackAccountCode === '4120'), true);
+  assert.equal(DEFAULT_FINANCE_TRANSACTION_MAPPINGS.some((mapping) => mapping.key === 'COST_OF_GOODS_SOLD' && mapping.fallbackAccountCode === '5110'), true);
+});
+
+test('chart hierarchy builder preserves parent-child structure', () => {
+  const rows = [
+    {
+      id: '1',
+      organization_id: 'org-1',
+      code: '1000',
+      name: 'Assets',
+      type: 'HEADER',
+      is_active: true,
+      allow_posting: false,
+      balance: 0,
+      parent_id: null,
+    },
+    {
+      id: '2',
+      organization_id: 'org-1',
+      code: '1100',
+      name: 'Current Assets',
+      type: 'HEADER',
+      is_active: true,
+      allow_posting: false,
+      balance: 0,
+      parent_id: '1',
+    },
+    {
+      id: '3',
+      organization_id: 'org-1',
+      code: '1110',
+      name: 'Cash on Hand',
+      type: 'ASSET',
+      is_active: true,
+      allow_posting: true,
+      balance: 0,
+      parent_id: '2',
+    },
+  ].map((row) => ({
+    accountCode: String(row.code),
+    accountName: String(row.name),
+    accountType: row.type as 'HEADER' | 'ASSET',
+    allowPosting: Boolean(row.allow_posting),
+    currentBalance: Number(row.balance),
+    description: null,
+    id: String(row.id),
+    isActive: true,
+    normalBalance: row.type === 'ASSET' ? ('DEBIT' as const) : null,
+    organizationId: 'org-1',
+    parentAccountCode: null,
+    parentAccountId: row.parent_id ? String(row.parent_id) : null,
+  }));
+
+  const tree = buildFinanceAccountTree(rows);
+  assert.equal(tree.length, 1);
+  assert.equal(tree[0]?.children[0]?.accountCode, '1100');
+  assert.equal(tree[0]?.children[0]?.children[0]?.accountCode, '1110');
+});
+
+test('posting validation blocks header and inactive accounts', () => {
+  assert.equal(
+    canFinanceAccountReceivePosting({
+      accountCode: '1000',
+      accountType: 'HEADER',
+      allowPosting: false,
+      isActive: true,
+    }),
+    '1000 is a header account and cannot receive postings.',
+  );
+  assert.equal(
+    canFinanceAccountReceivePosting({
+      accountCode: '1110',
+      accountType: 'ASSET',
+      allowPosting: true,
+      isActive: false,
+    }),
+    '1110 is inactive.',
+  );
+  assert.equal(
+    canFinanceAccountReceivePosting({
+      accountCode: '1140',
+      accountType: 'ASSET',
+      allowPosting: true,
+      isActive: true,
+    }),
+    null,
+  );
+});
+
+test('branch cost centre definitions synchronize by branch code and remain branch-specific', () => {
+  const definitions = buildBranchCostCentreDefinitions([
+    { code: 'BTA', id: 'branch-1', name: 'Borrowdale' },
+    { code: null, id: 'branch-2', name: 'Eastgate Mall' },
+  ]);
+
+  assert.equal(definitions[0]?.code, 'BRANCH_BTA');
+  assert.equal(definitions[1]?.code, 'BRANCH_EASTGATE_MALL');
+  assert.equal(definitions.every((definition) => definition.parentCode === 'SALES'), true);
+});
+
+test('opening balance draft validation requires a balanced multi-line batch', () => {
+  assert.equal(
+    validateOpeningBalanceDraftLines([
+      { accountId: '1', debitAmount: 100, creditAmount: 0 },
+      { accountId: '2', debitAmount: 0, creditAmount: 90 },
+    ]),
+    'Opening balances must balance before posting.',
+  );
+  assert.equal(
+    validateOpeningBalanceDraftLines([
+      { accountId: '1', debitAmount: 100, creditAmount: 0 },
+      { accountId: '2', debitAmount: 0, creditAmount: 100 },
+    ]),
+    null,
+  );
+});
+
+test('phase 1d migration and finance routes stay schema-local and enforce posting controls', () => {
+  const root = process.cwd();
+  const migration = readFileSync(join(root, 'migrations', '043_finance_chart_of_accounts_foundation.sql'), 'utf8');
+  const rollback = readFileSync(join(root, 'migrations', 'manual', '043_finance_chart_of_accounts_foundation.rollback.sql'), 'utf8');
+  const verify = readFileSync(join(root, 'migrations', 'manual', '043_finance_chart_of_accounts_foundation.verify.sql'), 'utf8');
+  const chartRoute = readFileSync(join(root, 'src', 'app', 'api', 'finance', 'chart-of-accounts', 'route.ts'), 'utf8');
+  const chartDetailRoute = readFileSync(join(root, 'src', 'app', 'api', 'finance', 'chart-of-accounts', '[id]', 'route.ts'), 'utf8');
+  const journalRoute = readFileSync(join(root, 'src', 'app', 'api', 'finance', 'journal-entries', 'route.ts'), 'utf8');
+  const openingBalancesRoute = readFileSync(join(root, 'src', 'app', 'api', 'finance', 'opening-balances', 'route.ts'), 'utf8');
+  const openingBalancesPostRoute = readFileSync(join(root, 'src', 'app', 'api', 'finance', 'opening-balances', 'post', 'route.ts'), 'utf8');
+  const financePage = readFileSync(join(root, 'src', 'app', '(dashboard)', 'finance', 'page.tsx'), 'utf8');
+  const chartPage = readFileSync(join(root, 'src', 'app', '(dashboard)', 'finance', 'chart-of-accounts', 'page.tsx'), 'utf8');
+
+  assert.match(migration, /create table if not exists icecream_erp\.cost_centres/);
+  assert.match(migration, /create table if not exists icecream_erp\.erp_account_mappings/);
+  assert.match(migration, /idx_accounts_org_code_unique/);
+  assert.match(migration, /on conflict \(organization_id, code\) do update/);
+  assert.doesNotMatch(migration, /alter\s+role|authenticator|pgrst\.db_schemas|search_path\s+to/i);
+  assert.doesNotMatch(migration.replace(/public\.digest/g, ''), /public\./);
+  assert.match(rollback, /drop table if exists icecream_erp\.erp_account_mappings/);
+  assert.match(verify, /total_accounts/);
+  assert.match(chartRoute, /view === 'tree'/);
+  assert.match(chartRoute, /accountType/);
+  assert.match(chartDetailRoute, /ACCOUNT_DELETED/);
+  assert.match(journalRoute, /canFinanceAccountReceivePosting/);
+  assert.match(openingBalancesRoute, /createFinanceOpeningBalanceDraft/);
+  assert.match(openingBalancesPostRoute, /postFinanceOpeningBalanceDrafts/);
+  assert.match(financePage, /Opening Balances/);
+  assert.match(chartPage, /Account Tree/);
 });

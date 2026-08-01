@@ -9,6 +9,7 @@ import {
   serverError,
   unauthorized,
 } from '@/lib/api-auth';
+import { loadInventoryReversalSnapshots } from '@/lib/inventory-reversal-server';
 import { normalizeTransferStatus, resolveTransferWriteStatus } from '@/lib/inventory';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
@@ -37,10 +38,17 @@ export async function GET(
 
   if (error) return serverError(error.message);
   if (!data) return notFound('Stock transfer not found.');
+  const reversals = (await loadInventoryReversalSnapshots(service, 'stock_transfer', [id])).get(id) ?? [];
+  const dispatchReversal = reversals.find((entry) => entry.operationType === 'stock_transfer_dispatch_reverse') ?? null;
+  const receiptReversal = reversals.find((entry) => entry.operationType === 'stock_transfer_receipt_reverse') ?? null;
+  const reversal = dispatchReversal ?? receiptReversal ?? reversals[0] ?? null;
 
   return NextResponse.json({
     ...data,
-    status: normalizeTransferStatus(String(data.status ?? '')),
+    dispatchReversal,
+    receiptReversal,
+    reversal,
+    status: dispatchReversal ? 'REVERSED' : normalizeTransferStatus(String(data.status ?? '')),
   });
 }
 

@@ -1,5 +1,6 @@
 ﻿'use client';
 
+import Link from 'next/link';
 import { useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import {
@@ -42,6 +43,7 @@ import { useUserContext } from '@/contexts/UserContext';
 import { useBranchRealtime } from '@/hooks/branch-operations/useBranchRealtime';
 import { useDashboardMetrics } from '@/hooks/reports/useReports';
 import { getDashboardRoleLabel, resolveDashboardPersona } from '@/lib/dashboard-access';
+import { resolveDashboardShortcuts } from '@/lib/dashboard-shortcuts';
 import { formatCatDateTime } from '@/lib/date-time';
 
 function formatNumber(value: unknown) {
@@ -55,6 +57,51 @@ const CHART_GRID_COLOR = 'var(--dashboard-card-grid)';
 const CHART_PRIMARY_COLOR = 'var(--dashboard-card-fill)';
 const CHART_WARM_COLOR = 'var(--dashboard-card-warm)';
 
+function ShortcutGrid({
+  roleLabel,
+  shortcuts,
+}: {
+  roleLabel: string;
+  shortcuts: ReturnType<typeof resolveDashboardShortcuts>;
+}) {
+  if (!shortcuts.length) {
+    return null;
+  }
+
+  return (
+    <section className="space-y-3">
+      <div>
+        <h2 className="text-lg font-semibold text-brown">Operational shortcuts</h2>
+        <p className="mt-1 text-sm text-muted">{roleLabel} actions filtered to the current permission scope.</p>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        {shortcuts.map((shortcut) => {
+          const Icon = shortcut.icon;
+
+          return (
+            <Link
+              key={shortcut.id}
+              href={shortcut.href}
+              className="rounded-xl border border-[color:var(--app-border)] bg-[color:var(--app-surface)] p-4 shadow-sm transition hover:border-[color:var(--app-border-strong)] hover:bg-[color:var(--app-bg-subtle)]"
+              title={shortcut.description}
+            >
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-[color:var(--app-accent-soft)] text-[color:var(--app-accent-strong)]">
+                  <Icon className="h-4 w-4" />
+                </div>
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-semibold text-brown">{shortcut.label}</p>
+                  <p className="mt-1 text-xs text-muted">{shortcut.description}</p>
+                </div>
+              </div>
+            </Link>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
 export function DashboardOverview() {
   const router = useRouter();
   const { currentUser, isLoading } = useUserContext();
@@ -66,6 +113,10 @@ export function DashboardOverview() {
     roleNames: currentUser?.roles?.map((item) => item.name) ?? [],
   });
   const branchId = currentUser?.branch?.id;
+  const shortcuts = useMemo(
+    () => resolveDashboardShortcuts(role, currentUser?.permissions ?? []).slice(0, 8),
+    [currentUser?.permissions, role],
+  );
   const realtimeHandlers = useMemo(
     () => ({
       onSale: () => void dashboardQuery.refetch(),
@@ -142,6 +193,7 @@ export function DashboardOverview() {
           title={`Welcome back, ${currentUser?.profile?.firstName ?? 'team'}`}
           description={`${roleLabel} dashboard with live production, sales, stock, and audit visibility.`}
         />
+        <ShortcutGrid roleLabel={roleLabel} shortcuts={shortcuts} />
 
         <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-4">
           <StatCard
@@ -271,6 +323,7 @@ export function DashboardOverview() {
           title={`Welcome back, ${currentUser?.profile?.firstName ?? 'team'}`}
           description={`${roleLabel} dashboard with live production throughput, efficiency, and material health.`}
         />
+        <ShortcutGrid roleLabel={roleLabel} shortcuts={shortcuts} />
 
         <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-4">
           <StatCard
@@ -390,6 +443,7 @@ export function DashboardOverview() {
           title={`Welcome back, ${currentUser?.profile?.firstName ?? 'team'}`}
           description={`${roleLabel} dashboard focused on ${focus.replace(/_/g, ' ')} data only.`}
         />
+        <ShortcutGrid roleLabel={roleLabel} shortcuts={shortcuts} />
 
         <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-4">
           {summaryCards.slice(0, 4).map(([key, value]) => (
@@ -457,6 +511,7 @@ export function DashboardOverview() {
           title={`Welcome back, ${currentUser?.profile?.firstName ?? 'team'}`}
           description={`${roleLabel} dashboard focused on sales, transactions, and saleable stock visibility.`}
         />
+        <ShortcutGrid roleLabel={roleLabel} shortcuts={shortcuts} />
 
         <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-4">
           <StatCard
@@ -546,6 +601,7 @@ export function DashboardOverview() {
         title={`Welcome back, ${currentUser?.profile?.firstName ?? 'team'}`}
         description={`${roleLabel} dashboard with live branch sales monitoring and shift close visibility.`}
       />
+      <ShortcutGrid roleLabel={roleLabel} shortcuts={shortcuts} />
 
       <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { badRequest, can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
 import { buildOpeningClosingRows, deriveSupplierShortages, toCsv, toNumber } from '@/lib/inventory';
+import { listCompatibleStockMovements, mapCompatibleStockMovementRows } from '@/lib/inventory-server';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
 const REPORT_TYPES = new Set([
@@ -34,31 +35,47 @@ export async function GET(
     let rows: Array<Record<string, string | number | null>> = [];
 
     if (reportType === 'stock-movement') {
-      const { data, error } = await service
-        .from('stock_movements')
-        .select(
-          `movement_type, quantity, unit_cost, total_cost, created_at,
-           items!item_id(code, name),
-           warehouses!warehouse_id(code, name)`,
-        )
-        .order('created_at', { ascending: false });
-      if (error) return serverError(error.message);
-
-      rows = (data ?? []).map((row) => {
-        const item = Array.isArray(row.items) ? row.items[0] : row.items;
-        const warehouse = Array.isArray(row.warehouses) ? row.warehouses[0] : row.warehouses;
-        return {
-          createdAt: String(row.created_at),
-          itemCode: String(item?.code ?? ''),
-          itemName: String(item?.name ?? ''),
-          movementType: String(row.movement_type ?? ''),
-          quantity: toNumber(row.quantity),
-          unitCost: toNumber(row.unit_cost),
-          totalCost: toNumber(row.total_cost),
-          warehouseCode: String(warehouse?.code ?? ''),
-          warehouseName: String(warehouse?.name ?? ''),
-        };
+      const result = await listCompatibleStockMovements(service, {
+        branchId: ctx.branchId,
+        endDate,
+        isBranchScoped: ctx.isBranchScoped,
+        itemId: searchParams.get('itemId') ?? undefined,
+        page: 1,
+        pageSize: 5000,
+        startDate,
+        type: searchParams.get('type') ?? undefined,
+        warehouseId: searchParams.get('warehouseId') ?? undefined,
       });
+      const mapped = await mapCompatibleStockMovementRows(service, result.rows);
+
+      rows = mapped.map((row) => ({
+        branch: String(row.branchName ?? ''),
+        createdBy: String(row.createdBy?.name ?? 'System'),
+        destinationWarehouse: String(row.destinationWarehouse?.name ?? ''),
+        itemCode: String(row.item?.code ?? ''),
+        itemName: String(row.item?.name ?? ''),
+        journalEntryId: String(row.journalEntryId ?? ''),
+        movementNumber: String(row.movementNumber ?? row.id ?? ''),
+        movementType: String(row.type ?? ''),
+        notes: String(row.notes ?? ''),
+        postingDate: String(row.postingDate ?? ''),
+        postingStatus: String(row.postingStatus ?? ''),
+        quantityIn: toNumber(row.quantityIn),
+        quantityOut: toNumber(row.quantityOut),
+        referenceId: String(row.reference?.id ?? ''),
+        referenceNumber: String(row.reference?.number ?? ''),
+        referenceType: String(row.reference?.type ?? ''),
+        reversalReference: String(row.reversalReference ?? ''),
+        runningQuantity: toNumber(row.runningBalance),
+        runningValue: toNumber(row.runningValue),
+        sourceDocumentNumber: String(row.reference?.number ?? ''),
+        sourceModule: String(row.sourceModule ?? ''),
+        sourceWarehouse: String(row.sourceWarehouse?.name ?? ''),
+        totalValue: toNumber(row.totalValue ?? row.totalCost),
+        transactionDate: String(row.date ?? ''),
+        unitCost: toNumber(row.unitCost),
+        warehouse: String(row.warehouse?.name ?? ''),
+      }));
     } else if (reportType === 'valuation' || reportType === 'branch-stock') {
       const { data, error } = await service
         .from('stock_balances')

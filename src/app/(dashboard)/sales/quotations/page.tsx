@@ -32,15 +32,16 @@ function totalDraft(lines: SalesLineDraft[], discountAmount: string, taxAmount: 
 export default function SalesQuotationsPage() {
   const query = useSalesReport(API_ROUTES.SALES.QUOTATIONS);
   const metaQuery = useSalesMeta();
+  const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  const [formState, setFormState] = useState(initialQuotationForm);
+  const [formError, setFormError] = useState<string | null>(null);
   const itemOptionsQuery = useItemSelectorOptions({
+    customerId: formState.customerId || undefined,
     includePrice: true,
     includeStock: true,
   });
   const request = useSalesRequest();
   const queryClient = useQueryClient();
-  const [isDrawerOpen, setIsDrawerOpen] = useState(false);
-  const [formState, setFormState] = useState(initialQuotationForm);
-  const [formError, setFormError] = useState<string | null>(null);
   const rows =
     query.data && typeof query.data === 'object' && Array.isArray((query.data as { data?: unknown }).data)
       ? (query.data as { data: Array<Record<string, unknown>> }).data

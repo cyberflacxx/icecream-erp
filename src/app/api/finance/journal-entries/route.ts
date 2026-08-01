@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { badRequest, can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
+import { canFinanceAccountReceivePosting, normalizeFinanceAccountRecord } from '@/lib/finance-foundation';
 import { financeErrorMessage, isMissingFinanceColumn, isMissingFinanceTable, loadLedgerLines } from '@/lib/finance-server';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
@@ -94,11 +95,31 @@ export async function POST(request: NextRequest) {
     let accountsResult = await service
       .schema('icecream_erp')
       .from('accounts')
-      .select('id')
+      .select('id, code, name, type, is_active, allow_posting, normal_balance, balance, parent_id')
       .in('id', accountIds);
+    if (
+      accountsResult.error &&
+      (
+        String(accountsResult.error.message ?? '').includes('allow_posting') ||
+        String(accountsResult.error.message ?? '').includes('normal_balance')
+      )
+    ) {
+      accountsResult = await service
+        .schema('icecream_erp')
+        .from('accounts')
+        .select('id, code, name, type, is_active, balance, parent_id')
+        .in('id', accountIds) as typeof accountsResult;
+    }
     if (accountsResult.error) throw accountsResult.error;
     if ((accountsResult.data ?? []).length !== accountIds.length) {
-      return badRequest('One or more journal line accounts are invalid');
+      return badRequest('One or more journal line accounts are invalid.');
+    }
+
+    for (const accountRow of (accountsResult.data ?? []) as Array<Record<string, unknown>>) {
+      const postingError = canFinanceAccountReceivePosting(normalizeFinanceAccountRecord(accountRow));
+      if (postingError) {
+        return badRequest(postingError);
+      }
     }
 
     // Generate entry number

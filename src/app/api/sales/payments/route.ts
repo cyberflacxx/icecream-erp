@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { badRequest, can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
+import { resolveFinancePostingAccount } from '@/lib/finance-foundation-server';
 import { buildFinanceSourceReference } from '@/lib/finance';
 import { createLinkedFinanceTransaction, financeErrorMessage, isMissingFinanceTable, postFinanceDocument } from '@/lib/finance-server';
 import { canRecordPayment } from '@/lib/sales';
@@ -20,15 +21,41 @@ export async function GET() {
 
   try {
     const service = salesService();
+    let scopedInvoiceIds: string[] | null = null;
+    if (ctx.isBranchScoped && ctx.branchId) {
+      const invoiceResult = await service
+        .from('invoices')
+        .select('id')
+        .eq('organization_id', ctx.organizationId)
+        .eq('branch_id', ctx.branchId);
+      if (invoiceResult.error && !isMissingSalesColumn(invoiceResult.error, 'invoices', 'branch_id')) {
+        throw invoiceResult.error;
+      }
+      scopedInvoiceIds = (invoiceResult.data ?? []).map((row) => String(row.id));
+    }
+
     let paymentsResult: any = await service
       .from('payments')
       .select('id, payment_number, customer_id, invoice_id, payment_date, amount, payment_method, reference_number, status, created_at')
+      .eq('organization_id', ctx.organizationId)
       .order('payment_date', { ascending: false });
+
+    if (scopedInvoiceIds) {
+      paymentsResult = scopedInvoiceIds.length
+        ? await service
+            .from('payments')
+            .select('id, payment_number, customer_id, invoice_id, payment_date, amount, payment_method, reference_number, status, created_at')
+            .eq('organization_id', ctx.organizationId)
+            .in('invoice_id', scopedInvoiceIds)
+            .order('payment_date', { ascending: false })
+        : { data: [], error: null };
+    }
 
     if (paymentsResult.error && isMissingSalesColumn(paymentsResult.error, 'payments', 'created_at')) {
       paymentsResult = await service
         .from('payments')
         .select('id, payment_number, customer_id, invoice_id, payment_date, amount, payment_method, reference_number, status')
+        .eq('organization_id', ctx.organizationId)
         .order('payment_date', { ascending: false });
     }
 
@@ -42,6 +69,7 @@ export async function GET() {
       paymentsResult = await service
         .from('payments')
         .select('id, payment_number, customer_id, invoice_id, payment_date, amount, payment_method')
+        .eq('organization_id', ctx.organizationId)
         .order('payment_date', { ascending: false });
     }
 
@@ -94,7 +122,8 @@ export async function POST(request: NextRequest) {
     const service = salesService();
     let invoiceResult = await service
       .from('invoices')
-      .select('id, total, amount_paid, balance_due, customer_id, invoice_number')
+      .select('id, total, amount_paid, balance_due, customer_id, invoice_number, branch_id, organization_id')
+      .eq('organization_id', ctx.organizationId)
       .eq('id', body.invoiceId)
       .single();
     if (
@@ -103,12 +132,17 @@ export async function POST(request: NextRequest) {
     ) {
       invoiceResult = await service
         .from('invoices')
-        .select('id, total_amount, paid_amount, balance_due, customer_id, invoice_number')
+        .select('id, total_amount, paid_amount, balance_due, customer_id, invoice_number, branch_id, organization_id')
+        .eq('organization_id', ctx.organizationId)
         .eq('id', body.invoiceId)
         .single();
     }
     const { data: invoice, error: invoiceError } = invoiceResult;
     if (invoiceError) throw invoiceError;
+    const invoiceBranchId = String((invoice as Record<string, unknown>).branch_id ?? '');
+    if (ctx.isBranchScoped && ctx.branchId && invoiceBranchId && invoiceBranchId !== ctx.branchId) {
+      return forbidden('This role is limited to its assigned branch.');
+    }
     if (!canRecordPayment(Number(invoice.balance_due ?? 0), body.amount)) {
       return badRequest('Payment amount exceeds invoice balance.');
     }
@@ -117,7 +151,7 @@ export async function POST(request: NextRequest) {
       const transaction = await postSalesPaymentTransaction(
         {
           amount: body.amount,
-          branchId: body.branchId ?? null,
+          branchId: invoiceBranchId || body.branchId || null,
           costCenterCode: body.costCenterCode ?? null,
           currencyCode: body.currencyCode ?? null,
           customerId: body.customerId,
@@ -246,19 +280,27 @@ export async function POST(request: NextRequest) {
     let journal: { entryDate: string; entryNumber: string; id: string; sourceReference: string; totalCredit: number; totalDebit: number } | null = null;
     let linkedTransaction: { id: string; table: string } | null = null;
     try {
+      const tenderAccount =
+        paymentMethod === 'BANK'
+          ? await resolveFinancePostingAccount(ctx.organizationId, 'BANK_ACCOUNT', { fallbackAccountCode: '1120' })
+          : paymentMethod === 'PETTY_CASH'
+            ? await resolveFinancePostingAccount(ctx.organizationId, 'PETTY_CASH_ACCOUNT', { fallbackAccountCode: '1130' })
+            : await resolveFinancePostingAccount(ctx.organizationId, 'CASH_ACCOUNT', { fallbackAccountCode: '1110' });
+      const receivableAccount = await resolveFinancePostingAccount(ctx.organizationId, 'ACCOUNTS_RECEIVABLE', { fallbackAccountCode: '1140' });
+
       journal = await postFinanceDocument({
         createdBy: ctx.userId,
         description: `Customer payment for invoice ${String(invoice.invoice_number ?? body.invoiceId)}`,
         journalDate: paymentDate,
         lines: [
           {
-            accountCode: paymentMethod === 'BANK' ? '1000' : '1010',
+            accountId: tenderAccount.id,
             creditAmount: 0,
             debitAmount: Number(body.amount),
             description: `Customer payment via ${paymentMethod}`,
           },
           {
-            accountCode: '1100',
+            accountId: receivableAccount.id,
             creditAmount: Number(body.amount),
             debitAmount: 0,
             description: `Reduce accounts receivable for invoice ${String(invoice.invoice_number ?? body.invoiceId)}`,

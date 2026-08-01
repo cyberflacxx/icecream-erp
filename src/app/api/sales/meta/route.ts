@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 
 import { can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
 import { calculateAvailableCredit, deriveCustomerCreditAllowed } from '@/lib/sales-customers';
+import { deriveSalesInvoiceStatus } from '@/lib/sales-workflow';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
 type Row = Record<string, unknown>;
@@ -234,7 +235,16 @@ export async function GET() {
           invoiceItems: invoiceItemsByInvoiceId.get(id) ?? [],
           invoiceNumber: String(row.invoice_number ?? row.id ?? ''),
           salesOrderId,
-          status: String(row.status ?? ''),
+          status: deriveSalesInvoiceStatus({
+            amountPaid: row.amount_paid ?? row.paid_amount,
+            approvedAt: row.approved_at,
+            approvedBy: row.approved_by,
+            balanceDue: row.balance_due,
+            postedAt: row.posted_at,
+            postedBy: row.posted_by,
+            status: row.status,
+            total: row.total ?? row.total_amount,
+          }),
           total: toNumber(row.total ?? row.total_amount),
           warehouseId: row.warehouse_id ? String(row.warehouse_id) : salesOrderId ? orderWarehouseById.get(salesOrderId) ?? null : null,
         };

@@ -1,15 +1,21 @@
-﻿'use client';
+'use client';
 
+import Link from 'next/link';
 import {
   AlertCircle,
   BanknoteArrowDown,
   BanknoteArrowUp,
+  BookOpen,
   CircleDollarSign,
+  ClipboardList,
   Coins,
+  FileText,
   Landmark,
   Package,
   PiggyBank,
-  Wallet
+  Scale,
+  TrendingUp,
+  Wallet,
 } from 'lucide-react';
 import {
   Bar,
@@ -20,25 +26,41 @@ import {
   ResponsiveContainer,
   Tooltip,
   XAxis,
-  YAxis
+  YAxis,
 } from 'recharts';
-
-import { ChartCard, DataTable, EmptyState, LoadingState, StatCard } from '@/components/ui-library';
 
 import { PageHeader } from '@/components/dashboard/page-header';
 import { FinanceNav } from '@/components/finance/finance-nav';
+import { ChartCard, DataTable, EmptyState, LoadingState, StatCard } from '@/components/ui-library';
 import { useFinanceDashboard } from '@/hooks/finance/useFinance';
 import { useAppAuth } from '@/hooks/useAppAuth';
+import { usePermission } from '@/hooks/usePermission';
 
 function formatCurrency(value: number) {
   return value.toLocaleString(undefined, {
-    maximumFractionDigits: 2
+    maximumFractionDigits: 2,
   });
 }
 
 export default function FinancePage() {
   const { isLoaded, isSignedIn } = useAppAuth();
   const dashboardQuery = useFinanceDashboard();
+  const canReadFinance = usePermission(['finance.read', 'finance.gl.view']);
+  const canWriteFinance = usePermission(['finance.write', 'finance.gl.create']);
+
+  const shortcuts = [
+    { href: '/finance/chart-of-accounts', icon: BookOpen, label: 'Chart of Accounts', visible: canReadFinance },
+    { href: '/finance/journals', icon: FileText, label: 'New Journal', visible: canWriteFinance },
+    { href: '/finance/opening-balances', icon: ClipboardList, label: 'Opening Balances', visible: canReadFinance || canWriteFinance },
+    { href: '/finance/reports?report=trial-balance', icon: Scale, label: 'Trial Balance', visible: canReadFinance },
+    { href: '/finance/reports?report=profit-and-loss', icon: TrendingUp, label: 'Income Statement', visible: canReadFinance },
+    { href: '/finance/reports?report=balance-sheet', icon: FileText, label: 'Balance Sheet', visible: canReadFinance },
+    { href: '/finance/reports?report=cash-flow', icon: Wallet, label: 'Cash Flow', visible: canReadFinance },
+    { href: '/finance/bank-accounts', icon: Landmark, label: 'Bank Reconciliation', visible: canReadFinance },
+    { href: '/sales/payments', icon: BanknoteArrowUp, label: 'Customer Receipts', visible: canReadFinance },
+    { href: '/procurement/payments', icon: BanknoteArrowDown, label: 'Supplier Payments', visible: canReadFinance },
+    { href: '/finance/budgets', icon: Coins, label: 'Budget versus Actual', visible: canReadFinance },
+  ].filter((shortcut) => shortcut.visible);
 
   if (!isLoaded || (isSignedIn && dashboardQuery.isPending && !dashboardQuery.data)) {
     return <LoadingState />;
@@ -76,6 +98,24 @@ export default function FinancePage() {
       />
       <FinanceNav />
 
+      {shortcuts.length ? (
+        <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          {shortcuts.map((shortcut) => {
+            const Icon = shortcut.icon;
+            return (
+              <Link
+                key={shortcut.href}
+                href={shortcut.href}
+                className="flex items-center gap-3 rounded-xl border border-[color:var(--app-border)] bg-[color:var(--app-surface)] px-4 py-3 text-sm font-medium text-[color:var(--app-text)] transition hover:bg-[color:var(--app-bg-subtle)]"
+              >
+                <Icon className="h-4 w-4 text-[color:var(--app-accent-strong)]" />
+                <span>{shortcut.label}</span>
+              </Link>
+            );
+          })}
+        </section>
+      ) : null}
+
       {warnings.length ? (
         <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
           {warnings[0]}
@@ -83,72 +123,18 @@ export default function FinancePage() {
       ) : null}
 
       <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-4">
-        <StatCard
-          title="Revenue (Period)"
-          value={formatCurrency(stats.revenue)}
-          icon={<CircleDollarSign className="h-5 w-5" />}
-          color="success"
-        />
-        <StatCard
-          title="Payments Count"
-          value={formatCurrency(stats.paymentsCount)}
-          icon={<Wallet className="h-5 w-5" />}
-        />
-        <StatCard
-          title="Outstanding Receivables"
-          value={formatCurrency(stats.outstandingReceivables)}
-          icon={<BanknoteArrowUp className="h-5 w-5" />}
-          color="warning"
-        />
-        <StatCard
-          title="Outstanding Payables"
-          value={formatCurrency(stats.outstandingPayables)}
-          icon={<BanknoteArrowDown className="h-5 w-5" />}
-          color="brown"
-        />
-        <StatCard
-          title="Total Expenses"
-          value={formatCurrency(stats.totalExpenses)}
-          icon={<Coins className="h-5 w-5" />}
-        />
-        <StatCard
-          title="Cash Balance"
-          value={formatCurrency(stats.cashBalance)}
-          icon={<Wallet className="h-5 w-5" />}
-          color="warning"
-        />
-        <StatCard
-          title="Bank Balance"
-          value={formatCurrency(stats.bankBalance)}
-          icon={<Landmark className="h-5 w-5" />}
-        />
-        <StatCard
-          title="Petty Cash"
-          value={formatCurrency(stats.pettyCashBalance)}
-          icon={<PiggyBank className="h-5 w-5" />}
-        />
-        <StatCard
-          title="Stock Valuation"
-          value={formatCurrency(stats.stockValuation)}
-          icon={<Package className="h-5 w-5" />}
-        />
-        <StatCard
-          title="Production Cost"
-          value={formatCurrency(stats.productionCost)}
-          icon={<Package className="h-5 w-5" />}
-          color="brown"
-        />
-        <StatCard
-          title="Branch Profitability"
-          value={formatCurrency(stats.branchProfitability)}
-          icon={<CircleDollarSign className="h-5 w-5" />}
-          color="success"
-        />
-        <StatCard
-          title="Pending Approvals"
-          value={formatCurrency(stats.pendingApprovals)}
-          icon={<BanknoteArrowUp className="h-5 w-5" />}
-        />
+        <StatCard title="Revenue (Period)" value={formatCurrency(stats.revenue)} icon={<CircleDollarSign className="h-5 w-5" />} color="success" />
+        <StatCard title="Payments Count" value={formatCurrency(stats.paymentsCount)} icon={<Wallet className="h-5 w-5" />} />
+        <StatCard title="Outstanding Receivables" value={formatCurrency(stats.outstandingReceivables)} icon={<BanknoteArrowUp className="h-5 w-5" />} color="warning" />
+        <StatCard title="Outstanding Payables" value={formatCurrency(stats.outstandingPayables)} icon={<BanknoteArrowDown className="h-5 w-5" />} color="brown" />
+        <StatCard title="Total Expenses" value={formatCurrency(stats.totalExpenses)} icon={<Coins className="h-5 w-5" />} />
+        <StatCard title="Cash Balance" value={formatCurrency(stats.cashBalance)} icon={<Wallet className="h-5 w-5" />} color="warning" />
+        <StatCard title="Bank Balance" value={formatCurrency(stats.bankBalance)} icon={<Landmark className="h-5 w-5" />} />
+        <StatCard title="Petty Cash" value={formatCurrency(stats.pettyCashBalance)} icon={<PiggyBank className="h-5 w-5" />} />
+        <StatCard title="Stock Valuation" value={formatCurrency(stats.stockValuation)} icon={<Package className="h-5 w-5" />} />
+        <StatCard title="Production Cost" value={formatCurrency(stats.productionCost)} icon={<Package className="h-5 w-5" />} color="brown" />
+        <StatCard title="Branch Profitability" value={formatCurrency(stats.branchProfitability)} icon={<CircleDollarSign className="h-5 w-5" />} color="success" />
+        <StatCard title="Pending Approvals" value={formatCurrency(stats.pendingApprovals)} icon={<BanknoteArrowUp className="h-5 w-5" />} />
       </div>
 
       <div className="grid gap-6 xl:grid-cols-2">
@@ -189,7 +175,7 @@ export default function FinancePage() {
             { key: 'customer', header: 'Customer' },
             { key: 'dueDate', header: 'Due Date' },
             { key: 'balance', header: 'Balance' },
-            { key: 'status', header: 'Status' }
+            { key: 'status', header: 'Status' },
           ]}
           data={overdueInvoices}
           emptyState={
@@ -207,7 +193,7 @@ export default function FinancePage() {
             { key: 'entryDate', header: 'Entry Date' },
             { key: 'description', header: 'Description' },
             { key: 'debit', header: 'Debit' },
-            { key: 'credit', header: 'Credit' }
+            { key: 'credit', header: 'Credit' },
           ]}
           data={recentEntries}
           emptyState={
@@ -222,4 +208,3 @@ export default function FinancePage() {
     </div>
   );
 }
-

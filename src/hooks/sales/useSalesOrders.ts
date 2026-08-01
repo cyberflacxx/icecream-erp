@@ -17,6 +17,7 @@ interface UseSalesOrdersParams {
 }
 
 export interface SalesOrderListItem {
+  branchId?: string | null;
   customer: { id: string; name: string } | null;
   id: string;
   itemsCount: number;
@@ -25,6 +26,7 @@ export interface SalesOrderListItem {
   requiredDate: string | null;
   status: string;
   total: number;
+  warehouseId?: string | null;
 }
 
 interface PaginatedResponse<T> {

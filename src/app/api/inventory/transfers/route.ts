@@ -8,13 +8,8 @@ import {
   serverError,
   unauthorized,
 } from '@/lib/api-auth';
-import {
-  applyInventoryDelta,
-  getBalance,
-  recordStockMovement,
-  requireItem,
-  requireWarehouseAccess,
-} from '@/lib/inventory-server';
+import { requireItem, requireWarehouseAccess } from '@/lib/inventory-server';
+import { loadInventoryReversalSnapshots } from '@/lib/inventory-reversal-server';
 import { normalizeTransferStatus, resolveTransferWriteStatus } from '@/lib/inventory';
 import { recordAuditLog } from '@/lib/security-server';
 import { createServiceRoleClient } from '@/lib/supabase/server';
@@ -98,16 +93,87 @@ export async function GET(request: NextRequest) {
     itemsCount.set(key, (itemsCount.get(key) ?? 0) + 1);
   }
 
+  const reversalMap = await loadInventoryReversalSnapshots(service, 'stock_transfer', transferIds);
   const mapped = (data ?? []).map((row: Record<string, unknown>) => {
     const fromWarehouse = warehouses.get(String(row.from_warehouse_id ?? ''));
     const toWarehouse = warehouses.get(String(row.to_warehouse_id ?? ''));
+    const reversals = reversalMap.get(String(row.id)) ?? [];
+    const dispatchReversal = reversals.find((entry) => entry.operationType === 'stock_transfer_dispatch_reverse') ?? null;
+    const receiptReversal = reversals.find((entry) => entry.operationType === 'stock_transfer_receipt_reverse') ?? null;
+    const reversal = dispatchReversal ?? receiptReversal ?? reversals[0] ?? null;
 
     return {
       id: row.id,
       transferNumber: row.transfer_number,
       transferDate: row.transfer_date,
-      status: normalizeTransferStatus(String(row.status ?? '')),
+      status: dispatchReversal ? 'REVERSED' : normalizeTransferStatus(String(row.status ?? '')),
       notes: row.notes ?? null,
+      reversal: reversal
+        ? {
+            approvedBy: reversal.approvedBy,
+            approvedByName: reversal.approvedByName,
+            id: reversal.id,
+            operationType: reversal.operationType,
+            originalJournalId: reversal.originalJournalId,
+            originalMovementIds: reversal.originalMovementIds,
+            postedAt: reversal.postedAt,
+            postedBy: reversal.postedBy,
+            postedByName: reversal.postedByName,
+            reason: reversal.reason,
+            reversalJournalId: reversal.reversalJournalId,
+            reversalJournalNumber: reversal.reversalJournalNumber,
+            reversalMovementIds: reversal.movementIds,
+            reversalNumber: reversal.reversalNumber,
+            reversalReference: reversal.reversalReference,
+            requestedBy: reversal.requestedBy,
+            requestedByName: reversal.requestedByName,
+            status: reversal.status,
+          }
+        : null,
+      dispatchReversal: dispatchReversal
+        ? {
+            approvedBy: dispatchReversal.approvedBy,
+            approvedByName: dispatchReversal.approvedByName,
+            id: dispatchReversal.id,
+            operationType: dispatchReversal.operationType,
+            originalJournalId: dispatchReversal.originalJournalId,
+            originalMovementIds: dispatchReversal.originalMovementIds,
+            postedAt: dispatchReversal.postedAt,
+            postedBy: dispatchReversal.postedBy,
+            postedByName: dispatchReversal.postedByName,
+            reason: dispatchReversal.reason,
+            reversalJournalId: dispatchReversal.reversalJournalId,
+            reversalJournalNumber: dispatchReversal.reversalJournalNumber,
+            reversalMovementIds: dispatchReversal.movementIds,
+            reversalNumber: dispatchReversal.reversalNumber,
+            reversalReference: dispatchReversal.reversalReference,
+            requestedBy: dispatchReversal.requestedBy,
+            requestedByName: dispatchReversal.requestedByName,
+            status: dispatchReversal.status,
+          }
+        : null,
+      receiptReversal: receiptReversal
+        ? {
+            approvedBy: receiptReversal.approvedBy,
+            approvedByName: receiptReversal.approvedByName,
+            id: receiptReversal.id,
+            operationType: receiptReversal.operationType,
+            originalJournalId: receiptReversal.originalJournalId,
+            originalMovementIds: receiptReversal.originalMovementIds,
+            postedAt: receiptReversal.postedAt,
+            postedBy: receiptReversal.postedBy,
+            postedByName: receiptReversal.postedByName,
+            reason: receiptReversal.reason,
+            reversalJournalId: receiptReversal.reversalJournalId,
+            reversalJournalNumber: receiptReversal.reversalJournalNumber,
+            reversalMovementIds: receiptReversal.movementIds,
+            reversalNumber: receiptReversal.reversalNumber,
+            reversalReference: receiptReversal.reversalReference,
+            requestedBy: receiptReversal.requestedBy,
+            requestedByName: receiptReversal.requestedByName,
+            status: receiptReversal.status,
+          }
+        : null,
       fromWarehouse: fromWarehouse ? { id: fromWarehouse.id, name: fromWarehouse.name } : null,
       toWarehouse: toWarehouse ? { id: toWarehouse.id, name: toWarehouse.name } : null,
       itemsCount: itemsCount.get(String(row.id)) ?? 0,
@@ -152,8 +218,8 @@ export async function POST(request: NextRequest) {
     const toWarehouseId = body.destinationWarehouseId ?? body.toWarehouseId;
     const items = body.items;
     const notes = body.remarks ?? body.notes ?? null;
-    const normalizedStatus = normalizeTransferStatus(body.status ?? 'COMPLETED') || 'COMPLETED';
-    const persistedStatus = resolveTransferWriteStatus(normalizedStatus) || 'COMPLETED';
+    const normalizedStatus = normalizeTransferStatus(body.status ?? 'DRAFT') || 'DRAFT';
+    const persistedStatus = resolveTransferWriteStatus(normalizedStatus) || 'DRAFT';
 
     if (!fromWarehouseId || !toWarehouseId) {
       return badRequest('fromWarehouseId and toWarehouseId are required.');
@@ -167,7 +233,7 @@ export async function POST(request: NextRequest) {
       return badRequest('Source and destination warehouses must be different.');
     }
 
-    if (!['DRAFT', 'PENDING_APPROVAL', 'APPROVED', 'COMPLETED', 'CANCELLED'].includes(normalizedStatus)) {
+    if (!['DRAFT', 'PENDING_APPROVAL', 'APPROVED'].includes(normalizedStatus)) {
       return badRequest('Unsupported transfer status.');
     }
 
@@ -225,7 +291,6 @@ export async function POST(request: NextRequest) {
       ),
     ]);
 
-    const requiresAvailableStock = normalizedStatus === 'COMPLETED';
     const validatedItems = [];
 
     for (const itemRow of items) {
@@ -236,17 +301,6 @@ export async function POST(request: NextRequest) {
       }
 
       const item = await requireItem(service, itemRow.itemId);
-
-      if (requiresAvailableStock) {
-        const sourceBalance = await getBalance(service, itemRow.itemId, fromWarehouseId);
-        const sourceAvailable = Number(sourceBalance?.quantity_available ?? 0);
-
-        if (sourceAvailable < qty) {
-          return badRequest(
-            `Insufficient stock for ${item.name}. Available: ${sourceAvailable.toFixed(3)}, Required: ${qty.toFixed(3)}`,
-          );
-        }
-      }
 
       validatedItems.push({
         batchNumber: itemRow.batchNumber ?? null,
@@ -294,10 +348,7 @@ export async function POST(request: NextRequest) {
         status: persistedStatus,
         transfer_date: body.transferDate ? new Date(body.transferDate).toISOString() : new Date().toISOString(),
         requested_by: transferUserAccountId,
-        approved_by:
-          normalizedStatus === 'APPROVED' || normalizedStatus === 'COMPLETED'
-            ? transferUserAccountId
-            : null,
+        approved_by: normalizedStatus === 'APPROVED' ? transferUserAccountId : null,
       })
       .select('id, transfer_number, status, transfer_date, notes')
       .single();
@@ -310,64 +361,16 @@ export async function POST(request: NextRequest) {
         item_id: validatedItem.item.id,
         notes,
         quantity_requested: validatedItem.quantity,
-        quantity_received: normalizedStatus === 'COMPLETED' ? validatedItem.quantity : 0,
-        quantity_sent: normalizedStatus === 'COMPLETED' ? validatedItem.quantity : 0,
+        quantity_received: 0,
+        quantity_sent: 0,
         unit_cost: validatedItem.unitCost,
       });
 
       if (transferItemError) return serverError(transferItemError.message);
-
-      if (normalizedStatus !== 'COMPLETED') {
-        continue;
-      }
-
-      await applyInventoryDelta(service, {
-        itemId: validatedItem.item.id,
-        organizationId: ctx.organizationId,
-        quantityDelta: -validatedItem.quantity,
-        warehouseId: fromWarehouseId,
-      });
-
-      await applyInventoryDelta(service, {
-        itemId: validatedItem.item.id,
-        organizationId: ctx.organizationId,
-        quantityDelta: validatedItem.quantity,
-        warehouseId: toWarehouseId,
-      });
-
-      await recordStockMovement(service, {
-        batchNumber: validatedItem.batchNumber,
-        createdBy: ctx.userId,
-        destinationWarehouseId: toWarehouseId,
-        itemId: validatedItem.item.id,
-        movementType: 'TRANSFER_OUT',
-        notes,
-        organizationId: ctx.organizationId,
-        quantity: validatedItem.quantity,
-        referenceId: String(transfer.id),
-        referenceType: 'stock_transfer',
-        sourceWarehouseId: fromWarehouseId,
-        warehouseId: fromWarehouseId,
-      });
-
-      await recordStockMovement(service, {
-        batchNumber: validatedItem.batchNumber,
-        createdBy: ctx.userId,
-        destinationWarehouseId: toWarehouseId,
-        itemId: validatedItem.item.id,
-        movementType: 'TRANSFER_IN',
-        notes,
-        organizationId: ctx.organizationId,
-        quantity: validatedItem.quantity,
-        referenceId: String(transfer.id),
-        referenceType: 'stock_transfer',
-        sourceWarehouseId: fromWarehouseId,
-        warehouseId: toWarehouseId,
-      });
     }
 
     await recordAuditLog({
-      action: normalizedStatus === 'COMPLETED' ? 'INVENTORY_TRANSFER_COMPLETED' : 'INVENTORY_TRANSFER_CREATED',
+      action: 'INVENTORY_TRANSFER_CREATED',
       entityId: String(transfer.id),
       entityType: 'stock_transfer',
       newValues: {
@@ -395,9 +398,9 @@ export async function POST(request: NextRequest) {
         items: validatedItems.map((validatedItem) => ({
           itemId: validatedItem.item.id,
           itemName: validatedItem.item.name,
-          quantityReceived: normalizedStatus === 'COMPLETED' ? validatedItem.quantity : 0,
+          quantityReceived: 0,
           quantityRequested: validatedItem.quantity,
-          quantitySent: normalizedStatus === 'COMPLETED' ? validatedItem.quantity : 0,
+          quantitySent: 0,
           unitCost: validatedItem.unitCost,
         })),
       },

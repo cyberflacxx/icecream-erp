@@ -30,6 +30,7 @@ const REPORT_ENDPOINTS: Record<string, string> = {
   'cost-of-goods-sold': '/api/finance/reports/cost-of-goods-sold',
   'general-ledger': '/api/finance/reports/general-ledger',
   'inventory-valuation': '/api/finance/reports/inventory-valuation',
+  'inventory-reconciliation': '/api/finance/reports/inventory-reconciliation',
   payables: '/api/finance/reports/payables',
   'payables-ageing': '/api/finance/reports/payables-ageing',
   'profit-and-loss': '/api/finance/reports/profit-and-loss',

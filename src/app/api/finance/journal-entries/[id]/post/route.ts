@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { badRequest, can, forbidden, getAuthContext, notFound, serverError, unauthorized } from '@/lib/api-auth';
+import { canFinanceAccountReceivePosting, normalizeFinanceAccountRecord } from '@/lib/finance-foundation';
 import { emitOperationalNotifications } from '@/lib/notifications-server';
 import { financeService, isMissingFinanceColumn } from '@/lib/finance-server';
 import { createServiceRoleClient } from '@/lib/supabase/server';
@@ -19,13 +20,13 @@ export async function POST(
   try {
     let entryResult = await service
       .from('journal_entries')
-      .select('id, entry_number, is_posted, journal_entry_lines(debit_amount, credit_amount)')
+      .select('id, entry_number, is_posted, journal_entry_lines(account_id, debit_amount, credit_amount)')
       .eq('id', id)
       .single();
 
     let entry = entryResult.data as Record<string, unknown> | null;
     let fetchErr = entryResult.error;
-    let lines = (entry?.journal_entry_lines as Array<{ debit_amount: number; credit_amount: number }>) ?? [];
+    let lines = (entry?.journal_entry_lines as Array<{ account_id?: string; debit_amount: number; credit_amount: number }>) ?? [];
 
     if (
       fetchErr &&
@@ -43,13 +44,14 @@ export async function POST(
 
       const legacyLines = await service
         .from('journal_lines')
-        .select('debit, credit')
+        .select('account_id, debit, credit')
         .eq('entry_id', id);
       if (legacyLines.error) return serverError(legacyLines.error.message);
 
       entry = legacyEntry.data as Record<string, unknown>;
       fetchErr = null;
       lines = (legacyLines.data ?? []).map((line) => ({
+        account_id: line.account_id ? String(line.account_id) : undefined,
         credit_amount: Number(line.credit ?? 0),
         debit_amount: Number(line.debit ?? 0),
       }));
@@ -66,6 +68,31 @@ export async function POST(
     const totalCredit = lines.reduce((s, l) => s + Number(l.credit_amount ?? 0), 0);
     if (Math.abs(totalDebit - totalCredit) > 0.01) {
       return badRequest(`Journal entry is not balanced. Debit: ${totalDebit.toFixed(2)}, Credit: ${totalCredit.toFixed(2)}`);
+    }
+
+    const accountIds = [...new Set(lines.map((line) => String(line.account_id ?? '')).filter(Boolean))];
+    if (accountIds.length > 0) {
+      let accountResult = await service
+        .from('accounts')
+        .select('id, code, name, type, is_active, allow_posting, normal_balance, balance, parent_id')
+        .in('id', accountIds);
+      if (
+        accountResult.error &&
+        (
+          String(accountResult.error.message ?? '').includes('allow_posting') ||
+          String(accountResult.error.message ?? '').includes('normal_balance')
+        )
+      ) {
+        accountResult = await service
+          .from('accounts')
+          .select('id, code, name, type, is_active, balance, parent_id')
+          .in('id', accountIds) as typeof accountResult;
+      }
+      if (accountResult.error) return serverError(accountResult.error.message);
+      for (const accountRow of (accountResult.data ?? []) as Array<Record<string, unknown>>) {
+        const postingError = canFinanceAccountReceivePosting(normalizeFinanceAccountRecord(accountRow));
+        if (postingError) return badRequest(postingError);
+      }
     }
 
     const updateResult = await service

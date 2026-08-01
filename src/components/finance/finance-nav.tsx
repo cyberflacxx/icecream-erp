@@ -7,6 +7,7 @@ import {
   Building2,
   CalendarRange,
   ChartColumnIncreasing,
+  ClipboardList,
   ArrowLeftRight,
   FileBarChart2,
   Landmark,
@@ -22,6 +23,7 @@ import { cn } from '@/lib/utils';
 const links = [
   { href: '/finance', icon: ChartColumnIncreasing, label: 'Dashboard' },
   { href: '/finance/chart-of-accounts', icon: ScrollText, label: 'Accounts' },
+  { href: '/finance/opening-balances', icon: ClipboardList, label: 'Opening Balances' },
   { href: '/finance/fiscal-periods', icon: CalendarRange, label: 'Periods' },
   { href: '/finance/journals', icon: BookOpenText, label: 'Journals' },
   { href: '/finance/transactions', icon: ArrowLeftRight, label: 'Transactions' },
