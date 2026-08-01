@@ -101,6 +101,20 @@ alter table if exists icecream_erp.stock_movements
   add column if not exists reversal_of_movement_id uuid null references icecream_erp.stock_movements(id),
   add column if not exists reversal_reference text null;
 
+with stock_movement_context as (
+  select
+    movement.id,
+    wh.branch_id as warehouse_branch_id,
+    src.branch_id as source_branch_id,
+    dst.branch_id as destination_branch_id
+  from icecream_erp.stock_movements movement
+  join icecream_erp.warehouses wh
+    on wh.id = movement.warehouse_id
+  left join icecream_erp.warehouses src
+    on src.id = movement.source_warehouse_id
+  left join icecream_erp.warehouses dst
+    on dst.id = movement.destination_warehouse_id
+)
 update icecream_erp.stock_movements sm
 set total_value = coalesce(sm.total_value, sm.total_cost, sm.quantity * sm.unit_cost, 0),
     posting_date = coalesce(sm.posting_date, sm.created_at::date),
@@ -110,15 +124,13 @@ set total_value = coalesce(sm.total_value, sm.total_cost, sm.quantity * sm.unit_
       nullif(sm.reference_number, ''),
       'SM-' || replace(left(sm.created_at::text, 19), ':', '') || '-' || left(sm.id::text, 8)
     ),
-    branch_id = coalesce(sm.branch_id, wh.branch_id),
-    source_branch_id = coalesce(sm.source_branch_id, src.branch_id, wh.branch_id),
-    destination_branch_id = coalesce(sm.destination_branch_id, dst.branch_id),
+    branch_id = coalesce(sm.branch_id, context.warehouse_branch_id),
+    source_branch_id = coalesce(sm.source_branch_id, context.source_branch_id, context.warehouse_branch_id),
+    destination_branch_id = coalesce(sm.destination_branch_id, context.destination_branch_id),
     running_value = coalesce(sm.running_value, sm.total_value),
     updated_at = now()
-from icecream_erp.warehouses wh
-left join icecream_erp.warehouses src on src.id = sm.source_warehouse_id
-left join icecream_erp.warehouses dst on dst.id = sm.destination_warehouse_id
-where wh.id = sm.warehouse_id
+from stock_movement_context context
+where context.id = sm.id
   and (
     sm.total_value is null
     or sm.posting_date is null
@@ -437,12 +449,12 @@ security definer
 set search_path = icecream_erp, pg_temp
 as $$
 declare
-  v_grn goods_received_notes%rowtype;
+  v_grn icecream_erp.goods_received_notes%rowtype;
   v_line record;
   v_po_line record;
-  v_balance stock_balances%rowtype;
+  v_balance icecream_erp.stock_balances%rowtype;
   v_journal record;
-  v_existing_run inventory_posting_runs%rowtype;
+  v_existing_run icecream_erp.inventory_posting_runs%rowtype;
   v_movement_id uuid;
   v_movement_ids uuid[] := '{}';
   v_inventory_value numeric := 0;
@@ -870,7 +882,7 @@ as $$
 declare
   v_adjustment_id uuid;
   v_adjustment_number text;
-  v_balance stock_balances%rowtype;
+  v_balance icecream_erp.stock_balances%rowtype;
   v_journal record;
   v_movement_id uuid;
   v_new_qty numeric;
@@ -879,7 +891,7 @@ declare
   v_quantity_delta numeric;
   v_total_value numeric;
   v_result jsonb;
-  v_existing_run inventory_posting_runs%rowtype;
+  v_existing_run icecream_erp.inventory_posting_runs%rowtype;
 begin
   if p_organization_id is null or p_warehouse_id is null or p_item_id is null or p_actor_user_id is null then
     raise exception 'Stock adjustment posting requires organization, warehouse, item, and actor.' using errcode = '23514';
@@ -1217,9 +1229,9 @@ security definer
 set search_path = icecream_erp, pg_temp
 as $$
 declare
-  v_take inventory_stock_takes%rowtype;
+  v_take icecream_erp.inventory_stock_takes%rowtype;
   v_line record;
-  v_balance stock_balances%rowtype;
+  v_balance icecream_erp.stock_balances%rowtype;
   v_journal record;
   v_movement_id uuid;
   v_movement_ids uuid[] := '{}';
@@ -1228,7 +1240,7 @@ declare
   v_new_average_cost numeric;
   v_movement_type icecream_erp.stock_movement_type;
   v_result jsonb;
-  v_existing_run inventory_posting_runs%rowtype;
+  v_existing_run icecream_erp.inventory_posting_runs%rowtype;
 begin
   select *
   into v_existing_run
@@ -1519,8 +1531,8 @@ security definer
 set search_path = icecream_erp, pg_temp
 as $$
 declare
-  v_batch inventory_batches%rowtype;
-  v_balance stock_balances%rowtype;
+  v_batch icecream_erp.inventory_batches%rowtype;
+  v_balance icecream_erp.stock_balances%rowtype;
   v_journal record;
   v_movement_id uuid;
   v_new_qty numeric;
@@ -1528,7 +1540,7 @@ declare
   v_new_average_cost numeric;
   v_write_off_value numeric;
   v_result jsonb;
-  v_existing_run inventory_posting_runs%rowtype;
+  v_existing_run icecream_erp.inventory_posting_runs%rowtype;
 begin
   select *
   into v_existing_run
@@ -1749,9 +1761,9 @@ security definer
 set search_path = icecream_erp, pg_temp
 as $$
 declare
-  v_transfer stock_transfers%rowtype;
+  v_transfer icecream_erp.stock_transfers%rowtype;
   v_item record;
-  v_balance stock_balances%rowtype;
+  v_balance icecream_erp.stock_balances%rowtype;
   v_journal record;
   v_movement_id uuid;
   v_movement_ids uuid[] := '{}';
@@ -1759,7 +1771,7 @@ declare
   v_new_total_value numeric;
   v_new_average_cost numeric;
   v_result jsonb;
-  v_existing_run inventory_posting_runs%rowtype;
+  v_existing_run icecream_erp.inventory_posting_runs%rowtype;
   v_source_branch_id uuid;
   v_destination_branch_id uuid;
 begin
@@ -1998,10 +2010,10 @@ security definer
 set search_path = icecream_erp, pg_temp
 as $$
 declare
-  v_transfer stock_transfers%rowtype;
+  v_transfer icecream_erp.stock_transfers%rowtype;
   v_receipt jsonb;
-  v_transfer_item stock_transfer_items%rowtype;
-  v_balance stock_balances%rowtype;
+  v_transfer_item icecream_erp.stock_transfer_items%rowtype;
+  v_balance icecream_erp.stock_balances%rowtype;
   v_journal record;
   v_movement_id uuid;
   v_movement_ids uuid[] := '{}';
@@ -2012,7 +2024,7 @@ declare
   v_total_sent numeric;
   v_total_received numeric;
   v_result jsonb;
-  v_existing_run inventory_posting_runs%rowtype;
+  v_existing_run icecream_erp.inventory_posting_runs%rowtype;
   v_source_branch_id uuid;
   v_destination_branch_id uuid;
 begin
@@ -2279,6 +2291,24 @@ revoke all on function icecream_erp.post_inventory_stock_take_atomic(uuid, uuid,
 revoke all on function icecream_erp.post_inventory_write_off_atomic(uuid, uuid, uuid, uuid, text, date, text, jsonb, text) from public;
 revoke all on function icecream_erp.dispatch_stock_transfer_atomic(uuid, uuid, uuid, uuid, text, date, jsonb, text) from public;
 revoke all on function icecream_erp.receive_stock_transfer_atomic(uuid, uuid, uuid, uuid, text, date, jsonb, jsonb, text) from public;
+revoke all on function icecream_erp.inventory_next_document_number(text) from anon;
+revoke all on function icecream_erp.inventory_advisory_lock(text) from anon;
+revoke all on function icecream_erp.inventory_create_posted_journal(uuid, uuid, uuid, text, date, text, text, uuid, text, jsonb) from anon;
+revoke all on function icecream_erp.post_goods_received_note_atomic(uuid, uuid, uuid, uuid, text, date, text, jsonb, text) from anon;
+revoke all on function icecream_erp.post_inventory_adjustment_atomic(uuid, uuid, uuid, uuid, text, numeric, numeric, text, uuid, text, date, jsonb, text) from anon;
+revoke all on function icecream_erp.post_inventory_stock_take_atomic(uuid, uuid, uuid, uuid, text, date, jsonb, text) from anon;
+revoke all on function icecream_erp.post_inventory_write_off_atomic(uuid, uuid, uuid, uuid, text, date, text, jsonb, text) from anon;
+revoke all on function icecream_erp.dispatch_stock_transfer_atomic(uuid, uuid, uuid, uuid, text, date, jsonb, text) from anon;
+revoke all on function icecream_erp.receive_stock_transfer_atomic(uuid, uuid, uuid, uuid, text, date, jsonb, jsonb, text) from anon;
+revoke all on function icecream_erp.inventory_next_document_number(text) from authenticated;
+revoke all on function icecream_erp.inventory_advisory_lock(text) from authenticated;
+revoke all on function icecream_erp.inventory_create_posted_journal(uuid, uuid, uuid, text, date, text, text, uuid, text, jsonb) from authenticated;
+revoke all on function icecream_erp.post_goods_received_note_atomic(uuid, uuid, uuid, uuid, text, date, text, jsonb, text) from authenticated;
+revoke all on function icecream_erp.post_inventory_adjustment_atomic(uuid, uuid, uuid, uuid, text, numeric, numeric, text, uuid, text, date, jsonb, text) from authenticated;
+revoke all on function icecream_erp.post_inventory_stock_take_atomic(uuid, uuid, uuid, uuid, text, date, jsonb, text) from authenticated;
+revoke all on function icecream_erp.post_inventory_write_off_atomic(uuid, uuid, uuid, uuid, text, date, text, jsonb, text) from authenticated;
+revoke all on function icecream_erp.dispatch_stock_transfer_atomic(uuid, uuid, uuid, uuid, text, date, jsonb, text) from authenticated;
+revoke all on function icecream_erp.receive_stock_transfer_atomic(uuid, uuid, uuid, uuid, text, date, jsonb, jsonb, text) from authenticated;
 
 grant execute on function icecream_erp.inventory_next_document_number(text) to service_role;
 grant execute on function icecream_erp.inventory_advisory_lock(text) to service_role;

@@ -76,6 +76,25 @@ create unique index if not exists idx_inventory_reversal_runs_idempotency
 create index if not exists idx_inventory_reversal_runs_document_lookup
   on icecream_erp.inventory_reversal_runs (organization_id, original_document_type, original_document_id, created_at desc);
 
+do $$
+begin
+  if to_regclass('icecream_erp.inventory_posting_runs') is null then
+    raise exception 'Phase 1G requires 044_atomic_inventory_posting_and_stock_ledger.sql to create icecream_erp.inventory_posting_runs before 045 is applied.';
+  end if;
+
+  if to_regclass('icecream_erp.inventory_document_relationships') is null then
+    raise exception 'Phase 1G requires 044_atomic_inventory_posting_and_stock_ledger.sql to create icecream_erp.inventory_document_relationships before 045 is applied.';
+  end if;
+
+  if to_regprocedure('icecream_erp.inventory_next_document_number(text)') is null then
+    raise exception 'Phase 1G requires icecream_erp.inventory_next_document_number(text) from 044_atomic_inventory_posting_and_stock_ledger.sql before 045 is applied.';
+  end if;
+
+  if to_regprocedure('icecream_erp.inventory_create_posted_journal(uuid, uuid, uuid, text, date, text, text, uuid, text, jsonb)') is null then
+    raise exception 'Phase 1G requires icecream_erp.inventory_create_posted_journal(...) from 044_atomic_inventory_posting_and_stock_ledger.sql before 045 is applied.';
+  end if;
+end $$;
+
 create or replace function icecream_erp.inventory_assert_open_fiscal_period(
   p_organization_id uuid,
   p_effective_date date
@@ -2037,6 +2056,20 @@ revoke all on function icecream_erp.reverse_inventory_adjustment_atomic(uuid, uu
 revoke all on function icecream_erp.reverse_inventory_write_off_atomic(uuid, uuid, uuid, uuid, text, date, text, text) from public;
 revoke all on function icecream_erp.reverse_stock_transfer_dispatch_atomic(uuid, uuid, uuid, uuid, text, date, text, text) from public;
 revoke all on function icecream_erp.reverse_stock_transfer_receipt_atomic(uuid, uuid, uuid, uuid, text, date, text, text) from public;
+revoke all on function icecream_erp.inventory_assert_open_fiscal_period(uuid, date) from anon;
+revoke all on function icecream_erp.inventory_reverse_posted_journal(uuid, uuid, text, uuid, uuid, uuid, text, date, text) from anon;
+revoke all on function icecream_erp.reverse_goods_received_note_atomic(uuid, uuid, uuid, uuid, text, date, text, text) from anon;
+revoke all on function icecream_erp.reverse_inventory_adjustment_atomic(uuid, uuid, uuid, uuid, text, date, text, text) from anon;
+revoke all on function icecream_erp.reverse_inventory_write_off_atomic(uuid, uuid, uuid, uuid, text, date, text, text) from anon;
+revoke all on function icecream_erp.reverse_stock_transfer_dispatch_atomic(uuid, uuid, uuid, uuid, text, date, text, text) from anon;
+revoke all on function icecream_erp.reverse_stock_transfer_receipt_atomic(uuid, uuid, uuid, uuid, text, date, text, text) from anon;
+revoke all on function icecream_erp.inventory_assert_open_fiscal_period(uuid, date) from authenticated;
+revoke all on function icecream_erp.inventory_reverse_posted_journal(uuid, uuid, text, uuid, uuid, uuid, text, date, text) from authenticated;
+revoke all on function icecream_erp.reverse_goods_received_note_atomic(uuid, uuid, uuid, uuid, text, date, text, text) from authenticated;
+revoke all on function icecream_erp.reverse_inventory_adjustment_atomic(uuid, uuid, uuid, uuid, text, date, text, text) from authenticated;
+revoke all on function icecream_erp.reverse_inventory_write_off_atomic(uuid, uuid, uuid, uuid, text, date, text, text) from authenticated;
+revoke all on function icecream_erp.reverse_stock_transfer_dispatch_atomic(uuid, uuid, uuid, uuid, text, date, text, text) from authenticated;
+revoke all on function icecream_erp.reverse_stock_transfer_receipt_atomic(uuid, uuid, uuid, uuid, text, date, text, text) from authenticated;
 
 grant execute on function icecream_erp.inventory_assert_open_fiscal_period(uuid, date) to service_role;
 grant execute on function icecream_erp.inventory_reverse_posted_journal(uuid, uuid, text, uuid, uuid, uuid, text, date, text) to service_role;

@@ -545,10 +545,14 @@ test('phase 1d migration and finance routes stay schema-local and enforce postin
   assert.match(migration, /create table if not exists icecream_erp\.erp_account_mappings/);
   assert.match(migration, /idx_accounts_org_code_unique/);
   assert.match(migration, /on conflict \(organization_id, code\) do update/);
+  assert.doesNotMatch(migration, /on parent\.organization_id = child\.organization_id/);
   assert.doesNotMatch(migration, /alter\s+role|authenticator|pgrst\.db_schemas|search_path\s+to/i);
   assert.doesNotMatch(migration.replace(/public\.digest/g, ''), /public\./);
   assert.match(rollback, /drop table if exists icecream_erp\.erp_account_mappings/);
-  assert.match(verify, /total_accounts/);
+  assert.match(verify, /VERIFY 043/);
+  assert.match(verify, /do \$\$/i);
+  assert.match(verify, /raise exception/i);
+  assert.match(verify, /default ERP account mappings/i);
   assert.match(chartRoute, /view === 'tree'/);
   assert.match(chartRoute, /accountType/);
   assert.match(chartDetailRoute, /ACCOUNT_DELETED/);

@@ -757,6 +757,7 @@ test('phase 1g reversal migration keeps RPCs schema-local and enforces transfer 
   const migration = fs.readFileSync('migrations/045_inventory_operational_reversals.sql', 'utf8');
 
   assert.match(migration, /create table if not exists icecream_erp\.inventory_reversal_runs/i);
+  assert.match(migration, /Phase 1G requires 044_atomic_inventory_posting_and_stock_ledger\.sql/i);
   assert.match(migration, /create or replace function icecream_erp\.reverse_goods_received_note_atomic/i);
   assert.match(migration, /create or replace function icecream_erp\.reverse_inventory_adjustment_atomic/i);
   assert.match(migration, /create or replace function icecream_erp\.reverse_inventory_write_off_atomic/i);
@@ -767,6 +768,22 @@ test('phase 1g reversal migration keeps RPCs schema-local and enforces transfer 
   assert.match(migration, /notify pgrst, 'reload schema'/i);
   assert.doesNotMatch(migration, /alter\s+role\s+authenticator/i);
   assert.doesNotMatch(migration, /pgrst\.db_schemas/i);
+});
+
+test('phase 1f posting migration fixes PG15 alias usage and hardens function exposure', () => {
+  const migration = fs.readFileSync('migrations/044_atomic_inventory_posting_and_stock_ledger.sql', 'utf8');
+  const verifySql = fs.readFileSync('migrations/manual/044_atomic_inventory_posting_and_stock_ledger.verify.sql', 'utf8');
+
+  assert.match(migration, /with stock_movement_context as \(/i);
+  assert.doesNotMatch(migration, /src\.id = sm\.source_warehouse_id/i);
+  assert.match(migration, /icecream_erp\.goods_received_notes%rowtype/i);
+  assert.match(migration, /icecream_erp\.inventory_posting_runs%rowtype/i);
+  assert.match(migration, /revoke all on function icecream_erp\.post_goods_received_note_atomic.* from anon;/i);
+  assert.match(migration, /revoke all on function icecream_erp\.post_goods_received_note_atomic.* from authenticated;/i);
+  assert.match(verifySql, /VERIFY 044/);
+  assert.match(verifySql, /do \$\$/i);
+  assert.match(verifySql, /raise exception/i);
+  assert.match(verifySql, /still has EXECUTE on privileged inventory posting functions/i);
 });
 
 test('phase 1g reversal routes and transfer UI use dedicated reverse APIs', () => {
@@ -797,6 +814,7 @@ test('phase 1g reversal routes and transfer UI use dedicated reverse APIs', () =
 test('phase 1g deployment assets and gated db test scripts are present', () => {
   const packageJson = fs.readFileSync('package.json', 'utf8');
   const dbScript = fs.readFileSync('scripts/run-phase-1g-reversal-db-tests.mjs', 'utf8');
+  const verify044Sql = fs.readFileSync('migrations/manual/044_atomic_inventory_posting_and_stock_ledger.verify.sql', 'utf8');
   const verifySql = fs.readFileSync('migrations/manual/045_inventory_operational_reversals.verify.sql', 'utf8');
   const rollbackSql = fs.readFileSync('migrations/manual/045_inventory_operational_reversals.rollback.sql', 'utf8');
   const transactionSql = fs.readFileSync('migrations/manual/045_inventory_operational_reversals.vps-transaction-test.sql', 'utf8');
@@ -814,7 +832,10 @@ test('phase 1g deployment assets and gated db test scripts are present', () => {
   assert.match(dbScript, /PHASE_1G_DB_TESTS/);
   assert.match(dbScript, /PHASE_1G_DB_ISOLATED/);
   assert.match(dbScript, /requires PHASE_1G_DB_TESTS=1/);
+  assert.match(verify044Sql, /VERIFY 044/);
+  assert.match(verify044Sql, /raise exception/i);
   assert.match(verifySql, /VERIFY 045/);
+  assert.match(verifySql, /raise exception/i);
   assert.match(rollbackSql, /Manual rollback for 045_inventory_operational_reversals\.sql/);
   assert.match(transactionSql, /SMOKE 045/);
   assert.match(concurrencySql, /CONCURRENCY 045/);
