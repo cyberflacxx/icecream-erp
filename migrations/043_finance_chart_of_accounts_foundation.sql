@@ -482,7 +482,8 @@ with branch_cost_centres as (
     ) as code,
     coalesce(nullif(branch.name, ''), branch.code, 'Unnamed Branch') as name
   from icecream_erp.branches branch
-  where branch.is_active = true
+  where branch.status = 'ACTIVE'::icecream_erp.branch_status
+    and branch.deleted_at is null
 )
 insert into icecream_erp.cost_centres (
   organization_id, code, name, branch_id, parent_id, is_active, created_at, updated_at
