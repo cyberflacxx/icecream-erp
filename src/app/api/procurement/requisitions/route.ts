@@ -29,10 +29,7 @@ function sanitizeStatusFilter(value: string | null) {
 }
 
 function applyApprovedRequisitionFilter<T extends { or: (filters: string) => T }>(query: T) {
-  return query.or(
-    'status.in.(approved,approved_for_po,level1_approved,level2_approved,submitted,pending_approval),' +
-      'approval_status.in.(approved,approved_for_po,level1_approved,level2_approved,submitted,pending_approval)',
-  );
+  return query.or('status.eq.approved,approval_status.eq.approved');
 }
 
 export async function GET(request: NextRequest) {

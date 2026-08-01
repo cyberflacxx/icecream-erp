@@ -4,6 +4,7 @@ export interface BranchAuthorizationContext {
   isBranchScoped: boolean;
   organizationId: string;
   permissions: string[];
+  warehouseAssignments?: string[];
 }
 
 export interface BranchSelectorRecord {
@@ -13,6 +14,14 @@ export interface BranchSelectorRecord {
   name?: string | null;
   organizationId: string;
   status?: string | null;
+}
+
+export interface WarehouseSelectorRecord {
+  branchId: string | null;
+  id: string;
+  isActive?: boolean | null;
+  name?: string | null;
+  organizationId: string;
 }
 
 export interface BranchAuthorizationFailure {
@@ -44,6 +53,12 @@ export function getAuthorizedBranchIds(
   return [...new Set([ctx.branchId, ...ctx.branchAssignments].filter(Boolean).map(String))];
 }
 
+export function getAuthorizedWarehouseIds(
+  ctx: Pick<BranchAuthorizationContext, 'warehouseAssignments'>,
+) {
+  return [...new Set((ctx.warehouseAssignments ?? []).filter(Boolean).map(String))];
+}
+
 export function isBranchAvailableToContext(
   ctx: BranchAuthorizationContext,
   branch: BranchSelectorRecord | null | undefined,
@@ -66,6 +81,39 @@ export function filterAuthorizedBranches(
   options: { includeInactive?: boolean } = {},
 ) {
   return branches.filter((branch) => isBranchAvailableToContext(ctx, branch, options));
+}
+
+export function isWarehouseAvailableToContext(
+  ctx: BranchAuthorizationContext,
+  warehouse: WarehouseSelectorRecord | null | undefined,
+  options: { includeInactive?: boolean } = {},
+) {
+  if (!warehouse || warehouse.organizationId !== ctx.organizationId) return false;
+  if (!options.includeInactive && warehouse.isActive === false) return false;
+
+  if (hasGlobalBranchAccess(ctx) || !ctx.isBranchScoped) {
+    return true;
+  }
+
+  const authorizedWarehouseIds = new Set(getAuthorizedWarehouseIds(ctx));
+  if (authorizedWarehouseIds.has(warehouse.id)) {
+    return true;
+  }
+
+  if (!warehouse.branchId) {
+    return false;
+  }
+
+  const authorizedBranchIds = new Set(getAuthorizedBranchIds(ctx));
+  return authorizedBranchIds.has(warehouse.branchId);
+}
+
+export function filterAuthorizedWarehouses(
+  ctx: BranchAuthorizationContext,
+  warehouses: WarehouseSelectorRecord[],
+  options: { includeInactive?: boolean } = {},
+) {
+  return warehouses.filter((warehouse) => isWarehouseAvailableToContext(ctx, warehouse, options));
 }
 
 export function resolveRequestedBranchId(

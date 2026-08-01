@@ -8,6 +8,10 @@ import {
 } from '@/lib/procurement-purchase-orders';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
+function isInvalidPoStatusEnumError(error: { message?: string } | null | undefined) {
+  return (error?.message ?? '').toLowerCase().includes('invalid input value for enum');
+}
+
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
@@ -22,15 +26,24 @@ export async function POST(
   let remarks: string | null = null;
   try {
     const body = await request.json();
-    remarks = body.remarks ?? null;
+    remarks =
+      typeof body.remarks === 'string'
+        ? body.remarks.trim() || null
+        : typeof body.reason === 'string'
+          ? body.reason.trim() || null
+          : null;
   } catch {
     // remarks optional
+  }
+
+  if (!remarks) {
+    return badRequest('Rejection reason is required.');
   }
 
   try {
     const { data: existing, error: fetchErr } = await service
       .from('purchase_orders')
-      .select('id, status, approver_user_id, sent_at, rejected_at, notes')
+      .select('id, status, approval_status, approver_user_id, approved_at, approved_by, sent_at, rejected_at, notes')
       .is('deleted_at', null)
       .eq('organization_id', ctx.organizationId)
       .eq('id', id)
@@ -40,6 +53,7 @@ export async function POST(
 
     const order = existing as Record<string, unknown>;
     const workflowStatus = derivePurchaseOrderStatus({
+      approvalStatus: order.approval_status,
       approvedAt: order.approved_at,
       approvedBy: order.approved_by,
       rejectedAt: order.rejected_at,
@@ -53,21 +67,37 @@ export async function POST(
       return forbidden();
     }
 
-    const { data: updated, error: updateErr } = await service
+    const rejectionTimestamp = new Date().toISOString();
+    const rejectionPayload = {
+      approval_status: 'REJECTED',
+      rejected_at: rejectionTimestamp,
+      rejected_by: ctx.userId,
+      notes: remarks ?? order.notes ?? null,
+      status: formatPurchaseOrderDbStatus('rejected', order.status),
+    };
+
+    let updateResult = await service
       .from('purchase_orders')
-      .update({
-        rejected_at: new Date().toISOString(),
-        rejected_by: ctx.userId,
-        notes: remarks ?? order.notes ?? null,
-        status: formatPurchaseOrderDbStatus('cancelled', order.status),
-      })
+      .update(rejectionPayload)
       .eq('id', id)
       .select()
       .single();
 
-    if (updateErr) return serverError(updateErr.message);
+    if (updateResult.error && isInvalidPoStatusEnumError(updateResult.error)) {
+      updateResult = await service
+        .from('purchase_orders')
+        .update({
+          ...rejectionPayload,
+          status: formatPurchaseOrderDbStatus('cancelled', order.status),
+        })
+        .eq('id', id)
+        .select()
+        .single();
+    }
 
-    return NextResponse.json(updated);
+    if (updateResult.error) return serverError(updateResult.error.message);
+
+    return NextResponse.json(updateResult.data);
   } catch (error) {
     return serverError(error instanceof Error ? error.message : 'Failed to reject purchase order.');
   }

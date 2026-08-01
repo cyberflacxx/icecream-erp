@@ -1,18 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { badRequest, can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
+import { isWarehouseAvailableToContext } from '@/lib/branch-access';
 import {
+  derivePurchaseOrderStatus,
+  getPurchaseOrderReceivingLines,
+  isApprovedRequisitionStatus,
+  isPurchaseOrderEligibleForGoodsReceived,
   normalizePurchaseOrderItemId,
+  normalizePurchaseOrderLineTotal,
   normalizePurchaseOrderQuantity,
   normalizePurchaseOrderRequisitionId,
   normalizePurchaseOrderSupplierId,
+  normalizePurchaseOrderStatus,
+  normalizePurchaseOrderTaxRate,
   normalizePurchaseOrderUnitOfMeasureId,
   normalizePurchaseOrderUnitPrice,
-  derivePurchaseOrderStatus,
-  isApprovedRequisitionStatus,
-  normalizePurchaseOrderStatus,
-  normalizePurchaseOrderLineTotal,
-  normalizePurchaseOrderTaxRate,
   resolvePurchaseOrderItemDescription,
   resolvePurchaseOrderItemUnitOfMeasureId,
   resolvePurchaseOrderItemUnitPrice,
@@ -37,11 +40,11 @@ const LEGACY_PURCHASE_ORDER_ITEM_COLUMNS = [
   'unit_of_measure_id',
   'unit_price',
 ] as const;
-const PURCHASE_ORDER_SELECT_BASE = `id, po_number, order_date, expected_delivery_date, status, total, approver_user_id, approved_by, approved_at, sent_at, rejected_at,
+const PURCHASE_ORDER_SELECT_BASE = `id, po_number, order_date, expected_delivery_date, status, approval_status, total, approver_user_id, approved_by, approved_at, sent_at, rejected_at,
          requisition_id,
          suppliers(id, name),
          purchase_order_items(id)`;
-const PURCHASE_ORDER_SELECT_WITH_APPROVER_DETAILS = `id, po_number, order_date, expected_delivery_date, status, total, approver_user_id, approver_name, approver_email, approval_notes, approved_by, approved_at, sent_at, rejected_at,
+const PURCHASE_ORDER_SELECT_WITH_APPROVER_DETAILS = `id, po_number, order_date, expected_delivery_date, status, approval_status, total, approver_user_id, approver_name, approver_email, approval_notes, approved_by, approved_at, sent_at, rejected_at,
          requisition_id,
          suppliers(id, name),
          purchase_order_items(id)`;
@@ -129,6 +132,77 @@ function poCreateFailure(
   }, { status });
 }
 
+async function loadReceivablePurchaseOrderPickerRows(
+  service: ReturnType<typeof createServiceRoleClient>,
+  organizationId: string,
+  pageSize: number,
+) {
+  const ordersResult = await service
+    .from('purchase_orders')
+    .select('id, po_number, supplier_id, status, approval_status, approved_at, approved_by, sent_at, rejected_at, suppliers(id, name)')
+    .eq('organization_id', organizationId)
+    .is('deleted_at', null)
+    .order('created_at', { ascending: false })
+    .limit(pageSize);
+
+  if (ordersResult.error) {
+    return { data: null, error: ordersResult.error };
+  }
+
+  const orderIds = [...new Set((ordersResult.data ?? []).map((row) => String(row.id ?? '')).filter(Boolean))];
+  const orderItemsResult = orderIds.length
+    ? await service
+        .from('purchase_order_items')
+        .select('id, purchase_order_id, po_id, item_id, quantity, quantity_ordered, quantity_received, received_qty, unit_price, unit_cost, total_cost, total_ex_vat, line_total')
+        .in('purchase_order_id', orderIds)
+    : { data: [], error: null };
+
+  const compatibleOrderItemsResult =
+    orderItemsResult.error && isMissingColumnError(orderItemsResult.error, 'purchase_order_items', 'purchase_order_id')
+      ? await service
+          .from('purchase_order_items')
+          .select('id, po_id, item_id, quantity, quantity_ordered, quantity_received, received_qty, unit_price, unit_cost, total_cost, total_ex_vat, line_total')
+          .in('po_id', orderIds)
+      : orderItemsResult;
+
+  if (compatibleOrderItemsResult.error) {
+    return { data: null, error: compatibleOrderItemsResult.error };
+  }
+
+  const itemsByOrderId = new Map<string, Array<Record<string, unknown>>>();
+  for (const item of compatibleOrderItemsResult.data ?? []) {
+    const orderId = String(item.purchase_order_id ?? item.po_id ?? '').trim();
+    if (!orderId) continue;
+    itemsByOrderId.set(orderId, [...(itemsByOrderId.get(orderId) ?? []), item as Record<string, unknown>]);
+  }
+
+  const data = (ordersResult.data ?? [])
+    .map((row) => {
+      const supplier = Array.isArray(row.suppliers) ? row.suppliers[0] : row.suppliers;
+      const lines = itemsByOrderId.get(String(row.id)) ?? [];
+      return {
+        ...row,
+        lines,
+        receivingLines: getPurchaseOrderReceivingLines(lines),
+        supplierActive: Boolean(row.supplier_id ?? supplier?.id),
+      };
+    })
+    .filter((row) =>
+      isPurchaseOrderEligibleForGoodsReceived({
+        approvalStatus: row.approval_status,
+        approvedAt: row.approved_at,
+        approvedBy: row.approved_by,
+        lines: row.lines,
+        rejectedAt: row.rejected_at,
+        sentAt: row.sent_at,
+        status: row.status,
+        supplierActive: row.supplierActive,
+      }),
+    );
+
+  return { data, error: null };
+}
+
 export async function GET(request: NextRequest) {
   const ctx = await getAuthContext();
   if (!ctx) return unauthorized();
@@ -148,33 +222,38 @@ export async function GET(request: NextRequest) {
 
   try {
     if (picker && forGrn) {
-      const pickerRows = await service
-        .from('purchase_orders')
-        .select('id, po_number, supplier_id, status, suppliers(id, name)')
-        .eq('organization_id', ctx.organizationId)
-        .is('deleted_at', null)
-        .order('created_at', { ascending: false })
-        .limit(pageSize);
-
+      const pickerRows = await loadReceivablePurchaseOrderPickerRows(service, ctx.organizationId, pageSize);
       if (pickerRows.error) return serverError(pickerRows.error.message);
 
       return NextResponse.json({
         success: true,
-        data: (pickerRows.data ?? [])
-          .filter((row) => ['APPROVED', 'CREATED', 'DRAFT', 'OPEN', 'SUBMITTED', 'SENT', 'SENT_TO_SUPPLIER', 'PARTIAL_RECEIVED', 'PARTIALLY_RECEIVED'].includes(normalizePurchaseOrderStatus(row.status)))
-          .map((row) => {
+        data: (pickerRows.data ?? []).map((row) => {
             const supplier = Array.isArray(row.suppliers) ? row.suppliers[0] : row.suppliers;
             const supplierName = String(supplier?.name ?? 'Unknown supplier');
             return {
               id: String(row.id),
               po_number: String(row.po_number ?? ''),
               poNumber: String(row.po_number ?? ''),
-              status: normalizePurchaseOrderStatus(row.status),
+              status: derivePurchaseOrderStatus({
+                approvalStatus: row.approval_status,
+                approvedAt: row.approved_at,
+                approvedBy: row.approved_by,
+                rejectedAt: row.rejected_at,
+                sentAt: row.sent_at,
+                status: row.status,
+              }),
               supplier_id: row.supplier_id ? String(row.supplier_id) : supplier?.id ? String(supplier.id) : null,
               supplierId: row.supplier_id ? String(row.supplier_id) : supplier?.id ? String(supplier.id) : null,
               supplier_name: supplierName,
               supplierName,
               label: `${String(row.po_number ?? 'Purchase order')} - ${supplierName}`,
+              remainingLines: row.receivingLines.map((line) => ({
+                id: line.id,
+                itemId: line.itemId,
+                orderedQuantity: line.orderedQuantity,
+                previouslyPostedReceivedQuantity: line.previouslyPostedReceivedQuantity,
+                remainingQuantity: line.remainingQuantity,
+              })),
             };
           }),
       });
@@ -257,6 +336,9 @@ export async function GET(request: NextRequest) {
       orderDate: r.order_date,
       expectedDeliveryDate: r.expected_delivery_date,
       status: derivePurchaseOrderStatus({
+        approvalStatus: r.approval_status,
+        approvedAt: r.approved_at,
+        approvedBy: r.approved_by,
         rejectedAt: r.rejected_at,
         sentAt: r.sent_at,
         status: r.status,
@@ -357,6 +439,7 @@ export async function POST(request: NextRequest) {
 
   const supplierId = normalizePurchaseOrderSupplierId(body);
   const requisitionId = normalizePurchaseOrderRequisitionId(body);
+  const requestedWarehouseId = firstString(body.warehouse_id, body.warehouseId) || null;
   const deliveryAddress = firstString(body.delivery_address, body.deliveryAddress, body.warehouse_id, body.warehouseId) || null;
   const supplierQuote = firstString(body.supplier_quote, body.supplierQuote, body.quote_reference, body.quoteReference) || null;
   const currency = firstString(body.currency) || 'USD';
@@ -414,6 +497,32 @@ export async function POST(request: NextRequest) {
       return badRequest('Selected supplier is no longer available. Please refresh and try again.');
     }
 
+    if (requestedWarehouseId) {
+      const warehouseResult = await service
+        .from('warehouses')
+        .select('id, organization_id, branch_id, is_active, name')
+        .eq('id', requestedWarehouseId)
+        .maybeSingle();
+
+      if (warehouseResult.error) {
+        return serverError(warehouseResult.error.message);
+      }
+
+      const warehouse = warehouseResult.data
+        ? {
+            branchId: warehouseResult.data.branch_id ? String(warehouseResult.data.branch_id) : null,
+            id: String(warehouseResult.data.id),
+            isActive: warehouseResult.data.is_active !== false,
+            name: warehouseResult.data.name ? String(warehouseResult.data.name) : null,
+            organizationId: String(warehouseResult.data.organization_id ?? ''),
+          }
+        : null;
+
+      if (!isWarehouseAvailableToContext(ctx, warehouse)) {
+        return forbidden();
+      }
+    }
+
     // Validate requisition if provided
     if (requisitionId) {
       const { data: req, error: reqErr } = await service
@@ -426,7 +535,7 @@ export async function POST(request: NextRequest) {
 
       if (reqErr || !req) return badRequest('Selected requisition is no longer available. Please refresh and try again.');
       if (!isApprovedRequisitionStatus((req as Record<string, unknown>).status, (req as Record<string, unknown>).approval_status)) {
-        return badRequest('Selected requisition is no longer available. Please refresh and try again.');
+        return badRequest('Only approved requisitions can be converted to purchase orders.');
       }
 
       const requestedRequisitionItemIds = normalizedItems.map((item) => item.requisitionItemId).filter(Boolean);
@@ -512,7 +621,7 @@ export async function POST(request: NextRequest) {
         const remainingBeforeCreate = Math.max(0, approvedQuantity - alreadyConverted);
 
         if (requestedQuantity > remainingBeforeCreate && !allowOverRequisitionQuantity) {
-          return badRequest(`PO quantity exceeds remaining approved requisition quantity for line ${lineId}.`);
+          return badRequest(`Requisition line ${lineId} has already been fully converted or does not have enough remaining approved quantity.`);
         }
 
         requisitionRemainingAfterCreate.push({

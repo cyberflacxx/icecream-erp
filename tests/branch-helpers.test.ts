@@ -17,6 +17,8 @@ import {
 } from '../src/lib/branches';
 import {
   filterAuthorizedBranches,
+  filterAuthorizedWarehouses,
+  isWarehouseAvailableToContext,
   resolveRequestedBranchId,
 } from '../src/lib/branch-access';
 
@@ -159,13 +161,42 @@ test('inactive branches are excluded from selector results by default', () => {
   assert.deepEqual(result, [{ id: 'branch-1', organizationId: 'org-1', status: 'ACTIVE' }]);
 });
 
+test('warehouse authorization helper allows assigned-branch warehouses and explicit warehouse assignments only', () => {
+  const ctx = {
+    branchAssignments: ['branch-1'],
+    branchId: 'branch-1',
+    isBranchScoped: true,
+    organizationId: 'org-1',
+    permissions: [],
+    warehouseAssignments: ['wh-central'],
+  };
+  const warehouses = [
+    { branchId: 'branch-1', id: 'wh-1', isActive: true, organizationId: 'org-1' },
+    { branchId: 'branch-2', id: 'wh-2', isActive: true, organizationId: 'org-1' },
+    { branchId: null, id: 'wh-central', isActive: true, organizationId: 'org-1' },
+    { branchId: null, id: 'wh-unassigned', isActive: true, organizationId: 'org-1' },
+  ];
+
+  assert.equal(isWarehouseAvailableToContext(ctx, warehouses[0]), true);
+  assert.equal(isWarehouseAvailableToContext(ctx, warehouses[1]), false);
+  assert.equal(isWarehouseAvailableToContext(ctx, warehouses[2]), true);
+  assert.equal(isWarehouseAvailableToContext(ctx, warehouses[3]), false);
+  assert.deepEqual(filterAuthorizedWarehouses(ctx, warehouses), [warehouses[0], warehouses[2]]);
+});
+
 test('branch selector and sales order routes use shared authorization-aware branch validation', () => {
   const branchesRoute = fs.readFileSync('src/app/api/branches/route.ts', 'utf8');
   const salesOrdersRoute = fs.readFileSync('src/app/api/sales/orders/route.ts', 'utf8');
+  const grnCreateRoute = fs.readFileSync('src/app/api/procurement/grns/route.ts', 'utf8');
+  const grnApproveRoute = fs.readFileSync('src/app/api/procurement/grns/[id]/approve/route.ts', 'utf8');
+  const goodsReceivingStatusRoute = fs.readFileSync('src/app/api/procurement/goods-receiving-status/route.ts', 'utf8');
 
   assert.match(branchesRoute, /filterAuthorizedBranches/);
   assert.match(branchesRoute, /organization_id/);
   assert.match(branchesRoute, /selector/);
   assert.match(salesOrdersRoute, /resolveRequestedBranchId/);
   assert.match(salesOrdersRoute, /Selected warehouse does not belong to the selected branch/);
+  assert.match(grnCreateRoute, /isWarehouseAvailableToContext/);
+  assert.match(grnApproveRoute, /isWarehouseAvailableToContext/);
+  assert.match(goodsReceivingStatusRoute, /organization_id/);
 });

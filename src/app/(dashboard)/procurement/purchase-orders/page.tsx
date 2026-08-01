@@ -458,9 +458,12 @@ export default function PurchaseOrdersPage() {
   }
 
   async function rejectOrder(id: string) {
+    const remarks = window.prompt('Reason for rejecting this purchase order:', 'Rejected from purchase order review.');
+    if (remarks === null) return;
+
     await runAction(`reject:${id}`, 'Purchase order rejected.', async () => {
       await request(`/api/procurement/purchase-orders/${id}/reject`, {
-        body: JSON.stringify({}),
+        body: JSON.stringify({ remarks }),
         method: 'POST'
       });
       await refresh();

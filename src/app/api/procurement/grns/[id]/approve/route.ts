@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { badRequest, can, forbidden, getAuthContext, notFound, serverError, unauthorized } from '@/lib/api-auth';
-import { isGrnStockPostingError, postGoodsReceivedNoteToInventory } from '@/lib/procurement-goods-received';
+import { isWarehouseAvailableToContext } from '@/lib/branch-access';
 import { recordAuditLog } from '@/lib/security-server';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
@@ -39,28 +39,37 @@ export async function POST(
 
     const grn = existing as Record<string, unknown>;
 
-    // Central warehouses have no branch_id. Branch-scoped users may also work
-    // against an explicitly assigned warehouse even when it belongs elsewhere.
-    if (ctx.isBranchScoped && ctx.branchId) {
-      const { data: wh, error: whError } = await service
-        .from('warehouses')
-        .select('branch_id')
-        .eq('id', grn.warehouse_id as string)
-        .maybeSingle();
-      if (whError) return serverError(whError.message);
-
-      const warehouseBranchId = wh?.branch_id ? String(wh.branch_id) : null;
-      const hasWarehouseAssignment = ctx.warehouseAssignments.includes(String(grn.warehouse_id ?? ''));
-      if (warehouseBranchId && warehouseBranchId !== ctx.branchId && !hasWarehouseAssignment) {
-        return forbidden();
-      }
+    const { data: warehouse, error: warehouseError } = await service
+      .from('warehouses')
+      .select('id, organization_id, branch_id, is_active, name')
+      .eq('id', String(grn.warehouse_id ?? ''))
+      .maybeSingle();
+    if (warehouseError) return serverError(warehouseError.message);
+    if (
+      !isWarehouseAvailableToContext(ctx, warehouse
+        ? {
+            branchId: warehouse.branch_id ? String(warehouse.branch_id) : null,
+            id: String(warehouse.id),
+            isActive: warehouse.is_active !== false,
+            name: warehouse.name ? String(warehouse.name) : null,
+            organizationId: String(warehouse.organization_id ?? ''),
+          }
+        : null)
+    ) {
+      return forbidden();
     }
 
-    if (grn.status === 'REJECTED' || grn.status === 'POSTED') {
-      return badRequest('Only submitted GRNs can be approved.');
+    if (grn.status === 'DRAFT' || grn.quality_status === 'PENDING') {
+      return badRequest('Goods Received Note must be submitted before approval.');
+    }
+    if (grn.status === 'REJECTED' || grn.quality_status === 'REJECTED') {
+      return badRequest('Rejected Goods Received Notes cannot be posted.');
+    }
+    if (grn.status === 'POSTED') {
+      return badRequest('Goods Received Note has already been posted.');
     }
     if (grn.quality_status !== 'PENDING_APPROVAL') {
-      return badRequest('Only submitted GRNs can be approved.');
+      return badRequest('Goods Received Note must be submitted before approval.');
     }
 
     const { data: updatedApproval, error: updateErr } = await service
@@ -77,60 +86,19 @@ export async function POST(
 
     if (updateErr) return serverError(updateErr.message);
 
-    let updated = updatedApproval;
-    try {
-      updated = await postGoodsReceivedNoteToInventory(service, {
-        grnId: id,
-        organizationId: ctx.organizationId,
-        userId: ctx.userId,
-      });
-    } catch (postingError) {
-      const message = postingError instanceof Error ? postingError.message : 'Failed to post GRN to inventory.';
-      const details = isGrnStockPostingError(postingError) ? postingError.details : undefined;
-      if (message === 'Please select a receiving warehouse before posting GRN.') {
-        return NextResponse.json({
-          success: false,
-          message,
-          code: 'GRN_STOCK_POST_FAILED',
-          details,
-        }, { status: 400 });
-      }
-      console.error('GRN inventory posting failed.', {
-        grnId: id,
-        details,
-        message,
-      });
-      return NextResponse.json({
-        success: false,
-        message: 'Goods received note could not update inventory. Please check warehouse and item details.',
-        code: 'GRN_STOCK_POST_FAILED',
-        details,
-      }, { status: 500 });
-    }
-
     await recordAuditLog({
-      action: 'GRN_POSTED_TO_STOCK',
+      action: 'GRN_APPROVED',
       entityId: id,
       entityType: 'goods_received_note',
-      newValues: { approvalNotes, qualityStatus: 'APPROVED', status: 'POSTED' },
+      newValues: { approvalNotes, qualityStatus: 'APPROVED' },
       organizationId: ctx.organizationId,
       userProfileId: ctx.userId,
       ipAddress: request.headers.get('x-forwarded-for'),
       userAgent: request.headers.get('user-agent'),
     });
 
-    return NextResponse.json(updated);
+    return NextResponse.json(updatedApproval);
   } catch (err) {
-    console.error('GRN approval failed.', {
-      details: isGrnStockPostingError(err) ? err.details : undefined,
-      grnId: id,
-      message: err instanceof Error ? err.message : String(err),
-    });
-    return NextResponse.json({
-      success: false,
-      message: 'Goods received note could not update inventory. Please check warehouse and item details.',
-      code: 'GRN_STOCK_POST_FAILED',
-      details: isGrnStockPostingError(err) ? err.details : undefined,
-    }, { status: 500 });
+    return serverError((err as Error).message);
   }
 }

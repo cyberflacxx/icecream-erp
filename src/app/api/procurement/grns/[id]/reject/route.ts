@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { badRequest, can, forbidden, getAuthContext, notFound, serverError, unauthorized } from '@/lib/api-auth';
+import { isWarehouseAvailableToContext } from '@/lib/branch-access';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
 export async function POST(
@@ -26,6 +27,26 @@ export async function POST(
     if (fetchErr || !existing) return notFound('Goods received note not found.');
 
     const grn = existing as Record<string, unknown>;
+    const { data: warehouse, error: warehouseError } = await service
+      .from('warehouses')
+      .select('id, organization_id, branch_id, is_active, name')
+      .eq('id', String(grn.warehouse_id ?? ''))
+      .maybeSingle();
+    if (warehouseError) return serverError(warehouseError.message);
+    if (
+      !isWarehouseAvailableToContext(ctx, warehouse
+        ? {
+            branchId: warehouse.branch_id ? String(warehouse.branch_id) : null,
+            id: String(warehouse.id),
+            isActive: warehouse.is_active !== false,
+            name: warehouse.name ? String(warehouse.name) : null,
+            organizationId: String(warehouse.organization_id ?? ''),
+          }
+        : null)
+    ) {
+      return forbidden();
+    }
+
     if (grn.status === 'REJECTED' || grn.status === 'POSTED') {
       return badRequest('Only submitted GRNs can be rejected.');
     }

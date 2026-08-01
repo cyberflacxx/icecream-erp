@@ -14,8 +14,11 @@ import {
 } from '../src/lib/procurement';
 import {
   buildPurchaseOrderDraftPayload as buildPurchaseOrderDraftPayloadForOrders,
+  derivePurchaseOrderStatus as derivePurchaseOrderStatusForOrders,
   extractRequisitionLineItems,
+  getPurchaseOrderReceivingLines,
   isApprovedRequisitionStatus,
+  isPurchaseOrderEligibleForGoodsReceived,
   mapRequisitionItemToPurchaseOrderLine,
   normalizePurchaseOrderItemId as normalizePurchaseOrderItemIdForOrders,
   normalizePurchaseOrderQuantity as normalizePurchaseOrderQuantityForOrders,
@@ -317,12 +320,109 @@ test('mapRequisitionItemToPurchaseOrderLine uses remaining approved quantity for
   assert.equal(fullyConverted[0]?.quantityRemainingForPurchaseOrder, 0);
 });
 
-test('approved requisition status helper accepts live procurement variants', () => {
+test('approved requisition status helper only accepts true approval', () => {
   assert.equal(isApprovedRequisitionStatus('approved', null), true);
-  assert.equal(isApprovedRequisitionStatus('submitted', null), true);
-  assert.equal(isApprovedRequisitionStatus('draft', 'approved_for_po'), true);
-  assert.equal(isApprovedRequisitionStatus('draft', 'pending_approval'), true);
+  assert.equal(isApprovedRequisitionStatus('submitted', null), false);
+  assert.equal(isApprovedRequisitionStatus('draft', 'approved_for_po'), false);
+  assert.equal(isApprovedRequisitionStatus('draft', 'pending_approval'), false);
+  assert.equal(isApprovedRequisitionStatus('po_created', null), false);
+  assert.equal(isApprovedRequisitionStatus('rejected', null), false);
   assert.equal(isApprovedRequisitionStatus('draft', null), false);
+});
+
+test('purchase order receiving helpers only expose approved, sent, or partially received orders with remaining quantity', () => {
+  const lines = [
+    {
+      id: 'po-line-1',
+      item_id: 'item-1',
+      items: { code: 'VAN-01', name: 'Vanilla Mix' },
+      quantity_ordered: 100,
+      quantity_received: 35,
+      unit_of_measure_name: 'Bucket',
+      unit_price: 5,
+      line_total: 500,
+    },
+  ] as Array<Record<string, unknown>>;
+
+  const receivingLines = getPurchaseOrderReceivingLines(lines);
+  assert.equal(receivingLines.length, 1);
+  assert.equal(receivingLines[0]?.orderedQuantity, 100);
+  assert.equal(receivingLines[0]?.previouslyPostedReceivedQuantity, 35);
+  assert.equal(receivingLines[0]?.remainingQuantity, 65);
+
+  assert.equal(
+    isPurchaseOrderEligibleForGoodsReceived({
+      approvedAt: '2026-07-20T10:00:00Z',
+      lines,
+      status: 'DRAFT',
+      supplierActive: true,
+    }),
+    true,
+  );
+  assert.equal(
+    isPurchaseOrderEligibleForGoodsReceived({
+      status: 'SENT_TO_SUPPLIER',
+      lines,
+      supplierActive: true,
+    }),
+    true,
+  );
+  assert.equal(
+    isPurchaseOrderEligibleForGoodsReceived({
+      status: 'PARTIAL_RECEIVED',
+      lines,
+      supplierActive: true,
+    }),
+    true,
+  );
+  assert.equal(
+    isPurchaseOrderEligibleForGoodsReceived({
+      status: 'OPEN',
+      lines,
+      supplierActive: true,
+    }),
+    false,
+  );
+  assert.equal(
+    isPurchaseOrderEligibleForGoodsReceived({
+      status: 'FULLY_RECEIVED',
+      lines,
+      supplierActive: true,
+    }),
+    false,
+  );
+  assert.equal(
+    isPurchaseOrderEligibleForGoodsReceived({
+      status: 'APPROVED',
+      lines: [{ ...lines[0], quantity_received: 100 }],
+      supplierActive: true,
+    }),
+    false,
+  );
+});
+
+test('purchase order status derivation uses approval compatibility fields consistently', () => {
+  assert.equal(
+    derivePurchaseOrderStatusForOrders({
+      approvedAt: '2026-07-21T12:00:00Z',
+      status: 'DRAFT',
+    }),
+    'APPROVED',
+  );
+  assert.equal(
+    derivePurchaseOrderStatusForOrders({
+      approvalStatus: 'APPROVED',
+      status: 'OPEN',
+    }),
+    'APPROVED',
+  );
+  assert.equal(
+    derivePurchaseOrderStatusForOrders({
+      rejectedAt: '2026-07-22T09:00:00Z',
+      status: 'APPROVED',
+    }),
+    'REJECTED',
+  );
 });
 
 test('buildPurchaseOrderDraftPayload stores supplier_id canonically', () => {
@@ -730,6 +830,29 @@ test('goods received workflow helper derives pending approval from quality statu
   assert.equal(actions.canApprove, true);
   assert.equal(actions.canReject, true);
   assert.equal(actions.canOpenPurchaseOrder, true);
+  assert.equal(actions.canPost, false);
+});
+
+test('goods received workflow helper treats stock-posted receipts as posted even when status compatibility falls back', () => {
+  const status = deriveGoodsReceivedWorkflowStatus({
+    qualityStatus: 'APPROVED',
+    status: 'RECEIVED',
+    stockPosted: true,
+  });
+  const actions = getGoodsReceivedActionState(
+    {
+      purchaseOrder: { id: 'po-2' },
+      qualityStatus: 'APPROVED',
+      status: 'RECEIVED',
+      stockPosted: true,
+    },
+    {
+      roleNames: ['Stores Supervisor'],
+    },
+  );
+
+  assert.equal(status, 'POSTED');
+  assert.equal(actions.canApprove, false);
   assert.equal(actions.canPost, false);
 });
 
@@ -2797,4 +2920,21 @@ test('procurement requisitions, purchase orders, and GRNs use the shared item se
 
   assert.match(goodsReceivedPage, /Select a warehouse first\./);
   assert.match(purchaseOrdersPage, /Search item/);
+});
+
+test('procurement receiving routes and UI use the repaired Batch 1 status contract', () => {
+  const purchaseOrdersRoute = fs.readFileSync('src/app/api/procurement/purchase-orders/route.ts', 'utf8');
+  const grnApproveRoute = fs.readFileSync('src/app/api/procurement/grns/[id]/approve/route.ts', 'utf8');
+  const grnPostRoute = fs.readFileSync('src/app/api/procurement/grns/[id]/post/route.ts', 'utf8');
+  const metaHook = fs.readFileSync('src/hooks/procurement/useProcurementMeta.ts', 'utf8');
+  const goodsReceivedPage = fs.readFileSync('src/app/(dashboard)/procurement/goods-received/page.tsx', 'utf8');
+
+  assert.match(purchaseOrdersRoute, /Only approved requisitions can be converted to purchase orders\./);
+  assert.match(purchaseOrdersRoute, /isPurchaseOrderEligibleForGoodsReceived/);
+  assert.match(grnApproveRoute, /Goods Received Note must be submitted before approval\./);
+  assert.match(grnPostRoute, /Goods Received Note must be approved before posting\./);
+  assert.match(grnPostRoute, /Goods Received Note has already been posted\./);
+  assert.match(metaHook, /purchaseOrderScope=receiving/);
+  assert.match(goodsReceivedPage, /useProcurementMeta\(\{ purchaseOrderScope: 'receiving' \}\)/);
+  assert.match(goodsReceivedPage, /No approved purchase orders with remaining quantity/);
 });

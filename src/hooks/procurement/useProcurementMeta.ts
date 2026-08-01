@@ -95,13 +95,21 @@ export interface ProcurementMetaResponse {
   }>;
 }
 
-export function useProcurementMeta() {
+interface ProcurementMetaOptions {
+  purchaseOrderScope?: 'all' | 'receiving';
+}
+
+export function useProcurementMeta(options: ProcurementMetaOptions = {}) {
   const { isLoaded, isSignedIn } = useAppAuth();
   const request = useProcurementRequest();
+  const purchaseOrderScope = options.purchaseOrderScope ?? 'all';
 
   return useQuery({
-    queryKey: ['procurement', 'meta'],
-    queryFn: () => request<ProcurementMetaResponse>(API_ROUTES.PROCUREMENT.META),
+    queryKey: ['procurement', 'meta', purchaseOrderScope],
+    queryFn: () =>
+      request<ProcurementMetaResponse>(
+        `${API_ROUTES.PROCUREMENT.META}${purchaseOrderScope === 'receiving' ? '?purchaseOrderScope=receiving' : ''}`,
+      ),
     enabled: isLoaded && Boolean(isSignedIn)
   });
 }

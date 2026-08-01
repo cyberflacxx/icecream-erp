@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { badRequest, can, forbidden, getAuthContext, notFound, serverError, unauthorized } from '@/lib/api-auth';
+import { isWarehouseAvailableToContext } from '@/lib/branch-access';
 import { calculateAcceptedQuantity, calculateShortageQuantity } from '@/lib/inventory';
 import { findMatchingGrnReceiveLine } from '@/lib/procurement-goods-received';
 import { recordAuditLog } from '@/lib/security-server';
@@ -56,21 +57,24 @@ export async function POST(
     const g = grn as Record<string, unknown>;
     const purchaseOrderId = resolveGrnPurchaseOrderId(g);
 
-    // Central warehouses have no branch_id. Branch-scoped users may also work
-    // against an explicitly assigned warehouse even when it belongs elsewhere.
-    if (ctx.isBranchScoped && ctx.branchId) {
-      const { data: wh, error: whError } = await service
-        .from('warehouses')
-        .select('branch_id')
-        .eq('id', g.warehouse_id as string)
-        .maybeSingle();
-      if (whError) return serverError(whError.message);
-
-      const warehouseBranchId = wh?.branch_id ? String(wh.branch_id) : null;
-      const hasWarehouseAssignment = ctx.warehouseAssignments.includes(String(g.warehouse_id ?? ''));
-      if (warehouseBranchId && warehouseBranchId !== ctx.branchId && !hasWarehouseAssignment) {
-        return forbidden();
-      }
+    const { data: warehouse, error: warehouseError } = await service
+      .from('warehouses')
+      .select('id, organization_id, branch_id, is_active, name')
+      .eq('id', String(g.warehouse_id ?? ''))
+      .maybeSingle();
+    if (warehouseError) return serverError(warehouseError.message);
+    if (
+      !isWarehouseAvailableToContext(ctx, warehouse
+        ? {
+            branchId: warehouse.branch_id ? String(warehouse.branch_id) : null,
+            id: String(warehouse.id),
+            isActive: warehouse.is_active !== false,
+            name: warehouse.name ? String(warehouse.name) : null,
+            organizationId: String(warehouse.organization_id ?? ''),
+          }
+        : null)
+    ) {
+      return forbidden();
     }
 
     if (g.status !== 'DRAFT') {
@@ -175,6 +179,7 @@ export async function POST(
         notes: body.notes ?? (g.notes as string | null),
         received_by: ctx.userId,
         received_date: new Date().toISOString(),
+        status: 'RECEIVED',
       })
       .eq('id', id)
       .select()
