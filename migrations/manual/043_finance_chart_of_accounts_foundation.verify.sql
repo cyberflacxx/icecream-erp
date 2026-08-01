@@ -90,6 +90,69 @@ begin
       raise exception 'VERIFY 043 failed: organization % has fewer than % base cost centres.', v_org.id, v_expected_cost_centre_count;
     end if;
 
+    if exists (
+      select 1
+      from icecream_erp.branches branch
+      where branch.organization_id = v_org.id
+        and branch.status = 'ACTIVE'::icecream_erp.branch_status
+        and branch.deleted_at is null
+        and not exists (
+          select 1
+          from icecream_erp.cost_centres centre
+          where centre.organization_id = branch.organization_id
+            and centre.branch_id = branch.id
+        )
+    ) then
+      raise exception 'VERIFY 043 failed: organization % has active non-deleted branches without branch cost centres.', v_org.id;
+    end if;
+
+    if exists (
+      select 1
+      from icecream_erp.cost_centres centre
+      where centre.organization_id = v_org.id
+        and centre.branch_id is not null
+      group by centre.organization_id, centre.branch_id
+      having count(*) > 1
+    ) then
+      raise exception 'VERIFY 043 failed: organization % has duplicate branch cost centres for the same branch.', v_org.id;
+    end if;
+
+    if exists (
+      select 1
+      from icecream_erp.cost_centres centre
+      left join icecream_erp.branches branch
+        on branch.id = centre.branch_id
+      where centre.organization_id = v_org.id
+        and centre.branch_id is not null
+        and branch.id is null
+    ) then
+      raise exception 'VERIFY 043 failed: organization % has branch cost centres referencing missing branches.', v_org.id;
+    end if;
+
+    if exists (
+      select 1
+      from icecream_erp.cost_centres centre
+      join icecream_erp.branches branch
+        on branch.id = centre.branch_id
+      where centre.organization_id = v_org.id
+        and centre.branch_id is not null
+        and branch.organization_id <> centre.organization_id
+    ) then
+      raise exception 'VERIFY 043 failed: organization % has branch cost centres linked to branches from a different organization.', v_org.id;
+    end if;
+
+    if exists (
+      select 1
+      from icecream_erp.cost_centres centre
+      join icecream_erp.branches branch
+        on branch.id = centre.branch_id
+      where centre.organization_id = v_org.id
+        and branch.organization_id = v_org.id
+        and branch.deleted_at is not null
+    ) then
+      raise exception 'VERIFY 043 failed: organization % has deleted branches seeded as branch cost centres.', v_org.id;
+    end if;
+
     if (
       select count(*)
       from icecream_erp.erp_account_mappings mapping
