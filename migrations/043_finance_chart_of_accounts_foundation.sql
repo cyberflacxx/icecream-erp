@@ -1,51 +1,8 @@
 -- Phase 1D finance foundation
 -- Additive only. Do not apply destructive DDL. All objects stay inside icecream_erp.
-
-do $$
-begin
-  if exists (
-    select 1
-    from pg_type
-    where typnamespace = 'icecream_erp'::regnamespace
-      and typname = 'account_type'
-  ) then
-    if not exists (
-      select 1
-      from pg_enum
-      where enumtypid = 'icecream_erp.account_type'::regtype
-        and enumlabel = 'HEADER'
-    ) then
-      alter type icecream_erp.account_type add value 'HEADER';
-    end if;
-
-    if not exists (
-      select 1
-      from pg_enum
-      where enumtypid = 'icecream_erp.account_type'::regtype
-        and enumlabel = 'CONTRA_ASSET'
-    ) then
-      alter type icecream_erp.account_type add value 'CONTRA_ASSET';
-    end if;
-
-    if not exists (
-      select 1
-      from pg_enum
-      where enumtypid = 'icecream_erp.account_type'::regtype
-        and enumlabel = 'CONTRA_REVENUE'
-    ) then
-      alter type icecream_erp.account_type add value 'CONTRA_REVENUE';
-    end if;
-
-    if not exists (
-      select 1
-      from pg_enum
-      where enumtypid = 'icecream_erp.account_type'::regtype
-        and enumlabel = 'OTHER_INCOME'
-    ) then
-      alter type icecream_erp.account_type add value 'OTHER_INCOME';
-    end if;
-  end if;
-end $$;
+-- Phase 1H deployment contract:
+-- 1. Apply and commit 042a_finance_account_type_enum_prerequisites.sql.
+-- 2. Then apply this migration in its own transaction.
 
 alter table if exists icecream_erp.accounts
   add column if not exists allow_posting boolean,
@@ -249,6 +206,31 @@ revoke all on table icecream_erp.erp_account_mappings from anon, authenticated;
 
 grant all on table icecream_erp.cost_centres to service_role;
 grant all on table icecream_erp.erp_account_mappings to service_role;
+
+do $$
+declare
+  v_missing_labels text[];
+begin
+  select array_agg(required.enum_label order by required.enum_label)
+  into v_missing_labels
+  from (
+    values
+      ('HEADER'),
+      ('CONTRA_ASSET'),
+      ('CONTRA_REVENUE'),
+      ('OTHER_INCOME')
+  ) as required(enum_label)
+  where not exists (
+    select 1
+    from pg_enum enum
+    where enum.enumtypid = 'icecream_erp.account_type'::regtype
+      and enum.enumlabel = required.enum_label
+  );
+
+  if coalesce(array_length(v_missing_labels, 1), 0) > 0 then
+    raise exception '043_finance_chart_of_accounts_foundation.sql requires 042a_finance_account_type_enum_prerequisites.sql first. Missing account_type labels: %', array_to_string(v_missing_labels, ', ');
+  end if;
+end $$;
 
 with account_definitions(code, name, type, parent_code, allow_posting, normal_balance, description) as (
   values

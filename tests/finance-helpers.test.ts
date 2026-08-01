@@ -530,6 +530,8 @@ test('opening balance draft validation requires a balanced multi-line batch', ()
 
 test('phase 1d migration and finance routes stay schema-local and enforce posting controls', () => {
   const root = process.cwd();
+  const enumPrerequisite = readFileSync(join(root, 'migrations', '042a_finance_account_type_enum_prerequisites.sql'), 'utf8');
+  const enumPrerequisiteVerify = readFileSync(join(root, 'migrations', 'manual', '042a_finance_account_type_enum_prerequisites.verify.sql'), 'utf8');
   const migration = readFileSync(join(root, 'migrations', '043_finance_chart_of_accounts_foundation.sql'), 'utf8');
   const rollback = readFileSync(join(root, 'migrations', 'manual', '043_finance_chart_of_accounts_foundation.rollback.sql'), 'utf8');
   const verify = readFileSync(join(root, 'migrations', 'manual', '043_finance_chart_of_accounts_foundation.verify.sql'), 'utf8');
@@ -541,10 +543,19 @@ test('phase 1d migration and finance routes stay schema-local and enforce postin
   const financePage = readFileSync(join(root, 'src', 'app', '(dashboard)', 'finance', 'page.tsx'), 'utf8');
   const chartPage = readFileSync(join(root, 'src', 'app', '(dashboard)', 'finance', 'chart-of-accounts', 'page.tsx'), 'utf8');
 
+  assert.match(enumPrerequisite, /apply and commit this file before 043_finance_chart_of_accounts_foundation\.sql/i);
+  assert.match(enumPrerequisite, /alter type icecream_erp\.account_type add value if not exists 'HEADER'/i);
+  assert.match(enumPrerequisite, /alter type icecream_erp\.account_type add value if not exists 'CONTRA_ASSET'/i);
+  assert.match(enumPrerequisite, /alter type icecream_erp\.account_type add value if not exists 'CONTRA_REVENUE'/i);
+  assert.match(enumPrerequisite, /alter type icecream_erp\.account_type add value if not exists 'OTHER_INCOME'/i);
+  assert.match(enumPrerequisiteVerify, /VERIFY 042A/);
+  assert.match(enumPrerequisiteVerify, /missing account_type enum labels/i);
   assert.match(migration, /create table if not exists icecream_erp\.cost_centres/);
   assert.match(migration, /create table if not exists icecream_erp\.erp_account_mappings/);
   assert.match(migration, /idx_accounts_org_code_unique/);
   assert.match(migration, /on conflict \(organization_id, code\) do update/);
+  assert.match(migration, /042a_finance_account_type_enum_prerequisites\.sql/);
+  assert.doesNotMatch(migration, /alter type icecream_erp\.account_type add value/i);
   assert.doesNotMatch(migration, /on parent\.organization_id = child\.organization_id/);
   assert.doesNotMatch(migration, /alter\s+role|authenticator|pgrst\.db_schemas|search_path\s+to/i);
   assert.doesNotMatch(migration.replace(/public\.digest/g, ''), /public\./);
@@ -552,6 +563,7 @@ test('phase 1d migration and finance routes stay schema-local and enforce postin
   assert.match(verify, /VERIFY 043/);
   assert.match(verify, /do \$\$/i);
   assert.match(verify, /raise exception/i);
+  assert.match(verify, /Apply 042a_finance_account_type_enum_prerequisites\.sql first/i);
   assert.match(verify, /default ERP account mappings/i);
   assert.match(chartRoute, /view === 'tree'/);
   assert.match(chartRoute, /accountType/);

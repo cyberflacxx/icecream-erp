@@ -4,11 +4,23 @@ These commands are for operator-controlled execution only.
 
 Do not run them from Codex against production.
 
-## 1. Isolated Rehearsal First
+## 1. Exact migration order
+
+Phase 1H must be applied in this order:
+
+1. `migrations/042a_finance_account_type_enum_prerequisites.sql`
+2. `migrations/043_finance_chart_of_accounts_foundation.sql`
+3. `migrations/044_atomic_inventory_posting_and_stock_ledger.sql`
+4. `migrations/045_inventory_operational_reversals.sql`
+
+Reason: PostgreSQL 15 requires the new `icecream_erp.account_type` labels to be committed before `043` uses them.
+
+## 2. Isolated rehearsal first
 
 ### Required environment
 
 ```bash
+export PHASE_1H_DB_ISOLATED=1
 export PHASE_1G_DB_TESTS=1
 export PHASE_1G_DB_ISOLATED=1
 export DATABASE_URL='postgresql://<user>:<password>@<isolated-host>:5432/<isolated-db>'
@@ -18,21 +30,14 @@ export PHASE_1G_HEALTH_URL='https://<erp-host>/api/health'
 ### Confirm target is isolated and not production
 
 ```bash
-python - <<'PY'
-from urllib.parse import urlparse
-import os
-u = urlparse(os.environ['DATABASE_URL'])
-print('database_host=', u.hostname)
-print('database_name=', u.path.lstrip('/'))
-print('production_target=', 'YES' if 'prod' in (u.hostname or '').lower() or 'prod' in u.path.lower() else 'NO')
-PY
+node -e "const u=new URL(process.env.DATABASE_URL); const db=decodeURIComponent((u.pathname||'').replace(/^\\//,'')); console.log('database_host=', u.hostname || ''); console.log('database_name=', db); console.log('explicit_isolated_flag=', process.env.PHASE_1H_DB_ISOLATED || '0'); console.log('production_target=', /(prod|production|live)/i.test((u.hostname||'') + ' ' + db) ? 'YES' : 'NO');"
 ```
 
 ### Confirm PostgreSQL identity and schema
 
 ```bash
 psql "$DATABASE_URL" -X -v ON_ERROR_STOP=1 -c "select version();"
-psql "$DATABASE_URL" -X -v ON_ERROR_STOP=1 -c "select current_schema();"
+psql "$DATABASE_URL" -X -v ON_ERROR_STOP=1 -c "select current_database(), current_schema();"
 psql "$DATABASE_URL" -X -v ON_ERROR_STOP=1 -c "select filename, applied_at from public.schema_migrations order by filename;"
 ```
 
@@ -46,22 +51,34 @@ pg_dump "$DATABASE_URL" --format=custom --file "backups/icecream_erp_phase1h_iso
 ### Record checksums
 
 ```bash
+sha256sum migrations/042a_finance_account_type_enum_prerequisites.sql
 sha256sum migrations/043_finance_chart_of_accounts_foundation.sql
 sha256sum migrations/044_atomic_inventory_posting_and_stock_ledger.sql
 sha256sum migrations/045_inventory_operational_reversals.sql
 ```
 
-### Apply and verify in order
+### Preferred isolated rehearsal runner
 
 ```bash
-psql "$DATABASE_URL" -X -v ON_ERROR_STOP=1 -f migrations/043_finance_chart_of_accounts_foundation.sql
-psql "$DATABASE_URL" -X -v ON_ERROR_STOP=1 -f migrations/manual/043_finance_chart_of_accounts_foundation.verify.sql
+bash deployment/run-phase1h-isolated-rehearsal.sh
+```
 
-psql "$DATABASE_URL" -X -v ON_ERROR_STOP=1 -f migrations/044_atomic_inventory_posting_and_stock_ledger.sql
-psql "$DATABASE_URL" -X -v ON_ERROR_STOP=1 -f migrations/manual/044_atomic_inventory_posting_and_stock_ledger.verify.sql
+### Manual isolated rehearsal equivalent
 
-psql "$DATABASE_URL" -X -v ON_ERROR_STOP=1 -f migrations/045_inventory_operational_reversals.sql
-psql "$DATABASE_URL" -X -v ON_ERROR_STOP=1 -f migrations/manual/045_inventory_operational_reversals.verify.sql
+`042a` must not be wrapped in `--single-transaction`.
+
+```bash
+psql "$DATABASE_URL" -X -v ON_ERROR_STOP=1 -f migrations/042a_finance_account_type_enum_prerequisites.sql
+psql "$DATABASE_URL" -X -v ON_ERROR_STOP=1 --single-transaction -f migrations/manual/042a_finance_account_type_enum_prerequisites.verify.sql
+
+psql "$DATABASE_URL" -X -v ON_ERROR_STOP=1 --single-transaction -f migrations/043_finance_chart_of_accounts_foundation.sql
+psql "$DATABASE_URL" -X -v ON_ERROR_STOP=1 --single-transaction -f migrations/manual/043_finance_chart_of_accounts_foundation.verify.sql
+
+psql "$DATABASE_URL" -X -v ON_ERROR_STOP=1 --single-transaction -f migrations/044_atomic_inventory_posting_and_stock_ledger.sql
+psql "$DATABASE_URL" -X -v ON_ERROR_STOP=1 --single-transaction -f migrations/manual/044_atomic_inventory_posting_and_stock_ledger.verify.sql
+
+psql "$DATABASE_URL" -X -v ON_ERROR_STOP=1 --single-transaction -f migrations/045_inventory_operational_reversals.sql
+psql "$DATABASE_URL" -X -v ON_ERROR_STOP=1 --single-transaction -f migrations/manual/045_inventory_operational_reversals.verify.sql
 ```
 
 ### Run real transaction and concurrency tests
@@ -71,7 +88,7 @@ npm run test:inventory:db
 npm run test:inventory:concurrency
 ```
 
-## 2. Production Window
+## 3. Production window
 
 ### Enter maintenance mode and back up
 
@@ -94,15 +111,20 @@ psql "$DATABASE_URL" -X -v ON_ERROR_STOP=1 -f deployment/phase-1g-predeploy.sql
 
 ### Apply migrations and verify
 
+`042a` must be committed before `043`. Keep `043` through `045` transactional.
+
 ```bash
-psql "$DATABASE_URL" -X -v ON_ERROR_STOP=1 -f migrations/043_finance_chart_of_accounts_foundation.sql
-psql "$DATABASE_URL" -X -v ON_ERROR_STOP=1 -f migrations/manual/043_finance_chart_of_accounts_foundation.verify.sql
+psql "$DATABASE_URL" -X -v ON_ERROR_STOP=1 -f migrations/042a_finance_account_type_enum_prerequisites.sql
+psql "$DATABASE_URL" -X -v ON_ERROR_STOP=1 --single-transaction -f migrations/manual/042a_finance_account_type_enum_prerequisites.verify.sql
 
-psql "$DATABASE_URL" -X -v ON_ERROR_STOP=1 -f migrations/044_atomic_inventory_posting_and_stock_ledger.sql
-psql "$DATABASE_URL" -X -v ON_ERROR_STOP=1 -f migrations/manual/044_atomic_inventory_posting_and_stock_ledger.verify.sql
+psql "$DATABASE_URL" -X -v ON_ERROR_STOP=1 --single-transaction -f migrations/043_finance_chart_of_accounts_foundation.sql
+psql "$DATABASE_URL" -X -v ON_ERROR_STOP=1 --single-transaction -f migrations/manual/043_finance_chart_of_accounts_foundation.verify.sql
 
-psql "$DATABASE_URL" -X -v ON_ERROR_STOP=1 -f migrations/045_inventory_operational_reversals.sql
-psql "$DATABASE_URL" -X -v ON_ERROR_STOP=1 -f migrations/manual/045_inventory_operational_reversals.verify.sql
+psql "$DATABASE_URL" -X -v ON_ERROR_STOP=1 --single-transaction -f migrations/044_atomic_inventory_posting_and_stock_ledger.sql
+psql "$DATABASE_URL" -X -v ON_ERROR_STOP=1 --single-transaction -f migrations/manual/044_atomic_inventory_posting_and_stock_ledger.verify.sql
+
+psql "$DATABASE_URL" -X -v ON_ERROR_STOP=1 --single-transaction -f migrations/045_inventory_operational_reversals.sql
+psql "$DATABASE_URL" -X -v ON_ERROR_STOP=1 --single-transaction -f migrations/manual/045_inventory_operational_reversals.verify.sql
 ```
 
 ### Rehearsal-only SQL tests on non-production data only
