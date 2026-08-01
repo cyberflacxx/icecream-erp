@@ -774,6 +774,10 @@ test('phase 1f posting migration fixes PG15 alias usage and hardens function exp
   const migration = fs.readFileSync('migrations/044_atomic_inventory_posting_and_stock_ledger.sql', 'utf8');
   const verifySql = fs.readFileSync('migrations/manual/044_atomic_inventory_posting_and_stock_ledger.verify.sql', 'utf8');
 
+  assert.match(migration, /v_has_updated_at boolean/i);
+  assert.match(migration, /v_optional_updated_at_assignment/i);
+  assert.match(migration, /column_name = 'updated_at'/i);
+  assert.match(migration, /execute format\(\$sql\$/i);
   assert.match(migration, /with stock_movement_context as \(/i);
   assert.doesNotMatch(migration, /src\.id = sm\.source_warehouse_id/i);
   assert.match(migration, /icecream_erp\.goods_received_notes%rowtype/i);
@@ -784,6 +788,7 @@ test('phase 1f posting migration fixes PG15 alias usage and hardens function exp
   assert.match(verifySql, /do \$\$/i);
   assert.match(verifySql, /raise exception/i);
   assert.match(verifySql, /still has EXECUTE on privileged inventory posting functions/i);
+  assert.doesNotMatch(verifySql, /stock_movements', 'updated_at'/i);
 });
 
 test('phase 1g reversal routes and transfer UI use dedicated reverse APIs', () => {
@@ -846,6 +851,35 @@ test('phase 1g deployment assets and gated db test scripts are present', () => {
   assert.match(smoke, /045_inventory_operational_reversals\.verify\.sql/);
   assert.match(deploy, /Apply 045/);
   assert.match(deploy, /pg_dump/);
+});
+
+test('phase 1h rehearsal runner enforces enum prerequisite order and non-production safety', () => {
+  const runner = fs.readFileSync('deployment/run-phase1h-isolated-rehearsal.sh', 'utf8');
+  const commands = fs.readFileSync('deployment/PHASE_1H_PRODUCTION_COMMANDS.md', 'utf8');
+  const order = [
+    'migrations/042a_finance_account_type_enum_prerequisites.sql',
+    'migrations/043_finance_chart_of_accounts_foundation.sql',
+    'migrations/044_atomic_inventory_posting_and_stock_ledger.sql',
+    'migrations/045_inventory_operational_reversals.sql',
+  ];
+
+  assert.match(runner, /PHASE_1H_DB_ISOLATED/);
+  assert.match(runner, /Refusing to run against database name postgres/i);
+  assert.match(runner, /run_sql_non_transaction "042a enum prerequisite"/i);
+  assert.match(runner, /run_sql_single_transaction "043 finance foundation"/i);
+  assert.match(runner, /run_sql_single_transaction "044 atomic inventory posting"/i);
+  assert.match(runner, /run_sql_single_transaction "045 inventory reversals"/i);
+  assert.match(runner, /PASSED/);
+  assert.doesNotMatch(runner, /\|\|\s*echo/);
+  assert.match(commands, /bash deployment\/run-phase1h-isolated-rehearsal\.sh/);
+  assert.match(commands, /042a.*must not be wrapped in `--single-transaction`/i);
+
+  let previousIndex = -1;
+  for (const marker of order) {
+    const currentIndex = commands.indexOf(marker);
+    assert.ok(currentIndex > previousIndex, `Expected ${marker} to appear in Phase 1H command order.`);
+    previousIndex = currentIndex;
+  }
 });
 
 test('item selector helper preserves missing cost and price values while aggregating stock by branch and warehouse', () => {

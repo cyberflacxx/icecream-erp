@@ -101,47 +101,93 @@ alter table if exists icecream_erp.stock_movements
   add column if not exists reversal_of_movement_id uuid null references icecream_erp.stock_movements(id),
   add column if not exists reversal_reference text null;
 
-with stock_movement_context as (
-  select
-    movement.id,
-    wh.branch_id as warehouse_branch_id,
-    src.branch_id as source_branch_id,
-    dst.branch_id as destination_branch_id
-  from icecream_erp.stock_movements movement
-  join icecream_erp.warehouses wh
-    on wh.id = movement.warehouse_id
-  left join icecream_erp.warehouses src
-    on src.id = movement.source_warehouse_id
-  left join icecream_erp.warehouses dst
-    on dst.id = movement.destination_warehouse_id
-)
-update icecream_erp.stock_movements sm
-set total_value = coalesce(sm.total_value, sm.total_cost, sm.quantity * sm.unit_cost, 0),
-    posting_date = coalesce(sm.posting_date, sm.created_at::date),
-    posting_status = coalesce(nullif(sm.posting_status, ''), 'POSTED'),
-    movement_number = coalesce(
-      nullif(sm.movement_number, ''),
-      nullif(sm.reference_number, ''),
-      'SM-' || replace(left(sm.created_at::text, 19), ':', '') || '-' || left(sm.id::text, 8)
-    ),
-    branch_id = coalesce(sm.branch_id, context.warehouse_branch_id),
-    source_branch_id = coalesce(sm.source_branch_id, context.source_branch_id, context.warehouse_branch_id),
-    destination_branch_id = coalesce(sm.destination_branch_id, context.destination_branch_id),
-    running_value = coalesce(sm.running_value, sm.total_value),
-    updated_at = now()
-from stock_movement_context context
-where context.id = sm.id
-  and (
-    sm.total_value is null
-    or sm.posting_date is null
-    or sm.movement_number is null
-    or sm.branch_id is null
-    or sm.source_branch_id is null
-    or sm.destination_branch_id is null
-    or sm.running_value is null
-    or sm.posting_status is null
-    or sm.posting_status = ''
+do $$
+declare
+  v_has_updated_at boolean := false;
+  v_missing_columns text[];
+  v_optional_updated_at_assignment text := '';
+begin
+  select array_agg(required.column_name order by required.column_name)
+  into v_missing_columns
+  from (
+    values
+      ('created_at'),
+      ('destination_warehouse_id'),
+      ('quantity'),
+      ('reference_number'),
+      ('source_warehouse_id'),
+      ('total_cost'),
+      ('unit_cost'),
+      ('warehouse_id')
+  ) as required(column_name)
+  where not exists (
+    select 1
+    from information_schema.columns cols
+    where cols.table_schema = 'icecream_erp'
+      and cols.table_name = 'stock_movements'
+      and cols.column_name = required.column_name
   );
+
+  if coalesce(array_length(v_missing_columns, 1), 0) > 0 then
+    raise exception '044_atomic_inventory_posting_and_stock_ledger.sql requires stock_movements columns before backfill: %', array_to_string(v_missing_columns, ', ');
+  end if;
+
+  select exists (
+    select 1
+    from information_schema.columns cols
+    where cols.table_schema = 'icecream_erp'
+      and cols.table_name = 'stock_movements'
+      and cols.column_name = 'updated_at'
+  )
+  into v_has_updated_at;
+
+  if v_has_updated_at then
+    v_optional_updated_at_assignment := E',\n    updated_at = now()';
+  end if;
+
+  execute format($sql$
+    with stock_movement_context as (
+      select
+        movement.id,
+        wh.branch_id as warehouse_branch_id,
+        src.branch_id as source_branch_id,
+        dst.branch_id as destination_branch_id
+      from icecream_erp.stock_movements movement
+      join icecream_erp.warehouses wh
+        on wh.id = movement.warehouse_id
+      left join icecream_erp.warehouses src
+        on src.id = movement.source_warehouse_id
+      left join icecream_erp.warehouses dst
+        on dst.id = movement.destination_warehouse_id
+    )
+    update icecream_erp.stock_movements sm
+    set total_value = coalesce(sm.total_value, sm.total_cost, sm.quantity * sm.unit_cost, 0),
+        posting_date = coalesce(sm.posting_date, sm.created_at::date),
+        posting_status = coalesce(nullif(sm.posting_status, ''), 'POSTED'),
+        movement_number = coalesce(
+          nullif(sm.movement_number, ''),
+          nullif(sm.reference_number, ''),
+          'SM-' || replace(left(sm.created_at::text, 19), ':', '') || '-' || left(sm.id::text, 8)
+        ),
+        branch_id = coalesce(sm.branch_id, context.warehouse_branch_id),
+        source_branch_id = coalesce(sm.source_branch_id, context.source_branch_id, context.warehouse_branch_id),
+        destination_branch_id = coalesce(sm.destination_branch_id, context.destination_branch_id),
+        running_value = coalesce(sm.running_value, sm.total_value)%s
+    from stock_movement_context context
+    where context.id = sm.id
+      and (
+        sm.total_value is null
+        or sm.posting_date is null
+        or sm.movement_number is null
+        or sm.branch_id is null
+        or sm.source_branch_id is null
+        or sm.destination_branch_id is null
+        or sm.running_value is null
+        or sm.posting_status is null
+        or sm.posting_status = ''
+      )
+  $sql$, v_optional_updated_at_assignment);
+end $$;
 
 create index if not exists idx_stock_movements_posting_date
   on icecream_erp.stock_movements (organization_id, posting_date, created_at, id);

@@ -5,11 +5,36 @@
 
 do $$
 declare
+  v_missing_labels text[];
   v_expected_account_count integer := 110;
   v_expected_mapping_count integer := 31;
   v_expected_cost_centre_count integer := 11;
   v_org record;
 begin
+  if to_regtype('icecream_erp.account_type') is null then
+    raise exception 'VERIFY 043 failed: missing enum icecream_erp.account_type. Apply 042a_finance_account_type_enum_prerequisites.sql first.';
+  end if;
+
+  select array_agg(required.enum_label order by required.enum_label)
+  into v_missing_labels
+  from (
+    values
+      ('HEADER'),
+      ('CONTRA_ASSET'),
+      ('CONTRA_REVENUE'),
+      ('OTHER_INCOME')
+  ) as required(enum_label)
+  where not exists (
+    select 1
+    from pg_enum enum
+    where enum.enumtypid = 'icecream_erp.account_type'::regtype
+      and enum.enumlabel = required.enum_label
+  );
+
+  if coalesce(array_length(v_missing_labels, 1), 0) > 0 then
+    raise exception 'VERIFY 043 failed: missing account_type enum prerequisite labels from 042a_finance_account_type_enum_prerequisites.sql: %', array_to_string(v_missing_labels, ', ');
+  end if;
+
   if not exists (select 1 from icecream_erp.organizations) then
     raise exception 'VERIFY 043 failed: no organizations found in icecream_erp.organizations.';
   end if;
