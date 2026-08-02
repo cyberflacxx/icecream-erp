@@ -1917,3 +1917,14 @@ test('production planning and BOM pages use the shared branch and item selector 
   assert.match(recipesPage, /ItemSelectorField/);
   assert.match(recipesPage, /Search finished product/);
 });
+
+test('production reports show a controlled zero-output costing notice and use compatibility fallback loading', () => {
+  const reportsPage = fs.readFileSync('src/app/(dashboard)/production/reports/page.tsx', 'utf8');
+  const productionServer = fs.readFileSync('src/lib/production-server.ts', 'utf8');
+
+  assert.match(reportsPage, /Production cost per good unit is unavailable because no good output has been recorded\./);
+  assert.match(productionServer, /isMissingRelationshipError/);
+  assert.match(productionServer, /from\('production_batch_materials'\)/);
+  assert.match(productionServer, /from\('production_batch_outputs'\)/);
+  assert.match(productionServer, /from\('production_worker_assignments'\)/);
+});

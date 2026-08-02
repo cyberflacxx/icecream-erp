@@ -1,12 +1,5 @@
 export interface SalesReceiptPrintPayload {
-  amount: number;
-  customerName: string;
-  invoiceNumber: string;
-  notes?: string;
-  paymentDate: string;
-  paymentMethod: string;
-  paymentNumber: string;
-  referenceNumber?: string;
+  paymentId: string;
 }
 
 export function formatPaymentMethodLabel(value: string) {
@@ -19,16 +12,9 @@ export function formatPaymentMethodLabel(value: string) {
 
 export function buildSalesReceiptPrintUrl(payload: SalesReceiptPrintPayload, options?: { autoPrint?: boolean }) {
   const searchParams = new URLSearchParams({
-    amount: String(payload.amount),
-    customerName: payload.customerName,
-    invoiceNumber: payload.invoiceNumber,
-    paymentDate: payload.paymentDate,
-    paymentMethod: payload.paymentMethod,
-    paymentNumber: payload.paymentNumber,
+    paymentId: payload.paymentId,
   });
 
-  if (payload.notes) searchParams.set('notes', payload.notes);
-  if (payload.referenceNumber) searchParams.set('referenceNumber', payload.referenceNumber);
   if (options?.autoPrint) searchParams.set('autoprint', '1');
 
   return `/sales/payments/receipt?${searchParams.toString()}`;

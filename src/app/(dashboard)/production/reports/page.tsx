@@ -52,6 +52,7 @@ export default function ProductionReportsPage() {
   const consumptionRows = asRows(consumptionQuery.data);
   const yieldRows = asRows(yieldQuery.data);
   const costingRows = asRows(costingQuery.data);
+  const zeroOutputCosting = costingRows.some((row) => Number(row.acceptedOutput ?? 0) <= 0);
 
   async function handleExport(reportType: string) {
     setExportingReport(reportType);
@@ -170,6 +171,7 @@ export default function ProductionReportsPage() {
           title="Costing"
           description="Review total batch cost and unit cost to understand production efficiency and product profitability."
           rows={costingRows}
+          notice={zeroOutputCosting ? 'Production cost per good unit is unavailable because no good output has been recorded.' : null}
           columns={[
             { key: 'batchNumber', header: 'Batch #' },
             { key: 'productName', header: 'Product' },
@@ -219,6 +221,7 @@ function ReportSection({
     render?: (row: Record<string, unknown>) => ReactNode;
   }>;
   description: string;
+  notice?: string | null;
   rows: Array<Record<string, unknown>>;
   title: string;
 }) {
@@ -227,6 +230,7 @@ function ReportSection({
       <div>
         <h2 className="text-lg font-semibold text-brown">{title}</h2>
         <p className="mt-1 text-sm text-muted">{description}</p>
+        {notice ? <p className="mt-2 text-sm text-amber-700">{notice}</p> : null}
       </div>
       <DataTable
         columns={columns}

@@ -34,9 +34,6 @@ export default function SalesPaymentsPage() {
   const [formError, setFormError] = useState<string | null>(null);
   const [submitMode, setSubmitMode] = useState<'save' | 'print'>('save');
 
-  const selectedInvoice = metaQuery.data?.invoices.find((invoice) => invoice.id === formState.invoiceId);
-  const selectedCustomer = metaQuery.data?.customers.find((customer) => customer.id === formState.customerId);
-
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
@@ -72,16 +69,7 @@ export default function SalesPaymentsPage() {
 
     const payment = response.payment;
     const printUrl = buildSalesReceiptPrintUrl(
-      {
-        amount: Number(payment.amount ?? formState.amount),
-        customerName: selectedCustomer?.name ?? 'Customer',
-        invoiceNumber: selectedInvoice?.invoiceNumber ?? 'Invoice',
-        notes: formState.notes || undefined,
-        paymentDate: String(payment.payment_date ?? formState.paymentDate),
-        paymentMethod: String(payment.payment_method ?? formState.paymentMethod),
-        paymentNumber: String(payment.payment_number ?? 'Pending'),
-        referenceNumber: payment.reference_number ?? formState.referenceNumber ?? undefined,
-      },
+      { paymentId: String(payment.id) },
       { autoPrint: true },
     );
     await downloadFromUrl(printUrl, {
@@ -120,6 +108,22 @@ export default function SalesPaymentsPage() {
           { key: 'payment_method', header: 'Method' },
           { key: 'reference_number', header: 'Reference' },
           { key: 'status', header: 'Status' },
+          {
+            key: 'actions',
+            header: 'Actions',
+            render: (row) => (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => void downloadFromUrl(buildSalesReceiptPrintUrl({ paymentId: String((row as { id?: string }).id ?? '') }, { autoPrint: true }), {
+                  filename: `receipt-${String((row as { payment_number?: string }).payment_number ?? 'reprint')}.html`,
+                })}
+              >
+                Reprint Receipt
+              </Button>
+            ),
+          },
         ]}
         data={Array.isArray(query.data) ? query.data : []}
         emptyState={<EmptyState icon={<AlertCircle className="h-6 w-6" />} title="No receipts found" description="Record customer receipts against invoices." />}

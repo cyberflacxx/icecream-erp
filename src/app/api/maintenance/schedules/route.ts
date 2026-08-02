@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import { badRequest, can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
+import { apiServerError, badRequest, can, forbidden, getAuthContext, unauthorized } from '@/lib/api-auth';
 import {
   isMissingColumnError,
   isMissingRelationshipError,
@@ -90,8 +90,14 @@ export async function GET(request: NextRequest) {
       totalPages: Math.ceil(count / limit),
     });
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Internal server error';
-    return serverError(message);
+    return apiServerError({
+      ctx,
+      error: err,
+      message: 'Maintenance schedules could not be loaded.',
+      module: 'maintenance.schedules',
+      path: request.nextUrl.pathname,
+      status: 500,
+    });
   }
 }
 
@@ -144,7 +150,14 @@ export async function POST(request: NextRequest) {
     if (error) throw error;
     return NextResponse.json(schedule, { status: 201 });
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Internal server error';
-    return serverError(message);
+    return apiServerError({
+      ctx,
+      error: err,
+      message: 'The maintenance schedule could not be created.',
+      module: 'maintenance.schedules',
+      path: request.nextUrl.pathname,
+      status: 500,
+      transactionReference: 'maintenance-schedule-create',
+    });
   }
 }

@@ -451,10 +451,31 @@ export async function resolveFinanceCostCentreCode(
 
 export async function syncBranchCostCentres(organizationId: string) {
   const service = financeService();
-  const [branchesResult, costCentresResult] = await Promise.all([
-    service.from('branches').select('id, code, name, is_active').eq('organization_id', organizationId).eq('is_active', true),
-    service.from('cost_centres').select('id, code, branch_id, is_active').eq('organization_id', organizationId),
-  ]);
+  let branchesResult = await service
+    .from('branches')
+    .select('id, code, name, status, deleted_at')
+    .eq('organization_id', organizationId)
+    .eq('status', 'ACTIVE')
+    .is('deleted_at', null);
+
+  if (
+    branchesResult.error &&
+    (
+      isMissingFinanceColumn(branchesResult.error, 'branches', 'status') ||
+      isMissingFinanceColumn(branchesResult.error, 'branches', 'deleted_at')
+    )
+  ) {
+    branchesResult = await service
+      .from('branches')
+      .select('id, code, name, is_active')
+      .eq('organization_id', organizationId)
+      .eq('is_active', true) as typeof branchesResult;
+  }
+
+  const costCentresResult = await service
+    .from('cost_centres')
+    .select('id, code, branch_id, is_active')
+    .eq('organization_id', organizationId);
 
   if (branchesResult.error) throw branchesResult.error;
   if (costCentresResult.error) {
@@ -496,7 +517,7 @@ export async function loadFinanceMetaResources(organizationId: string) {
   const service = financeService();
   const [accounts, branches, cashAccounts, bankAccounts, costCentres, fiscalPeriods, currencies] = await Promise.all([
     loadFinanceAccounts(organizationId, { activeStatus: 'active' }),
-    service.from('branches').select('id, code, name').eq('organization_id', organizationId).order('name', { ascending: true }),
+    service.from('branches').select('id, code, name, status, deleted_at').eq('organization_id', organizationId).order('name', { ascending: true }),
     service.from('cash_accounts').select('id, name, account_name, branch_id, balance, current_balance').eq('organization_id', organizationId).order('name', { ascending: true }),
     service.from('bank_accounts').select('id, account_name, account_number, bank_name, current_balance').eq('organization_id', organizationId).order('account_name', { ascending: true }),
     loadFinanceCostCentres(organizationId).catch((error) => {
@@ -514,7 +535,9 @@ export async function loadFinanceMetaResources(organizationId: string) {
   if (currencies.error && !isMissingFinanceTable(currencies.error)) throw currencies.error;
 
   return {
-    accounts: accounts.map((account) => buildFinanceAccountApiRow(account, accounts)).filter((account) => Boolean(account.allowPosting) && account.is_active !== false),
+    accounts: accounts
+      .map((account) => buildFinanceAccountApiRow(account, accounts))
+      .filter((account) => Boolean(account.allowPosting) && account.is_active !== false),
     bankAccounts: ((bankAccounts.data ?? []) as Row[]).map((row) => ({
       accountName: String(row.account_name ?? ''),
       accountNumber: String(row.account_number ?? ''),
@@ -522,11 +545,14 @@ export async function loadFinanceMetaResources(organizationId: string) {
       currentBalance: toNumber(row.current_balance),
       id: String(row.id ?? ''),
     })),
-    branches: ((branches.data ?? []) as Row[]).map((row) => ({
-      code: String(row.code ?? ''),
-      id: String(row.id ?? ''),
-      name: String(row.name ?? row.code ?? ''),
-    })),
+    branches: ((branches.data ?? []) as Row[])
+      .filter((row) => !row.deleted_at)
+      .filter((row) => String(row.status ?? 'ACTIVE').toUpperCase() !== 'INACTIVE')
+      .map((row) => ({
+        code: String(row.code ?? ''),
+        id: String(row.id ?? ''),
+        name: String(row.name ?? row.code ?? ''),
+      })),
     cashAccounts: ((cashAccounts.data ?? []) as Row[]).map((row) => ({
       balance: toNumber(row.current_balance ?? row.balance),
       branchId: row.branch_id ? String(row.branch_id) : null,

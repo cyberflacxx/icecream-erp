@@ -582,3 +582,15 @@ test('phase 1d migration and finance routes stay schema-local and enforce postin
   assert.match(financePage, /Opening Balances/);
   assert.match(chartPage, /Account Tree/);
 });
+
+test('finance metadata synchronization uses active non-deleted branches and safe api error handling', () => {
+  const foundationServer = readFileSync(join('src', 'lib', 'finance-foundation-server.ts'), 'utf8');
+  const metaRoute = readFileSync(join('src', 'app', 'api', 'finance', 'meta', 'route.ts'), 'utf8');
+
+  assert.match(foundationServer, /\.select\('id, code, name, status, deleted_at'\)/);
+  assert.match(foundationServer, /\.eq\('status', 'ACTIVE'\)/);
+  assert.match(foundationServer, /\.is\('deleted_at', null\)/);
+  assert.doesNotMatch(foundationServer, /select\('id, code, name, is_active'\)\.eq\('organization_id', organizationId\)\.eq\('is_active', true\)/);
+  assert.match(metaRoute, /apiServerError/);
+  assert.match(metaRoute, /Finance accounts could not be loaded for this organization/);
+});

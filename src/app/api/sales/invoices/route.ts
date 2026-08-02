@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import { can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
+import { apiServerError, can, forbidden, getAuthContext, unauthorized } from '@/lib/api-auth';
 import { isWarehouseAvailableToContext, resolveRequestedBranchId } from '@/lib/branch-access';
-import { loadResolvedSalesItemPricing, loadSalesCustomerPricingContext } from '@/lib/sales-pricing';
+import { loadResolvedSalesItemPricing, loadSalesCustomerPricingContext, NO_ACTIVE_SELLING_PRICE_MESSAGE } from '@/lib/sales-pricing';
 import { isCustomerInactiveStatus } from '@/lib/sales-customers';
 import {
   isMissingSalesColumn,
@@ -118,7 +118,14 @@ export async function GET(request: NextRequest) {
 
     if (invoicesResult.error) {
       logSalesRouteError('invoices', 'load invoice list', invoicesResult.error);
-      return serverError('Sales invoices could not be loaded.');
+      return apiServerError({
+        ctx,
+        error: invoicesResult.error,
+        message: 'Sales invoices could not be loaded.',
+        module: 'sales.invoices',
+        path: request.nextUrl.pathname,
+        status: 500,
+      });
     }
 
     const rows = (invoicesResult.data ?? []) as Array<Record<string, unknown>>;
@@ -136,11 +143,25 @@ export async function GET(request: NextRequest) {
 
     if (customersResult.error) {
       logSalesRouteError('invoices', 'load invoice customers', customersResult.error);
-      return serverError('Sales invoices could not be loaded.');
+      return apiServerError({
+        ctx,
+        error: customersResult.error,
+        message: 'Sales invoices could not be loaded.',
+        module: 'sales.invoices',
+        path: request.nextUrl.pathname,
+        status: 500,
+      });
     }
     if (invoiceItemsResult.error && !isMissingSalesTable(invoiceItemsResult.error)) {
       logSalesRouteError('invoices', 'load invoice items', invoiceItemsResult.error);
-      return serverError('Sales invoices could not be loaded.');
+      return apiServerError({
+        ctx,
+        error: invoiceItemsResult.error,
+        message: 'Sales invoices could not be loaded.',
+        module: 'sales.invoices',
+        path: request.nextUrl.pathname,
+        status: 500,
+      });
     }
 
     const customersById = new Map(
@@ -186,7 +207,14 @@ export async function GET(request: NextRequest) {
     );
   } catch (error) {
     logSalesRouteError('invoices', 'load invoice list', error);
-    return serverError('Sales invoices could not be loaded.');
+    return apiServerError({
+      ctx,
+      error,
+      message: 'Sales invoices could not be loaded.',
+      module: 'sales.invoices',
+      path: request.nextUrl.pathname,
+      status: 500,
+    });
   }
 }
 
@@ -253,6 +281,7 @@ export async function POST(request: NextRequest) {
 
   const invoiceDate = body.invoiceDate ?? new Date().toISOString().slice(0, 10);
   const postInventory = body.postInventory !== false;
+  const idempotencyKey = String(body.idempotencyKey ?? '').trim() || crypto.randomUUID();
 
   let orderItems: Array<{
     discount_percent: number | null;
@@ -273,7 +302,14 @@ export async function POST(request: NextRequest) {
         'id, branch_id, warehouse_id, status, organization_id',
       );
     } catch (error) {
-      return serverError(error instanceof Error ? error.message : 'Failed to load sales order.');
+      return apiServerError({
+        ctx,
+        error,
+        message: 'The sales order could not be loaded for invoicing.',
+        module: 'sales.invoices',
+        path: request.nextUrl.pathname,
+        status: 500,
+      });
     }
 
     if (!order) {
@@ -284,7 +320,14 @@ export async function POST(request: NextRequest) {
         .eq('order_number', body.salesOrderId)
         .maybeSingle();
       if (orderByNumber.error) {
-        return serverError(orderByNumber.error.message);
+        return apiServerError({
+          ctx,
+          error: orderByNumber.error,
+          message: 'The sales order could not be loaded for invoicing.',
+          module: 'sales.invoices',
+          path: request.nextUrl.pathname,
+          status: 500,
+        });
       }
       order = (orderByNumber.data ?? null) as Record<string, unknown> | null;
     }
@@ -306,7 +349,14 @@ export async function POST(request: NextRequest) {
     try {
       orderItems = await loadSalesOrderItems(salesService, String(order.id ?? body.salesOrderId));
     } catch (error) {
-      return serverError(error instanceof Error ? error.message : 'Failed to load sales order items.');
+      return apiServerError({
+        ctx,
+        error,
+        message: 'The sales order lines could not be loaded for invoicing.',
+        module: 'sales.invoices',
+        path: request.nextUrl.pathname,
+        status: 500,
+      });
     }
   }
 
@@ -319,7 +369,14 @@ export async function POST(request: NextRequest) {
   }
   const branchRows = await branchLookup;
   if (branchRows.error) {
-    return serverError(branchRows.error.message);
+    return apiServerError({
+      ctx,
+      error: branchRows.error,
+      message: 'The selected branch could not be validated.',
+      module: 'sales.invoices',
+      path: request.nextUrl.pathname,
+      status: 500,
+    });
   }
 
   const branchAuthorization = resolveRequestedBranchId(
@@ -351,7 +408,15 @@ export async function POST(request: NextRequest) {
       .eq('is_active', true)
       .maybeSingle();
     if (warehouseResult.error) {
-      return serverError(warehouseResult.error.message);
+      return apiServerError({
+        branchId: branchAuthorization.branchId,
+        ctx,
+        error: warehouseResult.error,
+        message: 'The selected warehouse could not be validated.',
+        module: 'sales.invoices',
+        path: request.nextUrl.pathname,
+        status: 500,
+      });
     }
     if (!warehouseResult.data) {
       return NextResponse.json({ error: 'Warehouse not found.' }, { status: 404 });
@@ -421,7 +486,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: `The selected item ${item.itemId} is inactive or unavailable.` }, { status: 400 });
     }
     if (resolved.sellingPrice === null || resolved.sellingPrice <= 0) {
-      return NextResponse.json({ error: `The selected item ${resolved.code || item.itemId} has no active selling price.` }, { status: 400 });
+      return NextResponse.json({ error: NO_ACTIVE_SELLING_PRICE_MESSAGE }, { status: 400 });
     }
     if (postInventory && (resolved.currentInventoryCost === null || resolved.currentInventoryCost <= 0)) {
       return NextResponse.json({ error: `The selected item ${resolved.code || item.itemId} has no inventory cost configured.` }, { status: 400 });
@@ -453,11 +518,16 @@ export async function POST(request: NextRequest) {
         discountAmount,
         dueDate: body.dueDate ?? null,
         exchangeRate: body.exchangeRate ?? null,
-        idempotencyKey: body.idempotencyKey ?? null,
+        idempotencyKey,
         invoiceDate,
         items: pricedItems,
         notes: body.notes ?? null,
-        payment: body.payment ?? null,
+        payment: body.payment
+          ? {
+              ...body.payment,
+              idempotencyKey: String(body.payment.idempotencyKey ?? '').trim() || `${idempotencyKey}:payment`,
+            }
+          : null,
         postInventory,
         salesOrderId: body.salesOrderId ?? null,
         taxAmount,
@@ -467,107 +537,18 @@ export async function POST(request: NextRequest) {
     );
     return NextResponse.json(transaction, { status: 201 });
   } catch (error) {
-    if (postInventory) {
-      return serverError('The sales transaction engine is required to complete invoice posting.');
-    }
-    if (shouldRequireSalesTransactionRpc() || !isSalesTransactionRpcUnavailable(error)) {
-      return serverError(salesErrorMessage(error) || 'Failed to post sales invoice transaction.');
-    }
+    const rpcUnavailable = isSalesTransactionRpcUnavailable(error);
+    return apiServerError({
+      branchId,
+      ctx,
+      error,
+      message: rpcUnavailable
+        ? 'The sales transaction engine is not available. Invoice posting cannot continue until the production RPC deployment is restored.'
+        : salesErrorMessage(error) || 'The sales invoice could not be recorded.',
+      module: 'sales.invoices',
+      path: request.nextUrl.pathname,
+      status: rpcUnavailable || shouldRequireSalesTransactionRpc() ? 503 : 500,
+      transactionReference: idempotencyKey,
+    });
   }
-
-  const { count } = await salesService.from('invoices').select('id', { count: 'exact', head: true });
-  const invoiceNumber = `INV-${String((count ?? 0) + 1).padStart(5, '0')}`;
-
-  const invoicePayload: Record<string, unknown> = {
-    amount_paid: 0,
-    balance_due: total,
-    branch_id: branchId,
-    created_by: ctx.userId,
-    customer_id: body.customerId,
-    discount_amount: discountAmount,
-    due_date: body.dueDate ?? null,
-    invoice_date: invoiceDate,
-    invoice_number: invoiceNumber,
-    notes: body.notes ?? null,
-    sales_order_id: body.salesOrderId ?? null,
-    status: 'DRAFT',
-    subtotal,
-    tax_amount: taxAmount,
-    total,
-  };
-  if (warehouseId) invoicePayload.warehouse_id = warehouseId;
-
-  const primaryInsert = await salesService.from('invoices').insert(invoicePayload).select().single();
-  let invoice = primaryInsert.data;
-  let invoiceError = primaryInsert.error;
-
-  if (
-    invoiceError &&
-    (
-      isMissingSalesColumn(invoiceError, 'invoices', 'sales_order_id') ||
-      isMissingSalesColumn(invoiceError, 'invoices', 'warehouse_id') ||
-      isMissingSalesColumn(invoiceError, 'invoices', 'discount_amount') ||
-      isMissingSalesColumn(invoiceError, 'invoices', 'total') ||
-      isMissingSalesColumn(invoiceError, 'invoices', 'amount_paid')
-    )
-  ) {
-    const fallbackInsert = await salesService
-      .from('invoices')
-      .insert({
-        balance_due: total,
-        branch_id: branchId,
-        customer_id: body.customerId,
-        due_date: body.dueDate ?? null,
-        invoice_date: invoiceDate,
-        invoice_number: invoiceNumber,
-        notes: body.notes ?? null,
-        order_id: body.salesOrderId ?? null,
-        organization_id: ctx.organizationId,
-        paid_amount: 0,
-        status: 'DRAFT',
-        subtotal,
-        tax_amount: taxAmount,
-        total_amount: total,
-      })
-      .select()
-      .single();
-    invoice = fallbackInsert.data;
-    invoiceError = fallbackInsert.error;
-  }
-
-  if (invoiceError || !invoice) {
-    return serverError(invoiceError?.message ?? 'Failed to create invoice.');
-  }
-
-  const inv = invoice as Record<string, unknown>;
-  const itemsInsert = await salesService.from('invoice_items').insert(
-    pricedItems.map((item) => ({
-      discount_percent: item.discountPercent ?? null,
-      invoice_id: inv.id,
-      item_id: item.itemId,
-      quantity: item.quantity,
-      total_price: item.quantity * item.unitPrice * (1 - (item.discountPercent ?? 0) / 100),
-      unit_price: item.unitPrice,
-    })),
-  );
-
-  if (itemsInsert.error && !salesErrorMessage(itemsInsert.error).includes('invoice_items')) {
-    return serverError(itemsInsert.error.message);
-  }
-
-  const resultQuery = await salesService
-    .from('invoices')
-    .select('*, customers(*), invoice_items(*, items(*))')
-    .eq('id', String(inv.id))
-    .single();
-  if (!resultQuery.error) {
-    return NextResponse.json(resultQuery.data, { status: 201 });
-  }
-
-  const legacyResult = await salesService.from('invoices').select('*, customers(*)').eq('id', String(inv.id)).single();
-  if (legacyResult.error) {
-    return serverError(legacyResult.error.message);
-  }
-
-  return NextResponse.json(legacyResult.data, { status: 201 });
 }

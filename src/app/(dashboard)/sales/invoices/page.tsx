@@ -195,16 +195,7 @@ export default function InvoicesPage() {
 
     const payment = response.payment;
     const printUrl = buildSalesReceiptPrintUrl(
-      {
-        amount: Number(payment.amount ?? receiptForm.amount),
-        customerName: receiptContext?.customer?.name ?? 'Customer',
-        invoiceNumber: receiptContext?.invoiceNumber ?? 'Invoice',
-        notes: receiptForm.notes || undefined,
-        paymentDate: String(payment.payment_date ?? receiptForm.paymentDate),
-        paymentMethod: String(payment.payment_method ?? receiptForm.paymentMethod),
-        paymentNumber: String(payment.payment_number ?? 'Pending'),
-        referenceNumber: payment.reference_number ?? receiptForm.referenceNumber ?? undefined,
-      },
+      { paymentId: String(payment.id) },
       { autoPrint: true },
     );
     await downloadFromUrl(printUrl, {

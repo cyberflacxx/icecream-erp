@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import { createClient } from '@/lib/supabase/server';
+import { createClient, createServiceRoleClient } from '@/lib/supabase/server';
 import { hasPermissionAccess } from '@/lib/permission-access';
 import {
   buildSecurityContextProfile,
@@ -129,4 +129,88 @@ export function badRequest(msg: string) {
 
 export function serverError(msg: string) {
   return NextResponse.json({ error: msg }, { status: 500 });
+}
+
+type ApiServerErrorInput = {
+  branchId?: string | null;
+  ctx?: AuthContext | null;
+  error: unknown;
+  message: string;
+  module: string;
+  page?: string | null;
+  path?: string | null;
+  severity?: 'CRITICAL' | 'HIGH' | 'LOW' | 'MEDIUM';
+  status?: number;
+  transactionReference?: string | null;
+};
+
+function apiErrorMessage(error: unknown) {
+  if (error instanceof Error) return error.message;
+  if (typeof error === 'object' && error !== null && 'message' in error) {
+    return String((error as { message?: unknown }).message ?? '');
+  }
+  return '';
+}
+
+function apiErrorCode(error: unknown) {
+  if (typeof error === 'object' && error !== null && 'code' in error) {
+    const code = (error as { code?: unknown }).code;
+    return code == null ? null : String(code);
+  }
+  return null;
+}
+
+function sanitizeErrorValue(value: string | null) {
+  if (!value) return value;
+  return value
+    .replace(/eyJ[A-Za-z0-9._-]+/g, '[redacted-jwt]')
+    .replace(/\b(?:sb|service_role|anon)_[A-Za-z0-9_-]+\b/g, '[redacted-key]')
+    .replace(/postgres(?:ql)?:\/\/[^@\s]+@/gi, 'postgres://[redacted]@');
+}
+
+function buildApiErrorId() {
+  return `ERR-${new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 14)}-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
+}
+
+export async function apiServerError(input: ApiServerErrorInput) {
+  const errorId = buildApiErrorId();
+  const details = {
+    branchId: input.branchId ?? input.ctx?.branchId ?? null,
+    databaseCode: apiErrorCode(input.error),
+    errorId,
+    errorMessage: sanitizeErrorValue(apiErrorMessage(input.error)),
+    module: input.module,
+    organizationId: input.ctx?.organizationId ?? null,
+    page: input.page ?? null,
+    path: input.path ?? null,
+    stack: sanitizeErrorValue(input.error instanceof Error ? input.error.stack ?? null : null),
+    timestamp: new Date().toISOString(),
+    transactionReference: input.transactionReference ?? null,
+    userId: input.ctx?.userId ?? null,
+  };
+
+  try {
+    await createServiceRoleClient()
+      .schema('icecream_erp')
+      .from('error_logs')
+      .insert({
+        details,
+        error_type: apiErrorCode(input.error) ?? (input.error instanceof Error ? input.error.name : 'API_ERROR'),
+        message_summary: `${input.message} (${errorId})`,
+        module_name: input.module,
+        organization_id: input.ctx?.organizationId ?? null,
+        severity: input.severity ?? 'MEDIUM',
+      });
+  } catch (loggingError) {
+    console.error('Failed to persist API error log', {
+      errorId,
+      loggingError: apiErrorMessage(loggingError),
+      module: input.module,
+    });
+  }
+
+  return NextResponse.json({
+    error: input.message,
+    errorId,
+  }, { status: input.status ?? 500 });
 }

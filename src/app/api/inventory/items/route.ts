@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import {
+  apiServerError,
   badRequest,
   can,
   forbidden,
   getAuthContext,
-  serverError,
   unauthorized,
 } from '@/lib/api-auth';
 import { resolveRequestedBranchId } from '@/lib/branch-access';
@@ -71,6 +71,7 @@ export async function GET(request: NextRequest) {
   const includeCost = searchParams.get('include_cost') === 'true' || searchParams.get('includeCost') === 'true';
   const includePrice = searchParams.get('include_price') === 'true' || searchParams.get('includePrice') === 'true';
   const includeInactive = searchParams.get('includeInactive') === 'true';
+  const selectorPageSize = Math.min(100, Math.max(1, parseInt(searchParams.get('limit') ?? searchParams.get('pageSize') ?? '50', 10)));
 
   if (selector) {
     let branchLookup = service
@@ -84,7 +85,16 @@ export async function GET(request: NextRequest) {
     }
 
     const branchResult = await branchLookup;
-    if (branchResult.error) return serverError(branchResult.error.message);
+    if (branchResult.error) {
+      return apiServerError({
+        ctx,
+        error: branchResult.error,
+        message: 'Branches could not be loaded for the item selector.',
+        module: 'inventory.item-selector',
+        path: request.nextUrl.pathname,
+        status: 500,
+      });
+    }
 
     const branchAuthorization = resolveRequestedBranchId(
       {
@@ -124,7 +134,17 @@ export async function GET(request: NextRequest) {
     }
 
     const warehouseResult = await warehouseQuery;
-    if (warehouseResult.error) return serverError(warehouseResult.error.message);
+    if (warehouseResult.error) {
+      return apiServerError({
+        branchId: effectiveBranchId,
+        ctx,
+        error: warehouseResult.error,
+        message: 'Warehouses could not be loaded for the item selector.',
+        module: 'inventory.item-selector',
+        path: request.nextUrl.pathname,
+        status: 500,
+      });
+    }
 
     if (authorizedWarehouseId) {
       const warehouseBranchId = warehouseResult.data?.[0]?.branch_id ? String(warehouseResult.data[0].branch_id) : null;
@@ -152,6 +172,7 @@ export async function GET(request: NextRequest) {
         'id, organization_id, code, name, description, type, item_type, category_id, unit_id, unit_of_measure_id, standard_cost, unit_cost, cost_price, purchase_price, selling_price, is_active',
       )
       .eq('organization_id', ctx.organizationId)
+      .range(0, selectorPageSize - 1)
       .order('name', { ascending: true });
 
     if (search) {
@@ -164,7 +185,17 @@ export async function GET(request: NextRequest) {
     }
 
     const selectorResult = await selectorQuery;
-    if (selectorResult.error) return serverError(selectorResult.error.message);
+    if (selectorResult.error) {
+      return apiServerError({
+        branchId: effectiveBranchId,
+        ctx,
+        error: selectorResult.error,
+        message: 'Items could not be loaded for the selector.',
+        module: 'inventory.item-selector',
+        path: request.nextUrl.pathname,
+        status: 500,
+      });
+    }
 
     const selectorRows = (selectorResult.data ?? []).filter((row) =>
       typeFilters.length === 0
@@ -189,9 +220,39 @@ export async function GET(request: NextRequest) {
             .in('item_id', selectorRows.map((row) => String(row.id)))
         : Promise.resolve({ data: [], error: null }),
     ]);
-    if (categoriesResult.error) return serverError(categoriesResult.error.message);
-    if (unitsResult.error) return serverError(unitsResult.error.message);
-    if (stockResult.error) return serverError(stockResult.error.message);
+    if (categoriesResult.error) {
+      return apiServerError({
+        branchId: effectiveBranchId,
+        ctx,
+        error: categoriesResult.error,
+        message: 'Item categories could not be loaded for the selector.',
+        module: 'inventory.item-selector',
+        path: request.nextUrl.pathname,
+        status: 500,
+      });
+    }
+    if (unitsResult.error) {
+      return apiServerError({
+        branchId: effectiveBranchId,
+        ctx,
+        error: unitsResult.error,
+        message: 'Units of measure could not be loaded for the selector.',
+        module: 'inventory.item-selector',
+        path: request.nextUrl.pathname,
+        status: 500,
+      });
+    }
+    if (stockResult.error) {
+      return apiServerError({
+        branchId: effectiveBranchId,
+        ctx,
+        error: stockResult.error,
+        message: 'Stock balances could not be loaded for the selector.',
+        module: 'inventory.item-selector',
+        path: request.nextUrl.pathname,
+        status: 500,
+      });
+    }
 
     const categoryById = new Map((categoriesResult.data ?? []).map((row) => [String(row.id), String(row.name ?? '')]));
     const unitById = new Map(
@@ -248,6 +309,7 @@ export async function GET(request: NextRequest) {
           itemType: String(row.item_type ?? row.type ?? ''),
           name: String(row.name ?? row.code ?? ''),
           sellingPrice: rawPrice !== null && Number.isFinite(rawPrice) ? rawPrice : null,
+          taxStatus: resolved?.taxCode ?? null,
           unitAbbreviation: unit?.abbreviation ?? null,
           unitId: row.unit_id ? String(row.unit_id) : row.unit_of_measure_id ? String(row.unit_of_measure_id) : null,
           unitName: unit?.name ?? null,
@@ -295,7 +357,16 @@ export async function GET(request: NextRequest) {
     .order('name', { ascending: true })
     .range(from, from + pageSize - 1);
 
-  if (error) return serverError(error.message);
+  if (error) {
+    return apiServerError({
+      ctx,
+      error,
+      message: 'Inventory items could not be loaded.',
+      module: 'inventory.items',
+      path: request.nextUrl.pathname,
+      status: 500,
+    });
+  }
 
   const categoryIds = [...new Set((data ?? []).map((row) => String(row.category_id ?? '')).filter(Boolean))];
   const unitIds = [...new Set((data ?? []).map((row) => String(row.unit_id ?? '')).filter(Boolean))];
@@ -307,8 +378,26 @@ export async function GET(request: NextRequest) {
       ? service.from('units_of_measure').select('id, name, abbreviation').in('id', unitIds)
       : Promise.resolve({ data: [], error: null }),
   ]);
-  if (categoriesResult.error) return serverError(categoriesResult.error.message);
-  if (unitsResult.error) return serverError(unitsResult.error.message);
+  if (categoriesResult.error) {
+    return apiServerError({
+      ctx,
+      error: categoriesResult.error,
+      message: 'Inventory item categories could not be loaded.',
+      module: 'inventory.items',
+      path: request.nextUrl.pathname,
+      status: 500,
+    });
+  }
+  if (unitsResult.error) {
+    return apiServerError({
+      ctx,
+      error: unitsResult.error,
+      message: 'Inventory units of measure could not be loaded.',
+      module: 'inventory.items',
+      path: request.nextUrl.pathname,
+      status: 500,
+    });
+  }
 
   const categories = new Map((categoriesResult.data ?? []).map((row) => [String(row.id), row as Record<string, unknown>]));
   const units = new Map((unitsResult.data ?? []).map((row) => [String(row.id), row as Record<string, unknown>]));
@@ -358,7 +447,16 @@ export async function POST(request: NextRequest) {
       .eq('organization_id', ctx.organizationId)
       .ilike('name', 'Uncategorized')
       .maybeSingle();
-    if (existing.error) return serverError(existing.error.message);
+    if (existing.error) {
+      return apiServerError({
+        ctx,
+        error: existing.error,
+        message: 'The default inventory category could not be loaded.',
+        module: 'inventory.items',
+        path: request.nextUrl.pathname,
+        status: 500,
+      });
+    }
 
     if (existing.data?.id) {
       categoryId = existing.data.id;
@@ -369,7 +467,16 @@ export async function POST(request: NextRequest) {
         .insert({ organization_id: ctx.organizationId, name: 'Uncategorized', description: 'Default category for uncategorized inventory items.' })
         .select('id, name')
         .single();
-      if (created.error || !created.data) return serverError(created.error?.message ?? 'Failed to create default item category.');
+      if (created.error || !created.data) {
+        return apiServerError({
+          ctx,
+          error: created.error ?? new Error('Failed to create default item category.'),
+          message: 'The default inventory category could not be created.',
+          module: 'inventory.items',
+          path: request.nextUrl.pathname,
+          status: 500,
+        });
+      }
       categoryId = created.data.id;
       categoryRecord = created.data as Record<string, unknown>;
     }

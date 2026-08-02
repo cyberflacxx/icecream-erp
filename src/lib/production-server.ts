@@ -8,6 +8,7 @@ import {
   type ProductionBranchAuthorizationRecord,
   type ProductionOrderAuthorizationRecord,
 } from './production-order-authorization';
+import { isMissingColumnError, isMissingRelationshipError } from '@/lib/postgrest-compat';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
 export function productionService() {
@@ -280,8 +281,137 @@ export async function loadProductionReportBatches(filters: {
     query = query.in('warehouse_id', warehouseIds);
   }
 
-  const { data, error } = await query;
-  if (error) throw error;
+  let result = await query;
+
+  if (
+    result.error &&
+    (
+      isMissingColumnError(result.error, 'production_batches', 'deleted_at') ||
+      isMissingRelationshipError(result.error, 'production_batches', 'recipes') ||
+      isMissingRelationshipError(result.error, 'production_batch_materials', 'items') ||
+      isMissingRelationshipError(result.error, 'recipes', 'items')
+    )
+  ) {
+    let fallbackQuery = service
+      .from('production_batches')
+      .select('id, batch_number, production_date, shift, status, expected_output, actual_output, warehouse_id, recipe_id')
+      .order('production_date', { ascending: false });
+
+    if (filters.startDate) {
+      fallbackQuery = fallbackQuery.gte('production_date', `${filters.startDate}T00:00:00.000Z`);
+    }
+    if (filters.endDate) {
+      fallbackQuery = fallbackQuery.lte('production_date', `${filters.endDate}T23:59:59.999Z`);
+    }
+    if (filters.status) {
+      fallbackQuery = fallbackQuery.eq('status', filters.status);
+    }
+    if (warehouseIds && warehouseIds.length > 0) {
+      fallbackQuery = fallbackQuery.in('warehouse_id', warehouseIds);
+    }
+
+    const batchResult = await fallbackQuery;
+    if (batchResult.error) throw batchResult.error;
+
+    const batchRows = (batchResult.data ?? []) as Array<Record<string, unknown>>;
+    const batchIds = batchRows.map((row) => String(row.id ?? '')).filter(Boolean);
+    const recipeIds = [...new Set(batchRows.map((row) => String(row.recipe_id ?? '')).filter(Boolean))];
+
+    const [materialsResult, outputsResult, workerAssignmentsResult, recipesResult] = await Promise.all([
+      batchIds.length
+        ? service
+            .from('production_batch_materials')
+            .select('batch_id, quantity_required, quantity_issued, quantity_actual, unit_cost, item_id')
+            .in('batch_id', batchIds)
+        : Promise.resolve({ data: [], error: null }),
+      batchIds.length
+        ? service
+            .from('production_batch_outputs')
+            .select('batch_id, expected_quantity, actual_quantity, wastage_quantity')
+            .in('batch_id', batchIds)
+        : Promise.resolve({ data: [], error: null }),
+      batchIds.length
+        ? service
+            .from('production_worker_assignments')
+            .select('batch_id, employee_id')
+            .in('batch_id', batchIds)
+        : Promise.resolve({ data: [], error: null }),
+      recipeIds.length
+        ? service
+            .from('recipes')
+            .select('id, name, finished_item_id')
+            .in('id', recipeIds)
+        : Promise.resolve({ data: [], error: null }),
+    ]);
+
+    if (materialsResult.error && !isMissingProductionTable(materialsResult.error)) throw materialsResult.error;
+    if (outputsResult.error && !isMissingProductionTable(outputsResult.error)) throw outputsResult.error;
+    if (workerAssignmentsResult.error && !isMissingProductionTable(workerAssignmentsResult.error)) throw workerAssignmentsResult.error;
+    if (recipesResult.error && !isMissingProductionTable(recipesResult.error)) throw recipesResult.error;
+
+    const materialRows = (materialsResult.data ?? []) as Array<Record<string, unknown>>;
+    const materialItemIds = [...new Set(materialRows.map((row) => String(row.item_id ?? '')).filter(Boolean))];
+    const finishedItemIds = [...new Set(((recipesResult.data ?? []) as Array<Record<string, unknown>>).map((row) => String(row.finished_item_id ?? '')).filter(Boolean))];
+    const itemIds = [...new Set([...materialItemIds, ...finishedItemIds])];
+    const itemsResult = itemIds.length
+      ? await service.from('items').select('id, name, unit_cost').in('id', itemIds)
+      : { data: [], error: null };
+    if (itemsResult.error) throw itemsResult.error;
+
+    const itemsById = new Map(
+      ((itemsResult.data ?? []) as Array<Record<string, unknown>>).map((row) => [String(row.id ?? ''), row] as const),
+    );
+    const recipesById = new Map(
+      ((recipesResult.data ?? []) as Array<Record<string, unknown>>).map((row) => [String(row.id ?? ''), row] as const),
+    );
+    const materialsByBatchId = new Map<string, Array<Record<string, unknown>>>();
+    for (const row of materialRows) {
+      const batchId = String(row.batch_id ?? '');
+      const next = materialsByBatchId.get(batchId) ?? [];
+      next.push({
+        ...row,
+        items: row.item_id ? itemsById.get(String(row.item_id)) ?? null : null,
+      });
+      materialsByBatchId.set(batchId, next);
+    }
+    const outputsByBatchId = new Map<string, Array<Record<string, unknown>>>();
+    for (const row of ((outputsResult.data ?? []) as Array<Record<string, unknown>>)) {
+      const batchId = String(row.batch_id ?? '');
+      const next = outputsByBatchId.get(batchId) ?? [];
+      next.push(row);
+      outputsByBatchId.set(batchId, next);
+    }
+    const workersByBatchId = new Map<string, Array<Record<string, unknown>>>();
+    for (const row of ((workerAssignmentsResult.data ?? []) as Array<Record<string, unknown>>)) {
+      const batchId = String(row.batch_id ?? '');
+      const next = workersByBatchId.get(batchId) ?? [];
+      next.push(row);
+      workersByBatchId.set(batchId, next);
+    }
+
+    result = {
+      data: batchRows.map((row) => {
+        const recipe = row.recipe_id ? recipesById.get(String(row.recipe_id)) ?? null : null;
+        const finishedItem = recipe?.finished_item_id ? itemsById.get(String(recipe.finished_item_id)) ?? null : null;
+        return {
+          ...row,
+          production_batch_materials: materialsByBatchId.get(String(row.id ?? '')) ?? [],
+          production_batch_outputs: outputsByBatchId.get(String(row.id ?? '')) ?? [],
+          production_worker_assignments: workersByBatchId.get(String(row.id ?? '')) ?? [],
+          recipes: recipe
+            ? {
+                ...recipe,
+                finished_item: finishedItem ? { name: String(finishedItem.name ?? '') } : null,
+              }
+            : null,
+        };
+      }),
+      error: null,
+    } as typeof result;
+  }
+
+  if (result.error) throw result.error;
+  const data = result.data ?? [];
 
   const workerCounts = new Map<string, number>();
   for (const batch of data ?? []) {

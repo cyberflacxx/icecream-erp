@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 
-import { can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
+import { apiServerError, can, forbidden, getAuthContext, unauthorized } from '@/lib/api-auth';
 import { loadFinanceMetaResources, syncBranchCostCentres } from '@/lib/finance-foundation-server';
 
 export async function GET() {
@@ -13,6 +13,13 @@ export async function GET() {
     const payload = await loadFinanceMetaResources(ctx.organizationId);
     return NextResponse.json(payload);
   } catch (error) {
-    return serverError(error instanceof Error ? error.message : 'Failed to load finance metadata.');
+    return apiServerError({
+      ctx,
+      error,
+      message: 'Finance accounts could not be loaded for this organization.',
+      module: 'finance.meta',
+      path: '/api/finance/meta',
+      status: 500,
+    });
   }
 }

@@ -30,6 +30,8 @@ export type ResolvedSalesItemPricing = {
   unitName: string | null;
 };
 
+export const NO_ACTIVE_SELLING_PRICE_MESSAGE = 'No active selling price has been configured for this item and customer category.';
+
 function toNumber(value: unknown) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
@@ -45,6 +47,21 @@ function normalizeCode(value: unknown) {
   return normalized || null;
 }
 
+function buildPricePriority(input: {
+  branchCode?: string | null;
+  customer?: CustomerPricingContext | null;
+}) {
+  return [
+    input.customer?.code ? { code: input.customer.code, source: 'CUSTOMER' } : null,
+    input.customer?.customerGroupCode ? { code: input.customer.customerGroupCode, source: 'CUSTOMER_CATEGORY' } : null,
+    input.branchCode ? { code: input.branchCode, source: 'BRANCH' } : null,
+    input.customer?.priceListCode ? { code: input.customer.priceListCode, source: 'PRICE_LIST' } : null,
+    { code: 'WHOLESALE', source: 'DEFAULT_WHOLESALE' },
+    { code: 'RETAIL', source: 'DEFAULT_RETAIL' },
+    { code: 'STANDARD', source: 'STANDARD' },
+  ].filter((value): value is { code: string; source: string } => Boolean(value?.code));
+}
+
 function isActivePriceOnDate(row: Record<string, unknown>, documentDate: string) {
   if (row.is_active === false) return false;
   const effectiveDate = row.effective_date ? String(row.effective_date) : null;
@@ -58,19 +75,19 @@ function pickResolvedPrice(
   itemId: string,
   documentDate: string,
   priceRows: Array<Record<string, unknown>>,
-  priorityCodes: string[],
+  priorities: Array<{ code: string; source: string }>,
 ) {
   const activeRows = priceRows
     .filter((row) => String(row.item_id ?? '') === itemId)
     .filter((row) => isActivePriceOnDate(row, documentDate))
     .sort((left, right) => String(right.effective_date ?? '').localeCompare(String(left.effective_date ?? '')));
 
-  for (const code of priorityCodes) {
-    const match = activeRows.find((row) => normalizeCode(row.price_list_code) === normalizeCode(code));
+  for (const priority of priorities) {
+    const match = activeRows.find((row) => normalizeCode(row.price_list_code) === normalizeCode(priority.code));
     if (match) {
       const amount = toOptionalNumber(match.selling_price);
       return {
-        priceSource: code,
+        priceSource: priority.source,
         sellingPrice: amount !== null && amount > 0 ? amount : null,
       };
     }
@@ -192,12 +209,10 @@ export async function loadResolvedSalesItemPricing(input: {
     ]),
   );
 
-  const pricePriority = [
-    input.customer?.priceListCode ?? null,
-    input.customer?.customerGroupCode ?? null,
-    branchResult.data?.code ? String(branchResult.data.code) : null,
-    'STANDARD',
-  ].filter((value): value is string => Boolean(value));
+  const pricePriority = buildPricePriority({
+    branchCode: branchResult.data?.code ? String(branchResult.data.code) : null,
+    customer: input.customer,
+  });
 
   const stockByItem = new Map<string, {
     availableBranchStock: number | null;
