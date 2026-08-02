@@ -1,3 +1,7 @@
+import { notFound } from 'next/navigation';
+
+import { getAuthContext } from '@/lib/api-auth';
+import { createServiceRoleClient } from '@/lib/supabase/server';
 import { getCompanyProfile } from '@/lib/settings-server';
 import { formatPaymentMethodLabel } from '@/lib/sales-payments';
 
@@ -14,27 +18,113 @@ function readParam(value: string | string[] | undefined, fallback = '') {
   return value ?? fallback;
 }
 
+async function loadReceiptRecord(organizationId: string, paymentId: string) {
+  const service = createServiceRoleClient().schema('icecream_erp');
+
+  const paymentResult = await service
+    .from('payments')
+    .select('id, organization_id, customer_id, invoice_id, payment_number, payment_date, amount, payment_method, reference_number, notes')
+    .eq('organization_id', organizationId)
+    .eq('id', paymentId)
+    .maybeSingle();
+  if (paymentResult.error) throw paymentResult.error;
+  if (!paymentResult.data) return null;
+
+  const payment = paymentResult.data as Record<string, unknown>;
+  const invoiceId = payment.invoice_id ? String(payment.invoice_id) : null;
+  const customerId = payment.customer_id ? String(payment.customer_id) : null;
+
+  const [invoiceResult, customerResult] = await Promise.all([
+    invoiceId
+      ? service
+          .from('invoices')
+          .select('id, invoice_number, invoice_date, branch_id, warehouse_id, total, total_amount, amount_paid, paid_amount, balance_due')
+          .eq('organization_id', organizationId)
+          .eq('id', invoiceId)
+          .maybeSingle()
+      : Promise.resolve({ data: null, error: null }),
+    customerId
+      ? service
+          .from('customers')
+          .select('id, code, name, address, phone, email')
+          .eq('organization_id', organizationId)
+          .eq('id', customerId)
+          .maybeSingle()
+      : Promise.resolve({ data: null, error: null }),
+  ]);
+  if (invoiceResult.error) throw invoiceResult.error;
+  if (customerResult.error) throw customerResult.error;
+
+  const invoice = (invoiceResult.data ?? null) as Record<string, unknown> | null;
+  const customer = (customerResult.data ?? null) as Record<string, unknown> | null;
+
+  let branch: Record<string, unknown> | null = null;
+  let warehouse: Record<string, unknown> | null = null;
+  if (invoice?.branch_id) {
+    const branchResult = await service
+      .from('branches')
+      .select('id, code, name, address, phone')
+      .eq('organization_id', organizationId)
+      .eq('id', String(invoice.branch_id))
+      .maybeSingle();
+    if (branchResult.error) throw branchResult.error;
+    branch = (branchResult.data ?? null) as Record<string, unknown> | null;
+  }
+  if (invoice?.warehouse_id) {
+    const warehouseResult = await service
+      .from('warehouses')
+      .select('id, code, name')
+      .eq('organization_id', organizationId)
+      .eq('id', String(invoice.warehouse_id))
+      .maybeSingle();
+    if (warehouseResult.error) throw warehouseResult.error;
+    warehouse = (warehouseResult.data ?? null) as Record<string, unknown> | null;
+  }
+
+  return {
+    branch,
+    customer,
+    invoice,
+    payment,
+    warehouse,
+  };
+}
+
 export default async function SalesPaymentReceiptPage({
   searchParams,
 }: {
-  searchParams: Record<string, string | string[] | undefined>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
+  const params = await searchParams;
+  const paymentId = readParam(params.paymentId);
+  const autoPrint = readParam(params.autoprint) === '1';
+  const ctx = await getAuthContext();
+  if (!ctx || !paymentId) {
+    notFound();
+  }
+
   const company = await getCompanyProfile().catch(() => null);
+  const receipt = await loadReceiptRecord(ctx.organizationId, paymentId).catch(() => null);
+  if (!receipt) {
+    notFound();
+  }
+
   const companyName = company?.name?.trim() || 'Absolute Quality Icecream';
   const companyAddress = company?.address?.trim() || '';
   const companyPhone = company?.phone?.trim() || '';
   const companyEmail = company?.email?.trim() || '';
   const companyTaxNumber = company?.tax_number?.trim() || '';
 
-  const paymentNumber = readParam(searchParams.paymentNumber, 'Pending');
-  const invoiceNumber = readParam(searchParams.invoiceNumber, 'Not provided');
-  const customerName = readParam(searchParams.customerName, 'Walk-in customer');
-  const paymentDate = readParam(searchParams.paymentDate, new Date().toISOString().slice(0, 10));
-  const paymentMethod = readParam(searchParams.paymentMethod, 'CASH');
-  const referenceNumber = readParam(searchParams.referenceNumber);
-  const notes = readParam(searchParams.notes);
-  const autoPrint = readParam(searchParams.autoprint) === '1';
-  const amount = Number(readParam(searchParams.amount, '0'));
+  const paymentNumber = String(receipt.payment.payment_number ?? 'Pending');
+  const invoiceNumber = String(receipt.invoice?.invoice_number ?? receipt.invoice?.id ?? 'Not provided');
+  const customerName = String(receipt.customer?.name ?? receipt.customer?.code ?? 'Customer');
+  const paymentDate = String(receipt.payment.payment_date ?? receipt.invoice?.invoice_date ?? '2026-08-02');
+  const paymentMethod = String(receipt.payment.payment_method ?? 'CASH');
+  const referenceNumber = String(receipt.payment.reference_number ?? '');
+  const notes = String(receipt.payment.notes ?? '');
+  const amount = Number(receipt.payment.amount ?? 0);
+  const amountPaid = Number(receipt.invoice?.amount_paid ?? receipt.invoice?.paid_amount ?? amount);
+  const balanceDue = Number(receipt.invoice?.balance_due ?? 0);
 
   return (
     <main className="min-h-screen bg-cream px-4 py-6 text-brown print:bg-white print:px-0 print:py-0">
@@ -70,11 +160,19 @@ export default async function SalesPaymentReceiptPage({
             <DetailCard label="Invoice Number" value={invoiceNumber} />
             <DetailCard label="Payment Method" value={formatPaymentMethodLabel(paymentMethod)} />
             <DetailCard label="Reference Number" value={referenceNumber || 'Not provided'} />
+            <DetailCard label="Branch" value={String(receipt.branch?.name ?? receipt.branch?.code ?? 'Not assigned')} />
+            <DetailCard label="Warehouse" value={String(receipt.warehouse?.name ?? receipt.warehouse?.code ?? 'Not assigned')} />
           </div>
 
           <div className="mt-6 rounded-[28px] border border-orange/20 bg-[linear-gradient(135deg,rgba(255,248,238,1),rgba(255,255,255,1))] px-6 py-6">
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted">Amount Received</p>
             <p className="mt-3 text-4xl font-semibold text-brown">{currencyFormatter.format(Number.isFinite(amount) ? amount : 0)}</p>
+          </div>
+
+          <div className="mt-6 grid gap-4 md:grid-cols-3">
+            <DetailCard label="Invoice Total" value={currencyFormatter.format(Number(receipt.invoice?.total ?? receipt.invoice?.total_amount ?? 0))} />
+            <DetailCard label="Total Paid" value={currencyFormatter.format(amountPaid)} />
+            <DetailCard label="Outstanding Balance" value={currencyFormatter.format(balanceDue)} />
           </div>
 
           <div className="mt-6 grid gap-4 md:grid-cols-[1.25fr,0.75fr]">

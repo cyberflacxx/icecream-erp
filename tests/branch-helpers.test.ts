@@ -216,3 +216,18 @@ test('branch selector and sales order routes use shared authorization-aware bran
   assert.match(sidebar, /'Dashboard', 'Operations', 'Finance', 'Reports', 'Administration'/);
   assert.match(sidebar, /aria-current=\{isActive \? 'page' : undefined\}/);
 });
+
+test('branch expense route validates finance setup and falls back across legacy branch expense columns', () => {
+  const branchExpenseRoute = fs.readFileSync('src/app/api/branch-operations/[branchId]/expenses/route.ts', 'utf8');
+
+  assert.match(branchExpenseRoute, /resolveFinanceCostCentreCode/);
+  assert.match(branchExpenseRoute, /resolveFinancePostingAccount/);
+  assert.match(branchExpenseRoute, /findOpenFiscalPeriod/);
+  assert.match(branchExpenseRoute, /The branch cost centre has not been configured\./);
+  assert.match(branchExpenseRoute, /No payment account is linked to this branch\./);
+  assert.match(branchExpenseRoute, /The selected financial period is closed\./);
+  assert.match(branchExpenseRoute, /isMissingColumnError/);
+  assert.match(branchExpenseRoute, /receipt_url/);
+  assert.match(branchExpenseRoute, /shift_close_id/);
+  assert.match(branchExpenseRoute, /apiServerError/);
+});

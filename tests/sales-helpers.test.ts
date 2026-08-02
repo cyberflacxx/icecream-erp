@@ -214,3 +214,27 @@ test('sales quotations, orders, and invoices use the shared searchable item sele
   assert.match(itemSelectorRoute, /customer_id/);
   assert.match(itemSelectorRoute, /loadResolvedSalesItemPricing/);
 });
+
+test('sales pricing and receipt printing routes use organization-scoped prices and saved payment records', () => {
+  const pricesRoute = readFileSync(join('src', 'app', 'api', 'sales', 'prices', 'route.ts'), 'utf8');
+  const invoiceRoute = readFileSync(join('src', 'app', 'api', 'sales', 'invoices', 'route.ts'), 'utf8');
+  const invoicePage = readFileSync(join('src', 'app', '(dashboard)', 'sales', 'invoices', 'page.tsx'), 'utf8');
+  const paymentsPage = readFileSync(join('src', 'app', '(dashboard)', 'sales', 'payments', 'page.tsx'), 'utf8');
+  const receiptPage = readFileSync(join('src', 'app', '(dashboard)', 'sales', 'payments', 'receipt', 'page.tsx'), 'utf8');
+  const paymentsHelper = readFileSync(join('src', 'lib', 'sales-payments.ts'), 'utf8');
+
+  assert.match(pricesRoute, /\.from\('items'\)/);
+  assert.match(pricesRoute, /\.in\('item_id', itemIds\)/);
+  assert.match(pricesRoute, /Selling price must be greater than zero/);
+  assert.match(invoiceRoute, /NO_ACTIVE_SELLING_PRICE_MESSAGE/);
+  assert.match(invoiceRoute, /crypto\.randomUUID\(\)/);
+  assert.match(invoiceRoute, /The sales transaction engine is not available/);
+  assert.match(invoicePage, /buildSalesReceiptPrintUrl\(\s*\{\s*paymentId: String\(payment\.id\)/);
+  assert.match(paymentsPage, /buildSalesReceiptPrintUrl\(\s*\{\s*paymentId: String\(payment\.id\)/);
+  assert.match(paymentsPage, /Reprint Receipt/);
+  assert.match(receiptPage, /searchParams: Promise<Record<string, string \| string\[] \| undefined>>/);
+  assert.match(receiptPage, /paymentId/);
+  assert.match(receiptPage, /loadReceiptRecord/);
+  assert.match(paymentsHelper, /paymentId: string/);
+  assert.match(paymentsHelper, /searchParams = new URLSearchParams\(\{\s*paymentId:/);
+});

@@ -18,6 +18,7 @@ export interface ItemSelectorOption {
   label: string;
   name: string;
   sellingPrice: number | null;
+  taxStatus?: string | null;
   unitAbbreviation: string | null;
   unitId: string | null;
   unitName: string | null;

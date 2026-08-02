@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import { badRequest, can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
+import { apiServerError, badRequest, can, forbidden, getAuthContext, unauthorized } from '@/lib/api-auth';
 import { isMissingColumnError, isMissingTableError } from '@/lib/postgrest-compat';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
@@ -324,8 +324,14 @@ export async function GET(request: NextRequest) {
       totalPages: Math.ceil(normalized.length / limit),
     });
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Internal server error';
-    return serverError(message);
+    return apiServerError({
+      ctx,
+      error: err,
+      message: 'Machines could not be loaded.',
+      module: 'maintenance.machines',
+      path: request.nextUrl.pathname,
+      status: 500,
+    });
   }
 }
 
@@ -495,7 +501,14 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ id: machineId }, { status: 201 });
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Internal server error';
-    return serverError(message);
+    return apiServerError({
+      ctx,
+      error: err,
+      message: 'The machine record could not be created.',
+      module: 'maintenance.machines',
+      path: request.nextUrl.pathname,
+      status: 500,
+      transactionReference: 'maintenance-machine-create',
+    });
   }
 }
