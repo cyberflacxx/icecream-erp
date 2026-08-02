@@ -39,6 +39,7 @@ export default function SalesQuotationsPage() {
     customerId: formState.customerId || undefined,
     includePrice: true,
     includeStock: true,
+    limit: 250,
   });
   const request = useSalesRequest();
   const queryClient = useQueryClient();
@@ -179,6 +180,7 @@ export default function SalesQuotationsPage() {
             loading={itemOptionsQuery.isLoading}
             errorMessage={itemOptionsQuery.error?.message ?? null}
             emptyMessage="No saleable items are available for quotation."
+            onRetry={() => itemOptionsQuery.refetch()}
             lines={formState.items}
             onChange={(items) => setFormState((current) => ({ ...current, items }))}
           />

@@ -46,6 +46,7 @@ interface SalesLineItemsEditorProps {
   lines: SalesLineDraft[];
   loading?: boolean;
   onChange: (lines: SalesLineDraft[]) => void;
+  onRetry?: (() => void | Promise<void>) | null;
 }
 
 export function SalesLineItemsEditor({
@@ -55,6 +56,7 @@ export function SalesLineItemsEditor({
   lines,
   loading = false,
   onChange,
+  onRetry,
 }: SalesLineItemsEditorProps) {
   function updateLine(index: number, updates: Partial<SalesLineDraft>) {
     onChange(lines.map((line, lineIndex) => (lineIndex === index ? { ...line, ...updates } : line)));
@@ -80,6 +82,7 @@ export function SalesLineItemsEditor({
                 value={line.itemId}
                 options={items}
                 loading={loading}
+                onRetry={onRetry}
                 errorMessage={errorMessage}
                 emptyMessage={emptyMessage ?? 'No saleable items are available.'}
                 onChange={(nextItemId) => {

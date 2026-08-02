@@ -131,6 +131,7 @@ export default function RequisitionsPage() {
   const itemOptionsQuery = useItemSelectorOptions({
     includeCost: true,
     includeStock: true,
+    limit: 250,
   });
   const requisitionsQuery = useRequisitions({
     department: filters.department || undefined,
@@ -730,6 +731,7 @@ export default function RequisitionsPage() {
                         loading={itemOptionsQuery.isLoading}
                         errorMessage={itemOptionsQuery.error?.message ?? null}
                         emptyMessage="No requisition items are available."
+                        onRetry={() => itemOptionsQuery.refetch()}
                         onChange={(nextItemId) => {
                           const nextSelectedItem = itemOptions.find((candidate) => candidate.id === nextItemId);
                           setFormState((current) => ({

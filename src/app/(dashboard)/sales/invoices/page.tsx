@@ -66,6 +66,7 @@ export default function InvoicesPage() {
     customerId: invoiceForm.customerId || undefined,
     includePrice: true,
     includeStock: true,
+    limit: 250,
     warehouseId: invoiceForm.warehouseId || undefined,
   });
   const branchOptions = useMemo(() => branchesQuery.data ?? [], [branchesQuery.data]);
@@ -356,6 +357,7 @@ export default function InvoicesPage() {
               loading={itemOptionsQuery.isLoading}
               errorMessage={itemOptionsQuery.error?.message ?? null}
               emptyMessage="No invoice items are available for the selected warehouse."
+              onRetry={() => itemOptionsQuery.refetch()}
               lines={invoiceForm.items}
               onChange={(items) => setInvoiceForm((current) => ({ ...current, items }))}
             />

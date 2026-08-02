@@ -145,12 +145,14 @@ export default function InventoryStoresPage() {
     includeCost: true,
     includePrice: true,
     includeStock: true,
+    limit: 250,
     warehouseId: adjustmentState.warehouseId || undefined,
   });
   const stockTakeItemsQuery = useItemSelectorOptions({
     includeCost: true,
     includePrice: true,
     includeStock: true,
+    limit: 250,
     warehouseId: stockTakeState.warehouseId || undefined,
   });
   const returnItemsQuery = useItemSelectorOptions({
@@ -158,12 +160,14 @@ export default function InventoryStoresPage() {
     includePrice: true,
     includeStock: true,
     itemType: Array.from(finishedGoodsItemTypes),
+    limit: 250,
     warehouseId: returnState.returnWarehouseId || undefined,
   });
   const productionIssueItemsQuery = useItemSelectorOptions({
     includeCost: true,
     includeStock: true,
     itemType: Array.from(storesIssueItemTypes),
+    limit: 250,
     warehouseId: productionIssueState.sourceWarehouseId || undefined,
   });
   const finishedGoodsItemsQuery = useItemSelectorOptions({
@@ -171,6 +175,7 @@ export default function InventoryStoresPage() {
     includePrice: true,
     includeStock: true,
     itemType: Array.from(finishedGoodsItemTypes),
+    limit: 250,
     warehouseId: finishedGoodsReceiptState.destinationWarehouseId || undefined,
   });
   const recentAdjustmentsQuery = useQuery({
@@ -552,6 +557,7 @@ export default function InventoryStoresPage() {
                 emptyMessage={adjustmentState.warehouseId ? 'No items found for this warehouse.' : 'Select a warehouse first.'}
                 errorMessage={adjustmentItemsQuery.error instanceof Error ? adjustmentItemsQuery.error.message : null}
                 loading={adjustmentItemsQuery.isLoading}
+                onRetry={() => adjustmentItemsQuery.refetch()}
                 options={adjustmentItemsQuery.data ?? []}
                 value={adjustmentState.itemId}
                 onChange={(value) => setAdjustmentState((current) => ({ ...current, itemId: value }))}
@@ -620,6 +626,7 @@ export default function InventoryStoresPage() {
                 emptyMessage={stockTakeState.warehouseId ? 'No items found for this warehouse.' : 'Select a warehouse first.'}
                 errorMessage={stockTakeItemsQuery.error instanceof Error ? stockTakeItemsQuery.error.message : null}
                 loading={stockTakeItemsQuery.isLoading}
+                onRetry={() => stockTakeItemsQuery.refetch()}
                 options={stockTakeItemsQuery.data ?? []}
                 value={stockTakeState.itemId}
                 onChange={(value) => setStockTakeState((current) => ({ ...current, itemId: value }))}
@@ -691,6 +698,7 @@ export default function InventoryStoresPage() {
                 emptyMessage={returnState.returnWarehouseId ? 'No finished goods found for this warehouse.' : 'Select a warehouse first.'}
                 errorMessage={returnItemsQuery.error instanceof Error ? returnItemsQuery.error.message : null}
                 loading={returnItemsQuery.isLoading}
+                onRetry={() => returnItemsQuery.refetch()}
                 options={returnItemsQuery.data ?? []}
                 value={returnState.itemId}
                 onChange={(value) => setReturnState((current) => ({ ...current, itemId: value }))}
@@ -768,6 +776,7 @@ export default function InventoryStoresPage() {
                 emptyMessage={productionIssueState.sourceWarehouseId ? 'No production issue items found for this warehouse.' : 'Select a source warehouse first.'}
                 errorMessage={productionIssueItemsQuery.error instanceof Error ? productionIssueItemsQuery.error.message : null}
                 loading={productionIssueItemsQuery.isLoading}
+                onRetry={() => productionIssueItemsQuery.refetch()}
                 options={productionIssueItemsQuery.data ?? []}
                 value={productionIssueState.itemId}
                 onChange={(value) => setProductionIssueState((current) => ({ ...current, itemId: value }))}
@@ -829,6 +838,7 @@ export default function InventoryStoresPage() {
                 emptyMessage={finishedGoodsReceiptState.destinationWarehouseId ? 'No finished goods found for this warehouse.' : 'Select a destination warehouse first.'}
                 errorMessage={finishedGoodsItemsQuery.error instanceof Error ? finishedGoodsItemsQuery.error.message : null}
                 loading={finishedGoodsItemsQuery.isLoading}
+                onRetry={() => finishedGoodsItemsQuery.refetch()}
                 options={finishedGoodsItemsQuery.data ?? []}
                 value={finishedGoodsReceiptState.itemId}
                 onChange={(value) => setFinishedGoodsReceiptState((current) => ({ ...current, itemId: value }))}

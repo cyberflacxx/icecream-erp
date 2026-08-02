@@ -154,6 +154,7 @@ export default function GoodsReceivedPage() {
     includePrice: true,
     includeStock: true,
     itemType: Array.from(grnItemTypes),
+    limit: 250,
     warehouseId: formState.warehouseId || undefined,
   });
   const grnsQuery = useGRNs({
@@ -919,6 +920,7 @@ export default function GoodsReceivedPage() {
                       emptyMessage={formState.warehouseId ? 'No items found for this warehouse.' : 'Select a warehouse first.'}
                       errorMessage={itemSelectorQuery.error instanceof Error ? itemSelectorQuery.error.message : null}
                       loading={itemSelectorQuery.isLoading}
+                      onRetry={() => itemSelectorQuery.refetch()}
                       options={itemOptions}
                       value={item.itemId}
                       onChange={(value) =>

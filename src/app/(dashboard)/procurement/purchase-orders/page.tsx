@@ -12,7 +12,7 @@ import {
   Truck,
   XCircle,
 } from 'lucide-react';
-import { type FormEvent, useEffect, useState } from 'react';
+import { type FormEvent, useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 
@@ -218,6 +218,7 @@ export default function PurchaseOrdersPage() {
     includePrice: true,
     includeStock: true,
     itemType: Array.from(purchasableItemTypes),
+    limit: 250,
   });
   const requisitionPickerQuery = useQuery({
     queryKey: ['procurement', 'purchase-order-requisition-picker'],
@@ -303,6 +304,22 @@ export default function PurchaseOrdersPage() {
 
     return Array.from(merged.values()).sort((left, right) => left.name.localeCompare(right.name));
   })();
+  const draftTotals = useMemo(() => {
+    const subtotal = formState.items.reduce((sum, item) => {
+      const quantity = Number(item.quantityOrdered);
+      const unitCost = Number(item.unitCost);
+      if (!Number.isFinite(quantity) || !Number.isFinite(unitCost)) return sum;
+      return sum + (quantity * unitCost);
+    }, 0);
+    const taxAmount = Number(formState.taxAmount || 0);
+    const discountAmount = Number(formState.discountAmount || 0);
+    return {
+      discountAmount,
+      subtotal,
+      taxAmount,
+      total: subtotal + taxAmount - discountAmount,
+    };
+  }, [formState.discountAmount, formState.items, formState.taxAmount]);
   const workflowAccess = {
     canApprove,
     canCreate,
@@ -1056,6 +1073,7 @@ export default function PurchaseOrdersPage() {
                         emptyMessage="No purchasable items available."
                         errorMessage={itemSelectorQuery.error instanceof Error ? itemSelectorQuery.error.message : null}
                         loading={itemSelectorQuery.isLoading}
+                        onRetry={() => itemSelectorQuery.refetch()}
                         options={purchaseOrderItems}
                         value={item.itemId}
                         onChange={(value) => updateLineItem(item.rowId, 'itemId', value)}
@@ -1145,6 +1163,25 @@ export default function PurchaseOrdersPage() {
                   </div>
                 </div>
               )})}
+            </div>
+
+            <div className="mt-4 grid gap-3 rounded-2xl border border-border/70 bg-[color:var(--app-bg-subtle)] p-4 sm:grid-cols-2 xl:grid-cols-4">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted">Subtotal</p>
+                <p className="mt-1 text-base font-semibold text-[color:var(--app-text)]">{currencyFormatter.format(draftTotals.subtotal)}</p>
+              </div>
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted">Tax</p>
+                <p className="mt-1 text-base font-semibold text-[color:var(--app-text)]">{currencyFormatter.format(draftTotals.taxAmount)}</p>
+              </div>
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted">Discount</p>
+                <p className="mt-1 text-base font-semibold text-[color:var(--app-text)]">{currencyFormatter.format(draftTotals.discountAmount)}</p>
+              </div>
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted">Draft Total</p>
+                <p className="mt-1 text-base font-semibold text-[color:var(--app-accent-strong)]">{currencyFormatter.format(draftTotals.total)}</p>
+              </div>
             </div>
           </section>
 

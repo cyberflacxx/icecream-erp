@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import { badRequest, can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
+import { apiServerError, badRequest, can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
 import { ensurePositiveQuantity } from '@/lib/inventory';
 import { generateReferenceNumber, isMissingProductionTable, productionErrorMessage, productionService, writeProductionAuditLog } from '@/lib/production-server';
 
@@ -10,6 +10,18 @@ type RecipeIngredientInput = {
   unitId: string;
   wastageAllowancePercent?: number;
 };
+
+function hasDuplicateRecipeItems(lines: RecipeIngredientInput[]) {
+  const seen = new Set<string>();
+
+  for (const line of lines) {
+    const key = `${line.itemId}::${line.unitId}`;
+    if (seen.has(key)) return true;
+    seen.add(key);
+  }
+
+  return false;
+}
 
 export async function GET() {
   const ctx = await getAuthContext();
@@ -94,6 +106,12 @@ export async function POST(request: NextRequest) {
     if (!Array.isArray(body.ingredients) || body.ingredients.length === 0) {
       return badRequest('Recipe must have at least one ingredient.');
     }
+    if (hasDuplicateRecipeItems(body.ingredients)) {
+      return badRequest('Each raw material may only appear once in a BOM.');
+    }
+    if (Array.isArray(body.packagingItems) && hasDuplicateRecipeItems(body.packagingItems)) {
+      return badRequest('Each packaging material may only appear once in a BOM.');
+    }
 
     for (const ingredient of body.ingredients) {
       ensurePositiveQuantity(ingredient.quantityRequired, 'ingredient quantity');
@@ -174,6 +192,13 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json(recipe, { status: 201 });
   } catch (err) {
-    return serverError(productionErrorMessage(err) || 'Internal server error');
+    return apiServerError({
+      ctx,
+      error: err,
+      message: productionErrorMessage(err) || 'Production BOM could not be created.',
+      module: 'production.recipes',
+      path: '/api/production/recipes',
+      status: 500,
+    });
   }
 }

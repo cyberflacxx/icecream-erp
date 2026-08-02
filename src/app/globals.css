@@ -368,13 +368,13 @@
   }
 
   .surface-card {
-    @apply rounded-xl border p-4 shadow-sm;
+    @apply rounded-xl border p-5 shadow-sm;
     border-color: color-mix(in srgb, var(--app-border) 80%, transparent);
     background: var(--app-surface);
   }
 
   .surface-card-lg {
-    @apply rounded-xl border p-5 shadow-sm;
+    @apply rounded-xl border p-6 shadow-sm;
     border-color: color-mix(in srgb, var(--app-border) 80%, transparent);
     background: var(--app-surface);
   }
@@ -385,7 +385,7 @@
   }
 
   .surface-input {
-    @apply h-10 w-full rounded-lg border px-3 text-brown outline-none transition placeholder:text-slate-500 dark:text-darkText dark:placeholder:text-slate-400;
+    @apply h-11 w-full rounded-xl border px-4 text-sm leading-5 text-brown outline-none transition placeholder:text-slate-500 dark:text-darkText dark:placeholder:text-slate-400;
     border-color: color-mix(in srgb, var(--app-border) 80%, transparent);
     background: #ffffff;
     color: #0f172a;
@@ -393,7 +393,7 @@
   }
 
   .surface-input-soft {
-    @apply h-10 w-full rounded-lg border px-3.5 text-brown outline-none transition placeholder:text-slate-500 dark:text-darkText dark:placeholder:text-slate-400;
+    @apply min-h-11 w-full rounded-xl border px-4 text-sm leading-5 text-brown outline-none transition placeholder:text-slate-500 dark:text-darkText dark:placeholder:text-slate-400;
     border-color: color-mix(in srgb, var(--app-border) 80%, transparent);
     background: #ffffff;
     color: #0f172a;
@@ -401,7 +401,7 @@
   }
 
   .surface-textarea-soft {
-    @apply w-full rounded-lg border px-3.5 py-2.5 text-brown outline-none transition placeholder:text-slate-500 dark:text-darkText dark:placeholder:text-slate-400;
+    @apply min-h-28 w-full rounded-xl border px-4 py-3 text-sm leading-6 text-brown outline-none transition placeholder:text-slate-500 dark:text-darkText dark:placeholder:text-slate-400;
     border-color: color-mix(in srgb, var(--app-border) 80%, transparent);
     background: #ffffff;
     color: #0f172a;
@@ -729,6 +729,20 @@
     margin-top: 1.375rem;
   }
 
+  form label {
+    display: block;
+  }
+
+  form label > span:first-child {
+    display: block;
+    margin-bottom: 0.625rem;
+    line-height: 1.4;
+  }
+
+  form :is(input, select, textarea) {
+    width: 100%;
+  }
+
   form :is(input, select, textarea, button),
   [role='dialog'] :is(input, select, textarea, button) {
     scroll-margin-top: 7rem;
@@ -750,6 +764,13 @@
   form div[class*='justify-end'][class*='gap-'] > *,
   [role='dialog'] div[class*='justify-end'][class*='gap-'] > * {
     min-height: 2.75rem;
+  }
+
+  table button,
+  table a[role='button'],
+  table [type='button'] {
+    min-height: 2.5rem;
+    white-space: nowrap;
   }
 
   .auth-input:focus,

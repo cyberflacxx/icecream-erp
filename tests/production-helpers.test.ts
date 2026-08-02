@@ -1913,9 +1913,25 @@ test('production planning and BOM pages use the shared branch and item selector 
   assert.match(planningForm, /useAuthorizedBranches/);
   assert.match(planningForm, /useItemSelectorOptions/);
   assert.match(planningForm, /ItemSelectorField/);
+  assert.match(planningForm, /limit: 250/);
+  assert.match(planningForm, /onRetry=\{\(\) => productOptionsQuery\.refetch\(\)\}/);
   assert.match(recipesPage, /useItemSelectorOptions/);
   assert.match(recipesPage, /ItemSelectorField/);
   assert.match(recipesPage, /Search finished product/);
+  assert.match(recipesPage, /limit: 250/);
+  assert.match(recipesPage, /findDuplicateLineItems/);
+  assert.match(recipesPage, /Saving BOM/);
+  assert.match(recipesPage, /setCalculatorRecipeId/);
+  assert.match(recipesPage, /onRetry=\{\(\) => finishedGoodsQuery\.refetch\(\)\}/);
+});
+
+test('production recipe route rejects duplicate recipe items with structured server errors', () => {
+  const route = fs.readFileSync('src/app/api/production/recipes/route.ts', 'utf8');
+
+  assert.match(route, /hasDuplicateRecipeItems/);
+  assert.match(route, /Each raw material may only appear once in a BOM\./);
+  assert.match(route, /Each packaging material may only appear once in a BOM\./);
+  assert.match(route, /apiServerError/);
 });
 
 test('production reports show a controlled zero-output costing notice and use compatibility fallback loading', () => {

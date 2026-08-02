@@ -78,6 +78,7 @@ export default function BranchSalesPage() {
     includePrice: true,
     includeStock: true,
     itemType: ['FINISHED_GOOD', 'FINISHED'],
+    limit: 250,
   });
   const createSale = useCreateBranchSale(branchId);
   const createExpense = useCreateBranchExpense(branchId);
@@ -412,6 +413,7 @@ export default function BranchSalesPage() {
                     loading={itemOptionsQuery.isLoading}
                     errorMessage={itemOptionsQuery.error?.message ?? null}
                     emptyMessage="No branch sale items are available."
+                    onRetry={() => itemOptionsQuery.refetch()}
                     onChange={(selectedItemId) => {
                       const selectedStock = stockOptionByItemId.get(selectedItemId);
                       const defaultPrice = Number(selectedStock?.sellingPrice ?? selectedStock?.currentInventoryCost ?? 0);

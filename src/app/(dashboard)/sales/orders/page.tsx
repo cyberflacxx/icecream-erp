@@ -54,6 +54,7 @@ export default function SalesOrdersPage() {
     customerId: formState.customerId || undefined,
     includePrice: true,
     includeStock: true,
+    limit: 250,
     warehouseId: formState.warehouseId || undefined,
   });
   const branchOptions = useMemo(() => branchesQuery.data ?? [], [branchesQuery.data]);
@@ -272,6 +273,7 @@ export default function SalesOrdersPage() {
             loading={itemOptionsQuery.isLoading}
             errorMessage={itemOptionsQuery.error?.message ?? null}
             emptyMessage="No saleable items are available for the selected warehouse."
+            onRetry={() => itemOptionsQuery.refetch()}
             lines={formState.items}
             onChange={(items) => setFormState((current) => ({ ...current, items }))}
           />

@@ -61,6 +61,19 @@ function toPayloadLine(line: FormulaLine) {
   };
 }
 
+function findDuplicateLineItems(lines: Array<{ itemId: string }>) {
+  const seen = new Set<string>();
+  const duplicates = new Set<string>();
+
+  for (const line of lines) {
+    if (!line.itemId) continue;
+    if (seen.has(line.itemId)) duplicates.add(line.itemId);
+    seen.add(line.itemId);
+  }
+
+  return duplicates;
+}
+
 export default function ProductionRecipesPage() {
   const query = useRecipes();
   const batchesQuery = useBatches({ limit: 20 });
@@ -70,16 +83,19 @@ export default function ProductionRecipesPage() {
     includePrice: true,
     includeStock: true,
     itemType: Array.from(finishedGoodItemTypes),
+    limit: 250,
   });
   const ingredientItemsQuery = useItemSelectorOptions({
     includeCost: true,
     includeStock: true,
     itemType: Array.from(ingredientItemTypes),
+    limit: 250,
   });
   const packagingItemsQuery = useItemSelectorOptions({
     includeCost: true,
     includeStock: true,
     itemType: Array.from(packagingItemTypes),
+    limit: 250,
   });
   const request = useProductionRequest();
   const queryClient = useQueryClient();
@@ -87,6 +103,7 @@ export default function ProductionRecipesPage() {
   const [feedback, setFeedback] = useState<{ message: string; tone: 'error' | 'success' } | null>(null);
   const [formState, setFormState] = useState(() => createInitialFormState());
   const [formError, setFormError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [calculatorRecipeId, setCalculatorRecipeId] = useState('');
   const [productionQuantity, setProductionQuantity] = useState('1000');
 
@@ -185,6 +202,8 @@ export default function ProductionRecipesPage() {
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (isSubmitting) return;
+
     const ingredients = formState.ingredients.filter((line) => line.itemId && line.unitId).map(toPayloadLine);
     const packagingItems = formState.packagingItems.filter((line) => line.itemId && line.unitId).map(toPayloadLine);
 
@@ -198,8 +217,21 @@ export default function ProductionRecipesPage() {
       return;
     }
 
+    const duplicateIngredients = findDuplicateLineItems(ingredients);
+    if (duplicateIngredients.size > 0) {
+      setFormError('Each raw material may only appear once in a BOM. Remove duplicate lines and try again.');
+      return;
+    }
+
+    const duplicatePackaging = findDuplicateLineItems(packagingItems);
+    if (duplicatePackaging.size > 0) {
+      setFormError('Each packaging material may only appear once in a BOM. Remove duplicate lines and try again.');
+      return;
+    }
+
+    setIsSubmitting(true);
     try {
-      await request('/api/production/recipes', {
+      const createdRecipe = await request<{ id?: string; finished_item_id?: string; output_unit_id?: string }>('/api/production/recipes', {
         body: JSON.stringify({
           expectedOutputQuantity: Number(formState.expectedOutputQuantity),
           finishedItemId: formState.finishedItemId,
@@ -213,9 +245,13 @@ export default function ProductionRecipesPage() {
         }),
         method: 'POST',
       });
+      const createdRecipeId = String(createdRecipe.id ?? '').trim();
       setFormState(createInitialFormState());
       setFormError(null);
       setOpen(false);
+      if (createdRecipeId) {
+        setCalculatorRecipeId(createdRecipeId);
+      }
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['recipes'] }),
         queryClient.invalidateQueries({ queryKey: ['production'] }),
@@ -223,6 +259,8 @@ export default function ProductionRecipesPage() {
       setFeedback({ message: 'BOM saved as the active production standard.', tone: 'success' });
     } catch (error) {
       setFormError(error instanceof Error ? error.message : 'Failed to create recipe.');
+    } finally {
+      setIsSubmitting(false);
     }
   }
 
@@ -551,6 +589,7 @@ export default function ProductionRecipesPage() {
                 emptyMessage="No finished goods available."
                 errorMessage={finishedGoodsQuery.error instanceof Error ? finishedGoodsQuery.error.message : null}
                 loading={finishedGoodsQuery.isLoading}
+                onRetry={() => finishedGoodsQuery.refetch()}
                 options={finishedGoodsQuery.data ?? []}
                 value={formState.finishedItemId}
                 onChange={(value) => setFormState((current) => ({ ...current, finishedItemId: value }))}
@@ -599,6 +638,7 @@ export default function ProductionRecipesPage() {
             lines={formState.ingredients}
             options={ingredientItemsQuery.data ?? []}
             loading={ingredientItemsQuery.isLoading}
+            onRetry={() => ingredientItemsQuery.refetch()}
             errorMessage={ingredientItemsQuery.error instanceof Error ? ingredientItemsQuery.error.message : null}
             units={units}
             onAdd={() => addLine('ingredients')}
@@ -611,6 +651,7 @@ export default function ProductionRecipesPage() {
             lines={formState.packagingItems}
             options={packagingItemsQuery.data ?? []}
             loading={packagingItemsQuery.isLoading}
+            onRetry={() => packagingItemsQuery.refetch()}
             errorMessage={packagingItemsQuery.error instanceof Error ? packagingItemsQuery.error.message : null}
             units={units}
             onAdd={() => addLine('packagingItems')}
@@ -630,7 +671,9 @@ export default function ProductionRecipesPage() {
 
           <div className="flex justify-end gap-3">
             <Button type="button" variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
-            <Button type="submit">Create Formula</Button>
+            <Button type="submit" disabled={isSubmitting}>
+              {isSubmitting ? 'Saving BOM...' : 'Create Formula'}
+            </Button>
           </div>
         </form>
       </FormDrawer>
@@ -727,6 +770,7 @@ function FormulaLines({
   errorMessage,
   lines,
   loading,
+  onRetry,
   onAdd,
   onRemove,
   onUpdate,
@@ -737,6 +781,7 @@ function FormulaLines({
   errorMessage?: string | null;
   lines: FormulaLine[];
   loading?: boolean;
+  onRetry?: (() => void | Promise<void>) | null;
   onAdd: () => void;
   onRemove: (index: number) => void;
   onUpdate: (index: number, next: Partial<FormulaLine>) => void;
@@ -757,6 +802,7 @@ function FormulaLines({
             emptyMessage="No items available."
             errorMessage={errorMessage}
             loading={loading}
+            onRetry={onRetry}
             options={options}
             value={line.itemId}
             onChange={(value) => onUpdate(index, { itemId: value })}

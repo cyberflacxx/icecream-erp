@@ -116,6 +116,7 @@ export default function TransfersPage() {
   const itemOptionsQuery = useItemSelectorOptions({
     includeCost: true,
     includeStock: true,
+    limit: 250,
     warehouseId: formState.fromWarehouseId || undefined,
   });
 
@@ -721,6 +722,7 @@ export default function TransfersPage() {
                   loading={itemOptionsQuery.isLoading}
                   errorMessage={itemOptionsQuery.error?.message ?? null}
                   emptyMessage="No transfer items are available for the selected source warehouse."
+                  onRetry={() => itemOptionsQuery.refetch()}
                   onChange={(nextItemId) =>
                     setFormState((current) => ({
                       ...current,

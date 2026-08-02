@@ -53,7 +53,7 @@ export function DataTable<T extends object>({
                   key={String(column.key)}
                   className={
                     column.className ??
-                    'px-4 py-3 text-left text-[10px] font-semibold uppercase tracking-[0.18em] text-[color:var(--app-subtle)]'
+                    'px-5 py-3.5 text-left text-[11px] font-semibold uppercase tracking-[0.18em] text-[color:var(--app-subtle)]'
                   }
                 >
                   {column.header}
@@ -67,7 +67,7 @@ export function DataTable<T extends object>({
                 {columns.map((column) => (
                   <td
                     key={String(column.key)}
-                    className={column.className ?? 'px-4 py-3 text-sm text-[color:var(--app-text)]'}
+                    className={column.className ?? 'px-5 py-4 align-top text-sm leading-6 text-[color:var(--app-text)]'}
                   >
                     {column.render
                       ? column.render(row)

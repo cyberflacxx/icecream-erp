@@ -949,6 +949,9 @@ test('inventory items route exposes selector mode with branch and warehouse awar
   assert.match(route, /include_stock/);
   assert.match(route, /warehouse_id/);
   assert.match(route, /buildItemSelectorOptions/);
+  assert.match(route, /matchesRequestedItemTypes/);
+  assert.match(route, /selectorFetchSize = Math\.min\(200, selectorPageSize\)/);
+  assert.match(route, /limitedSelectorRows = selectorRows\.slice\(0, selectorPageSize\)/);
 });
 
 test('inventory stores and transfers pages use the shared selector hook and searchable item field', () => {
@@ -958,6 +961,21 @@ test('inventory stores and transfers pages use the shared selector hook and sear
   assert.match(storesPage, /useItemSelectorOptions/);
   assert.match(storesPage, /ItemSelectorField/);
   assert.match(storesPage, /Select a warehouse first\./);
+  assert.match(storesPage, /limit: 250/);
+  assert.match(storesPage, /onRetry=\{\(\) => adjustmentItemsQuery\.refetch\(\)\}/);
   assert.match(transfersPage, /useItemSelectorOptions/);
   assert.match(transfersPage, /ItemSelectorField/);
+  assert.match(transfersPage, /limit: 250/);
+  assert.match(transfersPage, /onRetry=\{\(\) => itemOptionsQuery\.refetch\(\)\}/);
+});
+
+test('shared item selector hook and field expose retry, search, and stable empty-state handling', () => {
+  const hook = fs.readFileSync('src/hooks/useItemSelectorOptions.ts', 'utf8');
+  const field = fs.readFileSync('src/components/shared/item-selector-field.tsx', 'utf8');
+
+  assert.match(hook, /retry: 1/);
+  assert.match(hook, /staleTime: 30_000/);
+  assert.match(field, /onRetry\?: \(\(\) => void \| Promise<void>\) \| null/);
+  assert.match(field, /Search by item code or item name/);
+  assert.match(field, /No items found for this search/);
 });

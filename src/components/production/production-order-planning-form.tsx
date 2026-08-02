@@ -122,6 +122,7 @@ export function ProductionOrderPlanningForm({
     branchId: isBranchScoped ? branchId : form.branchId || undefined,
     includeCost: true,
     itemType: ['FINISHED_GOOD', 'FINISHED'],
+    limit: 250,
   });
 
   useEffect(() => {
@@ -328,6 +329,7 @@ export function ProductionOrderPlanningForm({
                 value={form.productId}
                 options={productOptionsQuery.data ?? []}
                 loading={productOptionsQuery.isLoading}
+                onRetry={() => productOptionsQuery.refetch()}
                 errorMessage={productOptionsQuery.error?.message ?? null}
                 emptyMessage="No production products are available."
                 onChange={(nextProductId) => setForm((current) => ({ ...current, productId: nextProductId }))}

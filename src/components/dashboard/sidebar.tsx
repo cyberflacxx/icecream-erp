@@ -225,11 +225,11 @@ export function Sidebar() {
   ));
 
   return (
-    <aside className="flex h-full flex-col overflow-hidden border-r border-slate-900/10 bg-[linear-gradient(180deg,#0f2c52_0%,#173b6e_58%,#214f8a_100%)] text-white backdrop-blur-xl dark:border-[color:var(--app-border-muted)] dark:bg-[color:var(--app-sidebar)] dark:text-[color:var(--app-text)]">
-      <div className="border-b border-white/12 px-3 py-3 dark:border-[color:var(--app-border-muted)]">
-        <div className="rounded-[26px] border border-white/12 bg-white/10 px-3 py-3 shadow-[0_16px_36px_rgba(2,6,23,0.18)] dark:app-panel-subtle dark:shadow-none">
-          <div className="flex items-center gap-3">
-            <div className="flex h-12 w-12 items-center justify-center overflow-hidden rounded-xl border border-white/18 bg-white shadow-[var(--app-shadow-sm)] dark:border-[color:var(--app-border)] dark:bg-[color:var(--app-bg-canvas)]">
+    <aside className="flex h-full min-h-0 flex-col overflow-hidden border-r border-slate-900/10 bg-[linear-gradient(180deg,#0f2c52_0%,#173b6e_58%,#214f8a_100%)] text-white backdrop-blur-xl dark:border-[color:var(--app-border-muted)] dark:bg-[color:var(--app-sidebar)] dark:text-[color:var(--app-text)]">
+      <div className="border-b border-white/12 px-4 py-4 dark:border-[color:var(--app-border-muted)]">
+        <div className="rounded-[26px] border border-white/12 bg-white/10 px-4 py-4 shadow-[0_16px_36px_rgba(2,6,23,0.18)] dark:app-panel-subtle dark:shadow-none">
+          <div className="flex items-center gap-3.5">
+            <div className="flex h-12 w-12 flex-shrink-0 items-center justify-center overflow-hidden rounded-xl border border-white/18 bg-white shadow-[var(--app-shadow-sm)] dark:border-[color:var(--app-border)] dark:bg-[color:var(--app-bg-canvas)]">
               <Image
                 src="/branding/logo.png"
                 alt="Absolute Ice Cream ERP"
@@ -239,16 +239,16 @@ export function Sidebar() {
               />
             </div>
             <div className="min-w-0">
-              <p className="truncate text-sm font-semibold tracking-[-0.02em] text-white dark:text-[color:var(--app-text)]">
+              <p className="text-sm font-semibold tracking-[-0.02em] text-white dark:text-[color:var(--app-text)]">
                 Absolute Ice Cream ERP
               </p>
-              <p className="text-[11px] text-blue-100/78 dark:text-[color:var(--app-muted)]">
+              <p className="mt-0.5 text-xs leading-5 text-blue-100/78 dark:text-[color:var(--app-muted)]">
                 Internal operations console
               </p>
             </div>
           </div>
 
-          <div className="mt-3 rounded-2xl border border-white/12 bg-slate-950/18 px-3 py-3 backdrop-blur-sm dark:border-[color:var(--app-border-muted)] dark:bg-[color:var(--app-bg-default)]">
+          <div className="mt-4 rounded-2xl border border-white/12 bg-slate-950/18 px-4 py-3.5 backdrop-blur-sm dark:border-[color:var(--app-border-muted)] dark:bg-[color:var(--app-bg-default)]">
             <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-blue-100/62 dark:text-[color:var(--app-subtle)]">
               Signed in as
             </p>
@@ -272,8 +272,8 @@ export function Sidebar() {
         </div>
       </div>
 
-      <nav className="flex-1 overflow-y-auto px-2.5 py-3">
-        <div className="space-y-4">
+      <nav className="flex-1 overflow-y-auto px-3 py-4">
+        <div className="space-y-5">
           {navSections.map((section) => {
             const sectionItems = visibleItems.filter((item) => item.section === section);
 
@@ -283,10 +283,10 @@ export function Sidebar() {
 
             return (
               <section key={section}>
-                <p className="px-2.5 text-[10px] font-semibold uppercase tracking-[0.2em] text-blue-100/60 dark:text-[color:var(--app-subtle)]">
+                <p className="px-3 text-[10px] font-semibold uppercase tracking-[0.2em] text-blue-100/60 dark:text-[color:var(--app-subtle)]">
                   {section}
                 </p>
-                <div className="mt-1.5 space-y-1">
+                <div className="mt-2 space-y-1.5">
                   {sectionItems.map((item) => {
                     const Icon = item.icon;
                     const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`);
@@ -297,7 +297,7 @@ export function Sidebar() {
                         href={item.href}
                         aria-current={isActive ? 'page' : undefined}
                         className={cn(
-                          'group flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13px] transition-all duration-150',
+                          'group flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm leading-5 transition-all duration-150',
                           isActive
                             ? 'border border-white/20 bg-white text-slate-900 shadow-[0_10px_24px_rgba(2,6,23,0.18)] dark:border-[color:var(--app-border-strong)] dark:bg-[color:var(--app-accent-soft)] dark:text-[color:var(--app-accent-strong)] dark:shadow-[var(--app-shadow-sm)]'
                             : 'border border-transparent text-blue-50/84 hover:border-white/12 hover:bg-white/10 hover:text-white dark:text-[color:var(--app-muted)] dark:hover:border-[color:var(--app-border-muted)] dark:hover:bg-[color:var(--app-bg-subtle)] dark:hover:text-[color:var(--app-text)]',
@@ -306,15 +306,15 @@ export function Sidebar() {
                       >
                         <div
                           className={cn(
-                            'flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg border transition',
+                            'flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg border transition',
                             isActive
                               ? 'border-slate-200 bg-slate-50 text-[color:var(--app-accent-strong)] dark:border-[color:var(--app-border-strong)] dark:bg-[color:var(--app-bg-canvas)] dark:text-[color:var(--app-accent)]'
                               : 'border-white/12 bg-slate-950/18 text-blue-100/74 group-hover:border-white/18 group-hover:bg-white/12 group-hover:text-white dark:border-[color:var(--app-border-muted)] dark:bg-[color:var(--app-bg-default)] dark:text-[color:var(--app-subtle)] dark:group-hover:text-[color:var(--app-accent)]',
                           )}
                         >
-                          <Icon className="h-3.5 w-3.5" />
+                          <Icon className="h-4 w-4" />
                         </div>
-                        <span className="truncate font-medium">{item.label}</span>
+                        <span className="min-w-0 flex-1 font-medium">{item.label}</span>
                         {isActive ? <span className="ml-auto h-2 w-2 rounded-full bg-[color:var(--app-accent-strong)] dark:bg-[color:var(--app-accent)]" /> : null}
                       </Link>
                     );
@@ -326,13 +326,13 @@ export function Sidebar() {
         </div>
       </nav>
 
-      <div className="border-t border-white/12 px-2.5 py-3 dark:border-[color:var(--app-border-muted)]">
+      <div className="border-t border-white/12 px-3 py-4 dark:border-[color:var(--app-border-muted)]">
         <button
           type="button"
           onClick={async () => { await logoutAndRedirect(router); }}
-          className="flex w-full items-center gap-3 rounded-lg bg-red-600 px-2.5 py-2 text-sm font-semibold text-white transition hover:bg-red-700"
+          className="flex min-h-11 w-full items-center gap-3 rounded-xl bg-red-600 px-3 py-2.5 text-sm font-semibold text-white transition hover:bg-red-700"
         >
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-red-700/70">
+          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-red-700/70">
             <LogOut className="h-4 w-4" />
           </div>
           <span>Sign out</span>

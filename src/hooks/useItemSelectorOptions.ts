@@ -34,6 +34,7 @@ export interface UseItemSelectorOptionsInput {
   includePrice?: boolean;
   includeStock?: boolean;
   itemType?: string | string[] | null;
+  limit?: number;
   search?: string | null;
   warehouseId?: string | null;
 }
@@ -56,17 +57,20 @@ export function useItemSelectorOptions(input: UseItemSelectorOptionsInput = {}) 
       if (input.includeInactive) searchParams.set('includeInactive', 'true');
       if (input.includePrice) searchParams.set('include_price', 'true');
       if (input.includeStock) searchParams.set('include_stock', 'true');
+      if (input.limit) searchParams.set('limit', String(input.limit));
       if (input.search) searchParams.set('search', input.search);
       if (input.warehouseId) searchParams.set('warehouse_id', input.warehouseId);
       if (input.itemType) {
         searchParams.set('item_type', Array.isArray(input.itemType) ? input.itemType.join(',') : input.itemType);
       }
 
-      const response = await apiFetch<{ data: ItemSelectorOption[] }>(`${API_ROUTES.ITEMS}?${searchParams.toString()}`, {
+      const response = await apiFetch<{ data?: ItemSelectorOption[] } | ItemSelectorOption[]>(`${API_ROUTES.ITEMS}?${searchParams.toString()}`, {
         token,
       });
-      return response.data ?? [];
+      return Array.isArray(response) ? response : response.data ?? [];
     },
     enabled: isLoaded && Boolean(isSignedIn),
+    retry: 1,
+    staleTime: 30_000,
   });
 }

@@ -200,6 +200,8 @@ test('sales quotations, orders, and invoices use the shared searchable item sele
 
   for (const page of [quotationsPage, ordersPage, invoicesPage]) {
     assert.match(page, /useItemSelectorOptions/);
+    assert.match(page, /limit: 250/);
+    assert.match(page, /onRetry=\{\(\) => itemOptionsQuery\.refetch\(\)\}/);
   }
 
   assert.match(ordersPage, /useAuthorizedBranches/);
@@ -207,6 +209,8 @@ test('sales quotations, orders, and invoices use the shared searchable item sele
   assert.match(invoicesPage, /Preview \/ Print/);
   assert.match(invoicePreviewPage, /window\.print/);
   assert.match(lineEditor, /ItemSelectorField/);
+  assert.match(lineEditor, /onRetry\?: \(\(\) => void \| Promise<void>\) \| null/);
+  assert.match(lineEditor, /onRetry=\{onRetry\}/);
   assert.match(lineEditor, /readOnly/);
   assert.match(lineEditor, /No saleable items are available\./);
   assert.match(invoiceRoute, /loadResolvedSalesItemPricing/);

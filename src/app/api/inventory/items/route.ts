@@ -49,6 +49,15 @@ function normalizeItem(row: Record<string, unknown>, categories = new Map<string
   };
 }
 
+function matchesRequestedItemTypes(
+  row: Record<string, unknown>,
+  requestedTypes: string[],
+) {
+  if (requestedTypes.length === 0) return true;
+  const resolvedType = String(row.item_type ?? row.type ?? '').trim().toUpperCase();
+  return requestedTypes.includes(resolvedType);
+}
+
 export async function GET(request: NextRequest) {
   const ctx = await getAuthContext();
   if (!ctx) return unauthorized();
@@ -71,7 +80,7 @@ export async function GET(request: NextRequest) {
   const includeCost = searchParams.get('include_cost') === 'true' || searchParams.get('includeCost') === 'true';
   const includePrice = searchParams.get('include_price') === 'true' || searchParams.get('includePrice') === 'true';
   const includeInactive = searchParams.get('includeInactive') === 'true';
-  const selectorPageSize = Math.min(100, Math.max(1, parseInt(searchParams.get('limit') ?? searchParams.get('pageSize') ?? '50', 10)));
+  const selectorPageSize = Math.min(500, Math.max(25, parseInt(searchParams.get('limit') ?? searchParams.get('pageSize') ?? '200', 10)));
 
   if (selector) {
     let branchLookup = service
@@ -166,45 +175,53 @@ export async function GET(request: NextRequest) {
       .map((value) => value.trim())
       .filter(Boolean);
 
-    let selectorQuery = service
-      .from('items')
-      .select(
-        'id, organization_id, code, name, description, type, item_type, category_id, unit_id, unit_of_measure_id, standard_cost, unit_cost, cost_price, purchase_price, selling_price, is_active',
-      )
-      .eq('organization_id', ctx.organizationId)
-      .range(0, selectorPageSize - 1)
-      .order('name', { ascending: true });
+    const selectorRows: Array<Record<string, unknown>> = [];
+    const selectorFetchSize = Math.min(200, selectorPageSize);
+    let selectorOffset = 0;
 
-    if (search) {
-      selectorQuery = selectorQuery.or(`name.ilike.%${search}%,code.ilike.%${search}%,description.ilike.%${search}%`);
+    while (selectorRows.length < selectorPageSize) {
+      let selectorQuery = service
+        .from('items')
+        .select(
+          'id, organization_id, code, name, description, type, item_type, category_id, unit_id, unit_of_measure_id, standard_cost, unit_cost, cost_price, purchase_price, selling_price, is_active',
+        )
+        .eq('organization_id', ctx.organizationId)
+        .range(selectorOffset, selectorOffset + selectorFetchSize - 1)
+        .order('name', { ascending: true });
+
+      if (search) {
+        selectorQuery = selectorQuery.or(`name.ilike.%${search}%,code.ilike.%${search}%,description.ilike.%${search}%`);
+      }
+      if (category) selectorQuery = selectorQuery.eq('category_id', category);
+      if (!includeInactive) selectorQuery = selectorQuery.eq('is_active', true);
+
+      const selectorResult = await selectorQuery;
+      if (selectorResult.error) {
+        return apiServerError({
+          branchId: effectiveBranchId,
+          ctx,
+          error: selectorResult.error,
+          message: 'Items could not be loaded for the selector.',
+          module: 'inventory.item-selector',
+          path: request.nextUrl.pathname,
+          status: 500,
+        });
+      }
+
+      const batchRows = (selectorResult.data ?? []).filter((row) => matchesRequestedItemTypes(row, typeFilters));
+      selectorRows.push(...batchRows);
+
+      if ((selectorResult.data?.length ?? 0) < selectorFetchSize) {
+        break;
+      }
+
+      selectorOffset += selectorFetchSize;
     }
-    if (category) selectorQuery = selectorQuery.eq('category_id', category);
-    if (!includeInactive) selectorQuery = selectorQuery.eq('is_active', true);
-    if (typeFilters.length === 1) {
-      selectorQuery = selectorQuery.or(`type.eq.${typeFilters[0]},item_type.eq.${typeFilters[0]}`);
-    }
 
-    const selectorResult = await selectorQuery;
-    if (selectorResult.error) {
-      return apiServerError({
-        branchId: effectiveBranchId,
-        ctx,
-        error: selectorResult.error,
-        message: 'Items could not be loaded for the selector.',
-        module: 'inventory.item-selector',
-        path: request.nextUrl.pathname,
-        status: 500,
-      });
-    }
+    const limitedSelectorRows = selectorRows.slice(0, selectorPageSize);
 
-    const selectorRows = (selectorResult.data ?? []).filter((row) =>
-      typeFilters.length === 0
-        ? true
-        : typeFilters.includes(String(row.item_type ?? row.type ?? '').trim().toUpperCase()),
-    );
-
-    const categoryIds = [...new Set(selectorRows.map((row) => String(row.category_id ?? '')).filter(Boolean))];
-    const unitIds = [...new Set(selectorRows.map((row) => String(row.unit_id ?? row.unit_of_measure_id ?? '')).filter(Boolean))];
+    const categoryIds = [...new Set(limitedSelectorRows.map((row) => String(row.category_id ?? '')).filter(Boolean))];
+    const unitIds = [...new Set(limitedSelectorRows.map((row) => String(row.unit_id ?? row.unit_of_measure_id ?? '')).filter(Boolean))];
 
     const [categoriesResult, unitsResult, stockResult] = await Promise.all([
       categoryIds.length
@@ -217,7 +234,7 @@ export async function GET(request: NextRequest) {
         ? service
             .from('stock_balances')
             .select('item_id, warehouse_id, quantity_on_hand, quantity_available, average_cost, avg_cost')
-            .in('item_id', selectorRows.map((row) => String(row.id)))
+            .in('item_id', limitedSelectorRows.map((row) => String(row.id)))
         : Promise.resolve({ data: [], error: null }),
     ]);
     if (categoriesResult.error) {
@@ -281,7 +298,7 @@ export async function GET(request: NextRequest) {
       branchId: effectiveBranchId,
       customer: customerPricing,
       documentDate: new Date().toISOString().slice(0, 10),
-      itemIds: selectorRows.map((row) => String(row.id)),
+      itemIds: limitedSelectorRows.map((row) => String(row.id)),
       organizationId: ctx.organizationId,
       service,
       warehouseId: authorizedWarehouseId,
@@ -289,7 +306,7 @@ export async function GET(request: NextRequest) {
 
     const options = buildItemSelectorOptions({
       branchId: effectiveBranchId,
-      items: selectorRows.map((row) => {
+      items: limitedSelectorRows.map((row) => {
         const categoryName = categoryById.get(String(row.category_id ?? '')) ?? null;
         const unit = unitById.get(String(row.unit_id ?? row.unit_of_measure_id ?? '')) ?? null;
         const resolved = resolvedPricing.get(String(row.id));

@@ -231,3 +231,24 @@ test('branch expense route validates finance setup and falls back across legacy 
   assert.match(branchExpenseRoute, /shift_close_id/);
   assert.match(branchExpenseRoute, /apiServerError/);
 });
+
+test('shared dashboard and form layout primitives use the widened navigation and roomier form spacing', () => {
+  const shell = fs.readFileSync('src/components/dashboard/dashboard-shell.tsx', 'utf8');
+  const sidebar = fs.readFileSync('src/components/dashboard/sidebar.tsx', 'utf8');
+  const drawer = fs.readFileSync('src/components/ui-library/form-drawer.tsx', 'utf8');
+  const table = fs.readFileSync('src/components/ui-library/data-table.tsx', 'utf8');
+  const globals = fs.readFileSync('src/app/globals.css', 'utf8');
+
+  assert.match(shell, /grid-cols-\[304px_1fr\]/);
+  assert.match(shell, /xl:grid-cols-\[312px_1fr\]/);
+  assert.match(shell, /overflow-x-clip/);
+  assert.match(shell, /w-\[304px\] max-w-\[85vw\]/);
+  assert.match(sidebar, /gap-3 rounded-xl px-3 py-2\.5 text-sm leading-5/);
+  assert.match(drawer, /max-w-4xl/);
+  assert.match(drawer, /rounded-t-3xl/);
+  assert.match(table, /px-5 py-4 align-top text-sm leading-6/);
+  assert.match(globals, /\.surface-card \{\s*@apply rounded-xl border p-5 shadow-sm;/);
+  assert.match(globals, /\.surface-input \{\s*@apply h-11 w-full rounded-xl border px-4 text-sm leading-5/);
+  assert.match(globals, /min-height: 2\.5rem;/);
+  assert.match(globals, /white-space: nowrap;/);
+});
