@@ -6,6 +6,7 @@ import {
   can,
   forbidden,
   getAuthContext,
+  serverError,
   unauthorized,
 } from '@/lib/api-auth';
 import { resolveRequestedBranchId } from '@/lib/branch-access';
@@ -13,7 +14,11 @@ import { buildItemSelectorOptions } from '@/lib/item-selector';
 import { loadResolvedSalesItemPricing, loadSalesCustomerPricingContext } from '@/lib/sales-pricing';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
-function normalizeItem(row: Record<string, unknown>, categories = new Map<string, Record<string, unknown>>(), units = new Map<string, Record<string, unknown>>()) {
+function normalizeItem(
+  row: Record<string, unknown>,
+  categories = new Map<string, Record<string, unknown>>(),
+  units = new Map<string, Record<string, unknown>>(),
+) {
   const categoryId = String(row.category_id ?? '');
   const unitId = String(row.unit_of_measure_id ?? row.unit_id ?? '');
   const category = categoryId ? categories.get(categoryId) ?? null : null;
@@ -49,25 +54,102 @@ function normalizeItem(row: Record<string, unknown>, categories = new Map<string
   };
 }
 
-function matchesRequestedItemTypes(
-  row: Record<string, unknown>,
-  requestedTypes: string[],
-) {
+function matchesRequestedItemTypes(row: Record<string, unknown>, requestedTypes: string[]) {
   if (requestedTypes.length === 0) return true;
   const resolvedType = String(row.item_type ?? row.type ?? '').trim().toUpperCase();
   return requestedTypes.includes(resolvedType);
 }
 
-export async function GET(request: NextRequest) {
-  const ctx = await getAuthContext();
-  if (!ctx) return unauthorized();
-  if (!can(ctx, 'inventory.read')) return forbidden();
+function buildSelectorRequestId(request: NextRequest) {
+  return request.headers.get('x-request-id')?.trim() || `item-selector-${crypto.randomUUID()}`;
+}
 
-  const service = createServiceRoleClient();
+function jsonWithRequestId(body: Record<string, unknown>, requestId: string, status = 200) {
+  return NextResponse.json(body, {
+    headers: { 'x-request-id': requestId },
+    status,
+  });
+}
+
+function buildSelectorFailureResponse(input: {
+  code: string;
+  message: string;
+  requestId: string;
+  status: number;
+}) {
+  return jsonWithRequestId(
+    {
+      success: false,
+      error: {
+        code: input.code,
+        message: input.message,
+        requestId: input.requestId,
+      },
+    },
+    input.requestId,
+    input.status,
+  );
+}
+
+function toSupabaseCode(error: unknown) {
+  if (typeof error === 'object' && error !== null && 'code' in error) {
+    return String((error as { code?: unknown }).code ?? '') || null;
+  }
+
+  return null;
+}
+
+function toSupabaseMessage(error: unknown) {
+  if (error instanceof Error) return error.message;
+  if (typeof error === 'object' && error !== null && 'message' in error) {
+    return String((error as { message?: unknown }).message ?? '') || null;
+  }
+
+  return null;
+}
+
+function logSelectorRequest(
+  requestId: string,
+  details: {
+    branchId?: string | null;
+    httpStatus: number;
+    itemTypes: string[];
+    organizationId?: string | null;
+    page: number;
+    pageSize: number;
+    returnedRows?: number | null;
+    role?: string | null;
+    search?: string | null;
+    supabaseCode?: string | null;
+    supabaseMessage?: string | null;
+    userId?: string | null;
+    warehouseId?: string | null;
+  },
+) {
+  console.info('inventory.item-selector', {
+    branchId: details.branchId ?? null,
+    httpStatus: details.httpStatus,
+    itemTypes: details.itemTypes,
+    organizationId: details.organizationId ?? null,
+    page: details.page,
+    pageSize: details.pageSize,
+    requestId,
+    returnedRows: details.returnedRows ?? null,
+    role: details.role ?? null,
+    search: details.search ?? null,
+    supabaseCode: details.supabaseCode ?? null,
+    supabaseMessage: details.supabaseMessage ?? null,
+    userId: details.userId ?? null,
+    warehouseId: details.warehouseId ?? null,
+  });
+}
+
+export async function GET(request: NextRequest) {
+  const requestId = buildSelectorRequestId(request);
   const { searchParams } = new URL(request.url);
 
-  const page = Math.max(1, parseInt(searchParams.get('page') ?? '1'));
-  const pageSize = Math.min(100, parseInt(searchParams.get('pageSize') ?? '20'));
+  const page = Math.max(1, parseInt(searchParams.get('page') ?? '1', 10));
+  const pageSize = Math.min(100, parseInt(searchParams.get('pageSize') ?? '20', 10));
   const search = searchParams.get('search') ?? '';
   const category = searchParams.get('category') ?? '';
   const status = searchParams.get('status') ?? '';
@@ -80,7 +162,124 @@ export async function GET(request: NextRequest) {
   const includeCost = searchParams.get('include_cost') === 'true' || searchParams.get('includeCost') === 'true';
   const includePrice = searchParams.get('include_price') === 'true' || searchParams.get('includePrice') === 'true';
   const includeInactive = searchParams.get('includeInactive') === 'true';
-  const selectorPageSize = Math.min(500, Math.max(25, parseInt(searchParams.get('limit') ?? searchParams.get('pageSize') ?? '200', 10)));
+  const selectorPageSize = Math.min(
+    500,
+    Math.max(25, parseInt(searchParams.get('limit') ?? searchParams.get('pageSize') ?? '200', 10)),
+  );
+  const typeFilters = (searchParams.get('item_type') ?? searchParams.get('itemType') ?? type)
+    .split(',')
+    .map((value) => value.trim().toUpperCase())
+    .filter(Boolean);
+
+  const ctx = await getAuthContext(request);
+  if (!ctx) {
+    if (selector) {
+      logSelectorRequest(requestId, {
+        httpStatus: 401,
+        itemTypes: typeFilters,
+        page: 1,
+        pageSize: selectorPageSize,
+        search,
+        userId: null,
+        warehouseId,
+      });
+      return buildSelectorFailureResponse({
+        code: 'ITEM_AUTH_REQUIRED',
+        message: 'Authentication is required to load selector items.',
+        requestId,
+        status: 401,
+      });
+    }
+
+    return unauthorized();
+  }
+
+  if (!ctx.organizationId) {
+    if (selector) {
+      logSelectorRequest(requestId, {
+        branchId: ctx.branchId,
+        httpStatus: 422,
+        itemTypes: typeFilters,
+        organizationId: null,
+        page: 1,
+        pageSize: selectorPageSize,
+        role: ctx.role,
+        search,
+        userId: ctx.userId,
+        warehouseId,
+      });
+      return buildSelectorFailureResponse({
+        code: 'ITEM_ORGANIZATION_REQUIRED',
+        message: 'Organization context is missing for the item selector.',
+        requestId,
+        status: 422,
+      });
+    }
+
+    return serverError('Organization context is missing.', 'ORGANIZATION_CONTEXT_MISSING');
+  }
+
+  if (!can(ctx, 'inventory.read')) {
+    if (selector) {
+      logSelectorRequest(requestId, {
+        branchId: ctx.branchId,
+        httpStatus: 403,
+        itemTypes: typeFilters,
+        organizationId: ctx.organizationId,
+        page: 1,
+        pageSize: selectorPageSize,
+        role: ctx.role,
+        search,
+        userId: ctx.userId,
+        warehouseId,
+      });
+      return buildSelectorFailureResponse({
+        code: 'ITEM_ACCESS_DENIED',
+        message: 'You do not have permission to load selector items.',
+        requestId,
+        status: 403,
+      });
+    }
+
+    return forbidden();
+  }
+
+  let service;
+  try {
+    service = createServiceRoleClient();
+  } catch (error) {
+    if (selector) {
+      logSelectorRequest(requestId, {
+        branchId: ctx.branchId,
+        httpStatus: 500,
+        itemTypes: typeFilters,
+        organizationId: ctx.organizationId,
+        page: 1,
+        pageSize: selectorPageSize,
+        role: ctx.role,
+        search,
+        supabaseCode: 'SUPABASE_SERVICE_ROLE_KEY_MISSING',
+        supabaseMessage: toSupabaseMessage(error),
+        userId: ctx.userId,
+        warehouseId,
+      });
+      return buildSelectorFailureResponse({
+        code: 'ITEM_ENV_MISCONFIGURED',
+        message: 'The inventory selector is not configured correctly in this deployment.',
+        requestId,
+        status: 500,
+      });
+    }
+
+    return apiServerError({
+      ctx,
+      error,
+      message: 'Inventory service configuration is missing.',
+      module: 'inventory.items',
+      path: request.nextUrl.pathname,
+      status: 500,
+    });
+  }
 
   if (selector) {
     let branchLookup = service
@@ -95,6 +294,20 @@ export async function GET(request: NextRequest) {
 
     const branchResult = await branchLookup;
     if (branchResult.error) {
+      logSelectorRequest(requestId, {
+        branchId: branchIdParam,
+        httpStatus: 500,
+        itemTypes: typeFilters,
+        organizationId: ctx.organizationId,
+        page: 1,
+        pageSize: selectorPageSize,
+        role: ctx.role,
+        search,
+        supabaseCode: toSupabaseCode(branchResult.error),
+        supabaseMessage: toSupabaseMessage(branchResult.error),
+        userId: ctx.userId,
+        warehouseId,
+      });
       return apiServerError({
         ctx,
         error: branchResult.error,
@@ -122,11 +335,28 @@ export async function GET(request: NextRequest) {
       { includeInactive: true },
     );
     if (!branchAuthorization.ok) {
-      return NextResponse.json({ error: branchAuthorization.message }, { status: branchAuthorization.status });
+      logSelectorRequest(requestId, {
+        branchId: branchIdParam,
+        httpStatus: branchAuthorization.status,
+        itemTypes: typeFilters,
+        organizationId: ctx.organizationId,
+        page: 1,
+        pageSize: selectorPageSize,
+        role: ctx.role,
+        search,
+        userId: ctx.userId,
+        warehouseId,
+      });
+      return buildSelectorFailureResponse({
+        code: branchAuthorization.status === 403 ? 'ITEM_ACCESS_DENIED' : 'ITEM_BRANCH_INVALID',
+        message: branchAuthorization.message,
+        requestId,
+        status: branchAuthorization.status,
+      });
     }
 
     const effectiveBranchId = branchAuthorization.branchId;
-    let authorizedWarehouseId = warehouseId ? String(warehouseId) : null;
+    const authorizedWarehouseId = warehouseId ? String(warehouseId) : null;
 
     let warehouseQuery = service
       .from('warehouses')
@@ -144,6 +374,20 @@ export async function GET(request: NextRequest) {
 
     const warehouseResult = await warehouseQuery;
     if (warehouseResult.error) {
+      logSelectorRequest(requestId, {
+        branchId: effectiveBranchId,
+        httpStatus: 500,
+        itemTypes: typeFilters,
+        organizationId: ctx.organizationId,
+        page: 1,
+        pageSize: selectorPageSize,
+        role: ctx.role,
+        search,
+        supabaseCode: toSupabaseCode(warehouseResult.error),
+        supabaseMessage: toSupabaseMessage(warehouseResult.error),
+        userId: ctx.userId,
+        warehouseId: authorizedWarehouseId,
+      });
       return apiServerError({
         branchId: effectiveBranchId,
         ctx,
@@ -156,7 +400,9 @@ export async function GET(request: NextRequest) {
     }
 
     if (authorizedWarehouseId) {
-      const warehouseBranchId = warehouseResult.data?.[0]?.branch_id ? String(warehouseResult.data[0].branch_id) : null;
+      const warehouseBranchId = warehouseResult.data?.[0]?.branch_id
+        ? String(warehouseResult.data[0].branch_id)
+        : null;
       const warehouseAllowed =
         warehouseResult.data?.length === 1 &&
         (
@@ -166,14 +412,26 @@ export async function GET(request: NextRequest) {
           ctx.warehouseAssignments.includes(authorizedWarehouseId)
         );
       if (!warehouseAllowed) {
-        return NextResponse.json({ error: 'Warehouse not found or out of scope.' }, { status: 400 });
+        logSelectorRequest(requestId, {
+          branchId: effectiveBranchId,
+          httpStatus: 400,
+          itemTypes: typeFilters,
+          organizationId: ctx.organizationId,
+          page: 1,
+          pageSize: selectorPageSize,
+          role: ctx.role,
+          search,
+          userId: ctx.userId,
+          warehouseId: authorizedWarehouseId,
+        });
+        return buildSelectorFailureResponse({
+          code: 'ITEM_WAREHOUSE_INVALID',
+          message: 'Warehouse not found or out of scope.',
+          requestId,
+          status: 400,
+        });
       }
     }
-
-    const typeFilters = (searchParams.get('item_type') ?? searchParams.get('itemType') ?? type)
-      .split(',')
-      .map((value) => value.trim())
-      .filter(Boolean);
 
     const selectorRows: Array<Record<string, unknown>> = [];
     const selectorFetchSize = Math.min(200, selectorPageSize);
@@ -197,6 +455,20 @@ export async function GET(request: NextRequest) {
 
       const selectorResult = await selectorQuery;
       if (selectorResult.error) {
+        logSelectorRequest(requestId, {
+          branchId: effectiveBranchId,
+          httpStatus: 500,
+          itemTypes: typeFilters,
+          organizationId: ctx.organizationId,
+          page: 1,
+          pageSize: selectorPageSize,
+          role: ctx.role,
+          search,
+          supabaseCode: toSupabaseCode(selectorResult.error),
+          supabaseMessage: toSupabaseMessage(selectorResult.error),
+          userId: ctx.userId,
+          warehouseId: authorizedWarehouseId,
+        });
         return apiServerError({
           branchId: effectiveBranchId,
           ctx,
@@ -219,7 +491,6 @@ export async function GET(request: NextRequest) {
     }
 
     const limitedSelectorRows = selectorRows.slice(0, selectorPageSize);
-
     const categoryIds = [...new Set(limitedSelectorRows.map((row) => String(row.category_id ?? '')).filter(Boolean))];
     const unitIds = [...new Set(limitedSelectorRows.map((row) => String(row.unit_id ?? row.unit_of_measure_id ?? '')).filter(Boolean))];
 
@@ -237,7 +508,22 @@ export async function GET(request: NextRequest) {
             .in('item_id', limitedSelectorRows.map((row) => String(row.id)))
         : Promise.resolve({ data: [], error: null }),
     ]);
+
     if (categoriesResult.error) {
+      logSelectorRequest(requestId, {
+        branchId: effectiveBranchId,
+        httpStatus: 500,
+        itemTypes: typeFilters,
+        organizationId: ctx.organizationId,
+        page: 1,
+        pageSize: selectorPageSize,
+        role: ctx.role,
+        search,
+        supabaseCode: toSupabaseCode(categoriesResult.error),
+        supabaseMessage: toSupabaseMessage(categoriesResult.error),
+        userId: ctx.userId,
+        warehouseId: authorizedWarehouseId,
+      });
       return apiServerError({
         branchId: effectiveBranchId,
         ctx,
@@ -248,7 +534,22 @@ export async function GET(request: NextRequest) {
         status: 500,
       });
     }
+
     if (unitsResult.error) {
+      logSelectorRequest(requestId, {
+        branchId: effectiveBranchId,
+        httpStatus: 500,
+        itemTypes: typeFilters,
+        organizationId: ctx.organizationId,
+        page: 1,
+        pageSize: selectorPageSize,
+        role: ctx.role,
+        search,
+        supabaseCode: toSupabaseCode(unitsResult.error),
+        supabaseMessage: toSupabaseMessage(unitsResult.error),
+        userId: ctx.userId,
+        warehouseId: authorizedWarehouseId,
+      });
       return apiServerError({
         branchId: effectiveBranchId,
         ctx,
@@ -259,7 +560,22 @@ export async function GET(request: NextRequest) {
         status: 500,
       });
     }
+
     if (stockResult.error) {
+      logSelectorRequest(requestId, {
+        branchId: effectiveBranchId,
+        httpStatus: 500,
+        itemTypes: typeFilters,
+        organizationId: ctx.organizationId,
+        page: 1,
+        pageSize: selectorPageSize,
+        role: ctx.role,
+        search,
+        supabaseCode: toSupabaseCode(stockResult.error),
+        supabaseMessage: toSupabaseMessage(stockResult.error),
+        userId: ctx.userId,
+        warehouseId: authorizedWarehouseId,
+      });
       return apiServerError({
         branchId: effectiveBranchId,
         ctx,
@@ -271,7 +587,9 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    const categoryById = new Map((categoriesResult.data ?? []).map((row) => [String(row.id), String(row.name ?? '')]));
+    const categoryById = new Map(
+      (categoriesResult.data ?? []).map((row) => [String(row.id), String(row.name ?? '')]),
+    );
     const unitById = new Map(
       (unitsResult.data ?? []).map((row) => [
         String(row.id),
@@ -313,9 +631,8 @@ export async function GET(request: NextRequest) {
         const rawCost = includeCost
           ? resolved?.currentInventoryCost ?? Number(row.unit_cost ?? row.standard_cost ?? row.cost_price ?? row.purchase_price)
           : null;
-        const rawPrice = includePrice
-          ? resolved?.sellingPrice ?? Number(row.selling_price)
-          : null;
+        const rawPrice = includePrice ? resolved?.sellingPrice ?? Number(row.selling_price) : null;
+
         return {
           categoryId: row.category_id ? String(row.category_id) : null,
           categoryName,
@@ -328,30 +645,61 @@ export async function GET(request: NextRequest) {
           sellingPrice: rawPrice !== null && Number.isFinite(rawPrice) ? rawPrice : null,
           taxStatus: resolved?.taxCode ?? null,
           unitAbbreviation: unit?.abbreviation ?? null,
-          unitId: row.unit_id ? String(row.unit_id) : row.unit_of_measure_id ? String(row.unit_of_measure_id) : null,
+          unitId: row.unit_id
+            ? String(row.unit_id)
+            : row.unit_of_measure_id
+              ? String(row.unit_of_measure_id)
+              : null,
           unitName: unit?.name ?? null,
         };
       }),
-      stockRows: (stockResult.data ?? []).filter((row) => warehousesById.has(String(row.warehouse_id ?? ''))).map((row) => ({
-        averageCost: Number.isFinite(Number(row.average_cost ?? row.avg_cost)) ? Number(row.average_cost ?? row.avg_cost) : null,
-        itemId: String(row.item_id ?? ''),
-        quantityAvailable: Number.isFinite(Number(row.quantity_available)) ? Number(row.quantity_available) : null,
-        quantityOnHand: Number.isFinite(Number(row.quantity_on_hand)) ? Number(row.quantity_on_hand) : null,
-        warehouseId: String(row.warehouse_id ?? ''),
-      })),
+      stockRows: (stockResult.data ?? [])
+        .filter((row) => warehousesById.has(String(row.warehouse_id ?? '')))
+        .map((row) => ({
+          averageCost: Number.isFinite(Number(row.average_cost ?? row.avg_cost))
+            ? Number(row.average_cost ?? row.avg_cost)
+            : null,
+          itemId: String(row.item_id ?? ''),
+          quantityAvailable: Number.isFinite(Number(row.quantity_available))
+            ? Number(row.quantity_available)
+            : null,
+          quantityOnHand: Number.isFinite(Number(row.quantity_on_hand))
+            ? Number(row.quantity_on_hand)
+            : null,
+          warehouseId: String(row.warehouse_id ?? ''),
+        })),
       warehouseId: authorizedWarehouseId,
       warehousesById,
     });
 
-    return NextResponse.json({
-      data: options,
-      items: options,
-      pagination: {
-        page: 1,
-        pageSize: selectorPageSize,
-        total: limitedSelectorRows.length,
-      },
+    logSelectorRequest(requestId, {
+      branchId: effectiveBranchId,
+      httpStatus: 200,
+      itemTypes: typeFilters,
+      organizationId: ctx.organizationId,
+      page: 1,
+      pageSize: selectorPageSize,
+      returnedRows: options.length,
+      role: ctx.role,
+      search,
+      userId: ctx.userId,
+      warehouseId: authorizedWarehouseId,
     });
+
+    return jsonWithRequestId(
+      {
+        success: true,
+        data: options,
+        items: options,
+        pagination: {
+          page: 1,
+          pageSize: selectorPageSize,
+          total: limitedSelectorRows.length,
+        },
+        requestId,
+      },
+      requestId,
+    );
   }
 
   let query = service
@@ -403,6 +751,7 @@ export async function GET(request: NextRequest) {
       ? service.from('units_of_measure').select('id, name, abbreviation').in('id', unitIds)
       : Promise.resolve({ data: [], error: null }),
   ]);
+
   if (categoriesResult.error) {
     return apiServerError({
       ctx,
@@ -413,6 +762,7 @@ export async function GET(request: NextRequest) {
       status: 500,
     });
   }
+
   if (unitsResult.error) {
     return apiServerError({
       ctx,
@@ -424,7 +774,9 @@ export async function GET(request: NextRequest) {
     });
   }
 
-  const categories = new Map((categoriesResult.data ?? []).map((row) => [String(row.id), row as Record<string, unknown>]));
+  const categories = new Map(
+    (categoriesResult.data ?? []).map((row) => [String(row.id), row as Record<string, unknown>]),
+  );
   const units = new Map((unitsResult.data ?? []).map((row) => [String(row.id), row as Record<string, unknown>]));
 
   return NextResponse.json({
@@ -434,25 +786,24 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const ctx = await getAuthContext();
+  const ctx = await getAuthContext(request);
   if (!ctx) return unauthorized();
   if (!can(ctx, 'inventory.write')) return forbidden();
 
   const service = createServiceRoleClient();
-
   const body = (await request.json()) as {
-    code?: string;
-    name?: string;
-    description?: string | null;
     categoryId?: string;
-    unitOfMeasureId?: string;
-    itemType?: string;
+    code?: string;
+    description?: string | null;
     isActive?: boolean;
-    trackExpiry?: boolean;
+    itemType?: string;
+    name?: string;
     reorderLevel?: number | null;
     reorderQuantity?: number | null;
-    unitCost?: number | null;
     sellingPrice?: number | null;
+    trackExpiry?: boolean;
+    unitCost?: number | null;
+    unitOfMeasureId?: string;
   };
 
   const { code, name, unitOfMeasureId, itemType } = body;
@@ -489,7 +840,11 @@ export async function POST(request: NextRequest) {
     } else {
       const created = await service
         .from('item_categories')
-        .insert({ organization_id: ctx.organizationId, name: 'Uncategorized', description: 'Default category for uncategorized inventory items.' })
+        .insert({
+          description: 'Default category for uncategorized inventory items.',
+          name: 'Uncategorized',
+          organization_id: ctx.organizationId,
+        })
         .select('id, name')
         .single();
       if (created.error || !created.data) {
@@ -502,22 +857,22 @@ export async function POST(request: NextRequest) {
           status: 500,
         });
       }
+
       categoryId = created.data.id;
       categoryRecord = created.data as Record<string, unknown>;
     }
   } else {
-    const { data: category, error: categoryError } = await service
+    const { data: categoryRecordRow, error: categoryError } = await service
       .from('item_categories')
       .select('id, name')
       .eq('id', categoryId)
       .eq('organization_id', ctx.organizationId)
       .single();
     if (categoryError) return serverError(categoryError.message);
-    if (!category) return badRequest('Item category not found.');
-    categoryRecord = category as Record<string, unknown>;
+    if (!categoryRecordRow) return badRequest('Item category not found.');
+    categoryRecord = categoryRecordRow as Record<string, unknown>;
   }
 
-  // Verify unit of measure exists
   const { data: unit, error: unitError } = await service
     .from('units_of_measure')
     .select('id, name, abbreviation')
@@ -530,19 +885,19 @@ export async function POST(request: NextRequest) {
   const { data, error } = await service
     .from('items')
     .insert({
-      code,
-      name,
-      description: body.description ?? null,
-      organization_id: ctx.organizationId,
       category_id: categoryId,
-      unit_id: unitOfMeasureId,
-      type: itemType,
+      code,
+      description: body.description ?? null,
       is_active: body.isActive ?? true,
+      name,
+      organization_id: ctx.organizationId,
       reorder_level: body.reorderLevel ?? null,
       reorder_qty: body.reorderQuantity ?? null,
+      selling_price: body.sellingPrice ?? null,
       shelf_life_days: body.trackExpiry ? 30 : null,
       standard_cost: body.unitCost ?? null,
-      selling_price: body.sellingPrice ?? null,
+      type: itemType,
+      unit_id: unitOfMeasureId,
     })
     .select()
     .single();

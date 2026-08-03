@@ -945,6 +945,7 @@ test('inventory items route exposes selector mode with branch and warehouse awar
   const route = fs.readFileSync('src/app/api/inventory/items/route.ts', 'utf8');
 
   assert.match(route, /selector/);
+  assert.match(route, /getAuthContext\(request\)/);
   assert.match(route, /resolveRequestedBranchId/);
   assert.match(route, /include_stock/);
   assert.match(route, /warehouse_id/);
@@ -952,6 +953,13 @@ test('inventory items route exposes selector mode with branch and warehouse awar
   assert.match(route, /matchesRequestedItemTypes/);
   assert.match(route, /selectorFetchSize = Math\.min\(200, selectorPageSize\)/);
   assert.match(route, /limitedSelectorRows = selectorRows\.slice\(0, selectorPageSize\)/);
+  assert.match(route, /success:\s*true/);
+  assert.match(route, /requestId/);
+  assert.match(route, /ITEM_AUTH_REQUIRED/);
+  assert.match(route, /ITEM_ACCESS_DENIED/);
+  assert.match(route, /ITEM_ORGANIZATION_REQUIRED/);
+  assert.match(route, /ITEM_WAREHOUSE_INVALID/);
+  assert.match(route, /ITEM_ENV_MISCONFIGURED/);
   assert.match(route, /items: options/);
   assert.match(route, /pagination:/);
 });
@@ -978,7 +986,29 @@ test('shared item selector hook and field expose retry, search, and stable empty
   assert.match(hook, /retry: 1/);
   assert.match(hook, /staleTime: 30_000/);
   assert.match(hook, /response\.items \?\? response\.data \?\? \[\]/);
+  assert.match(hook, /Items could not be loaded\./);
+  assert.match(hook, /API \$\{error\.status\}/);
+  assert.match(hook, /Request \$\{error\.requestId\}/);
   assert.match(field, /onRetry\?: \(\(\) => void \| Promise<void>\) \| null/);
   assert.match(field, /Search by item code or item name/);
   assert.match(field, /No items found for this search/);
+});
+
+test('API client and server env helpers harden selector failures against invalid responses and missing Vercel env', () => {
+  const apiClient = fs.readFileSync('src/lib/api.ts', 'utf8');
+  const runtimeEnv = fs.readFileSync('src/lib/runtime-env.ts', 'utf8');
+  const supabaseServer = fs.readFileSync('src/lib/supabase/server.ts', 'utf8');
+  const middleware = fs.readFileSync('src/middleware.ts', 'utf8');
+
+  assert.match(apiClient, /INVALID_API_RESPONSE/);
+  assert.match(apiClient, /API returned a non-JSON response\./);
+  assert.match(apiClient, /x-request-id/);
+  assert.match(runtimeEnv, /NEXT_PUBLIC_SUPABASE_URL/);
+  assert.match(runtimeEnv, /NEXT_PUBLIC_SUPABASE_ANON_KEY/);
+  assert.match(runtimeEnv, /SUPABASE_SERVICE_ROLE_KEY/);
+  assert.match(runtimeEnv, /NEXT_PUBLIC_APP_URL/);
+  assert.match(runtimeEnv, /VERCEL_URL/);
+  assert.match(runtimeEnv, /Missing required environment variable/);
+  assert.match(supabaseServer, /assertServerRuntimeEnv/);
+  assert.match(middleware, /assertServerRuntimeEnv/);
 });

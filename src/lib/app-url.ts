@@ -1,15 +1,6 @@
-const PUBLIC_APP_URL_FALLBACK = 'https://www.absolute-erp.com';
+import { CANONICAL_APP_URL_ENV_KEYS } from '@/lib/runtime-env';
 
-const APP_URL_ENV_KEYS = [
-  'ABSOLUTE_ERP_BASE_URL',
-  'NEXT_PUBLIC_APP_URL',
-  'NEXT_PUBLIC_SITE_URL',
-  'APP_URL',
-  'BASE_URL',
-  'SITE_URL',
-  'NEXTAUTH_URL',
-  'VERCEL_URL',
-] as const;
+const PUBLIC_APP_URL_FALLBACK = 'https://www.absolute-erp.com';
 
 function normalizeBaseUrl(value: string | null | undefined) {
   const trimmed = String(value ?? '').trim();
@@ -27,7 +18,7 @@ function normalizeBaseUrl(value: string | null | undefined) {
 }
 
 function getConfiguredBaseUrl() {
-  for (const key of APP_URL_ENV_KEYS) {
+  for (const key of CANONICAL_APP_URL_ENV_KEYS) {
     const normalized = normalizeBaseUrl(process.env[key]);
     if (normalized) return normalized;
   }
@@ -58,4 +49,4 @@ export function toAbsoluteAppUrl(path: string, request?: Request | URL | null) {
   return new URL(path, `${resolvePublicAppUrl(request)}/`).toString();
 }
 
-export { APP_URL_ENV_KEYS, PUBLIC_APP_URL_FALLBACK };
+export { CANONICAL_APP_URL_ENV_KEYS as APP_URL_ENV_KEYS, PUBLIC_APP_URL_FALLBACK };

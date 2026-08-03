@@ -1913,10 +1913,15 @@ test('production planning and BOM pages use the shared branch and item selector 
   assert.match(planningForm, /useAuthorizedBranches/);
   assert.match(planningForm, /useItemSelectorOptions/);
   assert.match(planningForm, /ItemSelectorField/);
+  assert.match(planningForm, /itemType: \['FINISHED_GOOD', 'FINISHED'\]/);
+  assert.match(planningForm, /errorMessage=\{productOptionsQuery\.error\?\.message \?\? null\}/);
   assert.match(planningForm, /limit: 250/);
   assert.match(planningForm, /onRetry=\{\(\) => productOptionsQuery\.refetch\(\)\}/);
   assert.match(recipesPage, /useItemSelectorOptions/);
   assert.match(recipesPage, /ItemSelectorField/);
+  assert.match(recipesPage, /const finishedGoodItemTypes = \['FINISHED_GOOD', 'FINISHED'\] as const/);
+  assert.match(recipesPage, /const ingredientItemTypes = \['RAW', 'RAW_MATERIAL', 'INGREDIENT', 'CONSUMABLE', 'STOCK'\] as const/);
+  assert.match(recipesPage, /const packagingItemTypes = \['PACKAGING', 'PACKAGING_MATERIAL'\] as const/);
   assert.match(recipesPage, /Search finished product/);
   assert.match(recipesPage, /limit: 250/);
   assert.match(recipesPage, /findDuplicateLineItems/);

@@ -16,6 +16,10 @@ export class ApiRequestError extends Error {
   }
 }
 
+function readResponseRequestId(response: Response) {
+  return response.headers.get('x-request-id') ?? response.headers.get('x-vercel-id');
+}
+
 export async function apiFetch<T>(path: string, options: ApiFetchOptions = {}) {
   const { headers, token, body, ...rest } = options;
   const isFormData = typeof FormData !== 'undefined' && body instanceof FormData;
@@ -38,6 +42,7 @@ export async function apiFetch<T>(path: string, options: ApiFetchOptions = {}) {
     }
 
     const rawBody = await response.text();
+    const headerRequestId = readResponseRequestId(response);
     let parsedMessage: string | undefined;
     let parsedCode: string | undefined;
     let parsedRequestId: string | undefined;
@@ -59,9 +64,10 @@ export async function apiFetch<T>(path: string, options: ApiFetchOptions = {}) {
         parsed.errorMessage ??
         (typeof parsed.error === 'string' ? parsed.error : undefined);
       parsedCode = nestedError?.code ?? parsed.code;
-      parsedRequestId = nestedError?.requestId ?? parsed.requestId ?? parsed.errorId;
+      parsedRequestId = nestedError?.requestId ?? parsed.requestId ?? parsed.errorId ?? headerRequestId ?? undefined;
     } catch {
       parsedMessage = undefined;
+      parsedRequestId = headerRequestId ?? undefined;
     }
 
     if (parsedRequestId) {
@@ -81,5 +87,19 @@ export async function apiFetch<T>(path: string, options: ApiFetchOptions = {}) {
     });
   }
 
-  return (await response.json()) as T;
+  const rawBody = await response.text();
+  if (!rawBody.trim()) {
+    return null as T;
+  }
+
+  try {
+    return JSON.parse(rawBody) as T;
+  } catch {
+    throw new ApiRequestError({
+      code: 'INVALID_API_RESPONSE',
+      message: 'API returned a non-JSON response.',
+      requestId: readResponseRequestId(response),
+      status: response.status,
+    });
+  }
 }

@@ -211,12 +211,15 @@ test('sales quotations, orders, and invoices use the shared searchable item sele
   assert.match(lineEditor, /ItemSelectorField/);
   assert.match(lineEditor, /onRetry\?: \(\(\) => void \| Promise<void>\) \| null/);
   assert.match(lineEditor, /onRetry=\{onRetry\}/);
+  assert.match(lineEditor, /errorMessage=\{errorMessage\}/);
   assert.match(lineEditor, /readOnly/);
   assert.match(lineEditor, /No saleable items are available\./);
   assert.match(invoiceRoute, /loadResolvedSalesItemPricing/);
   assert.match(invoiceRoute, /postInventory !== false/);
   assert.match(itemSelectorRoute, /customer_id/);
   assert.match(itemSelectorRoute, /loadResolvedSalesItemPricing/);
+  assert.match(ordersPage, /errorMessage=\{itemOptionsQuery\.error\?\.message \?\? null\}/);
+  assert.match(invoicesPage, /errorMessage=\{itemOptionsQuery\.error\?\.message \?\? null\}/);
 });
 
 test('sales pricing and receipt printing routes use organization-scoped prices and saved payment records', () => {

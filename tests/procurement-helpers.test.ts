@@ -2920,11 +2920,14 @@ test('procurement requisitions, purchase orders, and GRNs use the shared item se
 
   assert.match(goodsReceivedPage, /Select a warehouse first\./);
   assert.match(purchaseOrdersPage, /Search item/);
+  assert.match(purchaseOrdersPage, /itemType: Array\.from\(purchasableItemTypes\)/);
+  assert.match(purchaseOrdersPage, /errorMessage=\{itemSelectorQuery\.error instanceof Error \? itemSelectorQuery\.error\.message : null\}/);
   assert.match(requisitionsPage, /limit: 250/);
   assert.match(requisitionsPage, /onRetry=\{\(\) => itemOptionsQuery\.refetch\(\)\}/);
   assert.match(purchaseOrdersPage, /limit: 250/);
   assert.match(purchaseOrdersPage, /onRetry=\{\(\) => itemSelectorQuery\.refetch\(\)\}/);
   assert.match(goodsReceivedPage, /limit: 250/);
+  assert.match(goodsReceivedPage, /itemType: Array\.from\(grnItemTypes\)/);
   assert.match(goodsReceivedPage, /onRetry=\{\(\) => itemSelectorQuery\.refetch\(\)\}/);
 });
 

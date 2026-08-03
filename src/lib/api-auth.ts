@@ -31,8 +31,17 @@ export interface AuthContext {
   }>;
 }
 
+function extractBearerToken(request?: Request | NextRequest) {
+  const authorizationHeader = request?.headers.get('authorization') ?? request?.headers.get('Authorization');
+  if (!authorizationHeader) return null;
+
+  const match = authorizationHeader.match(/^Bearer\s+(.+)$/i);
+  return match?.[1]?.trim() || null;
+}
+
 export async function getAuthContext(request?: Request | NextRequest): Promise<AuthContext | null> {
   const supabase = await createClient();
+  const accessToken = extractBearerToken(request);
   const [
     {
       data: { user },
@@ -40,7 +49,18 @@ export async function getAuthContext(request?: Request | NextRequest): Promise<A
     {
       data: { session },
     },
-  ] = await Promise.all([supabase.auth.getUser(), supabase.auth.getSession()]);
+  ] = await Promise.all([
+    accessToken ? supabase.auth.getUser(accessToken) : supabase.auth.getUser(),
+    accessToken
+      ? Promise.resolve({
+          data: {
+            session: {
+              access_token: accessToken,
+            },
+          },
+        })
+      : supabase.auth.getSession(),
+  ]);
 
   if (!user) return null;
 
@@ -48,7 +68,8 @@ export async function getAuthContext(request?: Request | NextRequest): Promise<A
   if (!profile) return null;
 
   const resolved = await buildSecurityContextProfile(profile);
-  const sessionCheck = await ensureActiveSession(resolved, session?.access_token);
+  const resolvedAccessToken = session?.access_token ?? accessToken ?? undefined;
+  const sessionCheck = await ensureActiveSession(resolved, resolvedAccessToken);
 
   if (!sessionCheck.active) {
     await recordSecurityEvent({
@@ -63,11 +84,11 @@ export async function getAuthContext(request?: Request | NextRequest): Promise<A
     return null;
   }
 
-  if (session?.access_token) {
+  if (resolvedAccessToken) {
     await touchSessionActivity({
       userAccountId: resolved.userAccountId,
       userProfileId: resolved.id,
-      accessToken: session.access_token,
+      accessToken: resolvedAccessToken,
       ipAddress: request?.headers.get('x-forwarded-for'),
       userAgent: request?.headers.get('user-agent'),
       timeoutMinutes: resolved.sessionTimeoutMinutes,

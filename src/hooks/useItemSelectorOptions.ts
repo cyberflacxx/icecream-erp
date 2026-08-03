@@ -3,7 +3,7 @@
 import { useQuery } from '@tanstack/react-query';
 
 import { useAppAuth } from '@/hooks/useAppAuth';
-import { apiFetch } from '@/lib/api';
+import { ApiRequestError, apiFetch } from '@/lib/api';
 import { API_ROUTES } from '@/lib/shared';
 
 export interface ItemSelectorOption {
@@ -42,6 +42,8 @@ export interface UseItemSelectorOptionsInput {
 type ItemSelectorApiResponse =
   | ItemSelectorOption[]
   | {
+      requestId?: string;
+      success?: boolean;
       data?: ItemSelectorOption[];
       items?: ItemSelectorOption[];
       pagination?: {
@@ -50,6 +52,30 @@ type ItemSelectorApiResponse =
         total: number;
       };
     };
+
+function formatItemSelectorLoadError(error: unknown) {
+  if (error instanceof ApiRequestError) {
+    const parts = ['Items could not be loaded.'];
+
+    const contextParts = [`API ${error.status}`];
+    if (error.code) contextParts.push(error.code);
+    if (error.requestId) contextParts.push(`Request ${error.requestId}`);
+    parts.push(contextParts.join(' — '));
+
+    const detail = error.message.trim();
+    if (detail && detail !== 'Items could not be loaded.') {
+      parts.push(detail);
+    }
+
+    return parts.join(' — ');
+  }
+
+  if (error instanceof Error && error.message.trim()) {
+    return `Items could not be loaded. — ${error.message.trim()}`;
+  }
+
+  return 'Items could not be loaded for the selector.';
+}
 
 export function useItemSelectorOptions(input: UseItemSelectorOptionsInput = {}) {
   const { getToken, isLoaded, isSignedIn, userId } = useAppAuth();
@@ -76,14 +102,27 @@ export function useItemSelectorOptions(input: UseItemSelectorOptionsInput = {}) 
         searchParams.set('item_type', Array.isArray(input.itemType) ? input.itemType.join(',') : input.itemType);
       }
 
-      const response = await apiFetch<ItemSelectorApiResponse>(`${API_ROUTES.ITEMS}?${searchParams.toString()}`, {
-        token,
-      });
-      if (Array.isArray(response)) {
-        return response;
-      }
+      try {
+        const response = await apiFetch<ItemSelectorApiResponse>(`${API_ROUTES.ITEMS}?${searchParams.toString()}`, {
+          token,
+        });
+        if (Array.isArray(response)) {
+          return response;
+        }
 
-      return response.items ?? response.data ?? [];
+        return response.items ?? response.data ?? [];
+      } catch (error) {
+        if (error instanceof ApiRequestError) {
+          throw new ApiRequestError({
+            code: error.code,
+            message: formatItemSelectorLoadError(error),
+            requestId: error.requestId,
+            status: error.status,
+          });
+        }
+
+        throw new Error(formatItemSelectorLoadError(error));
+      }
     },
     enabled: isLoaded && Boolean(isSignedIn),
     retry: 1,

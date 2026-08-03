@@ -2,6 +2,7 @@ import { createServerClient } from '@supabase/ssr';
 import { type NextRequest, NextResponse } from 'next/server';
 
 import { resolvePublicAppUrl } from '@/lib/app-url';
+import { assertServerRuntimeEnv } from '@/lib/runtime-env';
 
 const protectedPrefixes = [
   '/dashboard',
@@ -51,6 +52,7 @@ function buildCanonicalRedirect(request: NextRequest) {
 }
 
 export async function middleware(request: NextRequest) {
+  const env = assertServerRuntimeEnv();
   const canonicalRedirect = buildCanonicalRedirect(request);
   if (canonicalRedirect) {
     return NextResponse.redirect(canonicalRedirect, 308);
@@ -60,8 +62,8 @@ export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    env.supabaseUrl,
+    env.supabaseAnonKey,
     {
       db: { schema: 'icecream_erp' },
       cookies: {

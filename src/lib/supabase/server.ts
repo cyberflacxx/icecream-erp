@@ -2,14 +2,17 @@ import { createServerClient } from '@supabase/ssr';
 import { createClient as createSupabaseClient } from '@supabase/supabase-js';
 import { cookies } from 'next/headers';
 
+import { assertServerRuntimeEnv } from '@/lib/runtime-env';
+
 import { createSupabaseFetch } from './fetch';
 
 export async function createClient() {
+  const env = assertServerRuntimeEnv();
   const cookieStore = await cookies();
 
   return createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    env.supabaseUrl,
+    env.supabaseAnonKey,
     {
       db: { schema: 'icecream_erp' },
       global: { fetch: createSupabaseFetch() },
@@ -32,9 +35,11 @@ export async function createClient() {
 }
 
 export function createServiceRoleClient() {
+  const env = assertServerRuntimeEnv({ requireServiceRole: true });
+
   return createSupabaseClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!,
+    env.supabaseUrl,
+    env.serviceRoleKey!,
     {
       db: { schema: 'icecream_erp' },
       auth: { persistSession: false, autoRefreshToken: false },
