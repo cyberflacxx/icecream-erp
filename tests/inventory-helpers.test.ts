@@ -952,6 +952,8 @@ test('inventory items route exposes selector mode with branch and warehouse awar
   assert.match(route, /matchesRequestedItemTypes/);
   assert.match(route, /selectorFetchSize = Math\.min\(200, selectorPageSize\)/);
   assert.match(route, /limitedSelectorRows = selectorRows\.slice\(0, selectorPageSize\)/);
+  assert.match(route, /items: options/);
+  assert.match(route, /pagination:/);
 });
 
 test('inventory stores and transfers pages use the shared selector hook and searchable item field', () => {
@@ -975,6 +977,7 @@ test('shared item selector hook and field expose retry, search, and stable empty
 
   assert.match(hook, /retry: 1/);
   assert.match(hook, /staleTime: 30_000/);
+  assert.match(hook, /response\.items \?\? response\.data \?\? \[\]/);
   assert.match(field, /onRetry\?: \(\(\) => void \| Promise<void>\) \| null/);
   assert.match(field, /Search by item code or item name/);
   assert.match(field, /No items found for this search/);

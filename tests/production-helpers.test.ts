@@ -1931,6 +1931,9 @@ test('production recipe route rejects duplicate recipe items with structured ser
   assert.match(route, /hasDuplicateRecipeItems/);
   assert.match(route, /Each raw material may only appear once in a BOM\./);
   assert.match(route, /Each packaging material may only appear once in a BOM\./);
+  assert.match(route, /rollbackCreatedRecipe/);
+  assert.match(route, /sort_order: index/);
+  assert.match(route, /Saved BOM ingredient lines could not be confirmed after creation\./);
   assert.match(route, /apiServerError/);
 });
 
@@ -1939,6 +1942,8 @@ test('production reports show a controlled zero-output costing notice and use co
   const productionServer = fs.readFileSync('src/lib/production-server.ts', 'utf8');
 
   assert.match(reportsPage, /Production cost per good unit is unavailable because no good output has been recorded\./);
+  assert.match(reportsPage, /function ReportSection\(\{\s*columns,\s*description,\s*notice,\s*rows,\s*title,/s);
+  assert.match(reportsPage, /Retry reports/);
   assert.match(productionServer, /isMissingRelationshipError/);
   assert.match(productionServer, /from\('production_batch_materials'\)/);
   assert.match(productionServer, /from\('production_batch_outputs'\)/);

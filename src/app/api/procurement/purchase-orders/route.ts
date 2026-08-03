@@ -120,16 +120,38 @@ function poCreateFailure(
     operation: string;
   },
 ) {
+  const requestId = `PO-${Date.now()}-${Math.random().toString(16).slice(2, 10).toUpperCase()}`;
   return NextResponse.json({
     success: false,
+    error: {
+      code: 'PO_CREATE_FAILED',
+      message: 'Purchase order could not be created. Please check supplier, requisition items, quantities, and prices.',
+      requestId,
+    },
     message: 'Purchase order could not be created. Please check supplier, requisition items, quantities, and prices.',
     code: 'PO_CREATE_FAILED',
+    requestId,
     details: {
       lineCount: details.lineCount,
       missing: details.missing ?? [],
       operation: details.operation,
     },
   }, { status });
+}
+
+async function rollbackCreatedPurchaseOrder(
+  service: ReturnType<typeof createServiceRoleClient>,
+  orderId: string,
+) {
+  await service
+    .from('purchase_order_items')
+    .delete()
+    .or(`purchase_order_id.eq.${orderId},po_id.eq.${orderId}`);
+
+  await service
+    .from('purchase_orders')
+    .delete()
+    .eq('id', orderId);
 }
 
 async function loadReceivablePurchaseOrderPickerRows(
@@ -430,6 +452,7 @@ export async function POST(request: NextRequest) {
     allowOverRequisitionQuantity?: boolean;
     overrideOverRequisitionQuantity?: boolean;
   };
+  let createdOrderId: string | null = null;
 
   try {
     body = await request.json();
@@ -792,6 +815,7 @@ export async function POST(request: NextRequest) {
     const order = orderInsert.data;
 
     const orderId = (order as Record<string, unknown>).id as string;
+    createdOrderId = orderId;
 
     let itemPayload: Record<string, unknown>[] = resolvedItems.map((item) => ({
       po_id: orderId,
@@ -825,6 +849,7 @@ export async function POST(request: NextRequest) {
     }
 
     if (itemsErr) {
+      await rollbackCreatedPurchaseOrder(service, orderId);
       logPurchaseOrderFailure('purchase_order_items.insert', {
         firstLine: itemPayload[0] ?? null,
         header: {
@@ -885,6 +910,17 @@ export async function POST(request: NextRequest) {
       },
     }, { status: 201 });
   } catch (err) {
+    if (createdOrderId) {
+      try {
+        await rollbackCreatedPurchaseOrder(service, createdOrderId);
+      } catch (rollbackError) {
+        console.error('Failed to roll back purchase order creation.', {
+          message: rollbackError instanceof Error ? rollbackError.message : String(rollbackError),
+          orderId: createdOrderId,
+        });
+      }
+    }
+
     return serverError((err as Error).message);
   }
 }

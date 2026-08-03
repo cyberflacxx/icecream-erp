@@ -111,28 +111,9 @@ export function canAccessBranchScope(ctx: AuthContext, branchId: string) {
   );
 }
 
-export function unauthorized(message = 'Unauthorized') {
-  return NextResponse.json({ error: message }, { status: 401 });
-}
-
-export function forbidden(message = 'Forbidden') {
-  return NextResponse.json({ error: message }, { status: 403 });
-}
-
-export function notFound(msg = 'Not found') {
-  return NextResponse.json({ error: msg }, { status: 404 });
-}
-
-export function badRequest(msg: string) {
-  return NextResponse.json({ error: msg }, { status: 400 });
-}
-
-export function serverError(msg: string) {
-  return NextResponse.json({ error: msg }, { status: 500 });
-}
-
 type ApiServerErrorInput = {
   branchId?: string | null;
+  code?: string | null;
   ctx?: AuthContext | null;
   error: unknown;
   message: string;
@@ -172,12 +153,66 @@ function buildApiErrorId() {
   return `ERR-${new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 14)}-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
 }
 
+function normalizeApiErrorCode(value: string | null | undefined, fallback: string) {
+  const normalized = String(value ?? '')
+    .trim()
+    .replace(/[^A-Za-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .toUpperCase();
+
+  return normalized || fallback;
+}
+
+function buildApiErrorResponse(input: {
+  code: string;
+  message: string;
+  requestId?: string;
+  status: number;
+}) {
+  const requestId = input.requestId ?? buildApiErrorId();
+  const code = normalizeApiErrorCode(input.code, 'API_ERROR');
+
+  return NextResponse.json({
+    success: false,
+    error: {
+      code,
+      message: input.message,
+      requestId,
+    },
+    code,
+    message: input.message,
+    requestId,
+    errorMessage: input.message,
+    errorId: requestId,
+  }, { status: input.status });
+}
+
+export function unauthorized(message = 'Unauthorized') {
+  return buildApiErrorResponse({ code: 'UNAUTHORIZED', message, status: 401 });
+}
+
+export function forbidden(message = 'Forbidden') {
+  return buildApiErrorResponse({ code: 'FORBIDDEN', message, status: 403 });
+}
+
+export function notFound(message = 'Not found') {
+  return buildApiErrorResponse({ code: 'NOT_FOUND', message, status: 404 });
+}
+
+export function badRequest(message: string, code = 'BAD_REQUEST') {
+  return buildApiErrorResponse({ code, message, status: 400 });
+}
+
+export function serverError(message: string, code = 'INTERNAL_SERVER_ERROR') {
+  return buildApiErrorResponse({ code, message, status: 500 });
+}
+
 export async function apiServerError(input: ApiServerErrorInput) {
-  const errorId = buildApiErrorId();
+  const requestId = buildApiErrorId();
   const details = {
     branchId: input.branchId ?? input.ctx?.branchId ?? null,
     databaseCode: apiErrorCode(input.error),
-    errorId,
+    errorId: requestId,
     errorMessage: sanitizeErrorValue(apiErrorMessage(input.error)),
     module: input.module,
     organizationId: input.ctx?.organizationId ?? null,
@@ -196,21 +231,23 @@ export async function apiServerError(input: ApiServerErrorInput) {
       .insert({
         details,
         error_type: apiErrorCode(input.error) ?? (input.error instanceof Error ? input.error.name : 'API_ERROR'),
-        message_summary: `${input.message} (${errorId})`,
+        message_summary: `${input.message} (${requestId})`,
         module_name: input.module,
         organization_id: input.ctx?.organizationId ?? null,
         severity: input.severity ?? 'MEDIUM',
       });
   } catch (loggingError) {
     console.error('Failed to persist API error log', {
-      errorId,
+      errorId: requestId,
       loggingError: apiErrorMessage(loggingError),
       module: input.module,
     });
   }
 
-  return NextResponse.json({
-    error: input.message,
-    errorId,
-  }, { status: input.status ?? 500 });
+  return buildApiErrorResponse({
+    code: input.code ?? apiErrorCode(input.error) ?? 'INTERNAL_SERVER_ERROR',
+    message: input.message,
+    requestId,
+    status: input.status ?? 500,
+  });
 }

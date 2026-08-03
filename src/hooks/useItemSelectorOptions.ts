@@ -39,6 +39,18 @@ export interface UseItemSelectorOptionsInput {
   warehouseId?: string | null;
 }
 
+type ItemSelectorApiResponse =
+  | ItemSelectorOption[]
+  | {
+      data?: ItemSelectorOption[];
+      items?: ItemSelectorOption[];
+      pagination?: {
+        page: number;
+        pageSize: number;
+        total: number;
+      };
+    };
+
 export function useItemSelectorOptions(input: UseItemSelectorOptionsInput = {}) {
   const { getToken, isLoaded, isSignedIn, userId } = useAppAuth();
 
@@ -64,10 +76,14 @@ export function useItemSelectorOptions(input: UseItemSelectorOptionsInput = {}) 
         searchParams.set('item_type', Array.isArray(input.itemType) ? input.itemType.join(',') : input.itemType);
       }
 
-      const response = await apiFetch<{ data?: ItemSelectorOption[] } | ItemSelectorOption[]>(`${API_ROUTES.ITEMS}?${searchParams.toString()}`, {
+      const response = await apiFetch<ItemSelectorApiResponse>(`${API_ROUTES.ITEMS}?${searchParams.toString()}`, {
         token,
       });
-      return Array.isArray(response) ? response : response.data ?? [];
+      if (Array.isArray(response)) {
+        return response;
+      }
+
+      return response.items ?? response.data ?? [];
     },
     enabled: isLoaded && Boolean(isSignedIn),
     retry: 1,

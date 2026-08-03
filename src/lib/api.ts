@@ -2,6 +2,20 @@ interface ApiFetchOptions extends RequestInit {
   token?: string | null;
 }
 
+export class ApiRequestError extends Error {
+  code: string | null;
+  requestId: string | null;
+  status: number;
+
+  constructor(input: { code?: string | null; message: string; requestId?: string | null; status: number }) {
+    super(input.message);
+    this.name = 'ApiRequestError';
+    this.code = input.code ?? null;
+    this.requestId = input.requestId ?? null;
+    this.status = input.status;
+  }
+}
+
 export async function apiFetch<T>(path: string, options: ApiFetchOptions = {}) {
   const { headers, token, body, ...rest } = options;
   const isFormData = typeof FormData !== 'undefined' && body instanceof FormData;
@@ -23,17 +37,48 @@ export async function apiFetch<T>(path: string, options: ApiFetchOptions = {}) {
       window.location.replace('/auth/login');
     }
 
-    const message = await response.text();
+    const rawBody = await response.text();
     let parsedMessage: string | undefined;
+    let parsedCode: string | undefined;
+    let parsedRequestId: string | undefined;
 
     try {
-      const parsed = JSON.parse(message) as { error?: string; message?: string };
-      parsedMessage = parsed.message ?? parsed.error;
+      const parsed = JSON.parse(rawBody) as {
+        code?: string;
+        error?: { code?: string; message?: string; requestId?: string } | string;
+        errorId?: string;
+        errorMessage?: string;
+        message?: string;
+        requestId?: string;
+      };
+      const nestedError = typeof parsed.error === 'object' && parsed.error !== null ? parsed.error : null;
+
+      parsedMessage =
+        nestedError?.message ??
+        parsed.message ??
+        parsed.errorMessage ??
+        (typeof parsed.error === 'string' ? parsed.error : undefined);
+      parsedCode = nestedError?.code ?? parsed.code;
+      parsedRequestId = nestedError?.requestId ?? parsed.requestId ?? parsed.errorId;
     } catch {
       parsedMessage = undefined;
     }
 
-    throw new Error(parsedMessage || message || `Request failed with status ${response.status}.`);
+    if (parsedRequestId) {
+      console.error('API request failed', {
+        code: parsedCode ?? null,
+        path,
+        requestId: parsedRequestId,
+        status: response.status,
+      });
+    }
+
+    throw new ApiRequestError({
+      code: parsedCode,
+      message: parsedMessage || rawBody || `Request failed with status ${response.status}.`,
+      requestId: parsedRequestId,
+      status: response.status,
+    });
   }
 
   return (await response.json()) as T;

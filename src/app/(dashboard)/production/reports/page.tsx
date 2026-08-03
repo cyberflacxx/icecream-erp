@@ -32,10 +32,11 @@ export default function ProductionReportsPage() {
   const consumptionQuery = useProductionReport(API_ROUTES.PRODUCTION.REPORT_MATERIAL_CONSUMPTION);
   const yieldQuery = useProductionReport(API_ROUTES.PRODUCTION.REPORT_YIELD);
   const costingQuery = useProductionReport(API_ROUTES.PRODUCTION.REPORT_COSTING);
+  const reportQueries = [varianceQuery, consumptionQuery, yieldQuery, costingQuery];
 
-  const isLoading = [varianceQuery, consumptionQuery, yieldQuery, costingQuery].some((query) => query.isLoading);
-  const hasAnyData = [varianceQuery, consumptionQuery, yieldQuery, costingQuery].some((query) => Array.isArray(query.data));
-  const firstError = [varianceQuery, consumptionQuery, yieldQuery, costingQuery].find((query) => query.isError)?.error;
+  const isLoading = reportQueries.some((query) => query.isLoading);
+  const hasAnyData = reportQueries.some((query) => Array.isArray(query.data));
+  const firstError = reportQueries.find((query) => query.isError)?.error;
 
   if (isLoading) return <LoadingState />;
   if (!hasAnyData && firstError) {
@@ -44,6 +45,17 @@ export default function ProductionReportsPage() {
         icon={<AlertCircle className="h-6 w-6" />}
         title="Reports unavailable"
         description={firstError.message ?? 'No production report data returned.'}
+        action={
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => {
+              void Promise.all(reportQueries.map((query) => query.refetch()));
+            }}
+          >
+            Retry reports
+          </Button>
+        }
       />
     );
   }
@@ -95,6 +107,25 @@ export default function ProductionReportsPage() {
         }
       />
       <ProductionNav />
+
+      {firstError ? (
+        <div className="flex flex-col gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p className="font-semibold">One or more report queries failed.</p>
+            <p className="mt-1 text-amber-800">{firstError.message ?? 'A production report request failed.'}</p>
+          </div>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={() => {
+              void Promise.all(reportQueries.map((query) => query.refetch()));
+            }}
+          >
+            Retry reports
+          </Button>
+        </div>
+      ) : null}
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <SummaryCard
@@ -212,6 +243,7 @@ function SummaryCard({
 function ReportSection({
   columns,
   description,
+  notice,
   rows,
   title,
 }: {

@@ -2943,4 +2943,6 @@ test('procurement receiving routes and UI use the repaired Batch 1 status contra
   assert.match(metaHook, /purchaseOrderScope=receiving/);
   assert.match(goodsReceivedPage, /useProcurementMeta\(\{ purchaseOrderScope: 'receiving' \}\)/);
   assert.match(goodsReceivedPage, /No approved purchase orders with remaining quantity/);
+  assert.match(purchaseOrdersRoute, /rollbackCreatedPurchaseOrder/);
+  assert.match(purchaseOrdersRoute, /requestId/);
 });

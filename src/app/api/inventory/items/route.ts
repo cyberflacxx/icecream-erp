@@ -343,7 +343,15 @@ export async function GET(request: NextRequest) {
       warehousesById,
     });
 
-    return NextResponse.json({ data: options });
+    return NextResponse.json({
+      data: options,
+      items: options,
+      pagination: {
+        page: 1,
+        pageSize: selectorPageSize,
+        total: limitedSelectorRows.length,
+      },
+    });
   }
 
   let query = service
