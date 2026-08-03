@@ -960,8 +960,19 @@ test('inventory items route exposes selector mode with branch and warehouse awar
   assert.match(route, /ITEM_ORGANIZATION_REQUIRED/);
   assert.match(route, /ITEM_WAREHOUSE_INVALID/);
   assert.match(route, /ITEM_ENV_MISCONFIGURED/);
+  assert.match(route, /ITEM_QUERY_FAILED/);
+  assert.match(route, /message:\s*'Items could not be loaded\.'/);
+  assert.match(route, /postgresHint/);
+  assert.match(route, /postgresDetails/);
+  assert.match(route, /ITEM_SELECTOR_SELECT_COLUMNS/);
+  assert.match(route, /organization_id/);
+  assert.match(route, /item_type/);
+  assert.match(route, /unit_id/);
+  assert.match(route, /unit_of_measure_id/);
   assert.match(route, /items: options/);
   assert.match(route, /pagination:/);
+  assert.doesNotMatch(route, /cost_price/);
+  assert.doesNotMatch(route, /purchase_price/);
 });
 
 test('inventory stores and transfers pages use the shared selector hook and searchable item field', () => {

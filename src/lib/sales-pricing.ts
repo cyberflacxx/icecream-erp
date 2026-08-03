@@ -157,7 +157,7 @@ export async function loadResolvedSalesItemPricing(input: {
   const [itemsResult, pricesResult, stockResult, branchResult] = await Promise.all([
     input.service
       .from('items')
-      .select('id, organization_id, code, name, type, item_type, unit_id, unit_of_measure_id, unit_cost, standard_cost, cost_price, purchase_price, selling_price, is_active')
+      .select('id, organization_id, code, name, type, item_type, unit_id, unit_of_measure_id, unit_cost, standard_cost, selling_price, is_active')
       .eq('organization_id', input.organizationId)
       .in('id', input.itemIds),
     input.service
@@ -263,7 +263,7 @@ export async function loadResolvedSalesItemPricing(input: {
     const unit = unitId ? unitById.get(unitId) ?? null : null;
     const resolvedPrice = pickResolvedPrice(id, documentDate, (pricesResult.data ?? []) as Array<Record<string, unknown>>, pricePriority);
     const fallbackPrice = toOptionalNumber(row.selling_price);
-    const fallbackCost = toOptionalNumber(row.unit_cost ?? row.standard_cost ?? row.cost_price ?? row.purchase_price);
+    const fallbackCost = toOptionalNumber(row.unit_cost ?? row.standard_cost);
 
     resolved.set(id, {
       availableBranchStock: stock?.availableBranchStock ?? null,

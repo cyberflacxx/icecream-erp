@@ -14,6 +14,23 @@ import { buildItemSelectorOptions } from '@/lib/item-selector';
 import { loadResolvedSalesItemPricing, loadSalesCustomerPricingContext } from '@/lib/sales-pricing';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
+const ITEM_SELECTOR_SELECT_COLUMNS = [
+  'id',
+  'organization_id',
+  'code',
+  'name',
+  'description',
+  'type',
+  'item_type',
+  'category_id',
+  'unit_id',
+  'unit_of_measure_id',
+  'standard_cost',
+  'unit_cost',
+  'selling_price',
+  'is_active',
+].join(', ');
+
 function normalizeItem(
   row: Record<string, unknown>,
   categories = new Map<string, Record<string, unknown>>(),
@@ -108,6 +125,22 @@ function toSupabaseMessage(error: unknown) {
   return null;
 }
 
+function toSupabaseHint(error: unknown) {
+  if (typeof error === 'object' && error !== null && 'hint' in error) {
+    return String((error as { hint?: unknown }).hint ?? '') || null;
+  }
+
+  return null;
+}
+
+function toSupabaseDetails(error: unknown) {
+  if (typeof error === 'object' && error !== null && 'details' in error) {
+    return String((error as { details?: unknown }).details ?? '') || null;
+  }
+
+  return null;
+}
+
 function logSelectorRequest(
   requestId: string,
   details: {
@@ -117,8 +150,11 @@ function logSelectorRequest(
     organizationId?: string | null;
     page: number;
     pageSize: number;
+    postgresDetails?: string | null;
+    postgresHint?: string | null;
     returnedRows?: number | null;
     role?: string | null;
+    route?: string | null;
     search?: string | null;
     supabaseCode?: string | null;
     supabaseMessage?: string | null;
@@ -126,21 +162,72 @@ function logSelectorRequest(
     warehouseId?: string | null;
   },
 ) {
-  console.info('inventory.item-selector', {
+  const payload = {
     branchId: details.branchId ?? null,
     httpStatus: details.httpStatus,
     itemTypes: details.itemTypes,
     organizationId: details.organizationId ?? null,
     page: details.page,
     pageSize: details.pageSize,
+    postgresDetails: details.postgresDetails ?? null,
+    postgresHint: details.postgresHint ?? null,
     requestId,
     returnedRows: details.returnedRows ?? null,
     role: details.role ?? null,
+    route: details.route ?? null,
     search: details.search ?? null,
     supabaseCode: details.supabaseCode ?? null,
     supabaseMessage: details.supabaseMessage ?? null,
     userId: details.userId ?? null,
     warehouseId: details.warehouseId ?? null,
+  };
+
+  if (details.httpStatus >= 500) {
+    console.error('inventory.item-selector', payload);
+    return;
+  }
+
+  console.info('inventory.item-selector', payload);
+}
+
+function buildSelectorDbErrorResponse(input: {
+  branchId?: string | null;
+  ctx: NonNullable<Awaited<ReturnType<typeof getAuthContext>>>;
+  error: unknown;
+  itemTypes: string[];
+  pageSize: number;
+  request: NextRequest;
+  requestId: string;
+  search: string;
+  warehouseId?: string | null;
+}) {
+  logSelectorRequest(input.requestId, {
+    branchId: input.branchId ?? null,
+    httpStatus: 500,
+    itemTypes: input.itemTypes,
+    organizationId: input.ctx.organizationId,
+    page: 1,
+    pageSize: input.pageSize,
+    postgresDetails: toSupabaseDetails(input.error),
+    postgresHint: toSupabaseHint(input.error),
+    role: input.ctx.role,
+    route: input.request.nextUrl.pathname,
+    search: input.search,
+    supabaseCode: toSupabaseCode(input.error),
+    supabaseMessage: toSupabaseMessage(input.error),
+    userId: input.ctx.userId,
+    warehouseId: input.warehouseId ?? null,
+  });
+
+  return apiServerError({
+    branchId: input.branchId ?? null,
+    code: 'ITEM_QUERY_FAILED',
+    ctx: input.ctx,
+    error: input.error,
+    message: 'Items could not be loaded.',
+    module: 'inventory.item-selector',
+    path: input.request.nextUrl.pathname,
+    status: 500,
   });
 }
 
@@ -179,6 +266,7 @@ export async function GET(request: NextRequest) {
         itemTypes: typeFilters,
         page: 1,
         pageSize: selectorPageSize,
+        route: request.nextUrl.pathname,
         search,
         userId: null,
         warehouseId,
@@ -203,6 +291,7 @@ export async function GET(request: NextRequest) {
         organizationId: null,
         page: 1,
         pageSize: selectorPageSize,
+        route: request.nextUrl.pathname,
         role: ctx.role,
         search,
         userId: ctx.userId,
@@ -228,6 +317,7 @@ export async function GET(request: NextRequest) {
         organizationId: ctx.organizationId,
         page: 1,
         pageSize: selectorPageSize,
+        route: request.nextUrl.pathname,
         role: ctx.role,
         search,
         userId: ctx.userId,
@@ -256,6 +346,9 @@ export async function GET(request: NextRequest) {
         organizationId: ctx.organizationId,
         page: 1,
         pageSize: selectorPageSize,
+        postgresDetails: toSupabaseDetails(error),
+        postgresHint: toSupabaseHint(error),
+        route: request.nextUrl.pathname,
         role: ctx.role,
         search,
         supabaseCode: 'SUPABASE_SERVICE_ROLE_KEY_MISSING',
@@ -301,6 +394,9 @@ export async function GET(request: NextRequest) {
         organizationId: ctx.organizationId,
         page: 1,
         pageSize: selectorPageSize,
+        postgresDetails: toSupabaseDetails(branchResult.error),
+        postgresHint: toSupabaseHint(branchResult.error),
+        route: request.nextUrl.pathname,
         role: ctx.role,
         search,
         supabaseCode: toSupabaseCode(branchResult.error),
@@ -308,13 +404,15 @@ export async function GET(request: NextRequest) {
         userId: ctx.userId,
         warehouseId,
       });
-      return apiServerError({
+      return buildSelectorDbErrorResponse({
         ctx,
         error: branchResult.error,
-        message: 'Branches could not be loaded for the item selector.',
-        module: 'inventory.item-selector',
-        path: request.nextUrl.pathname,
-        status: 500,
+        itemTypes: typeFilters,
+        pageSize: selectorPageSize,
+        request,
+        requestId,
+        search,
+        warehouseId,
       });
     }
 
@@ -342,6 +440,7 @@ export async function GET(request: NextRequest) {
         organizationId: ctx.organizationId,
         page: 1,
         pageSize: selectorPageSize,
+        route: request.nextUrl.pathname,
         role: ctx.role,
         search,
         userId: ctx.userId,
@@ -381,6 +480,9 @@ export async function GET(request: NextRequest) {
         organizationId: ctx.organizationId,
         page: 1,
         pageSize: selectorPageSize,
+        postgresDetails: toSupabaseDetails(warehouseResult.error),
+        postgresHint: toSupabaseHint(warehouseResult.error),
+        route: request.nextUrl.pathname,
         role: ctx.role,
         search,
         supabaseCode: toSupabaseCode(warehouseResult.error),
@@ -388,14 +490,16 @@ export async function GET(request: NextRequest) {
         userId: ctx.userId,
         warehouseId: authorizedWarehouseId,
       });
-      return apiServerError({
+      return buildSelectorDbErrorResponse({
         branchId: effectiveBranchId,
         ctx,
         error: warehouseResult.error,
-        message: 'Warehouses could not be loaded for the item selector.',
-        module: 'inventory.item-selector',
-        path: request.nextUrl.pathname,
-        status: 500,
+        itemTypes: typeFilters,
+        pageSize: selectorPageSize,
+        request,
+        requestId,
+        search,
+        warehouseId: authorizedWarehouseId,
       });
     }
 
@@ -419,6 +523,7 @@ export async function GET(request: NextRequest) {
           organizationId: ctx.organizationId,
           page: 1,
           pageSize: selectorPageSize,
+          route: request.nextUrl.pathname,
           role: ctx.role,
           search,
           userId: ctx.userId,
@@ -440,9 +545,7 @@ export async function GET(request: NextRequest) {
     while (selectorRows.length < selectorPageSize) {
       let selectorQuery = service
         .from('items')
-        .select(
-          'id, organization_id, code, name, description, type, item_type, category_id, unit_id, unit_of_measure_id, standard_cost, unit_cost, cost_price, purchase_price, selling_price, is_active',
-        )
+        .select(ITEM_SELECTOR_SELECT_COLUMNS)
         .eq('organization_id', ctx.organizationId)
         .range(selectorOffset, selectorOffset + selectorFetchSize - 1)
         .order('name', { ascending: true });
@@ -462,6 +565,9 @@ export async function GET(request: NextRequest) {
           organizationId: ctx.organizationId,
           page: 1,
           pageSize: selectorPageSize,
+          postgresDetails: toSupabaseDetails(selectorResult.error),
+          postgresHint: toSupabaseHint(selectorResult.error),
+          route: request.nextUrl.pathname,
           role: ctx.role,
           search,
           supabaseCode: toSupabaseCode(selectorResult.error),
@@ -469,14 +575,16 @@ export async function GET(request: NextRequest) {
           userId: ctx.userId,
           warehouseId: authorizedWarehouseId,
         });
-        return apiServerError({
+        return buildSelectorDbErrorResponse({
           branchId: effectiveBranchId,
           ctx,
           error: selectorResult.error,
-          message: 'Items could not be loaded for the selector.',
-          module: 'inventory.item-selector',
-          path: request.nextUrl.pathname,
-          status: 500,
+          itemTypes: typeFilters,
+          pageSize: selectorPageSize,
+          request,
+          requestId,
+          search,
+          warehouseId: authorizedWarehouseId,
         });
       }
 
@@ -517,6 +625,9 @@ export async function GET(request: NextRequest) {
         organizationId: ctx.organizationId,
         page: 1,
         pageSize: selectorPageSize,
+        postgresDetails: toSupabaseDetails(categoriesResult.error),
+        postgresHint: toSupabaseHint(categoriesResult.error),
+        route: request.nextUrl.pathname,
         role: ctx.role,
         search,
         supabaseCode: toSupabaseCode(categoriesResult.error),
@@ -524,14 +635,16 @@ export async function GET(request: NextRequest) {
         userId: ctx.userId,
         warehouseId: authorizedWarehouseId,
       });
-      return apiServerError({
+      return buildSelectorDbErrorResponse({
         branchId: effectiveBranchId,
         ctx,
         error: categoriesResult.error,
-        message: 'Item categories could not be loaded for the selector.',
-        module: 'inventory.item-selector',
-        path: request.nextUrl.pathname,
-        status: 500,
+        itemTypes: typeFilters,
+        pageSize: selectorPageSize,
+        request,
+        requestId,
+        search,
+        warehouseId: authorizedWarehouseId,
       });
     }
 
@@ -543,6 +656,9 @@ export async function GET(request: NextRequest) {
         organizationId: ctx.organizationId,
         page: 1,
         pageSize: selectorPageSize,
+        postgresDetails: toSupabaseDetails(unitsResult.error),
+        postgresHint: toSupabaseHint(unitsResult.error),
+        route: request.nextUrl.pathname,
         role: ctx.role,
         search,
         supabaseCode: toSupabaseCode(unitsResult.error),
@@ -550,14 +666,16 @@ export async function GET(request: NextRequest) {
         userId: ctx.userId,
         warehouseId: authorizedWarehouseId,
       });
-      return apiServerError({
+      return buildSelectorDbErrorResponse({
         branchId: effectiveBranchId,
         ctx,
         error: unitsResult.error,
-        message: 'Units of measure could not be loaded for the selector.',
-        module: 'inventory.item-selector',
-        path: request.nextUrl.pathname,
-        status: 500,
+        itemTypes: typeFilters,
+        pageSize: selectorPageSize,
+        request,
+        requestId,
+        search,
+        warehouseId: authorizedWarehouseId,
       });
     }
 
@@ -569,6 +687,9 @@ export async function GET(request: NextRequest) {
         organizationId: ctx.organizationId,
         page: 1,
         pageSize: selectorPageSize,
+        postgresDetails: toSupabaseDetails(stockResult.error),
+        postgresHint: toSupabaseHint(stockResult.error),
+        route: request.nextUrl.pathname,
         role: ctx.role,
         search,
         supabaseCode: toSupabaseCode(stockResult.error),
@@ -576,14 +697,16 @@ export async function GET(request: NextRequest) {
         userId: ctx.userId,
         warehouseId: authorizedWarehouseId,
       });
-      return apiServerError({
+      return buildSelectorDbErrorResponse({
         branchId: effectiveBranchId,
         ctx,
         error: stockResult.error,
-        message: 'Stock balances could not be loaded for the selector.',
-        module: 'inventory.item-selector',
-        path: request.nextUrl.pathname,
-        status: 500,
+        itemTypes: typeFilters,
+        pageSize: selectorPageSize,
+        request,
+        requestId,
+        search,
+        warehouseId: authorizedWarehouseId,
       });
     }
 
@@ -629,7 +752,7 @@ export async function GET(request: NextRequest) {
         const unit = unitById.get(String(row.unit_id ?? row.unit_of_measure_id ?? '')) ?? null;
         const resolved = resolvedPricing.get(String(row.id));
         const rawCost = includeCost
-          ? resolved?.currentInventoryCost ?? Number(row.unit_cost ?? row.standard_cost ?? row.cost_price ?? row.purchase_price)
+          ? resolved?.currentInventoryCost ?? Number(row.unit_cost ?? row.standard_cost)
           : null;
         const rawPrice = includePrice ? resolved?.sellingPrice ?? Number(row.selling_price) : null;
 
@@ -680,6 +803,7 @@ export async function GET(request: NextRequest) {
       page: 1,
       pageSize: selectorPageSize,
       returnedRows: options.length,
+      route: request.nextUrl.pathname,
       role: ctx.role,
       search,
       userId: ctx.userId,

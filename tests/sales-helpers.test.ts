@@ -197,6 +197,7 @@ test('sales quotations, orders, and invoices use the shared searchable item sele
   const lineEditor = readFileSync(join('src', 'components', 'sales', 'sales-line-items-editor.tsx'), 'utf8');
   const invoiceRoute = readFileSync(join('src', 'app', 'api', 'sales', 'invoices', 'route.ts'), 'utf8');
   const itemSelectorRoute = readFileSync(join('src', 'app', 'api', 'inventory', 'items', 'route.ts'), 'utf8');
+  const salesPricing = readFileSync(join('src', 'lib', 'sales-pricing.ts'), 'utf8');
 
   for (const page of [quotationsPage, ordersPage, invoicesPage]) {
     assert.match(page, /useItemSelectorOptions/);
@@ -218,6 +219,10 @@ test('sales quotations, orders, and invoices use the shared searchable item sele
   assert.match(invoiceRoute, /postInventory !== false/);
   assert.match(itemSelectorRoute, /customer_id/);
   assert.match(itemSelectorRoute, /loadResolvedSalesItemPricing/);
+  assert.match(salesPricing, /unit_cost, standard_cost, selling_price, is_active/);
+  assert.match(salesPricing, /row\.unit_cost \?\? row\.standard_cost/);
+  assert.doesNotMatch(salesPricing, /cost_price/);
+  assert.doesNotMatch(salesPricing, /purchase_price/);
   assert.match(ordersPage, /errorMessage=\{itemOptionsQuery\.error\?\.message \?\? null\}/);
   assert.match(invoicesPage, /errorMessage=\{itemOptionsQuery\.error\?\.message \?\? null\}/);
 });
