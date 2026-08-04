@@ -18,6 +18,7 @@ interface UseInvoicesParams {
 export interface InvoiceListItem {
   amountPaid: number;
   balanceDue: number;
+  branchId?: string | null;
   customer: { id: string; name: string } | null;
   dueDate: string | null;
   id: string;

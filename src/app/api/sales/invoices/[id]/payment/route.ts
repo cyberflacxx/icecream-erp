@@ -84,6 +84,8 @@ export async function POST(
 
   const body = await request.json() as {
     amount: number;
+    bankAccountId?: string;
+    cashAccountId?: string;
     paymentDate: string;
     paymentMethod: string;
     referenceNumber?: string;
@@ -112,6 +114,12 @@ export async function POST(
     return NextResponse.json({ error: 'Payment amount must be positive' }, { status: 400 });
   }
   const paymentMethod = normalizePaymentMethod(body.paymentMethod);
+  if (paymentMethod === 'BANK' && !String(body.bankAccountId ?? '').trim()) {
+    return NextResponse.json({ error: 'bankAccountId is required for bank receipts' }, { status: 400 });
+  }
+  if ((paymentMethod === 'CASH' || paymentMethod === 'PETTY_CASH') && !String(body.cashAccountId ?? '').trim()) {
+    return NextResponse.json({ error: 'cashAccountId is required for cash receipts' }, { status: 400 });
+  }
 
   const balanceDue = Number(inv.balance_due ?? 0);
   if (body.amount > balanceDue) {
@@ -139,6 +147,8 @@ export async function POST(
         paymentDate: body.paymentDate,
         paymentMethod,
         referenceNumber: body.referenceNumber ?? null,
+        bankAccountId: body.bankAccountId ?? null,
+        cashAccountId: body.cashAccountId ?? null,
         tenders: body.tenders ?? null,
       },
       ctx,
@@ -306,6 +316,7 @@ export async function POST(
         direction: 'IN',
         organizationId: ctx.organizationId,
         paymentMethod: paymentMethod as 'BANK' | 'CASH' | 'PETTY_CASH',
+        selectedAccountId: paymentMethod === 'BANK' ? body.bankAccountId ?? null : body.cashAccountId ?? null,
         referenceNumber: body.referenceNumber ?? null,
         sourceDocument: sourceReference,
         transactionDate: body.paymentDate,

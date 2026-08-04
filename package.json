@@ -10,6 +10,7 @@
     "seed:demo": "node scripts/seed-demo-data.mjs",
     "seed:sample-accounts": "node scripts/seed-sample-accounts-supabase.mjs",
     "cleanup:demo-data": "node scripts/cleanup-demo-data.mjs",
+    "reset:operational-data": "node scripts/reset-operational-data.mjs",
     "typecheck": "tsc --noEmit --incremental false",
     "test:inventory": "tsc --outDir .tmp-tests tests/inventory-helpers.test.ts src/lib/inventory.ts --module commonjs --target es2020 --esModuleInterop --skipLibCheck && node --test .tmp-tests/tests/inventory-helpers.test.js",
     "test:inventory:db": "node scripts/run-phase-1g-reversal-db-tests.mjs integration --required",

@@ -78,6 +78,14 @@ export default function BranchesPage() {
         }),
       });
       await queryClient.invalidateQueries({ queryKey: ['branch-operations', 'branches'] });
+      await queryClient.invalidateQueries({
+        predicate: (query) => Array.isArray(query.queryKey)
+          && query.queryKey[0] === 'selectors'
+          && query.queryKey[1] === 'branches',
+      });
+      await queryClient.invalidateQueries({ queryKey: ['sales', 'meta'] });
+      await queryClient.invalidateQueries({ queryKey: ['inventory'] });
+      await queryClient.invalidateQueries({ queryKey: ['finance'] });
       setDrawerOpen(false);
       setForm({ code: '', name: '', phone: '', address: '', managerId: '' });
     } catch (error) {

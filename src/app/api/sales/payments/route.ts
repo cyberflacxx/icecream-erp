@@ -96,6 +96,8 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json() as {
       amount: number;
+      bankAccountId?: string;
+      cashAccountId?: string;
       customerId: string;
       invoiceId: string;
       paymentDate: string;
@@ -118,6 +120,12 @@ export async function POST(request: NextRequest) {
       return badRequest('customerId, invoiceId, paymentDate, and paymentMethod are required.');
     }
     const normalizedPaymentMethod = normalizeSalesPaymentMethod(body.paymentMethod);
+    if (normalizedPaymentMethod === 'BANK' && !String(body.bankAccountId ?? '').trim()) {
+      return badRequest('bankAccountId is required for bank receipts.');
+    }
+    if ((normalizedPaymentMethod === 'CASH' || normalizedPaymentMethod === 'PETTY_CASH') && !String(body.cashAccountId ?? '').trim()) {
+      return badRequest('cashAccountId is required for cash receipts.');
+    }
 
     const service = salesService();
     let invoiceResult = await service
@@ -163,6 +171,8 @@ export async function POST(request: NextRequest) {
           paymentDate: body.paymentDate,
           paymentMethod: normalizedPaymentMethod,
           referenceNumber: body.referenceNumber ?? null,
+          bankAccountId: body.bankAccountId ?? null,
+          cashAccountId: body.cashAccountId ?? null,
           tenders: body.tenders ?? null,
         },
         ctx,
@@ -324,6 +334,7 @@ export async function POST(request: NextRequest) {
           direction: 'IN',
           organizationId: ctx.organizationId,
           paymentMethod: paymentMethod as 'BANK' | 'CASH' | 'PETTY_CASH',
+          selectedAccountId: paymentMethod === 'BANK' ? body.bankAccountId ?? null : body.cashAccountId ?? null,
           referenceNumber: body.referenceNumber ?? null,
           sourceDocument: sourceReference,
           transactionDate: paymentDate,

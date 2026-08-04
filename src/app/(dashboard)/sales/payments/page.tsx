@@ -1,6 +1,6 @@
 'use client';
 
-import { type FormEvent, useState } from 'react';
+import { type FormEvent, useMemo, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { AlertCircle, Plus } from 'lucide-react';
 
@@ -11,11 +11,12 @@ import { type RecordPaymentResponse, useRecordPayment } from '@/hooks/sales/useR
 import { useSalesMeta } from '@/hooks/sales/useSalesMeta';
 import { useSalesPayments } from '@/hooks/sales/useSalesPayments';
 import { DataTable, EmptyState, FormDrawer, LoadingState } from '@/components/ui-library';
-import { downloadFromUrl } from '@/lib/export';
 import { buildSalesReceiptPrintUrl } from '@/lib/sales-payments';
 
 const initialPaymentForm = {
   amount: '0',
+  bankAccountId: '',
+  cashAccountId: '',
   customerId: '',
   invoiceId: '',
   notes: '',
@@ -33,6 +34,43 @@ export default function SalesPaymentsPage() {
   const [formState, setFormState] = useState(initialPaymentForm);
   const [formError, setFormError] = useState<string | null>(null);
   const [submitMode, setSubmitMode] = useState<'save' | 'print'>('save');
+  const selectedInvoice = useMemo(
+    () => metaQuery.data?.invoices.find((row) => row.id === formState.invoiceId) ?? null,
+    [formState.invoiceId, metaQuery.data?.invoices],
+  );
+  const selectedCustomer = useMemo(
+    () => metaQuery.data?.customers.find((row) => row.id === selectedInvoice?.customerId) ?? null,
+    [metaQuery.data?.customers, selectedInvoice?.customerId],
+  );
+  const bankAccountOptions = useMemo(
+    () => (metaQuery.data?.bankAccounts ?? []).map((account) => ({
+      id: String(account.id ?? ''),
+      label: [
+        String(account.accountName ?? '').trim(),
+        String(account.bankName ?? '').trim(),
+        String(account.accountNumber ?? '').trim(),
+      ].filter(Boolean).join(' • '),
+    })),
+    [metaQuery.data?.bankAccounts],
+  );
+  const cashAccountOptions = useMemo(
+    () =>
+      (metaQuery.data?.cashAccounts ?? [])
+        .filter((account) => !selectedInvoice?.branchId || String(account.branchId ?? '') === String(selectedInvoice.branchId))
+        .map((account) => ({
+          id: String(account.id ?? ''),
+          label: String(account.name ?? 'Cash account'),
+        })),
+    [metaQuery.data?.cashAccounts, selectedInvoice?.branchId],
+  );
+
+  function openReceiptPrintPreview(payment: RecordPaymentResponse['payment']) {
+    const printUrl = buildSalesReceiptPrintUrl(
+      { paymentId: String(payment.id) },
+      { autoPrint: true },
+    );
+    window.open(printUrl, '_blank', 'noopener,noreferrer');
+  }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -51,6 +89,8 @@ export default function SalesPaymentsPage() {
         paymentDate: formState.paymentDate,
         paymentMethod: formState.paymentMethod,
         referenceNumber: formState.referenceNumber || undefined,
+        bankAccountId: formState.paymentMethod === 'BANK' ? formState.bankAccountId || undefined : undefined,
+        cashAccountId: formState.paymentMethod === 'BANK' ? undefined : formState.cashAccountId || undefined,
       });
 
       await maybePrintReceipt(response);
@@ -68,13 +108,7 @@ export default function SalesPaymentsPage() {
     if (submitMode !== 'print') return;
 
     const payment = response.payment;
-    const printUrl = buildSalesReceiptPrintUrl(
-      { paymentId: String(payment.id) },
-      { autoPrint: true },
-    );
-    await downloadFromUrl(printUrl, {
-      filename: `receipt-${String(payment.payment_number ?? 'pending')}.html`,
-    });
+    openReceiptPrintPreview(payment);
   }
 
   if (query.isLoading) return <LoadingState />;
@@ -116,9 +150,11 @@ export default function SalesPaymentsPage() {
                 type="button"
                 size="sm"
                 variant="outline"
-                onClick={() => void downloadFromUrl(buildSalesReceiptPrintUrl({ paymentId: String((row as { id?: string }).id ?? '') }, { autoPrint: true }), {
-                  filename: `receipt-${String((row as { payment_number?: string }).payment_number ?? 'reprint')}.html`,
-                })}
+                onClick={() => window.open(
+                  buildSalesReceiptPrintUrl({ paymentId: String((row as { id?: string }).id ?? '') }, { autoPrint: true }),
+                  '_blank',
+                  'noopener,noreferrer',
+                )}
               >
                 Reprint Receipt
               </Button>
@@ -147,6 +183,8 @@ export default function SalesPaymentsPage() {
                 setFormState((current) => ({
                   ...current,
                   amount: invoice ? String(invoice.balanceDue) : current.amount,
+                  bankAccountId: '',
+                  cashAccountId: '',
                   customerId: invoice?.customerId ?? '',
                   invoiceId: event.target.value,
                 }));
@@ -213,7 +251,12 @@ export default function SalesPaymentsPage() {
                 value={formState.paymentMethod}
                 onChange={(event) => {
                   setFormError(null);
-                  setFormState((current) => ({ ...current, paymentMethod: event.target.value as typeof current.paymentMethod }));
+                  setFormState((current) => ({
+                    ...current,
+                    bankAccountId: '',
+                    cashAccountId: '',
+                    paymentMethod: event.target.value as typeof current.paymentMethod,
+                  }));
                 }}
               >
                 <option value="CASH">Cash</option>
@@ -221,6 +264,47 @@ export default function SalesPaymentsPage() {
                 <option value="PETTY_CASH">Petty cash</option>
               </select>
             </label>
+            {formState.paymentMethod === 'BANK' ? (
+              <label className="space-y-2 text-sm text-muted">
+                <span>Bank account</span>
+                <select
+                  className="surface-input-soft"
+                  required
+                  value={formState.bankAccountId}
+                  onChange={(event) => {
+                    setFormError(null);
+                    setFormState((current) => ({ ...current, bankAccountId: event.target.value }));
+                  }}
+                >
+                  <option value="">{metaQuery.isLoading ? 'Loading bank accounts...' : 'Select bank account'}</option>
+                  {bankAccountOptions.map((account) => (
+                    <option key={account.id} value={account.id}>
+                      {account.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : (
+              <label className="space-y-2 text-sm text-muted">
+                <span>{formState.paymentMethod === 'PETTY_CASH' ? 'Petty cash account' : 'Cash account'}</span>
+                <select
+                  className="surface-input-soft"
+                  required
+                  value={formState.cashAccountId}
+                  onChange={(event) => {
+                    setFormError(null);
+                    setFormState((current) => ({ ...current, cashAccountId: event.target.value }));
+                  }}
+                >
+                  <option value="">{metaQuery.isLoading ? 'Loading cash accounts...' : 'Select cash account'}</option>
+                  {cashAccountOptions.map((account) => (
+                    <option key={account.id} value={account.id}>
+                      {account.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
             <label className="space-y-2 text-sm text-muted">
               <span>Reference</span>
               <input
@@ -253,7 +337,7 @@ export default function SalesPaymentsPage() {
               {recordPayment.isPending && submitMode === 'save' ? 'Saving...' : 'Save'}
             </Button>
             <Button type="submit" variant="secondary" disabled={recordPayment.isPending} onClick={() => setSubmitMode('print')}>
-              {recordPayment.isPending && submitMode === 'print' ? 'Saving & downloading...' : 'Save & Download Receipt'}
+              {recordPayment.isPending && submitMode === 'print' ? 'Saving & opening print...' : 'Save & Print Receipt'}
             </Button>
           </div>
         </form>

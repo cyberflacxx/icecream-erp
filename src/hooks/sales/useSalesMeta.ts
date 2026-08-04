@@ -58,9 +58,23 @@ export interface SalesMetaInvoiceItem {
   unitPrice: number;
 }
 
+export interface SalesMetaBankAccount {
+  accountName: string;
+  accountNumber: string;
+  bankName: string;
+  id: string;
+}
+
+export interface SalesMetaCashAccount {
+  branchId: string | null;
+  id: string;
+  name: string;
+}
+
 export interface SalesMetaInvoice {
   amountPaid: number;
   balanceDue: number;
+  branchId: string | null;
   customerId: string;
   dueDate: string | null;
   id: string;
@@ -74,7 +88,9 @@ export interface SalesMetaInvoice {
 }
 
 export interface SalesMetaResponse {
+  bankAccounts: SalesMetaBankAccount[];
   branches: Array<{ code: string; id: string; name: string }>;
+  cashAccounts: SalesMetaCashAccount[];
   customerGroups: Array<{ code: string; id: string; name: string }>;
   customers: SalesMetaCustomer[];
   invoices: SalesMetaInvoice[];

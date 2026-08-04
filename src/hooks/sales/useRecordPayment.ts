@@ -8,6 +8,8 @@ import { apiFetch } from '@/lib/api';
 
 interface RecordPaymentPayload {
   amount: number;
+  bankAccountId?: string;
+  cashAccountId?: string;
   customerId: string;
   invoiceId: string;
   notes?: string;
@@ -47,6 +49,8 @@ export function useRecordPayment() {
       await queryClient.invalidateQueries({ queryKey: ['invoices', invoiceId] });
       await queryClient.invalidateQueries({ queryKey: ['invoices'] });
       await queryClient.invalidateQueries({ queryKey: ['customers', customerId] });
+      await queryClient.invalidateQueries({ queryKey: ['sales'] });
+      await queryClient.invalidateQueries({ queryKey: ['finance'] });
     }
   });
 }

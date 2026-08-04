@@ -15,7 +15,6 @@ import { type InvoiceListItem, useInvoices } from '@/hooks/sales/useInvoices';
 import { type RecordPaymentResponse, useRecordPayment } from '@/hooks/sales/useRecordPayment';
 import { useSalesMeta } from '@/hooks/sales/useSalesMeta';
 import { useSalesRequest } from '@/hooks/sales/useSalesRequest';
-import { downloadFromUrl } from '@/lib/export';
 import { buildSalesReceiptPrintUrl } from '@/lib/sales-payments';
 import { API_ROUTES } from '@/lib/shared';
 
@@ -39,6 +38,8 @@ const initialInvoiceForm = {
 
 const initialReceiptForm = {
   amount: '0',
+  bankAccountId: '',
+  cashAccountId: '',
   customerId: '',
   invoiceId: '',
   notes: '',
@@ -73,6 +74,28 @@ export default function InvoicesPage() {
   const warehouseOptions = useMemo(
     () => (metaQuery.data?.warehouses ?? []).filter((warehouse) => !invoiceForm.branchId || warehouse.branchId === invoiceForm.branchId),
     [invoiceForm.branchId, metaQuery.data?.warehouses],
+  );
+  const receiptBranchId = receiptContext?.branchId ?? null;
+  const bankAccountOptions = useMemo(
+    () => (metaQuery.data?.bankAccounts ?? []).map((account) => ({
+      id: String(account.id ?? ''),
+      label: [
+        String(account.accountName ?? '').trim(),
+        String(account.bankName ?? '').trim(),
+        String(account.accountNumber ?? '').trim(),
+      ].filter(Boolean).join(' • '),
+    })),
+    [metaQuery.data?.bankAccounts],
+  );
+  const cashAccountOptions = useMemo(
+    () =>
+      (metaQuery.data?.cashAccounts ?? [])
+        .filter((account) => !receiptBranchId || String(account.branchId ?? '') === String(receiptBranchId))
+        .map((account) => ({
+          id: String(account.id ?? ''),
+          label: String(account.name ?? 'Cash account'),
+        })),
+    [metaQuery.data?.cashAccounts, receiptBranchId],
   );
 
   useEffect(() => {
@@ -143,6 +166,14 @@ export default function InvoicesPage() {
     window.open(`/sales/invoices/${id}`, '_blank', 'noopener,noreferrer');
   }
 
+  function openReceiptPrintPreview(payment: RecordPaymentResponse['payment']) {
+    const printUrl = buildSalesReceiptPrintUrl(
+      { paymentId: String(payment.id) },
+      { autoPrint: true },
+    );
+    window.open(printUrl, '_blank', 'noopener,noreferrer');
+  }
+
   function openReceiptDrawer(row: InvoiceListItem) {
     setReceiptContext(row);
     setReceiptForm({
@@ -167,6 +198,8 @@ export default function InvoicesPage() {
         paymentDate: receiptForm.paymentDate,
         paymentMethod: receiptForm.paymentMethod,
         referenceNumber: receiptForm.referenceNumber || undefined,
+        bankAccountId: receiptForm.paymentMethod === 'BANK' ? receiptForm.bankAccountId || undefined : undefined,
+        cashAccountId: receiptForm.paymentMethod === 'BANK' ? undefined : receiptForm.cashAccountId || undefined,
       });
       await maybePrintReceipt(response);
       setReceiptForm(initialReceiptForm);
@@ -195,13 +228,7 @@ export default function InvoicesPage() {
     if (receiptSubmitMode !== 'print') return;
 
     const payment = response.payment;
-    const printUrl = buildSalesReceiptPrintUrl(
-      { paymentId: String(payment.id) },
-      { autoPrint: true },
-    );
-    await downloadFromUrl(printUrl, {
-      filename: `receipt-${String(payment.payment_number ?? 'pending')}.html`,
-    });
+    openReceiptPrintPreview(payment);
   }
 
   return (
@@ -429,13 +456,49 @@ export default function InvoicesPage() {
               <span>Source of payment</span>
               <select className="surface-input-soft" value={receiptForm.paymentMethod} onChange={(event) => {
                 setFormError(null);
-                setReceiptForm((current) => ({ ...current, paymentMethod: event.target.value as typeof current.paymentMethod }));
+                setReceiptForm((current) => ({
+                  ...current,
+                  bankAccountId: '',
+                  cashAccountId: '',
+                  paymentMethod: event.target.value as typeof current.paymentMethod,
+                }));
               }}>
                 <option value="CASH">Cash</option>
                 <option value="BANK">Bank</option>
                 <option value="PETTY_CASH">Petty cash</option>
               </select>
             </label>
+            {receiptForm.paymentMethod === 'BANK' ? (
+              <label className="space-y-2 text-sm text-muted">
+                <span>Bank account</span>
+                <select className="surface-input-soft" required value={receiptForm.bankAccountId} onChange={(event) => {
+                  setFormError(null);
+                  setReceiptForm((current) => ({ ...current, bankAccountId: event.target.value }));
+                }}>
+                  <option value="">{metaQuery.isLoading ? 'Loading bank accounts...' : 'Select bank account'}</option>
+                  {bankAccountOptions.map((account) => (
+                    <option key={account.id} value={account.id}>
+                      {account.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : (
+              <label className="space-y-2 text-sm text-muted">
+                <span>{receiptForm.paymentMethod === 'PETTY_CASH' ? 'Petty cash account' : 'Cash account'}</span>
+                <select className="surface-input-soft" required value={receiptForm.cashAccountId} onChange={(event) => {
+                  setFormError(null);
+                  setReceiptForm((current) => ({ ...current, cashAccountId: event.target.value }));
+                }}>
+                  <option value="">{metaQuery.isLoading ? 'Loading cash accounts...' : 'Select cash account'}</option>
+                  {cashAccountOptions.map((account) => (
+                    <option key={account.id} value={account.id}>
+                      {account.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
             <label className="space-y-2 text-sm text-muted">
               <span>Reference</span>
               <input className="surface-input-soft" value={receiptForm.referenceNumber} onChange={(event) => {
@@ -459,7 +522,7 @@ export default function InvoicesPage() {
               {recordPayment.isPending && receiptSubmitMode === 'save' ? 'Saving...' : 'Save'}
             </Button>
             <Button type="submit" variant="secondary" disabled={recordPayment.isPending} onClick={() => setReceiptSubmitMode('print')}>
-              {recordPayment.isPending && receiptSubmitMode === 'print' ? 'Saving & downloading...' : 'Save & Download Receipt'}
+              {recordPayment.isPending && receiptSubmitMode === 'print' ? 'Saving & opening print...' : 'Save & Print Receipt'}
             </Button>
           </div>
         </form>

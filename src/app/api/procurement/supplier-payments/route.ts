@@ -247,6 +247,7 @@ export async function POST(request: NextRequest) {
       direction: 'OUT',
       organizationId: ctx.organizationId,
       paymentMethod: paymentSourceType as 'BANK' | 'CASH' | 'PETTY_CASH',
+      selectedAccountId: paymentSourceType === 'BANK' ? bankAccountId : paymentSourceType === 'CASH' ? cashAccountId : cashAccountId,
       referenceNumber: body.referenceNumber ?? null,
       sourceDocument: sourceReference,
       transactionDate: String(data.payment_date ?? body.paymentDate ?? new Date().toISOString().slice(0, 10)),

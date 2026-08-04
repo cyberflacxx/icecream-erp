@@ -2,9 +2,117 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { badRequest, can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
 import { filterAuthorizedBranches } from '@/lib/branch-access';
+import { resolveFinancePostingAccount, syncBranchCostCentres } from '@/lib/finance-foundation-server';
 import { isMissingColumnError } from '@/lib/postgrest-compat';
 import { syncUserBranchAssignment } from '@/lib/registration';
 import { createServiceRoleClient } from '@/lib/supabase/server';
+
+function buildBranchWarehouseCode(code: string) {
+  return `${String(code ?? '').trim().toUpperCase()}-MAIN`.slice(0, 40);
+}
+
+async function bootstrapBranchOperations(
+  service: ReturnType<typeof createServiceRoleClient>,
+  input: {
+    branchId: string;
+    branchCode: string;
+    branchName: string;
+    organizationId: string;
+    userId: string;
+  },
+) {
+  const bootstrap = {
+    cashAccount: 'skipped' as 'created' | 'existing' | 'failed' | 'skipped',
+    costCentre: 'skipped' as 'created' | 'existing' | 'failed' | 'skipped',
+    warehouse: 'skipped' as 'created' | 'existing' | 'failed' | 'skipped',
+    warnings: [] as string[],
+  };
+
+  try {
+    const existingWarehouseResult = await service
+      .schema('icecream_erp')
+      .from('warehouses')
+      .select('id')
+      .eq('organization_id', input.organizationId)
+      .eq('branch_id', input.branchId)
+      .eq('is_active', true)
+      .limit(1)
+      .maybeSingle();
+    if (existingWarehouseResult.error) throw existingWarehouseResult.error;
+
+    if (existingWarehouseResult.data) {
+      bootstrap.warehouse = 'existing';
+    } else {
+      const warehouseInsert = await service
+        .schema('icecream_erp')
+        .from('warehouses')
+        .insert({
+          branch_id: input.branchId,
+          code: buildBranchWarehouseCode(input.branchCode),
+          is_active: true,
+          name: `${input.branchName} Main Warehouse`,
+          organization_id: input.organizationId,
+          type: 'DISTRIBUTION',
+          warehouse_type: 'DISTRIBUTION',
+        })
+        .select('id')
+        .single();
+      if (warehouseInsert.error) throw warehouseInsert.error;
+      bootstrap.warehouse = 'created';
+    }
+  } catch (error) {
+    bootstrap.warehouse = 'failed';
+    bootstrap.warnings.push(error instanceof Error ? error.message : 'Default branch warehouse bootstrap failed.');
+  }
+
+  try {
+    const costCentres = await syncBranchCostCentres(input.organizationId);
+    bootstrap.costCentre = costCentres.some((row) => String(row.branch_id ?? '') === input.branchId) ? 'created' : 'existing';
+  } catch (error) {
+    bootstrap.costCentre = 'failed';
+    bootstrap.warnings.push(error instanceof Error ? error.message : 'Branch cost-centre bootstrap failed.');
+  }
+
+  try {
+    const existingCashAccountResult = await service
+      .schema('icecream_erp')
+      .from('cash_accounts')
+      .select('id')
+      .eq('organization_id', input.organizationId)
+      .eq('branch_id', input.branchId)
+      .limit(1)
+      .maybeSingle();
+
+    if (existingCashAccountResult.error) throw existingCashAccountResult.error;
+
+    if (existingCashAccountResult.data) {
+      bootstrap.cashAccount = 'existing';
+    } else {
+      const cashPostingAccount = await resolveFinancePostingAccount(input.organizationId, 'CASH_ACCOUNT', { fallbackAccountCode: '1110' });
+      const cashInsert = await service
+        .schema('icecream_erp')
+        .from('cash_accounts')
+        .insert({
+          account_id: cashPostingAccount.id,
+          balance: 0,
+          branch_id: input.branchId,
+          current_balance: 0,
+          name: `${input.branchName} Cash`,
+          organization_id: input.organizationId,
+          status: 'ACTIVE',
+        })
+        .select('id')
+        .single();
+      if (cashInsert.error) throw cashInsert.error;
+      bootstrap.cashAccount = 'created';
+    }
+  } catch (error) {
+    bootstrap.cashAccount = 'failed';
+    bootstrap.warnings.push(error instanceof Error ? error.message : 'Branch cash-account bootstrap failed.');
+  }
+
+  return bootstrap;
+}
 
 export async function GET(request: NextRequest) {
   const ctx = await getAuthContext();
@@ -204,7 +312,15 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    return NextResponse.json(branch, { status: 201 });
+    const bootstrap = await bootstrapBranchOperations(service, {
+      branchCode: String(branch.code ?? body.code),
+      branchId: String(branch.id),
+      branchName: String(branch.name ?? body.name),
+      organizationId: ctx.organizationId,
+      userId: ctx.userId,
+    });
+
+    return NextResponse.json({ ...branch, bootstrap }, { status: 201 });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Internal server error';
     return serverError(message);

@@ -53,6 +53,14 @@ export function useInventoryMutation<TData, TVariables>(
       await queryClient.invalidateQueries({
         queryKey: ['inventory']
       });
+      await queryClient.invalidateQueries({
+        queryKey: ['sales', 'meta']
+      });
+      await queryClient.invalidateQueries({
+        predicate: (query) => Array.isArray(query.queryKey)
+          && query.queryKey[0] === 'selectors'
+          && query.queryKey[1] === 'items'
+      });
     }
   });
 }

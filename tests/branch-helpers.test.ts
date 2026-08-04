@@ -198,6 +198,10 @@ test('branch selector and sales order routes use shared authorization-aware bran
   assert.match(branchesRoute, /filterAuthorizedBranches/);
   assert.match(branchesRoute, /organization_id/);
   assert.match(branchesRoute, /selector/);
+  assert.match(branchesRoute, /bootstrapBranchOperations/);
+  assert.match(branchesRoute, /syncBranchCostCentres/);
+  assert.match(branchesRoute, /from\('warehouses'\)\s*\.insert/);
+  assert.match(branchesRoute, /from\('cash_accounts'\)\s*\.insert/);
   assert.match(salesOrdersRoute, /resolveRequestedBranchId/);
   assert.match(salesOrdersRoute, /isWarehouseAvailableToContext/);
   assert.match(salesOrdersRoute, /Selected warehouse does not belong to the selected branch/);
@@ -239,10 +243,10 @@ test('shared dashboard and form layout primitives use the widened navigation and
   const table = fs.readFileSync('src/components/ui-library/data-table.tsx', 'utf8');
   const globals = fs.readFileSync('src/app/globals.css', 'utf8');
 
-  assert.match(shell, /grid-cols-\[304px_1fr\]/);
-  assert.match(shell, /xl:grid-cols-\[312px_1fr\]/);
+  assert.match(shell, /grid-cols-\[248px_1fr\]/);
+  assert.match(shell, /xl:grid-cols-\[256px_1fr\]/);
   assert.match(shell, /overflow-x-clip/);
-  assert.match(shell, /w-\[304px\] max-w-\[85vw\]/);
+  assert.match(shell, /w-\[248px\] max-w-\[82vw\]/);
   assert.match(sidebar, /gap-3 rounded-xl px-3 py-2\.5 text-sm leading-5/);
   assert.match(drawer, /max-w-4xl/);
   assert.match(drawer, /rounded-t-3xl/);
@@ -251,4 +255,16 @@ test('shared dashboard and form layout primitives use the widened navigation and
   assert.match(globals, /\.surface-input \{\s*@apply h-11 w-full rounded-xl border px-4 text-sm leading-5/);
   assert.match(globals, /min-height: 2\.5rem;/);
   assert.match(globals, /white-space: nowrap;/);
+});
+
+test('controlled operational reset script requires explicit confirmation and organization scoping', () => {
+  const resetScript = fs.readFileSync('scripts/reset-operational-data.mjs', 'utf8');
+  const packageJson = fs.readFileSync('package.json', 'utf8');
+
+  assert.match(resetScript, /RESET ICECREAM ERP OPERATIONAL DATA/);
+  assert.match(resetScript, /--organization-id=/);
+  assert.match(resetScript, /--dry-run/);
+  assert.match(resetScript, /journal_entries/);
+  assert.match(resetScript, /cash_transactions/);
+  assert.match(packageJson, /"reset:operational-data": "node scripts\/reset-operational-data\.mjs"/);
 });

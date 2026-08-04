@@ -234,6 +234,7 @@ test('sales pricing and receipt printing routes use organization-scoped prices a
   const paymentsPage = readFileSync(join('src', 'app', '(dashboard)', 'sales', 'payments', 'page.tsx'), 'utf8');
   const receiptPage = readFileSync(join('src', 'app', '(dashboard)', 'sales', 'payments', 'receipt', 'page.tsx'), 'utf8');
   const paymentsHelper = readFileSync(join('src', 'lib', 'sales-payments.ts'), 'utf8');
+  const salesMetaRoute = readFileSync(join('src', 'app', 'api', 'sales', 'meta', 'route.ts'), 'utf8');
 
   assert.match(pricesRoute, /\.from\('items'\)/);
   assert.match(pricesRoute, /\.in\('item_id', itemIds\)/);
@@ -243,7 +244,15 @@ test('sales pricing and receipt printing routes use organization-scoped prices a
   assert.match(invoiceRoute, /The sales transaction engine is not available/);
   assert.match(invoicePage, /buildSalesReceiptPrintUrl\(\s*\{\s*paymentId: String\(payment\.id\)/);
   assert.match(paymentsPage, /buildSalesReceiptPrintUrl\(\s*\{\s*paymentId: String\(payment\.id\)/);
+  assert.match(invoicePage, /window\.open\(printUrl, '_blank', 'noopener,noreferrer'\)/);
+  assert.match(paymentsPage, /window\.open\(printUrl, '_blank', 'noopener,noreferrer'\)/);
   assert.match(paymentsPage, /Reprint Receipt/);
+  assert.match(invoicePage, /bankAccountId/);
+  assert.match(invoicePage, /cashAccountId/);
+  assert.match(paymentsPage, /bankAccountId/);
+  assert.match(paymentsPage, /cashAccountId/);
+  assert.match(salesMetaRoute, /fetchRows\(service, 'bank_accounts'\)/);
+  assert.match(salesMetaRoute, /fetchRows\(service, 'cash_accounts'\)/);
   assert.match(receiptPage, /searchParams: Promise<Record<string, string \| string\[] \| undefined>>/);
   assert.match(receiptPage, /paymentId/);
   assert.match(receiptPage, /loadReceiptRecord/);

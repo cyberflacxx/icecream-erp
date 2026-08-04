@@ -690,6 +690,7 @@ export async function createLinkedFinanceTransaction(input: {
   direction?: 'IN' | 'OUT';
   organizationId: string;
   paymentMethod: 'BANK' | 'CASH' | 'PETTY_CASH';
+  selectedAccountId?: string | null;
   referenceNumber?: string | null;
   sourceDocument: string;
   transactionDate: string;
@@ -704,17 +705,35 @@ export async function createLinkedFinanceTransaction(input: {
     .from(accountTable)
     .select(accountSelect)
     .eq('organization_id', input.organizationId)
-    .limit(1)
+    .eq('id', input.selectedAccountId ?? '')
     .maybeSingle();
 
-  if (accountResult.error) {
-    if (isMissingFinanceTable(accountResult.error)) return null;
-    throw accountResult.error;
+  const fallbackAccountResult = input.selectedAccountId
+    ? null
+    : await service
+        .from(accountTable)
+        .select(accountSelect)
+        .eq('organization_id', input.organizationId)
+        .limit(1)
+        .maybeSingle();
+
+  const resolvedAccountResult = input.selectedAccountId
+    ? accountResult
+    : fallbackAccountResult;
+
+  if (resolvedAccountResult?.error) {
+    if (isMissingFinanceTable(resolvedAccountResult.error)) return null;
+    throw resolvedAccountResult.error;
   }
-  if (!accountResult.data) return null;
+  if (!resolvedAccountResult?.data) {
+    if (input.selectedAccountId) {
+      throw new Error(`The selected ${input.paymentMethod === 'BANK' ? 'bank' : 'cash'} account is no longer available.`);
+    }
+    return null;
+  }
 
   if (input.paymentMethod === 'BANK') {
-    const bankAccount = accountResult.data as { current_balance?: number | null; id: string };
+    const bankAccount = resolvedAccountResult.data as { current_balance?: number | null; id: string };
     const direction = input.direction === 'IN' ? 1 : -1;
     const nextBalance = Number(bankAccount.current_balance ?? 0) + direction * Number(input.amount ?? 0);
     const insertResult = await service
@@ -740,7 +759,7 @@ export async function createLinkedFinanceTransaction(input: {
     return { id: String(insertResult.data.id), table: 'bank_transactions' };
   }
 
-  const cashAccount = accountResult.data as { balance?: number | null; id: string };
+  const cashAccount = resolvedAccountResult.data as { balance?: number | null; id: string };
   const direction = input.direction === 'IN' ? 1 : -1;
   const nextBalance = Number(cashAccount.balance ?? 0) + direction * Number(input.amount ?? 0);
   const insertResult = await service

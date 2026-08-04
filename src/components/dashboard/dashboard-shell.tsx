@@ -53,7 +53,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
 
     if (!canAccessDashboardPath(persona, pathname)) {
       return (
-        <div className="min-h-screen bg-[var(--app-bg-canvas)] lg:grid lg:grid-cols-[304px_1fr] xl:grid-cols-[312px_1fr]">
+        <div className="min-h-screen bg-[var(--app-bg-canvas)] lg:grid lg:grid-cols-[248px_1fr] xl:grid-cols-[256px_1fr]">
           <Sidebar />
           <div className="min-w-0 border-l border-[color:var(--app-border-muted)] bg-[color:var(--app-bg-default)]">
             <Topbar onOpenSidebar={() => setSidebarOpen(true)} />
@@ -74,7 +74,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
   }
 
   return (
-    <div className="min-h-screen overflow-x-clip bg-[var(--app-bg-canvas)] lg:grid lg:grid-cols-[304px_1fr] xl:grid-cols-[312px_1fr]">
+    <div className="min-h-screen overflow-x-clip bg-[var(--app-bg-canvas)] lg:grid lg:grid-cols-[248px_1fr] xl:grid-cols-[256px_1fr]">
       <div
         className={`fixed inset-0 z-40 bg-[rgba(15,23,42,0.45)] backdrop-blur-sm transition-opacity lg:hidden ${
           sidebarOpen ? 'opacity-100' : 'pointer-events-none opacity-0'
@@ -82,7 +82,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
         onClick={() => setSidebarOpen(false)}
       />
       <div
-        className={`fixed inset-y-0 left-0 z-50 w-[304px] max-w-[85vw] transform transition-transform lg:static lg:w-auto lg:max-w-none lg:translate-x-0 ${
+        className={`fixed inset-y-0 left-0 z-50 w-[248px] max-w-[82vw] transform transition-transform lg:static lg:w-auto lg:max-w-none lg:translate-x-0 ${
           sidebarOpen ? 'translate-x-0' : '-translate-x-full'
         }`}
       >

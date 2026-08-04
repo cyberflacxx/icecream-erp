@@ -69,6 +69,8 @@ export async function GET() {
       itemRows,
       warehouseRows,
       branchRows,
+      bankAccountRows,
+      cashAccountRows,
       priceRows,
       customerGroupRows,
       salesOrderRows,
@@ -80,6 +82,8 @@ export async function GET() {
       fetchRows(service, 'items'),
       fetchRows(service, 'warehouses'),
       fetchRows(service, 'branches'),
+      fetchRows(service, 'bank_accounts'),
+      fetchRows(service, 'cash_accounts'),
       fetchRows(service, 'sales_product_prices'),
       fetchRows(service, 'sales_customer_groups'),
       fetchRows(service, 'sales_orders'),
@@ -121,6 +125,24 @@ export async function GET() {
         itemId: String(row.item_id ?? ''),
         priceListCode: String(row.price_list_code ?? 'STANDARD'),
         sellingPrice: toNumber(row.selling_price),
+      }));
+
+    const bankAccounts = bankAccountRows
+      .filter((row) => belongsToOrganization(row, ctx.organizationId) && isActive(row))
+      .map((row) => ({
+        accountName: String(row.account_name ?? row.name ?? ''),
+        accountNumber: String(row.account_number ?? ''),
+        bankName: String(row.bank_name ?? ''),
+        id: String(row.id),
+      }));
+
+    const cashAccounts = cashAccountRows
+      .filter((row) => belongsToOrganization(row, ctx.organizationId) && isActive(row))
+      .filter((row) => !ctx.isBranchScoped || !ctx.branchId || !row.branch_id || String(row.branch_id) === ctx.branchId)
+      .map((row) => ({
+        branchId: row.branch_id ? String(row.branch_id) : null,
+        id: String(row.id),
+        name: String(row.name ?? row.account_name ?? row.account_number ?? 'Cash account'),
       }));
 
     const standardPriceByItemId = new Map<string, number>();
@@ -228,6 +250,7 @@ export async function GET() {
         return {
           amountPaid: toNumber(row.amount_paid ?? row.paid_amount),
           balanceDue: toNumber(row.balance_due),
+          branchId: row.branch_id ? String(row.branch_id) : null,
           customerId: String(row.customer_id ?? ''),
           dueDate: row.due_date ? String(row.due_date) : null,
           id,
@@ -255,7 +278,9 @@ export async function GET() {
       .sort((a, b) => String(b.invoiceDate ?? '').localeCompare(String(a.invoiceDate ?? '')));
 
     return NextResponse.json({
+      bankAccounts,
       branches,
+      cashAccounts,
       customerGroups,
       customers,
       invoices,
