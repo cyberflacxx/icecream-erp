@@ -19,6 +19,7 @@ const protectedPrefixes = [
 
 const DEFAULT_TIMEOUT_MINUTES = 15;
 const LAST_ACTIVITY_COOKIE = 'icecream-last-activity';
+const REGISTRATION_REFRESH_VERSION = '20260804b';
 
 function isLocalHostname(hostname: string) {
   return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '0.0.0.0';
@@ -60,6 +61,14 @@ export async function middleware(request: NextRequest) {
 
   let supabaseResponse = NextResponse.next({ request });
   const { pathname } = request.nextUrl;
+
+  if (pathname === '/auth/register' && request.nextUrl.searchParams.get('rv') !== REGISTRATION_REFRESH_VERSION) {
+    const refreshUrl = new URL(resolvePublicAppUrl(request.nextUrl));
+    refreshUrl.pathname = pathname;
+    refreshUrl.search = request.nextUrl.search;
+    refreshUrl.searchParams.set('rv', REGISTRATION_REFRESH_VERSION);
+    return NextResponse.redirect(refreshUrl, 307);
+  }
 
   const supabase = createServerClient(
     env.supabaseUrl,
@@ -129,6 +138,8 @@ export async function middleware(request: NextRequest) {
   const shouldDisableCache =
     pathname === '/login' ||
     pathname.startsWith('/auth/login') ||
+    pathname === '/auth/register' ||
+    pathname.startsWith('/auth/register/') ||
     pathname === '/dashboard' ||
     pathname.startsWith('/dashboard/') ||
     pathname === '/procurement' ||
