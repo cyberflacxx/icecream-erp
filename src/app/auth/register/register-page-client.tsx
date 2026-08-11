@@ -150,20 +150,46 @@ export default function RegisterPageClient({
   useEffect(() => {
     const controller = new AbortController();
     let mounted = true;
-    (async () => {
-      if (!mounted) {
-        return;
-      }
+    if (initialRoles.length === 0) {
+      void (async () => {
+        if (!mounted) {
+          return;
+        }
 
-      await loadRoles(controller.signal);
-    })();
+        await loadRoles(controller.signal);
+      })();
+    }
 
     (async () => {
       try {
-        const response = await fetch('/api/branches/public');
-        const payload = (await response.json()) as { data?: BranchOption[] };
+        const response = await fetch(
+          `/api/branches/public?ts=${Date.now()}`,
+          {
+            cache: 'no-store',
+            headers: {
+              'Cache-Control': 'no-cache',
+              Pragma: 'no-cache',
+            },
+          },
+        );
+
+        const payload = (await response.json().catch(() => ({}))) as {
+          data?: BranchOption[];
+          error?: string;
+        };
+
         if (!mounted) return;
-        setBranches(payload.data ?? []);
+
+        if (!response.ok) {
+          console.error(
+            'Unable to load registration branches.',
+            payload.error ?? response.statusText,
+          );
+          setBranches([]);
+          return;
+        }
+
+        setBranches(Array.isArray(payload.data) ? payload.data : []);
       } catch {
         if (mounted) setBranches([]);
       }
@@ -173,7 +199,7 @@ export default function RegisterPageClient({
       mounted = false;
       controller.abort();
     };
-  }, []);
+  }, [initialRoles.length]);
 
   const passwordChecks = useMemo(
     () => ({
@@ -186,17 +212,39 @@ export default function RegisterPageClient({
     [password],
   );
   const selectedRole = useMemo(
-    () => roles.find((role) => role.id === roleId) ?? null,
+    () =>
+      roles.find((role) => {
+        const selected = normalizeRoleIdentity(roleId);
+
+        return (
+          normalizeRoleIdentity(role.id) === selected ||
+          normalizeRoleIdentity(role.code) === selected ||
+          normalizeRoleIdentity(role.name) === selected
+        );
+      }) ?? null,
     [roleId, roles],
   );
-  const branchIsRequired = roleRequiresBranch(selectedRole);
+
+  const selectedRoleIdentity = normalizeRoleIdentity(
+    selectedRole?.code || selectedRole?.name,
+  );
+
+  const branchIsRequired =
+    Boolean(roleId) &&
+    Boolean(selectedRole) &&
+    selectedRoleIdentity !== 'super_admin' &&
+    selectedRoleIdentity !== 'system_admin';
 
   useEffect(() => {
-    if (!branchIsRequired && branchId) {
+    const isAdminRole =
+      selectedRoleIdentity === 'super_admin' ||
+      selectedRoleIdentity === 'system_admin';
+
+    if (isAdminRole && branchId) {
       setBranchId('');
       setFieldErrors((current) => ({ ...current, branch_id: '' }));
     }
-  }, [branchId, branchIsRequired]);
+  }, [branchId, selectedRoleIdentity]);
 
   useEffect(() => {
     if (roleId && !roles.some((role) => role.id === roleId)) {
@@ -608,16 +656,36 @@ export default function RegisterPageClient({
               <span className="text-sm font-medium text-brown">Select Branch</span>
               <select
                 value={branchId}
-                disabled={registrationLocked || !branchIsRequired}
+                disabled={
+                  registrationLocked ||
+                  !roleId ||
+                  !selectedRole ||
+                  selectedRoleIdentity === 'super_admin' ||
+                  selectedRoleIdentity === 'system_admin'
+                }
                 onChange={(event) => {
                   setBranchId(event.target.value);
                   setFieldErrors((current) => ({ ...current, branch_id: '' }));
                 }}
                 className={`h-11 w-full rounded-xl border bg-white px-3 outline-none ${
                   fieldErrors.branch_id ? 'border-red-500' : branchId ? 'border-green-500' : 'border-border'
-                } ${registrationLocked || !branchIsRequired ? 'bg-slate-50 text-slate-500' : ''}`}
+                } ${
+                  registrationLocked ||
+                  !roleId ||
+                  !selectedRole ||
+                  selectedRoleIdentity === 'super_admin' ||
+                  selectedRoleIdentity === 'system_admin'
+                    ? 'bg-slate-50 text-slate-500'
+                    : ''
+                }`}
               >
-                <option value="">{branchIsRequired ? 'Select branch' : 'No branch required'}</option>
+                <option value="">
+                  {!roleId
+                    ? 'Select a role first'
+                    : branchIsRequired
+                      ? 'Select branch'
+                      : 'No branch required'}
+                </option>
                 {branches.map((branch) => (
                   <option key={branch.id} value={branch.id}>
                     {branch.code ? `${branch.code} - ${branch.name}` : branch.name}

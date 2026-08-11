@@ -15,13 +15,23 @@ export async function GET() {
     const service = createServiceRoleClient().schema('icecream_erp');
     const roles = await getPublicRegistrationRoles(service);
 
-    return NextResponse.json({
-      data: roles.map((role) => ({
-        code: role.code,
-        id: role.id,
-        name: role.name,
-      })),
-    });
+    return NextResponse.json(
+      {
+        data: roles.map((role) => ({
+          code: role.code,
+          id: role.id,
+          name: role.name,
+        })),
+      },
+      {
+        headers: {
+          'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+          Expires: '0',
+          Pragma: 'no-cache',
+          'Surrogate-Control': 'no-store',
+        },
+      },
+    );
   } catch (error) {
     console.error('Public registration roles failed to load.', {
       ...getSafeRegistrationErrorDetails(error, {

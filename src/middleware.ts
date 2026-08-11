@@ -2,6 +2,7 @@ import { createServerClient } from '@supabase/ssr';
 import { type NextRequest, NextResponse } from 'next/server';
 
 import { resolvePublicAppUrl } from '@/lib/app-url';
+import { REGISTRATION_REFRESH_VERSION } from '@/lib/registration-refresh';
 import { assertServerRuntimeEnv } from '@/lib/runtime-env';
 
 const protectedPrefixes = [
@@ -19,8 +20,6 @@ const protectedPrefixes = [
 
 const DEFAULT_TIMEOUT_MINUTES = 15;
 const LAST_ACTIVITY_COOKIE = 'icecream-last-activity';
-const REGISTRATION_REFRESH_VERSION = '20260804b';
-
 function isLocalHostname(hostname: string) {
   return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '0.0.0.0';
 }
