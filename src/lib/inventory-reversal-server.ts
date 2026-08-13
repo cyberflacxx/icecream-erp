@@ -42,6 +42,27 @@ function toStringArray(value: unknown) {
   return value.map((entry) => String(entry ?? '')).filter(Boolean);
 }
 
+function getInventoryReversalErrorCode(error: unknown) {
+  if (typeof error !== 'object' || error === null || !('code' in error)) return '';
+  return String((error as { code?: unknown }).code ?? '');
+}
+
+function isUnavailableInventoryReversalRunTable(error: unknown) {
+  const message =
+    error instanceof Error
+      ? error.message
+      : typeof error === 'object' && error !== null && 'message' in error
+        ? String((error as { message?: unknown }).message ?? '')
+        : '';
+  const code = getInventoryReversalErrorCode(error);
+
+  return (
+    message.includes("Could not find the table 'icecream_erp.inventory_reversal_runs'") ||
+    message.includes('permission denied for table inventory_reversal_runs') ||
+    code === '42501'
+  );
+}
+
 export function mapInventoryReversalError(error: unknown) {
   const message =
     error instanceof Error
@@ -219,7 +240,7 @@ export async function loadInventoryReversalSnapshots(
     .order('created_at', { ascending: false });
 
   if (error) {
-    if (String(error.message ?? '').includes("Could not find the table 'icecream_erp.inventory_reversal_runs'")) {
+    if (isUnavailableInventoryReversalRunTable(error)) {
       return new Map<string, ReversalSnapshot[]>();
     }
 

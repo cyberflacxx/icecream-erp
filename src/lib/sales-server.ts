@@ -65,6 +65,13 @@ export async function generateSalesReferenceNumber(table: string, prefix: string
 
 type SalesService = ReturnType<typeof salesService>;
 
+function toFiniteNumber(value: unknown) {
+  if (value === null || value === undefined) return null;
+  if (typeof value === 'string' && value.trim() === '') return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 export async function loadSalesOrderById(
   service: SalesService,
   orderId: string,
@@ -132,13 +139,39 @@ export async function loadSalesOrderById(
 export async function loadSalesOrderItems(service: SalesService, orderId: string) {
   const primary = await service
     .from('sales_order_items')
-    .select('item_id, quantity_ordered, unit_price, discount_percent')
+    .select('id, item_id, quantity_ordered, unit_price, discount_percent')
     .eq('order_id', orderId);
 
   if (!primary.error) {
-    return ((primary.data ?? []) as Array<Record<string, unknown>>).map((item) => ({
+    const primaryRows = (primary.data ?? []) as Array<Record<string, unknown>>;
+    const needsQuantityFallback = primaryRows.some((item) => toFiniteNumber(item.quantity_ordered) === null);
+    const fallbackQuantityByLineId = new Map<string, number>();
+
+    if (needsQuantityFallback) {
+      const fallbackQuantity = await service
+        .from('sales_order_items')
+        .select('id, quantity')
+        .eq('order_id', orderId);
+
+      if (fallbackQuantity.error && !isMissingSalesColumn(fallbackQuantity.error, 'sales_order_items', 'quantity')) {
+        throw fallbackQuantity.error;
+      }
+
+      for (const row of (fallbackQuantity.data ?? []) as Array<Record<string, unknown>>) {
+        const lineId = String(row.id ?? '').trim();
+        const quantity = toFiniteNumber(row.quantity);
+        if (lineId && quantity !== null) {
+          fallbackQuantityByLineId.set(lineId, quantity);
+        }
+      }
+    }
+
+    return primaryRows.map((item) => ({
       item_id: String(item.item_id),
-      quantity_ordered: Number(item.quantity_ordered ?? 0),
+      quantity_ordered:
+        toFiniteNumber(item.quantity_ordered) ??
+        fallbackQuantityByLineId.get(String(item.id ?? '').trim()) ??
+        0,
       unit_price: Number(item.unit_price ?? 0),
       discount_percent:
         item.discount_percent !== null && item.discount_percent !== undefined

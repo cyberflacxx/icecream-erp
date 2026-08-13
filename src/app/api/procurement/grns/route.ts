@@ -21,6 +21,42 @@ function isMissingColumnError(error: unknown, table: string, columnName: string)
   return error instanceof Error && error.message.includes(`column ${table}.${columnName} does not exist`);
 }
 
+function getReversalMetadataErrorCode(error: unknown) {
+  if (typeof error !== 'object' || error === null || !('code' in error)) return '';
+  return String((error as { code?: unknown }).code ?? '');
+}
+
+function isUnavailableReversalMetadata(error: unknown) {
+  const message =
+    error instanceof Error
+      ? error.message
+      : typeof error === 'object' && error !== null && 'message' in error
+        ? String((error as { message?: unknown }).message ?? '')
+        : '';
+  const code = getReversalMetadataErrorCode(error);
+
+  return (
+    message.includes("Could not find the table 'icecream_erp.inventory_reversal_runs'") ||
+    message.includes('permission denied for table inventory_reversal_runs') ||
+    code === '42501'
+  );
+}
+
+async function loadGrnReversalSnapshots(
+  service: ReturnType<typeof createServiceRoleClient>,
+  grnIds: string[],
+) {
+  try {
+    return await loadInventoryReversalSnapshots(service, 'goods_received_note', grnIds);
+  } catch (error) {
+    if (isUnavailableReversalMetadata(error)) {
+      return new Map<string, Awaited<ReturnType<typeof loadInventoryReversalSnapshots>> extends Map<string, infer TValue> ? TValue : never>();
+    }
+
+    throw error;
+  }
+}
+
 export async function GET(request: NextRequest) {
   const ctx = await getAuthContext();
   if (!ctx) return unauthorized();
@@ -120,7 +156,7 @@ export async function GET(request: NextRequest) {
       const warehousesById = new Map((warehouseLookup.data ?? []).map((row) => [String(row.id), String(row.name ?? 'Unknown warehouse')]));
 
       const fallbackGrnIds = (fallback.data ?? []).map((row: Record<string, unknown>) => String(row.id ?? '')).filter(Boolean);
-      const reversalMap = await loadInventoryReversalSnapshots(service, 'goods_received_note', fallbackGrnIds);
+      const reversalMap = await loadGrnReversalSnapshots(service, fallbackGrnIds);
       const mappedFallback = (fallback.data ?? []).map((r: Record<string, unknown>) => {
         const po = r.purchase_orders as Record<string, unknown> | null;
         const supplier = po?.suppliers as Record<string, unknown> | null;
@@ -215,7 +251,7 @@ export async function GET(request: NextRequest) {
     if (warehouseLookup.error) return serverError(warehouseLookup.error.message);
     const warehousesById = new Map((warehouseLookup.data ?? []).map((row) => [String(row.id), String(row.name ?? 'Unknown warehouse')]));
 
-    const reversalMap = await loadInventoryReversalSnapshots(service, 'goods_received_note', grnIds);
+    const reversalMap = await loadGrnReversalSnapshots(service, grnIds);
     const mapped = (primary.data ?? []).map((r: Record<string, unknown>) => {
       const po = r.purchase_orders as Record<string, unknown> | null;
       const supplierId = String(r.supplier_id ?? po?.supplier_id ?? '');

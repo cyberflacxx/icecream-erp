@@ -35,7 +35,7 @@ export async function POST(
   try {
     const { data: existing, error: existingError } = await service
       .from('goods_received_notes')
-      .select('id, status, quality_status, stock_posted, warehouse_id, grn_number, receiving_date, received_date, created_at, supplier_id, purchase_order_id')
+      .select('id, status, quality_status, stock_posted, warehouse_id, grn_number, received_date, created_at, supplier_id, purchase_order_id')
       .is('deleted_at', null)
       .eq('organization_id', ctx.organizationId)
       .eq('id', id)
@@ -82,9 +82,7 @@ export async function POST(
     });
     const postingDate = toDateOnly(
       String(
-        existing.receiving_date ??
-          existing.received_date ??
-          grnDetail.receiving_date ??
+        existing.received_date ??
           grnDetail.received_date ??
           grnDetail.created_at ??
           '',
