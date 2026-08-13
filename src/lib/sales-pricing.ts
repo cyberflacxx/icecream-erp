@@ -42,6 +42,16 @@ function toOptionalNumber(value: unknown) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function pickPositiveCost(...values: unknown[]) {
+  for (const value of values) {
+    const parsed = toOptionalNumber(value);
+    if (parsed !== null && parsed > 0) {
+      return parsed;
+    }
+  }
+  return null;
+}
+
 function normalizeCode(value: unknown) {
   const normalized = String(value ?? '').trim().toUpperCase();
   return normalized || null;
@@ -263,7 +273,7 @@ export async function loadResolvedSalesItemPricing(input: {
     const unit = unitId ? unitById.get(unitId) ?? null : null;
     const resolvedPrice = pickResolvedPrice(id, documentDate, (pricesResult.data ?? []) as Array<Record<string, unknown>>, pricePriority);
     const fallbackPrice = toOptionalNumber(row.selling_price);
-    const fallbackCost = toOptionalNumber(row.unit_cost ?? row.standard_cost);
+    const fallbackCost = pickPositiveCost(row.unit_cost, row.standard_cost);
 
     resolved.set(id, {
       availableBranchStock: stock?.availableBranchStock ?? null,

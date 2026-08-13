@@ -16,7 +16,7 @@ export async function GET(
 
   const invoiceResult = await service
     .from('invoices')
-    .select('*, customers(*), invoice_items(*, items(*))')
+    .select('*')
     .eq('organization_id', ctx.organizationId)
     .eq('id', params.id)
     .is('deleted_at', null)
@@ -26,6 +26,41 @@ export async function GET(
   if (!invoiceResult.data) return notFound('Invoice not found.');
 
   const invoice = invoiceResult.data as Record<string, unknown>;
+  const customerId = invoice.customer_id ? String(invoice.customer_id) : null;
+
+  const [customerResult, invoiceItemsResult] = await Promise.all([
+    customerId
+      ? service
+        .from('customers')
+        .select('*')
+        .eq('organization_id', ctx.organizationId)
+        .eq('id', customerId)
+        .maybeSingle()
+      : Promise.resolve({ data: null, error: null }),
+    service
+      .from('invoice_items')
+      .select('*')
+      .eq('invoice_id', params.id),
+  ]);
+
+  if (customerResult.error) return serverError(customerResult.error.message);
+  if (invoiceItemsResult.error) return serverError(invoiceItemsResult.error.message);
+
+  const invoiceItems = (invoiceItemsResult.data ?? []) as Array<Record<string, unknown>>;
+  const itemIds = [...new Set(invoiceItems.map((row) => String(row.item_id ?? '')).filter(Boolean))];
+  let itemsById = new Map<string, Record<string, unknown>>();
+
+  if (itemIds.length > 0) {
+    const itemsResult = await service
+      .from('items')
+      .select('*')
+      .eq('organization_id', ctx.organizationId)
+      .in('id', itemIds);
+    if (itemsResult.error) return serverError(itemsResult.error.message);
+    itemsById = new Map(
+      ((itemsResult.data ?? []) as Array<Record<string, unknown>>).map((row) => [String(row.id), row]),
+    );
+  }
 
   let effectiveBranchId = invoice.branch_id ? String(invoice.branch_id) : null;
   let branch: Record<string, unknown> | null = null;
@@ -76,6 +111,11 @@ export async function GET(
 
   return NextResponse.json({
     ...invoice,
+    customers: customerResult.data ?? null,
+    invoice_items: invoiceItems.map((row) => ({
+      ...row,
+      items: itemsById.get(String(row.item_id ?? '')) ?? null,
+    })),
     branch,
     company: companyResult.data ?? null,
     displayStatus: deriveSalesInvoiceStatus({

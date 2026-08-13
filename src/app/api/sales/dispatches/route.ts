@@ -114,6 +114,7 @@ export async function POST(request: NextRequest) {
         dispatch_note_number: dispatchNoteNumber,
         dispatched_by: ctx.userId,
         invoice_id: body.invoiceId,
+        organization_id: ctx.organizationId,
         status: 'PENDING',
         vehicle_reference: body.vehicleReference ?? null,
         warehouse_id: body.warehouseId,

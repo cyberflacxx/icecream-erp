@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 
 import { badRequest, can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
+import { resolveFinancePostingAccount } from '@/lib/finance-foundation-server';
 import { emitLowStockNotificationIfNeeded, emitOperationalNotifications } from '@/lib/notifications-server';
 import { isMissingSalesColumn, isMissingSalesTable, salesService, writeSalesAuditLog } from '@/lib/sales-server';
 import { getDocumentLockReason } from '@/lib/workflow';
@@ -29,13 +30,13 @@ async function loadCompatDispatchForPosting(service: ReturnType<typeof salesServ
 
   let invoiceResult = await service
     .from('invoices')
-    .select('id, status, approved_at')
+    .select('id, invoice_number, status, approved_at, branch_id, department_id, cost_center_code, currency_code, exchange_rate')
     .eq('id', String(payload.invoiceId ?? ''))
     .maybeSingle();
   if (invoiceResult.error && isMissingSalesColumn(invoiceResult.error, 'invoices', 'approved_at')) {
     invoiceResult = await service
       .from('invoices')
-      .select('id, status')
+      .select('id, invoice_number, status, branch_id, department_id, cost_center_code, currency_code, exchange_rate')
       .eq('id', String(payload.invoiceId ?? ''))
       .maybeSingle();
   }
@@ -75,13 +76,13 @@ async function loadDispatchForPosting(service: ReturnType<typeof salesService>, 
 
   let invoiceResult = await service
     .from('invoices')
-    .select('id, status, approved_at')
+    .select('id, invoice_number, status, approved_at, branch_id, department_id, cost_center_code, currency_code, exchange_rate')
     .eq('id', String((dispatchResult.data as SalesDispatchRow).invoice_id ?? ''))
     .maybeSingle();
   if (invoiceResult.error && isMissingSalesColumn(invoiceResult.error, 'invoices', 'approved_at')) {
     invoiceResult = await service
       .from('invoices')
-      .select('id, status')
+      .select('id, invoice_number, status, branch_id, department_id, cost_center_code, currency_code, exchange_rate')
       .eq('id', String((dispatchResult.data as SalesDispatchRow).invoice_id ?? ''))
       .maybeSingle();
   }
@@ -92,6 +93,113 @@ async function loadDispatchForPosting(service: ReturnType<typeof salesService>, 
     invoices: invoiceResult.data as SalesDispatchRow | null,
     sales_dispatch_note_items: (itemsResult.data ?? []) as SalesDispatchRow[],
   } as SalesDispatchForPosting;
+}
+
+async function createDispatchCostJournal(input: {
+  branchId: string | null;
+  costCenterCode: string | null;
+  currencyCode: string | null;
+  departmentId: string | null;
+  dispatchId: string;
+  dispatchNumber: string;
+  exchangeRate: number | null;
+  organizationId: string;
+  service: ReturnType<typeof salesService>;
+  totalCost: number;
+  userId: string;
+}) {
+  if (input.totalCost <= 0) {
+    return null;
+  }
+
+  const [cogsAccount, inventoryAccount, entryNumberResult] = await Promise.all([
+    resolveFinancePostingAccount(input.organizationId, 'COST_OF_GOODS_SOLD', {
+      branchId: input.branchId,
+      fallbackAccountCode: '5110',
+    }),
+    resolveFinancePostingAccount(input.organizationId, 'FINISHED_GOODS_INVENTORY', {
+      branchId: input.branchId,
+      fallbackAccountCode: '1240',
+    }),
+    input.service.rpc('sales_next_document_number', {
+      p_organization_id: input.organizationId,
+      p_prefix: 'JE',
+      p_series_type: 'JOURNAL_ENTRY',
+    }),
+  ]);
+
+  if (entryNumberResult.error) {
+    throw entryNumberResult.error;
+  }
+
+  const entryNumber = String(entryNumberResult.data ?? '').trim();
+  if (!entryNumber) {
+    throw new Error('Dispatch journal number could not be generated.');
+  }
+
+  const now = new Date().toISOString();
+  const journalInsert = await input.service
+    .from('journal_entries')
+    .insert({
+      organization_id: input.organizationId,
+      entry_number: entryNumber,
+      entry_date: now.slice(0, 10),
+      description: `Dispatch ${input.dispatchNumber}`,
+      reference: `sales:sales_dispatch:${input.dispatchId}`,
+      reference_type: 'sales_dispatch',
+      reference_id: input.dispatchId,
+      branch_id: input.branchId,
+      department_id: input.departmentId,
+      cost_center_code: input.costCenterCode,
+      currency_code: input.currencyCode ?? 'USD',
+      exchange_rate: input.exchangeRate ?? 1,
+      status: 'POSTED',
+      is_posted: true,
+      posted_by: input.userId,
+      posted_at: now,
+      created_by: input.userId,
+      approved_by: input.userId,
+      total_debit: input.totalCost,
+      total_credit: input.totalCost,
+    })
+    .select('id')
+    .single();
+
+  if (journalInsert.error) {
+    throw journalInsert.error;
+  }
+
+  const journalId = String((journalInsert.data as SalesDispatchRow).id ?? '');
+  const journalLinesInsert = await input.service
+    .from('journal_entry_lines')
+    .insert([
+      {
+        journal_entry_id: journalId,
+        account_id: cogsAccount.id,
+        branch_id: input.branchId,
+        department_id: input.departmentId,
+        cost_center_code: input.costCenterCode,
+        description: `Cost of goods sold for dispatch ${input.dispatchNumber}`,
+        debit_amount: input.totalCost,
+        credit_amount: 0,
+      },
+      {
+        journal_entry_id: journalId,
+        account_id: inventoryAccount.id,
+        branch_id: input.branchId,
+        department_id: input.departmentId,
+        cost_center_code: input.costCenterCode,
+        description: `Inventory issue for dispatch ${input.dispatchNumber}`,
+        debit_amount: 0,
+        credit_amount: input.totalCost,
+      },
+    ]);
+
+  if (journalLinesInsert.error) {
+    throw journalLinesInsert.error;
+  }
+
+  return journalId;
 }
 
 export async function POST(
@@ -127,6 +235,29 @@ export async function POST(
       ['APPROVED', 'SENT', 'PARTIAL_PAID', 'PAID', 'FULLY_DISPATCHED'].includes(linkedInvoiceStatus);
     if (!linkedInvoice || !invoiceApproved) {
       return badRequest('Dispatch cannot be posted until the linked invoice is approved.');
+    }
+
+    const [existingJournalResult, existingMovementResult] = await Promise.all([
+      service
+        .from('journal_entries')
+        .select('id')
+        .eq('reference_type', 'sales_dispatch')
+        .eq('reference_id', id)
+        .limit(1)
+        .maybeSingle(),
+      service
+        .from('stock_movements')
+        .select('id')
+        .eq('reference_type', 'sales_dispatch')
+        .eq('reference_id', id)
+        .eq('movement_type', 'SALES_ISSUE')
+        .limit(1)
+        .maybeSingle(),
+    ]);
+    if (existingJournalResult.error) throw existingJournalResult.error;
+    if (existingMovementResult.error) throw existingMovementResult.error;
+    if (existingJournalResult.data || existingMovementResult.data) {
+      return badRequest('Dispatch already has posting artifacts and cannot be retried automatically.');
     }
 
     const workflow = workflowService();
@@ -177,6 +308,19 @@ export async function POST(
 
     const items = Array.isArray(dispatch.sales_dispatch_note_items) ? dispatch.sales_dispatch_note_items : [];
     try {
+      const movementPlans: Array<{
+        balanceId: string;
+        itemId: string;
+        nextOnHand: number;
+        nextReserved: number;
+        nextTotalValue: number;
+        quantity: number;
+        quantityAvailable: number;
+        totalCost: number;
+        unitCost: number;
+      }> = [];
+      let totalDispatchCost = 0;
+
       for (const item of items) {
         if (Number(item.quantity_dispatched ?? 0) > Number(item.quantity_invoiced ?? 0)) {
           return badRequest('Dispatch quantity cannot exceed invoiced quantity.');
@@ -184,43 +328,106 @@ export async function POST(
 
         const { data: balance, error: balanceError } = await service
           .from('stock_balances')
-          .select('id, quantity_on_hand, quantity_reserved, quantity_available')
+          .select('id, quantity, quantity_on_hand, quantity_reserved, quantity_available, average_cost, avg_cost, total_value')
           .eq('item_id', item.item_id)
           .eq('warehouse_id', dispatch.warehouse_id)
           .single();
         if (balanceError) throw balanceError;
 
         const quantity = Number(item.quantity_dispatched ?? 0);
-        const nextReserved = Math.max(0, Number(balance.quantity_reserved ?? 0) - quantity);
-        const nextOnHand = Number(balance.quantity_on_hand ?? 0) - quantity;
-        if (nextOnHand < 0) return badRequest('Negative stock blocked.');
+        const currentOnHand = Number(balance.quantity_on_hand ?? balance.quantity ?? 0);
+        const currentReserved = Number(balance.quantity_reserved ?? 0);
+        const currentAvailable = Number(balance.quantity_available ?? Math.max(0, currentOnHand - currentReserved));
+        const unitCost = Number(balance.average_cost ?? balance.avg_cost ?? 0);
+        if (unitCost <= 0) {
+          return badRequest(`Dispatch requires an inventory cost for item ${String(item.item_id ?? '')}.`);
+        }
 
-        await service
+        const totalCost = unitCost * quantity;
+        const nextReserved = Math.max(0, Number(balance.quantity_reserved ?? 0) - quantity);
+        const nextOnHand = currentOnHand - quantity;
+        if (nextOnHand < 0) return badRequest('Negative stock blocked.');
+        const nextAvailable = Math.max(0, currentAvailable - Math.max(0, quantity - currentReserved));
+
+        const currentTotalValue = Number(balance.total_value ?? (currentOnHand * unitCost));
+        const nextTotalValue = Math.max(0, currentTotalValue - totalCost);
+        movementPlans.push({
+          balanceId: String(balance.id),
+          itemId: String(item.item_id ?? ''),
+          nextOnHand,
+          nextReserved,
+          nextTotalValue,
+          quantity,
+          quantityAvailable: nextAvailable,
+          totalCost,
+          unitCost,
+        });
+        totalDispatchCost += totalCost;
+      }
+
+      const linkedInvoiceBranchId = linkedInvoice?.branch_id ? String(linkedInvoice.branch_id) : null;
+      const linkedInvoiceDepartmentId = linkedInvoice?.department_id ? String(linkedInvoice.department_id) : null;
+      const linkedInvoiceCostCenterCode = linkedInvoice?.cost_center_code ? String(linkedInvoice.cost_center_code) : null;
+      const linkedInvoiceCurrencyCode = linkedInvoice?.currency_code ? String(linkedInvoice.currency_code) : null;
+      const linkedInvoiceExchangeRate = linkedInvoice?.exchange_rate == null ? null : Number(linkedInvoice.exchange_rate);
+      const journalId = await createDispatchCostJournal({
+        branchId: linkedInvoiceBranchId,
+        costCenterCode: linkedInvoiceCostCenterCode,
+        currencyCode: linkedInvoiceCurrencyCode,
+        departmentId: linkedInvoiceDepartmentId,
+        dispatchId: id,
+        dispatchNumber: String(dispatch.dispatch_note_number ?? id),
+        exchangeRate: linkedInvoiceExchangeRate,
+        organizationId: ctx.organizationId,
+        service,
+        totalCost: totalDispatchCost,
+        userId: ctx.userId,
+      });
+
+      for (const plan of movementPlans) {
+        const balanceUpdateResult = await service
           .from('stock_balances')
           .update({
             last_updated: new Date().toISOString(),
-            quantity_available: Number(balance.quantity_available ?? 0),
-            quantity_on_hand: nextOnHand,
-            quantity_reserved: nextReserved,
+            quantity: plan.nextOnHand,
+            quantity_available: plan.quantityAvailable,
+            quantity_on_hand: plan.nextOnHand,
+            quantity_reserved: plan.nextReserved,
+            total_value: plan.nextTotalValue,
           })
-          .eq('id', balance.id);
+          .eq('id', plan.balanceId);
+        if (balanceUpdateResult.error) {
+          throw balanceUpdateResult.error;
+        }
 
-        await service.from('stock_movements').insert({
+        const movementInsertResult = await service.from('stock_movements').insert({
+          branch_id: linkedInvoiceBranchId,
           created_by: ctx.userId,
-          item_id: item.item_id,
+          item_id: plan.itemId,
+          journal_entry_id: journalId,
           movement_type: 'SALES_ISSUE',
-          quantity,
+          organization_id: ctx.organizationId,
+          quantity: plan.quantity,
+          reference_number: String(dispatch.dispatch_note_number ?? id),
+          running_balance: plan.nextOnHand,
+          running_value: plan.nextTotalValue,
           reference_id: id,
           reference_type: 'sales_dispatch',
-          total_cost: 0,
-          unit_cost: 0,
+          source_document_id: id,
+          source_document_type: 'sales_dispatch',
+          total_cost: plan.totalCost,
+          total_value: plan.totalCost,
+          unit_cost: plan.unitCost,
           warehouse_id: dispatch.warehouse_id,
         });
+        if (movementInsertResult.error) {
+          throw movementInsertResult.error;
+        }
 
         try {
           await emitLowStockNotificationIfNeeded({
             actorUserId: ctx.userId,
-            itemId: String(item.item_id),
+            itemId: plan.itemId,
             organizationId: ctx.organizationId,
             warehouseId: String(dispatch.warehouse_id ?? ''),
           });

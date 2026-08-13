@@ -26,10 +26,10 @@ function toNumber(value: unknown) {
 async function approveInvoiceRecord(service: ReturnType<typeof salesService>, id: string, userId: string) {
   const approvedAt = new Date().toISOString();
   const attempts = [
-    { approved_at: approvedAt, approved_by: userId, status: 'APPROVED' },
-    { approved_by: userId, status: 'APPROVED' },
-    { approved_at: approvedAt, status: 'APPROVED' },
-    { status: 'APPROVED' },
+    { approved_at: approvedAt, approved_by: userId, status: 'SENT' },
+    { approved_by: userId, status: 'SENT' },
+    { approved_at: approvedAt, status: 'SENT' },
+    { status: 'SENT' },
   ];
 
   let lastCompatibilityError: unknown = null;

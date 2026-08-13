@@ -21,6 +21,19 @@ import { fetchGoodsReceivedNoteDetail, isGrnStockPostingError } from '@/lib/proc
 import { recordAuditLog } from '@/lib/security-server';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
+function isFinanceConfigurationError(message: string) {
+  const normalized = message.toLowerCase();
+
+  return (
+    normalized.startsWith('no active cost centre mapping is configured') ||
+    normalized.startsWith('cost centre ') ||
+    normalized.startsWith('missing active account mapping for') ||
+    normalized.startsWith('fallback account ') ||
+    normalized.endsWith('is a header account and cannot receive postings.') ||
+    normalized.endsWith('is inactive.')
+  );
+}
+
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
@@ -233,6 +246,14 @@ export async function POST(
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to post GRN.';
     const details = isGrnStockPostingError(error) ? error.details : undefined;
+    if (isFinanceConfigurationError(message)) {
+      return NextResponse.json({
+        success: false,
+        message,
+        code: 'GRN_FINANCE_CONFIGURATION_REQUIRED',
+        details,
+      }, { status: 400 });
+    }
     if (message === 'Please select a receiving warehouse before posting GRN.') {
       return NextResponse.json({
         success: false,
