@@ -34,6 +34,7 @@ function AuthenticatedUserProvider({ children }: { children: ReactNode }) {
 
   const protectedPrefixes = [
     '/dashboard',
+    '/ai',
     '/procurement',
     '/inventory',
     '/production',

@@ -131,6 +131,7 @@ export function canAccessDashboardPath(persona: DashboardPersona, pathname: stri
     { match: '/hr', personas: ['hr_lead'] },
     { match: '/quality', personas: ['quality_lead', 'production_manager', 'operations_manager'] },
     { match: '/reports', personas: ['sales_lead', 'finance_lead', 'procurement_lead', 'inventory_lead', 'production_manager', 'hr_lead', 'quality_lead', 'branch_manager', 'operations_manager', 'operations_specialist'] },
+    { match: '/ai', personas: ['sales_lead', 'finance_lead', 'procurement_lead', 'inventory_lead', 'production_manager', 'quality_lead', 'branch_manager', 'operations_manager', 'operations_specialist'] },
     { match: '/notifications', personas: ['sales_lead', 'finance_lead', 'procurement_lead', 'inventory_lead', 'production_manager', 'hr_lead', 'quality_lead', 'branch_manager', 'operations_manager', 'operations_specialist'] },
     { match: '/settings', personas: [] },
     { match: '/admin', personas: [] },

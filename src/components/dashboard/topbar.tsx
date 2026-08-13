@@ -19,6 +19,7 @@ import {
 } from '@/hooks/useNotifications';
 
 const pageTitles: Array<{ match: (path: string) => boolean; title: string }> = [
+  { match: (path) => path.startsWith('/ai'), title: 'Absolute AI' },
   { match: (path) => path.startsWith('/dashboard'), title: 'Dashboard' },
   { match: (path) => path.startsWith('/production'), title: 'Production' },
   { match: (path) => path.startsWith('/finance'), title: 'Finance' },

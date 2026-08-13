@@ -11,6 +11,7 @@ const protectedPrefixes = [
   '/inventory',
   '/production',
   '/branches',
+  '/ai',
   '/reports',
   '/settings',
   '/finance',
@@ -141,6 +142,8 @@ export async function middleware(request: NextRequest) {
     pathname.startsWith('/auth/register/') ||
     pathname === '/dashboard' ||
     pathname.startsWith('/dashboard/') ||
+    pathname === '/ai' ||
+    pathname.startsWith('/ai/') ||
     pathname === '/procurement' ||
     pathname.startsWith('/procurement/') ||
     pathname === '/production' ||
