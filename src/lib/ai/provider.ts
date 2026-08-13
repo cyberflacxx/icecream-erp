@@ -6,6 +6,15 @@ export interface AbsoluteAiProvider {
   chat(input: AbsoluteAiProviderRequest): Promise<AbsoluteAiProviderResponse>;
 }
 
+type AbsoluteAiProviderConfigDiagnostics = {
+  apiKeyHasLeadingWhitespace: boolean;
+  apiKeyHasTrailingWhitespace: boolean;
+  apiKeyLength: number;
+  apiKeyPresent: boolean;
+  model: string;
+  provider: string;
+};
+
 export function getAbsoluteAiProviderName() {
   return String(process.env.AI_PROVIDER ?? 'gemini').trim().toLowerCase() || 'gemini';
 }
@@ -18,16 +27,37 @@ export function isAbsoluteAiConfigured() {
   return getAbsoluteAiProviderName() === 'gemini' && Boolean(String(process.env.GEMINI_API_KEY ?? '').trim());
 }
 
+export function getAbsoluteAiProviderConfig() {
+  return {
+    apiKey: String(process.env.GEMINI_API_KEY ?? '').trim(),
+    model: getAbsoluteAiModel(),
+    provider: getAbsoluteAiProviderName(),
+  };
+}
+
+export function getAbsoluteAiProviderConfigDiagnostics(): AbsoluteAiProviderConfigDiagnostics {
+  const rawApiKey = String(process.env.GEMINI_API_KEY ?? '');
+
+  return {
+    apiKeyHasLeadingWhitespace: rawApiKey.length > 0 && rawApiKey.trimStart() !== rawApiKey,
+    apiKeyHasTrailingWhitespace: rawApiKey.length > 0 && rawApiKey.trimEnd() !== rawApiKey,
+    apiKeyLength: rawApiKey.trim().length,
+    apiKeyPresent: Boolean(rawApiKey.trim()),
+    model: getAbsoluteAiModel(),
+    provider: getAbsoluteAiProviderName(),
+  };
+}
+
 export function getAbsoluteAiProvider(): AbsoluteAiProvider {
-  const provider = getAbsoluteAiProviderName();
+  const { apiKey, model, provider } = getAbsoluteAiProviderConfig();
 
   if (provider !== 'gemini') {
     throw new Error(`Unsupported Absolute AI provider: ${provider}`);
   }
 
   return createGeminiProvider({
-    apiKey: String(process.env.GEMINI_API_KEY ?? '').trim(),
-    model: getAbsoluteAiModel(),
+    apiKey,
+    model,
   });
 }
 
