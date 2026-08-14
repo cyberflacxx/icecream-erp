@@ -5,6 +5,9 @@ import test from 'node:test';
 const auditSource = fs.readFileSync('src/lib/ai/audit.ts', 'utf8');
 const serviceSource = fs.readFileSync('src/lib/ai/service.ts', 'utf8');
 const geminiSource = fs.readFileSync('src/lib/ai/gemini.ts', 'utf8');
+const typesSource = fs.readFileSync('src/lib/ai/types.ts', 'utf8');
+const chatRouteSource = fs.readFileSync('src/app/api/ai/chat/route.ts', 'utf8');
+const aiPageSource = fs.readFileSync('src/app/(dashboard)/ai/page-client.tsx', 'utf8');
 
 test('provider failures are normalized to safe user-facing messages', () => {
   assert.match(geminiSource, /Gemini usage limit\. Please try again shortly/);
@@ -38,21 +41,30 @@ test('read-only refusal message is explicit', () => {
 });
 
 test('AI routes and dashboard wiring enforce authentication and protected navigation', () => {
-  const chatRoute = fs.readFileSync('src/app/api/ai/chat/route.ts', 'utf8');
   const healthRoute = fs.readFileSync('src/app/api/ai/health/route.ts', 'utf8');
   const sidebar = fs.readFileSync('src/components/dashboard/sidebar.tsx', 'utf8');
   const middleware = fs.readFileSync('src/middleware.ts', 'utf8');
   const userContext = fs.readFileSync('src/contexts/UserContext.tsx', 'utf8');
 
-  assert.match(chatRoute, /getAuthContext\(request\)/);
-  assert.match(chatRoute, /unauthorized\(\)/);
-  assert.match(chatRoute, /forbidden\(\)/);
-  assert.match(chatRoute, /runAbsoluteAiChat/);
+  assert.match(chatRouteSource, /getAuthContext\(request\)/);
+  assert.match(chatRouteSource, /unauthorized\(\)/);
+  assert.match(chatRouteSource, /forbidden\(\)/);
+  assert.match(chatRouteSource, /runAbsoluteAiChat/);
   assert.match(healthRoute, /getAbsoluteAiHealthSummary/);
   assert.match(sidebar, /href: '\/ai'/);
   assert.match(sidebar, /label: 'Absolute AI'/);
   assert.match(middleware, /'\/ai'/);
   assert.match(userContext, /'\/ai'/);
+});
+
+test('chat route and AI page share one request contract that accepts null interaction ids', () => {
+  assert.match(typesSource, /export const absoluteAiChatRequestSchema/);
+  assert.match(typesSource, /previousInteractionId: z\.string\(\)\.max\(512\)\.nullish\(\)/);
+  assert.match(typesSource, /conversationId: z\.string\(\)\.max\(120\)\.nullish\(\)/);
+  assert.match(chatRouteSource, /absoluteAiChatRequestSchema\.safeParse/);
+  assert.match(aiPageSource, /const requestBody: AbsoluteAiChatRequest =/);
+  assert.match(aiPageSource, /previousInteractionId,/);
+  assert.match(aiPageSource, /prompt: trimmed/);
 });
 
 test('tool registry includes GRN, stock, sales, fiscal, RBAC, health, and anomaly tools', () => {

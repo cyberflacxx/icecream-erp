@@ -1,21 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { z } from 'zod';
 
 import { forbidden, getAuthContext, unauthorized } from '@/lib/api-auth';
 import { canAccessAbsoluteAi, runAbsoluteAiChat } from '@/lib/ai/service';
-
-const requestSchema = z.object({
-  conversationId: z.string().max(120).optional(),
-  previousInteractionId: z.string().max(512).optional(),
-  prompt: z.string().min(1).max(2_000),
-});
+import { absoluteAiChatRequestSchema } from '@/lib/ai/types';
 
 export async function POST(request: NextRequest) {
   const auth = await getAuthContext(request);
   if (!auth) return unauthorized();
   if (!canAccessAbsoluteAi(auth)) return forbidden();
 
-  const body = requestSchema.safeParse(await request.json().catch(() => ({})));
+  const body = absoluteAiChatRequestSchema.safeParse(await request.json().catch(() => ({})));
   if (!body.success) {
     return NextResponse.json({
       error: {

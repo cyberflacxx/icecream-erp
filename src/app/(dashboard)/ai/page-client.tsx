@@ -4,6 +4,7 @@ import { Bot, RefreshCcw, Sparkles, Stethoscope } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 
 import { Button } from '@/components/ui/button';
+import type { AbsoluteAiChatRequest } from '@/lib/ai/types';
 import { cn } from '@/lib/utils';
 
 type HealthCard = {
@@ -118,12 +119,13 @@ export function AbsoluteAiPageClient() {
     setChatError(null);
 
     try {
+      const requestBody: AbsoluteAiChatRequest = {
+        conversationId,
+        previousInteractionId,
+        prompt: trimmed,
+      };
       const response = await fetch('/api/ai/chat', {
-        body: JSON.stringify({
-          conversationId,
-          previousInteractionId,
-          prompt: trimmed,
-        }),
+        body: JSON.stringify(requestBody),
         cache: 'no-store',
         headers: {
           'Content-Type': 'application/json',

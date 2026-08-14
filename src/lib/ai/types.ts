@@ -1,3 +1,5 @@
+import { z } from 'zod';
+
 import type { AuthContext } from '@/lib/api-auth';
 
 export const ABSOLUTE_AI_DEFAULT_MODEL = 'gemini-3.6-flash';
@@ -32,11 +34,13 @@ export type AbsoluteAiUsage = {
   totalTokens: number | null;
 };
 
-export type AbsoluteAiChatRequest = {
-  conversationId?: string | null;
-  previousInteractionId?: string | null;
-  prompt: string;
-};
+export const absoluteAiChatRequestSchema = z.object({
+  conversationId: z.string().max(120).nullish(),
+  previousInteractionId: z.string().max(512).nullish(),
+  prompt: z.string().min(1).max(2_000),
+}).strict();
+
+export type AbsoluteAiChatRequest = z.infer<typeof absoluteAiChatRequestSchema>;
 
 export type AbsoluteAiChatResponse = {
   conversationId: string;
