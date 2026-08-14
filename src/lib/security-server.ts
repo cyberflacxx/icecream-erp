@@ -606,7 +606,7 @@ export async function incrementFailedLogin(profile: SecurityUserProfile, setting
   };
 
   if (shouldLock) {
-    updates.status = 'LOCKED';
+    updates.status = 'locked';
     updates.locked_until = getLockoutExpiry(new Date(), policy.lockoutDurationMinutes).toISOString();
   }
 
