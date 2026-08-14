@@ -532,7 +532,7 @@ export async function loadFinanceMetaResources(organizationId: string) {
         .order(attempt.orderBy, { ascending: true });
 
       if (!result.error) {
-        return (result.data ?? []) as Row[];
+        return (result.data ?? []) as unknown as Row[];
       }
 
       if (isMissingFinanceTable(result.error)) {
