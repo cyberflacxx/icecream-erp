@@ -15,26 +15,42 @@ export function useAppAuth(): AppAuthState {
   const [userId, setUserId] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!hasSupabaseClientEnv()) {
-      setUserId(null);
-      setIsLoaded(true);
-      return;
-    }
+    let active = true;
 
-    const supabase = createClient();
+    const loadAuthState = async () => {
+      try {
+        const response = await fetch('/api/auth/me', {
+          cache: 'no-store',
+          credentials: 'include',
+        });
 
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setUserId(session?.user?.id ?? null);
-      setIsLoaded(true);
-    });
+        if (!active) return;
 
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUserId(session?.user?.id ?? null);
-    });
+        if (!response.ok) {
+          setUserId(null);
+          return;
+        }
 
-    return () => subscription.unsubscribe();
+        const payload = (await response.json()) as {
+          clerkUserId?: string | null;
+          profile?: { clerkUserId?: string | null; id?: string | null } | null;
+        };
+        setUserId(payload.clerkUserId ?? payload.profile?.clerkUserId ?? payload.profile?.id ?? null);
+      } catch {
+        if (!active) return;
+        setUserId(null);
+      } finally {
+        if (active) {
+          setIsLoaded(true);
+        }
+      }
+    };
+
+    void loadAuthState();
+
+    return () => {
+      active = false;
+    };
   }, []);
 
   return {
@@ -43,9 +59,13 @@ export function useAppAuth(): AppAuthState {
         return null;
       }
 
-      const supabase = createClient();
-      const { data: { session } } = await supabase.auth.getSession();
-      return session?.access_token ?? null;
+      try {
+        const supabase = createClient();
+        const { data: { session } } = await supabase.auth.getSession();
+        return session?.access_token ?? null;
+      } catch {
+        return null;
+      }
     },
     isLoaded,
     isSignedIn: Boolean(userId),
