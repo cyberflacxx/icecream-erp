@@ -553,6 +553,77 @@ export async function loadFinanceMetaResources(organizationId: string) {
 
     return [] as Row[];
   };
+  const loadCurrencies = async (): Promise<Array<Row & { exchange_rate?: number }>> => {
+    const currencyAttempts = [
+      { orderBy: 'code', select: 'id, code, name, exchange_rate, is_active' },
+      { orderBy: 'code', select: 'id, code, name, is_active' },
+      { orderBy: 'code', select: 'id, code, name' },
+      { orderBy: 'id', select: 'id, code, name' },
+    ] as const;
+
+    let currencyRows: Row[] = [];
+
+    for (const attempt of currencyAttempts) {
+      const result = await service
+        .from('currencies')
+        .select(attempt.select)
+        .eq('organization_id', organizationId)
+        .order(attempt.orderBy, { ascending: true });
+
+      if (!result.error) {
+        currencyRows = (result.data ?? []) as unknown as Row[];
+        break;
+      }
+
+      if (isMissingFinanceTable(result.error)) {
+        return [];
+      }
+
+      const missingHandled =
+        isMissingFinanceColumn(result.error, 'currencies', 'exchange_rate') ||
+        isMissingFinanceColumn(result.error, 'currencies', 'is_active') ||
+        isMissingFinanceColumn(result.error, 'currencies', 'code') ||
+        isMissingFinanceColumn(result.error, 'currencies', 'name');
+
+      if (!missingHandled) {
+        throw result.error;
+      }
+    }
+
+    if (currencyRows.length === 0) {
+      return [];
+    }
+
+    const exchangeRateResult = await service
+      .from('exchange_rates')
+      .select('currency_code, exchange_rate, rate_date')
+      .eq('organization_id', organizationId)
+      .order('rate_date', { ascending: false });
+
+    if (exchangeRateResult.error && !isMissingFinanceTable(exchangeRateResult.error)) {
+      const missingHandled =
+        isMissingFinanceColumn(exchangeRateResult.error, 'exchange_rates', 'currency_code') ||
+        isMissingFinanceColumn(exchangeRateResult.error, 'exchange_rates', 'exchange_rate') ||
+        isMissingFinanceColumn(exchangeRateResult.error, 'exchange_rates', 'rate_date');
+
+      if (!missingHandled) {
+        throw exchangeRateResult.error;
+      }
+    }
+
+    const latestRateByCode = new Map<string, number>();
+    for (const row of (exchangeRateResult.data ?? []) as Row[]) {
+      const code = String(row.currency_code ?? '').trim().toUpperCase();
+      if (!code || latestRateByCode.has(code)) continue;
+      latestRateByCode.set(code, toNumber(row.exchange_rate ?? 1));
+    }
+
+    return currencyRows.map((row) => {
+      const code = String(row.code ?? '').trim().toUpperCase();
+      const exchangeRate = row.exchange_rate == null ? latestRateByCode.get(code) ?? 1 : toNumber(row.exchange_rate);
+      return { ...(row as Row), code, exchange_rate: exchangeRate } as Row & { exchange_rate?: number };
+    });
+  };
   const [accounts, branches, cashAccounts, bankAccounts, costCentres, fiscalPeriods, currencies] = await Promise.all([
     loadFinanceAccounts(organizationId, { activeStatus: 'active' }),
     service.from('branches').select('id, code, name, status, deleted_at').eq('organization_id', organizationId).order('name', { ascending: true }),
@@ -563,13 +634,12 @@ export async function loadFinanceMetaResources(organizationId: string) {
       throw error;
     }),
     service.from('fiscal_periods').select('id, period_name, start_date, end_date, status, is_locked').eq('organization_id', organizationId).order('start_date', { ascending: false }),
-    service.from('currencies').select('id, code, name, exchange_rate, is_active').eq('organization_id', organizationId).order('code', { ascending: true }),
+    loadCurrencies(),
   ]);
 
   if (branches.error) throw branches.error;
   if (bankAccounts.error && !isMissingFinanceTable(bankAccounts.error)) throw bankAccounts.error;
   if (fiscalPeriods.error && !isMissingFinanceTable(fiscalPeriods.error)) throw fiscalPeriods.error;
-  if (currencies.error && !isMissingFinanceTable(currencies.error)) throw currencies.error;
 
   return {
     accounts: accounts
@@ -604,7 +674,7 @@ export async function loadFinanceMetaResources(organizationId: string) {
       name: String(row.name ?? ''),
       parentId: row.parent_id ? String(row.parent_id) : null,
     })),
-    currencies: ((currencies.data ?? []) as Row[]).map((row) => ({
+    currencies: currencies.map((row) => ({
       code: String(row.code ?? ''),
       exchangeRate: toNumber(row.exchange_rate ?? 1),
       id: String(row.id ?? ''),
