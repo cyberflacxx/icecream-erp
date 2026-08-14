@@ -18,6 +18,7 @@ export interface BranchSelectorRecord {
 
 export interface WarehouseSelectorRecord {
   branchId: string | null;
+  code?: string | null;
   id: string;
   isActive?: boolean | null;
   name?: string | null;

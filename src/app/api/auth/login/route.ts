@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { createClient as createSupabaseClient } from '@supabase/supabase-js';
 
 import {
   buildSecurityContextProfile,
@@ -10,15 +11,29 @@ import {
   recordSecurityEvent,
   registerSession,
 } from '@/lib/security-server';
-import { createClient } from '@/lib/supabase/server';
 import { isSupabaseNetworkTimeout } from '@/lib/supabase/fetch';
 import { workIdToEmail } from '@/lib/auth-roles';
+import { assertServerRuntimeEnv } from '@/lib/runtime-env';
 
 const DEFAULT_LOGIN_TIMEOUT_MS = 12_000;
+const LAST_ACTIVITY_COOKIE = 'icecream-last-activity';
+const SUPABASE_SESSION_COOKIE = 'sb-api-auth-token';
 
 function getLoginTimeoutMs() {
   const parsed = Number(process.env.AUTH_LOGIN_TIMEOUT_MS);
   return Number.isFinite(parsed) && parsed > 0 ? Math.max(3_000, parsed) : DEFAULT_LOGIN_TIMEOUT_MS;
+}
+
+function toBase64Url(value: string) {
+  return Buffer.from(value, 'utf8')
+    .toString('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/g, '');
+}
+
+function buildSessionCookieValue(session: unknown) {
+  return `base64-${toBase64Url(JSON.stringify(session))}`;
 }
 
 function loginTimeoutResponse(timeoutMs: number) {
@@ -80,7 +95,14 @@ async function handleLogin(request: Request) {
       return NextResponse.json({ error: 'This account is locked. Contact a system administrator.' }, { status: 423 });
     }
 
-    const supabase = await createClient();
+    const env = assertServerRuntimeEnv();
+    const supabase = createSupabaseClient(env.supabaseUrl, env.supabaseAnonKey, {
+      db: { schema: 'icecream_erp' },
+      auth: {
+        persistSession: false,
+        autoRefreshToken: false,
+      },
+    });
     const { data, error } = await supabase.auth.signInWithPassword({
       email: workIdToEmail(workId),
       password,
@@ -132,11 +154,25 @@ async function handleLogin(request: Request) {
       userAgent,
     });
 
-    return NextResponse.json({
+    const response = NextResponse.json({
       success: true,
       redirectTo: '/dashboard',
       sessionTimeoutMinutes: resolved.sessionTimeoutMinutes,
     });
+    const secure = request.headers.get('x-forwarded-proto') === 'https' || new URL(request.url).protocol === 'https:';
+    response.cookies.set(SUPABASE_SESSION_COOKIE, buildSessionCookieValue(data.session), {
+      httpOnly: true,
+      sameSite: 'lax',
+      path: '/',
+      secure,
+    });
+    response.cookies.set(LAST_ACTIVITY_COOKIE, String(Date.now()), {
+      httpOnly: true,
+      sameSite: 'lax',
+      path: '/',
+      secure,
+    });
+    return response;
   } catch (error) {
     if (isSupabaseNetworkTimeout(error)) {
       return NextResponse.json(

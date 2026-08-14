@@ -1,9 +1,11 @@
 import { checkDatabaseHealth } from '@/lib/health';
 import { filterAuthorizedWarehouses, getAuthorizedBranchIds, getAuthorizedWarehouseIds } from '@/lib/branch-access';
 import { can } from '@/lib/api-auth';
-import { findOpenFiscalPeriod, listFinanceOpeningBalances } from '@/lib/finance-foundation-server';
+import { findOpenFiscalPeriod, listFinanceOpeningBalances, loadFinanceMetaResources } from '@/lib/finance-foundation-server';
 import { normalizeStockMovementType, STOCK_IN_MOVEMENT_TYPES, STOCK_OUT_MOVEMENT_TYPES, toNumber } from '@/lib/inventory';
 import { listCompatibleStockMovements, mapCompatibleStockMovementRows } from '@/lib/inventory-server';
+import { isMissingRelationshipError } from '@/lib/postgrest-compat';
+import { loadProductionReportBatches } from '@/lib/production-server';
 import { fetchGoodsReceivedNoteDetail } from '@/lib/procurement-goods-received';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
@@ -14,7 +16,11 @@ import type {
   AbsoluteAiToolExecutionContext,
   AbsoluteAiToolResult,
 } from './types';
-import { ABSOLUTE_AI_MAX_RESULT_ROWS } from './types';
+import {
+  ABSOLUTE_AI_DIAGNOSTIC_CACHE_TTL_MS,
+  ABSOLUTE_AI_MAX_RESULT_ROWS,
+  ABSOLUTE_AI_ROLE_CACHE_TTL_MS,
+} from './types';
 
 type ToolRecord = {
   allowed: (auth: AuthContext) => boolean;
@@ -38,6 +44,31 @@ type WarehouseRecord = {
   name?: string | null;
   organizationId: string;
 };
+
+const diagnosticCache = new Map<string, { expiresAt: number; value: AbsoluteAiToolResult | AbsoluteAiHealthCard[] }>();
+
+async function getCachedDiagnostic<T extends AbsoluteAiToolResult | AbsoluteAiHealthCard[]>(
+  key: string,
+  ttlMs: number,
+  loader: () => Promise<T>,
+): Promise<T> {
+  const now = Date.now();
+  const cached = diagnosticCache.get(key);
+  if (cached && cached.expiresAt > now) {
+    return cached.value as T;
+  }
+
+  const value = await loader();
+  diagnosticCache.set(key, { expiresAt: now + ttlMs, value });
+
+  for (const [entryKey, entry] of diagnosticCache) {
+    if (entry.expiresAt <= now) {
+      diagnosticCache.delete(entryKey);
+    }
+  }
+
+  return value;
+}
 
 function stringValue(value: unknown) {
   return typeof value === 'string' ? value.trim() : '';
@@ -617,23 +648,29 @@ async function reconcileInventoryBalance(context: AbsoluteAiToolExecutionContext
 async function checkFiscalPeriod(context: AbsoluteAiToolExecutionContext, args: Record<string, unknown>) {
   const auth = context.auth;
   const effectiveDate = maybeDate(args.date) ?? new Date().toISOString().slice(0, 10);
-  const period = await findOpenFiscalPeriod(auth.organizationId, effectiveDate);
-  const availability = describeFiscalPeriodAvailability(period as Record<string, unknown> | null, effectiveDate);
+  return getCachedDiagnostic(
+    `fiscal-period:${auth.organizationId}:${effectiveDate}`,
+    ABSOLUTE_AI_DIAGNOSTIC_CACHE_TTL_MS,
+    async () => {
+      const period = await findOpenFiscalPeriod(auth.organizationId, effectiveDate);
+      const availability = describeFiscalPeriodAvailability(period as Record<string, unknown> | null, effectiveDate);
 
-  return {
-    data: {
-      date: effectiveDate,
-      mayPost: availability.mayPost,
-      period: period ? {
-        endDate: period.end_date ?? null,
-        id: period.id ?? null,
-        periodName: period.period_name ?? null,
-        startDate: period.start_date ?? null,
-        status: period.status ?? null,
-      } : null,
+      return {
+        data: {
+          date: effectiveDate,
+          mayPost: availability.mayPost,
+          period: period ? {
+            endDate: period.end_date ?? null,
+            id: period.id ?? null,
+            periodName: period.period_name ?? null,
+            startDate: period.start_date ?? null,
+            status: period.status ?? null,
+          } : null,
+        },
+        summary: availability.detail,
+      };
     },
-    summary: availability.detail,
-  };
+  );
 }
 
 async function checkRolePermissions(context: AbsoluteAiToolExecutionContext, args: Record<string, unknown>) {
@@ -659,37 +696,43 @@ async function checkRolePermissions(context: AbsoluteAiToolExecutionContext, arg
   if (!roleResult.data) throw new Error('The requested role was not found.');
 
   const role = roleResult.data as Record<string, unknown>;
-  const [rolePermissionsResult, permissionsResult] = await Promise.all([
-    service.from('role_permissions').select('permission_id').eq('role_id', String(role.id)),
-    service.from('permissions').select('id, code, module_name, action_name'),
-  ]);
+  return getCachedDiagnostic(
+    `role-permissions:${auth.organizationId}:${String(role.id)}`,
+    ABSOLUTE_AI_ROLE_CACHE_TTL_MS,
+    async () => {
+      const [rolePermissionsResult, permissionsResult] = await Promise.all([
+        service.from('role_permissions').select('permission_id').eq('role_id', String(role.id)),
+        service.from('permissions').select('id, code, module_name, action_name'),
+      ]);
 
-  if (rolePermissionsResult.error) throw rolePermissionsResult.error;
-  if (permissionsResult.error) throw permissionsResult.error;
+      if (rolePermissionsResult.error) throw rolePermissionsResult.error;
+      if (permissionsResult.error) throw permissionsResult.error;
 
-  const permissionIds = new Set((rolePermissionsResult.data ?? []).map((row) => String(row.permission_id ?? '')));
-  const permissions = (permissionsResult.data ?? [])
-    .filter((row) => permissionIds.has(String(row.id ?? '')))
-    .map((row) => ({
-      action: row.action_name ?? null,
-      code: row.code ?? null,
-      module: row.module_name ?? null,
-    }));
+      const permissionIds = new Set((rolePermissionsResult.data ?? []).map((row) => String(row.permission_id ?? '')));
+      const permissions = (permissionsResult.data ?? [])
+        .filter((row) => permissionIds.has(String(row.id ?? '')))
+        .map((row) => ({
+          action: row.action_name ?? null,
+          code: row.code ?? null,
+          module: row.module_name ?? null,
+        }));
 
-  return {
-    data: {
-      permissionCount: permissions.length,
-      permissions: permissions.slice(0, ABSOLUTE_AI_MAX_RESULT_ROWS),
-      role: {
-        code: role.code ?? null,
-        description: role.description ?? null,
-        id: role.id,
-        name: role.name ?? null,
-      },
-      suspiciousMissingAccess: permissions.length === 0 ? ['Role has no permissions assigned.'] : [],
+      return {
+        data: {
+          permissionCount: permissions.length,
+          permissions: permissions.slice(0, ABSOLUTE_AI_MAX_RESULT_ROWS),
+          role: {
+            code: role.code ?? null,
+            description: role.description ?? null,
+            id: role.id,
+            name: role.name ?? null,
+          },
+          suspiciousMissingAccess: permissions.length === 0 ? ['Role has no permissions assigned.'] : [],
+        },
+        summary: `${String(role.name ?? role.id)} has ${permissions.length} assigned permission(s).`,
+      };
     },
-    summary: `${String(role.name ?? role.id)} has ${permissions.length} assigned permission(s).`,
-  };
+  );
 }
 
 function mapHealthStatus(status: AbsoluteAiHealthCard['status']) {
@@ -757,17 +800,125 @@ async function buildSystemDoctorSummary(auth: AuthContext): Promise<AbsoluteAiHe
 
 async function systemHealth(context: AbsoluteAiToolExecutionContext) {
   const auth = context.auth;
-  const openingBalances = await listFinanceOpeningBalances(auth.organizationId).catch(() => []);
-  const cards = await buildSystemDoctorSummary(auth);
+  return getCachedDiagnostic(
+    `system-health:${auth.organizationId}:${auth.branchId ?? 'all'}:${auth.isBranchScoped ? 'scoped' : 'global'}`,
+    ABSOLUTE_AI_DIAGNOSTIC_CACHE_TTL_MS,
+    async () => {
+      const openingBalances = await listFinanceOpeningBalances(auth.organizationId).catch(() => []);
+      const cards = await buildSystemDoctorSummary(auth);
 
-  return {
-    data: {
-      openingBalanceDrafts: openingBalances.slice(0, 5),
-      scope: buildScopeSummary(auth),
-      summary: cards,
+      return {
+        data: {
+          openingBalanceDrafts: openingBalances.slice(0, 5),
+          scope: buildScopeSummary(auth),
+          summary: cards,
+        },
+        summary: cards.map((card) => `${card.title}: ${card.status}`).join(' | '),
+      };
     },
-    summary: cards.map((card) => `${card.title}: ${card.status}`).join(' | '),
-  };
+  );
+}
+
+async function diagnoseProductionReports(context: AbsoluteAiToolExecutionContext) {
+  const auth = context.auth;
+  const service = createServiceRoleClient().schema('icecream_erp');
+
+  return getCachedDiagnostic(
+    `production-reports:${auth.organizationId}:${auth.branchId ?? 'all'}:${auth.isBranchScoped ? 'scoped' : 'global'}`,
+    ABSOLUTE_AI_DIAGNOSTIC_CACHE_TTL_MS,
+    async () => {
+      const relationshipIssues: string[] = [];
+      const probes = [
+        {
+          key: 'production_batch_materials',
+          query: service.from('production_batches').select('id, production_batch_materials(quantity_required)').limit(1),
+        },
+        {
+          key: 'production_batch_outputs',
+          query: service.from('production_batches').select('id, production_batch_outputs(expected_quantity)').limit(1),
+        },
+        {
+          key: 'production_worker_assignments',
+          query: service.from('production_batches').select('id, production_worker_assignments(employee_id)').limit(1),
+        },
+      ];
+
+      for (const probe of probes) {
+        const result = await probe.query;
+        if (result.error) {
+          if (isMissingRelationshipError(result.error, 'production_batches', probe.key)) {
+            relationshipIssues.push(probe.key);
+            continue;
+          }
+          throw result.error;
+        }
+      }
+
+      const reportData = await loadProductionReportBatches({
+        branchId: auth.isBranchScoped ? auth.branchId : null,
+      });
+
+      return {
+        data: {
+          compatibilityMode: relationshipIssues.length > 0,
+          directQueryIssues: relationshipIssues,
+          emptyReportIsValid: reportData.batches.length === 0,
+          scope: buildScopeSummary(auth),
+          visibleBatchCount: reportData.batches.length,
+        },
+        summary: relationshipIssues.length > 0
+          ? `Production Reports is running in compatibility mode because direct batch relationships are missing for ${relationshipIssues.join(', ')}.`
+          : `Production Reports direct query path is healthy with ${reportData.batches.length} visible batch row(s).`,
+      };
+    },
+  );
+}
+
+async function diagnoseFinanceOpeningBalances(context: AbsoluteAiToolExecutionContext) {
+  const auth = context.auth;
+  const service = createServiceRoleClient().schema('icecream_erp');
+
+  return getCachedDiagnostic(
+    `finance-opening-balances:${auth.organizationId}`,
+    ABSOLUTE_AI_DIAGNOSTIC_CACHE_TTL_MS,
+    async () => {
+      const issues: string[] = [];
+      const cashAccountsProbe = await service
+        .from('cash_accounts')
+        .select('id, name, account_name, branch_id, balance, current_balance')
+        .eq('organization_id', auth.organizationId)
+        .limit(1);
+
+      if (cashAccountsProbe.error) {
+        const message = String(cashAccountsProbe.error.message ?? '');
+        if (
+          /column cash_accounts\.(name|branch_id|current_balance) does not exist/i.test(message)
+        ) {
+          issues.push(message);
+        } else {
+          throw cashAccountsProbe.error;
+        }
+      }
+
+      const [meta, openingBalances] = await Promise.all([
+        loadFinanceMetaResources(auth.organizationId),
+        listFinanceOpeningBalances(auth.organizationId),
+      ]);
+
+      return {
+        data: {
+          compatibilityIssues: issues,
+          cashAccountCount: meta.cashAccounts.length,
+          fiscalPeriodCount: meta.fiscalPeriods.length,
+          openingBalanceCount: openingBalances.length,
+          scope: buildScopeSummary(auth),
+        },
+        summary: issues.length > 0
+          ? 'Finance opening-balance configuration required compatibility handling for legacy cash_accounts columns.'
+          : 'Finance opening-balance configuration is healthy.',
+      };
+    },
+  );
 }
 
 function detectInventoryAnomalies(input: {
@@ -1030,6 +1181,34 @@ const TOOL_REGISTRY: Record<string, ToolRecord> = {
     },
     execute: checkRolePermissions,
   },
+  diagnose_production_reports: {
+    allowed: (auth) => can(auth, 'production.read', 'reports.read'),
+    definition: {
+      description: 'Check whether Production Reports can load and summarize any compatibility issue safely.',
+      friendlyName: 'Checking Production Reports',
+      name: 'diagnose_production_reports',
+      parameters: {
+        properties: {},
+        required: [],
+        type: 'object',
+      },
+    },
+    execute: diagnoseProductionReports,
+  },
+  diagnose_finance_opening_balances: {
+    allowed: (auth) => can(auth, 'finance.read', 'reports.read'),
+    definition: {
+      description: 'Check whether Finance Opening Balances can load and summarize any safe configuration issue.',
+      friendlyName: 'Checking opening balances',
+      name: 'diagnose_finance_opening_balances',
+      parameters: {
+        properties: {},
+        required: [],
+        type: 'object',
+      },
+    },
+    execute: diagnoseFinanceOpeningBalances,
+  },
   system_health: {
     allowed: (auth) => can(auth, 'dashboard.read', 'inventory.read', 'sales.read', 'finance.read', 'procurement.read', 'reports.read'),
     definition: {
@@ -1082,5 +1261,9 @@ export async function executeAbsoluteAiTool(
 }
 
 export async function getAbsoluteAiSystemDoctor(auth: AuthContext) {
-  return buildSystemDoctorSummary(auth);
+  return getCachedDiagnostic(
+    `system-doctor:${auth.organizationId}:${auth.branchId ?? 'all'}:${auth.isBranchScoped ? 'scoped' : 'global'}`,
+    ABSOLUTE_AI_DIAGNOSTIC_CACHE_TTL_MS,
+    () => buildSystemDoctorSummary(auth),
+  );
 }

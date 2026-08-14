@@ -287,6 +287,9 @@ export async function loadProductionReportBatches(filters: {
     result.error &&
     (
       isMissingColumnError(result.error, 'production_batches', 'deleted_at') ||
+      isMissingRelationshipError(result.error, 'production_batches', 'production_batch_materials') ||
+      isMissingRelationshipError(result.error, 'production_batches', 'production_batch_outputs') ||
+      isMissingRelationshipError(result.error, 'production_batches', 'production_worker_assignments') ||
       isMissingRelationshipError(result.error, 'production_batches', 'recipes') ||
       isMissingRelationshipError(result.error, 'production_batch_materials', 'items') ||
       isMissingRelationshipError(result.error, 'recipes', 'items')
@@ -407,7 +410,7 @@ export async function loadProductionReportBatches(filters: {
         };
       }),
       error: null,
-    } as typeof result;
+    } as unknown as typeof result;
   }
 
   if (result.error) throw result.error;

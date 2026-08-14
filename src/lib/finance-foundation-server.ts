@@ -515,10 +515,39 @@ export async function syncBranchCostCentres(organizationId: string) {
 
 export async function loadFinanceMetaResources(organizationId: string) {
   const service = financeService();
+  const loadCashAccounts = async () => {
+    let result = await service
+      .from('cash_accounts')
+      .select('id, name, account_name, branch_id, balance, current_balance')
+      .eq('organization_id', organizationId)
+      .order('name', { ascending: true });
+
+    if (
+      result.error &&
+      (
+        isMissingFinanceColumn(result.error, 'cash_accounts', 'name') ||
+        isMissingFinanceColumn(result.error, 'cash_accounts', 'branch_id') ||
+        isMissingFinanceColumn(result.error, 'cash_accounts', 'current_balance')
+      )
+    ) {
+      result = await service
+        .from('cash_accounts')
+        .select('id, account_name, balance')
+        .eq('organization_id', organizationId)
+        .order('account_name', { ascending: true }) as typeof result;
+    }
+
+    if (result.error) {
+      if (isMissingFinanceTable(result.error)) return [] as Row[];
+      throw result.error;
+    }
+
+    return (result.data ?? []) as Row[];
+  };
   const [accounts, branches, cashAccounts, bankAccounts, costCentres, fiscalPeriods, currencies] = await Promise.all([
     loadFinanceAccounts(organizationId, { activeStatus: 'active' }),
     service.from('branches').select('id, code, name, status, deleted_at').eq('organization_id', organizationId).order('name', { ascending: true }),
-    service.from('cash_accounts').select('id, name, account_name, branch_id, balance, current_balance').eq('organization_id', organizationId).order('name', { ascending: true }),
+    loadCashAccounts(),
     service.from('bank_accounts').select('id, account_name, account_number, bank_name, current_balance').eq('organization_id', organizationId).order('account_name', { ascending: true }),
     loadFinanceCostCentres(organizationId).catch((error) => {
       if (isMissingFinanceTable(error)) return [] as Row[];
@@ -529,7 +558,6 @@ export async function loadFinanceMetaResources(organizationId: string) {
   ]);
 
   if (branches.error) throw branches.error;
-  if (cashAccounts.error && !isMissingFinanceTable(cashAccounts.error)) throw cashAccounts.error;
   if (bankAccounts.error && !isMissingFinanceTable(bankAccounts.error)) throw bankAccounts.error;
   if (fiscalPeriods.error && !isMissingFinanceTable(fiscalPeriods.error)) throw fiscalPeriods.error;
   if (currencies.error && !isMissingFinanceTable(currencies.error)) throw currencies.error;
@@ -553,7 +581,7 @@ export async function loadFinanceMetaResources(organizationId: string) {
         id: String(row.id ?? ''),
         name: String(row.name ?? row.code ?? ''),
       })),
-    cashAccounts: ((cashAccounts.data ?? []) as Row[]).map((row) => ({
+    cashAccounts: cashAccounts.map((row) => ({
       balance: toNumber(row.current_balance ?? row.balance),
       branchId: row.branch_id ? String(row.branch_id) : null,
       id: String(row.id ?? ''),

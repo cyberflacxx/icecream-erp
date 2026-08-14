@@ -3,8 +3,11 @@ import type { AuthContext } from '@/lib/api-auth';
 export const ABSOLUTE_AI_DEFAULT_MODEL = 'gemini-3.6-flash';
 export const ABSOLUTE_AI_MAX_PROMPT_LENGTH = 2_000;
 export const ABSOLUTE_AI_MAX_TOOL_ROUNDS = 6;
-export const ABSOLUTE_AI_MAX_RESULT_ROWS = 25;
+export const ABSOLUTE_AI_MAX_RESULT_ROWS = 10;
 export const ABSOLUTE_AI_PROVIDER_TIMEOUT_MS = 20_000;
+export const ABSOLUTE_AI_REQUEST_THROTTLE_MS = 3_000;
+export const ABSOLUTE_AI_DIAGNOSTIC_CACHE_TTL_MS = 30_000;
+export const ABSOLUTE_AI_ROLE_CACHE_TTL_MS = 60_000;
 
 export type AbsoluteAiHealthStatus = 'healthy' | 'warning' | 'problem' | 'unknown';
 

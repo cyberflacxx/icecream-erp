@@ -57,6 +57,11 @@ type GeminiProbeResponse = {
   usage: AbsoluteAiUsage | null;
 };
 
+type GeminiNormalizedProviderError = {
+  message: string;
+  status: number;
+};
+
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number) {
   let timeoutHandle: NodeJS.Timeout | undefined;
 
@@ -188,12 +193,12 @@ export function normalizeAbsoluteAiProviderError(error: unknown) {
 
   if (
     status === 429 ||
-    /quota|rate limit|too many requests/i.test(message)
+    /quota|rate limit|too many requests|resource exhausted/i.test(message)
   ) {
     return {
-      message: 'Absolute AI is temporarily at its usage limit. Please try again later.',
+      message: 'Absolute AI has reached its current Gemini usage limit. Please try again shortly.',
       status: 429,
-    };
+    } satisfies GeminiNormalizedProviderError;
   }
 
   if (
@@ -204,13 +209,44 @@ export function normalizeAbsoluteAiProviderError(error: unknown) {
     return {
       message: 'Absolute AI is unavailable right now.',
       status: 503,
-    };
+    } satisfies GeminiNormalizedProviderError;
   }
 
   return {
     message: 'Absolute AI is unavailable right now.',
     status: 503,
-  };
+  } satisfies GeminiNormalizedProviderError;
+}
+
+function isRetryableGeminiError(error: unknown) {
+  const diagnostics = getSanitizedGeminiProviderErrorDetails(error);
+  const status = Number(diagnostics.status ?? 0);
+  const message = String(diagnostics.message ?? '').toLowerCase();
+
+  if (!message && status === 0) {
+    return false;
+  }
+
+  if (status === 429 || status === 400 || status === 401 || status === 403) {
+    return false;
+  }
+
+  if (/quota|rate limit|resource exhausted|api key|permission|unauthorized|forbidden|invalid|malformed|required/.test(message)) {
+    return false;
+  }
+
+  return (
+    status === 408 ||
+    status === 500 ||
+    status === 502 ||
+    status === 503 ||
+    status === 504 ||
+    /timeout|temporar|network|unavailable|internal/.test(message)
+  );
+}
+
+function delay(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function buildGeminiInteractionTools(tools: AbsoluteAiProviderRequest['tools']): GeminiInteractionTool[] {
@@ -426,12 +462,23 @@ export function createGeminiProvider(config: GeminiProviderConfig) {
       }
 
       const ai = new GoogleGenAI({ apiKey: config.apiKey });
-      try {
-        return await runGeminiInteraction(ai, config, input);
-      } catch (error) {
-        logGeminiProviderError(error, 'chat');
-        throw error;
+      let lastError: unknown = null;
+
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        try {
+          return await runGeminiInteraction(ai, config, input);
+        } catch (error) {
+          lastError = error;
+          if (attempt === 0 && isRetryableGeminiError(error)) {
+            await delay(300 * (attempt + 1));
+            continue;
+          }
+          logGeminiProviderError(error, 'chat');
+          throw error;
+        }
       }
+
+      throw lastError instanceof Error ? lastError : new Error('Absolute AI provider error.');
     },
   };
 }

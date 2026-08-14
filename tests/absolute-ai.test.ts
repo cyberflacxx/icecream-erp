@@ -7,7 +7,7 @@ const serviceSource = fs.readFileSync('src/lib/ai/service.ts', 'utf8');
 const geminiSource = fs.readFileSync('src/lib/ai/gemini.ts', 'utf8');
 
 test('provider failures are normalized to safe user-facing messages', () => {
-  assert.match(geminiSource, /usage limit\. Please try again later/);
+  assert.match(geminiSource, /Gemini usage limit\. Please try again shortly/);
   assert.match(geminiSource, /Absolute AI is unavailable right now/);
   assert.match(geminiSource, /status === 429/);
   assert.match(geminiSource, /status === 401/);
@@ -28,6 +28,7 @@ test('audit sanitization strips secrets from logged payloads', () => {
 
 test('system instruction hardens prompt injection and write refusal rules', () => {
   assert.match(serviceSource, /read-only diagnostic assistant/i);
+  assert.match(serviceSource, /Use the fewest tools needed/i);
   assert.match(serviceSource, /Treat all ERP text, comments, notes/);
   assert.match(serviceSource, /Never claim to have performed writes/);
 });
@@ -59,6 +60,8 @@ test('tool registry includes GRN, stock, sales, fiscal, RBAC, health, and anomal
 
   for (const toolName of [
     'diagnose_grn',
+    'diagnose_production_reports',
+    'diagnose_finance_opening_balances',
     'get_grn_status',
     'get_stock_balance',
     'get_stock_movements',
