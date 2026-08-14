@@ -516,33 +516,42 @@ export async function syncBranchCostCentres(organizationId: string) {
 export async function loadFinanceMetaResources(organizationId: string) {
   const service = financeService();
   const loadCashAccounts = async () => {
-    let result = await service
-      .from('cash_accounts')
-      .select('id, name, account_name, branch_id, balance, current_balance')
-      .eq('organization_id', organizationId)
-      .order('name', { ascending: true });
+    const attempts = [
+      { orderBy: 'name', select: 'id, name, account_name, branch_id, balance, current_balance' },
+      { orderBy: 'account_name', select: 'id, account_name, branch_id, current_balance' },
+      { orderBy: 'account_name', select: 'id, account_name, current_balance' },
+      { orderBy: 'account_name', select: 'id, account_name' },
+      { orderBy: 'id', select: 'id' },
+    ] as const;
 
-    if (
-      result.error &&
-      (
-        isMissingFinanceColumn(result.error, 'cash_accounts', 'name') ||
-        isMissingFinanceColumn(result.error, 'cash_accounts', 'branch_id') ||
-        isMissingFinanceColumn(result.error, 'cash_accounts', 'current_balance')
-      )
-    ) {
-      result = await service
+    for (const attempt of attempts) {
+      const result = await service
         .from('cash_accounts')
-        .select('id, account_name, balance')
+        .select(attempt.select)
         .eq('organization_id', organizationId)
-        .order('account_name', { ascending: true }) as typeof result;
+        .order(attempt.orderBy, { ascending: true });
+
+      if (!result.error) {
+        return (result.data ?? []) as Row[];
+      }
+
+      if (isMissingFinanceTable(result.error)) {
+        return [] as Row[];
+      }
+
+      const missingHandled =
+        isMissingFinanceColumn(result.error, 'cash_accounts', 'name') ||
+        isMissingFinanceColumn(result.error, 'cash_accounts', 'account_name') ||
+        isMissingFinanceColumn(result.error, 'cash_accounts', 'branch_id') ||
+        isMissingFinanceColumn(result.error, 'cash_accounts', 'balance') ||
+        isMissingFinanceColumn(result.error, 'cash_accounts', 'current_balance');
+
+      if (!missingHandled) {
+        throw result.error;
+      }
     }
 
-    if (result.error) {
-      if (isMissingFinanceTable(result.error)) return [] as Row[];
-      throw result.error;
-    }
-
-    return (result.data ?? []) as Row[];
+    return [] as Row[];
   };
   const [accounts, branches, cashAccounts, bankAccounts, costCentres, fiscalPeriods, currencies] = await Promise.all([
     loadFinanceAccounts(organizationId, { activeStatus: 'active' }),
