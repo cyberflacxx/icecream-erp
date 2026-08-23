@@ -235,33 +235,33 @@ export async function POST(
 
     const primaryLine = body.items[0]!;
     const saleDateIso = new Date(`${saleDate}T00:00:00.000Z`).toISOString();
+    const saleInsert = {
+      branch_id: branchId,
+      item_id: primaryLine.itemId,
+      organization_id: ctx.organizationId,
+      sale_number: saleNumber,
+      payment_method: normalizedPaymentMethod,
+      payment_status: body.paymentStatus ?? (normalizedPaymentMethod === 'CREDIT' ? 'CREDIT' : 'PAID'),
+      quantity: primaryLine.quantity,
+      shift: body.shift,
+      shift_close_id: openShift.id,
+      total_amount: totalAmount,
+      discount_amount: discountAmount,
+      tax_amount: taxAmount,
+      remarks: body.remarks ?? null,
+      status: 'POSTED',
+      posted_at: new Date().toISOString(),
+      posted_by: ctx.userId,
+      sale_date: saleDateIso,
+      served_by: ctx.userId,
+      payment_reference: body.paymentReference ?? null,
+      unit_price: primaryLine.unitPrice,
+    };
 
     const { data: sale, error: saleErr } = await service
       .schema('icecream_erp')
       .from('branch_sales')
-      .insert({
-        branch_id: branchId,
-        item_id: primaryLine.itemId,
-        organization_id: ctx.organizationId,
-        sale_number: saleNumber,
-        payment_method: normalizedPaymentMethod,
-        payment_status: body.paymentStatus ?? (normalizedPaymentMethod === 'CREDIT' ? 'CREDIT' : 'PAID'),
-        quantity: primaryLine.quantity,
-        shift: body.shift,
-        shift_close_id: openShift.id,
-        total_amount: totalAmount,
-        discount_amount: discountAmount,
-        tax_amount: taxAmount,
-        remarks: body.remarks ?? null,
-        status: 'POSTED',
-        posted_at: new Date().toISOString(),
-        posted_by: ctx.userId,
-        sale_date: saleDateIso,
-        served_by: ctx.userId,
-        customer_id: body.customerId ?? null,
-        payment_reference: body.paymentReference ?? null,
-        unit_price: primaryLine.unitPrice,
-      })
+      .insert(saleInsert)
       .select()
       .single();
     if (saleErr) throw saleErr;

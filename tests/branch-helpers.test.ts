@@ -236,6 +236,26 @@ test('branch expense route validates finance setup and falls back across legacy 
   assert.match(branchExpenseRoute, /apiServerError/);
 });
 
+test('branch sale route aligns header insert with live legacy schema', () => {
+  const branchSaleRoute = fs.readFileSync('src/app/api/branch-operations/[branchId]/sales/route.ts', 'utf8');
+
+  assert.match(branchSaleRoute, /const saleInsert = \{/);
+  assert.match(branchSaleRoute, /item_id: primaryLine\.itemId/);
+  assert.match(branchSaleRoute, /quantity: primaryLine\.quantity/);
+  assert.match(branchSaleRoute, /unit_price: primaryLine\.unitPrice/);
+  assert.match(branchSaleRoute, /payment_status: body\.paymentStatus/);
+  assert.match(branchSaleRoute, /shift_close_id: openShift\.id/);
+  assert.match(branchSaleRoute, /sale_date: saleDateIso/);
+  assert.match(branchSaleRoute, /posted_by: ctx\.userId/);
+  assert.match(branchSaleRoute, /served_by: ctx\.userId/);
+  assert.doesNotMatch(branchSaleRoute, /customer_id:\s*body\.customerId/);
+  assert.match(branchSaleRoute, /organization_id: ctx\.organizationId/);
+  assert.match(branchSaleRoute, /posting_status: 'POSTED'/);
+  assert.match(branchSaleRoute, /running_balance: nextQuantityOnHand/);
+  assert.match(branchSaleRoute, /total_value: lineInventoryCost/);
+  assert.match(branchSaleRoute, /transaction_date: saleDateIso/);
+});
+
 test('shared dashboard and form layout primitives use the widened navigation and roomier form spacing', () => {
   const shell = fs.readFileSync('src/components/dashboard/dashboard-shell.tsx', 'utf8');
   const sidebar = fs.readFileSync('src/components/dashboard/sidebar.tsx', 'utf8');
