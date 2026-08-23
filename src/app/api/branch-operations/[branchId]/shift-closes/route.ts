@@ -13,7 +13,7 @@ async function findExistingShiftClose(
   branchId: string,
   shiftDateIso: string,
 ) {
-  let query = service
+  const buildQuery = () => service
     .schema('icecream_erp')
     .from('branch_shift_closes')
     .select('id')
@@ -21,9 +21,9 @@ async function findExistingShiftClose(
     .eq('shift_date', shiftDateIso)
     .in('status', ['OPEN', 'SUBMITTED', 'APPROVED']);
 
-  let result = await query.is('deleted_at', null).maybeSingle();
+  let result = await buildQuery().is('deleted_at', null).maybeSingle();
   if (result.error && isMissingColumnError(result.error, 'branch_shift_closes', 'deleted_at')) {
-    result = await query.maybeSingle();
+    result = await buildQuery().maybeSingle();
   }
 
   if (result.error) throw result.error;
