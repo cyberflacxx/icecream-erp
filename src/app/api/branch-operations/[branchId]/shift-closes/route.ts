@@ -11,14 +11,14 @@ function isMissingColumnError(error: unknown, table: string, columnName: string)
 async function findExistingShiftClose(
   service: ReturnType<typeof createServiceRoleClient>,
   branchId: string,
-  shiftDateIso: string,
+  shiftDate: string,
 ) {
   const buildQuery = () => service
     .schema('icecream_erp')
     .from('branch_shift_closes')
     .select('id')
     .eq('branch_id', branchId)
-    .eq('shift_date', shiftDateIso)
+    .eq('shift_date', shiftDate)
     .in('status', ['OPEN', 'SUBMITTED', 'APPROVED']);
 
   let result = await buildQuery().is('deleted_at', null).maybeSingle();
@@ -143,7 +143,7 @@ export async function POST(
     const shiftDate = new Date(`${body.date}T00:00:00.000Z`);
 
     // Check for existing open shift close
-    const existing = await findExistingShiftClose(service, branchId, shiftDate.toISOString());
+    const existing = await findExistingShiftClose(service, branchId, body.date);
 
     if (existing) return badRequest('A shift close already exists for this branch and date.');
 
