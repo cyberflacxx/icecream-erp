@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { can, forbidden, getAuthContext, notFound, serverError, unauthorized } from '@/lib/api-auth';
+import { isMissingSalesColumn } from '@/lib/sales-server';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
 function mapLineTotals(items: Array<{ discountPercent?: number | null; quantity: number; unitPrice: number }>) {
@@ -9,6 +10,55 @@ function mapLineTotals(items: Array<{ discountPercent?: number | null; quantity:
     return sum + item.quantity * item.unitPrice * ((item.discountPercent ?? 0) / 100);
   }, 0);
   return { subtotal, lineDiscountTotal };
+}
+
+async function loadQuotationResponse(
+  service: ReturnType<typeof createServiceRoleClient>,
+  quotationId: string,
+) {
+  let quotationResult = await service
+    .schema('icecream_erp')
+    .from('quotations')
+    .select('*')
+    .eq('id', quotationId)
+    .is('deleted_at', null)
+    .single();
+
+  if (quotationResult.error && isMissingSalesColumn(quotationResult.error, 'quotations', 'deleted_at')) {
+    quotationResult = await service
+      .schema('icecream_erp')
+      .from('quotations')
+      .select('*')
+      .eq('id', quotationId)
+      .single();
+  }
+
+  if (quotationResult.error || !quotationResult.data) {
+    return null;
+  }
+
+  const quotation = quotationResult.data as Record<string, unknown>;
+  const customerId = String(quotation.customer_id ?? '');
+  const [customerResult, itemsResult] = await Promise.all([
+    customerId
+      ? service.schema('icecream_erp').from('customers').select('*').eq('id', customerId).maybeSingle()
+      : Promise.resolve({ data: null, error: null }),
+    service
+      .schema('icecream_erp')
+      .from('quotation_items')
+      .select('*, items(*)')
+      .eq('quotation_id', quotationId),
+  ]);
+
+  if (customerResult.error) throw customerResult.error;
+  if (itemsResult.error) throw itemsResult.error;
+
+  return {
+    ...quotation,
+    customer: customerResult.data ?? null,
+    customers: customerResult.data ?? null,
+    quotation_items: itemsResult.data ?? [],
+  };
 }
 
 // ─── GET /api/sales/quotations/[id] ──────────────────────────────────────────
@@ -23,15 +73,8 @@ export async function GET(
 
   const service = createServiceRoleClient();
 
-  const { data, error } = await service
-    .schema('icecream_erp')
-    .from('quotations')
-    .select(`*, customers(*), quotation_items(*, items(*))`)
-    .eq('id', params.id)
-    .is('deleted_at', null)
-    .single();
-
-  if (error || !data) return notFound('Quotation not found.');
+  const data = await loadQuotationResponse(service, params.id);
+  if (!data) return notFound('Quotation not found.');
 
   return NextResponse.json(data);
 }
@@ -150,14 +193,8 @@ export async function PATCH(
       );
   }
 
-  const { data: result, error: resultErr } = await service
-    .schema('icecream_erp')
-    .from('quotations')
-    .select(`*, customers(*), quotation_items(*, items(*))`)
-    .eq('id', params.id)
-    .single();
-
-  if (resultErr) return serverError(resultErr.message);
+  const result = await loadQuotationResponse(service, params.id);
+  if (!result) return notFound('Quotation not found.');
 
   return NextResponse.json(result);
 }

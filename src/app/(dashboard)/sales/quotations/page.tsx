@@ -1,6 +1,6 @@
 'use client';
 
-import { type FormEvent, useState } from 'react';
+import { type FormEvent, useEffect, useMemo, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { AlertCircle, FilePlus2, Plus } from 'lucide-react';
 
@@ -8,6 +8,7 @@ import { PageHeader } from '@/components/dashboard/page-header';
 import { SalesNav } from '@/components/sales/sales-nav';
 import { createSalesLineDraft, normalizeSalesLines, SalesLineItemsEditor, salesLineTotal, type SalesLineDraft } from '@/components/sales/sales-line-items-editor';
 import { Button } from '@/components/ui/button';
+import { useAuthorizedBranches } from '@/hooks/useAuthorizedBranches';
 import { useItemSelectorOptions } from '@/hooks/useItemSelectorOptions';
 import { useSalesReport } from '@/hooks/sales/useSalesReport';
 import { useSalesMeta } from '@/hooks/sales/useSalesMeta';
@@ -16,6 +17,7 @@ import { API_ROUTES } from '@/lib/shared';
 import { DataTable, EmptyState, FormDrawer, LoadingState } from '@/components/ui-library';
 
 const initialQuotationForm = {
+  branchId: '',
   customerId: '',
   discountAmount: '0',
   items: [createSalesLineDraft()],
@@ -23,6 +25,7 @@ const initialQuotationForm = {
   quotationDate: new Date().toISOString().slice(0, 10),
   taxAmount: '0',
   validUntil: '',
+  warehouseId: '',
 };
 
 function totalDraft(lines: SalesLineDraft[], discountAmount: string, taxAmount: string) {
@@ -32,21 +35,42 @@ function totalDraft(lines: SalesLineDraft[], discountAmount: string, taxAmount: 
 export default function SalesQuotationsPage() {
   const query = useSalesReport(API_ROUTES.SALES.QUOTATIONS);
   const metaQuery = useSalesMeta();
+  const branchesQuery = useAuthorizedBranches();
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [formState, setFormState] = useState(initialQuotationForm);
   const [formError, setFormError] = useState<string | null>(null);
   const itemOptionsQuery = useItemSelectorOptions({
+    branchId: formState.branchId || undefined,
     customerId: formState.customerId || undefined,
     includePrice: true,
     includeStock: true,
     limit: 250,
+    warehouseId: formState.warehouseId || undefined,
   });
   const request = useSalesRequest();
   const queryClient = useQueryClient();
+  const branchOptions = useMemo(() => branchesQuery.data ?? [], [branchesQuery.data]);
+  const warehouseOptions = useMemo(
+    () => (metaQuery.data?.warehouses ?? []).filter((warehouse) => !formState.branchId || warehouse.branchId === formState.branchId),
+    [formState.branchId, metaQuery.data?.warehouses],
+  );
   const rows =
     query.data && typeof query.data === 'object' && Array.isArray((query.data as { data?: unknown }).data)
       ? (query.data as { data: Array<Record<string, unknown>> }).data
       : [];
+
+  useEffect(() => {
+    if (branchOptions.length !== 1) return;
+    const onlyBranch = branchOptions[0];
+    setFormState((current) => {
+      if (current.branchId === onlyBranch.id && current.warehouseId) return current;
+      return {
+        ...current,
+        branchId: onlyBranch.id,
+        warehouseId: current.warehouseId || onlyBranch.defaultWarehouseId || '',
+      };
+    });
+  }, [branchOptions]);
 
   async function refresh() {
     await queryClient.invalidateQueries({ queryKey: ['sales'] });
@@ -167,6 +191,46 @@ export default function SalesQuotationsPage() {
           </label>
           <div className="grid gap-5 sm:grid-cols-2">
             <label className="space-y-2 text-sm text-muted">
+              <span>Branch</span>
+              <select className="surface-input-soft" value={formState.branchId} onChange={(event) => {
+                const branch = branchOptions.find((row) => row.id === event.target.value);
+                setFormState((current) => ({
+                  ...current,
+                  branchId: event.target.value,
+                  warehouseId: branch?.defaultWarehouseId ?? '',
+                }));
+              }}>
+                <option value="">Select branch</option>
+                {branchOptions.map((branch) => (
+                  <option key={branch.id} value={branch.id}>
+                    {branch.code ? `${branch.code} - ` : ''}
+                    {branch.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="space-y-2 text-sm text-muted">
+              <span>Warehouse</span>
+              <select className="surface-input-soft" value={formState.warehouseId} onChange={(event) => {
+                const warehouse = warehouseOptions.find((row) => row.id === event.target.value);
+                setFormState((current) => ({
+                  ...current,
+                  branchId: warehouse?.branchId ?? current.branchId,
+                  warehouseId: event.target.value,
+                }));
+              }}>
+                <option value="">Select warehouse</option>
+                {warehouseOptions.map((warehouse) => (
+                  <option key={warehouse.id} value={warehouse.id}>
+                    {warehouse.code ? `${warehouse.code} - ` : ''}
+                    {warehouse.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+          <div className="grid gap-5 sm:grid-cols-2">
+            <label className="space-y-2 text-sm text-muted">
               <span>Quotation date</span>
               <input className="surface-input-soft" type="date" value={formState.quotationDate} onChange={(event) => setFormState((current) => ({ ...current, quotationDate: event.target.value }))} />
             </label>
@@ -179,7 +243,7 @@ export default function SalesQuotationsPage() {
             items={itemOptionsQuery.data ?? []}
             loading={itemOptionsQuery.isLoading}
             errorMessage={itemOptionsQuery.error?.message ?? null}
-            emptyMessage="No saleable items are available for quotation."
+            emptyMessage={formState.warehouseId ? 'No saleable items are available for the selected warehouse.' : 'Select a branch warehouse to load live stock and cost.'}
             onRetry={() => itemOptionsQuery.refetch()}
             lines={formState.items}
             onChange={(items) => setFormState((current) => ({ ...current, items }))}

@@ -27,6 +27,56 @@ function mapLineTotals(items: Array<{ discountPercent?: number | null; quantity:
   return { subtotal, lineDiscountTotal };
 }
 
+async function loadQuotationResponse(
+  service: ReturnType<typeof createServiceRoleClient>,
+  quotationId: string,
+) {
+  let quotationResult = await service
+    .schema('icecream_erp')
+    .from('quotations')
+    .select('*')
+    .eq('id', quotationId)
+    .is('deleted_at', null)
+    .single();
+
+  if (quotationResult.error && isMissingSalesColumn(quotationResult.error, 'quotations', 'deleted_at')) {
+    quotationResult = await service
+      .schema('icecream_erp')
+      .from('quotations')
+      .select('*')
+      .eq('id', quotationId)
+      .single();
+  }
+
+  if (quotationResult.error || !quotationResult.data) {
+    throw quotationResult.error ?? new Error('Quotation not found.');
+  }
+
+  const quotation = quotationResult.data as Record<string, unknown>;
+  const customerId = String(quotation.customer_id ?? '');
+
+  const [customerResult, itemsResult] = await Promise.all([
+    customerId
+      ? service.schema('icecream_erp').from('customers').select('*').eq('id', customerId).maybeSingle()
+      : Promise.resolve({ data: null, error: null }),
+    service
+      .schema('icecream_erp')
+      .from('quotation_items')
+      .select('*, items(*)')
+      .eq('quotation_id', quotationId),
+  ]);
+
+  if (customerResult.error) throw customerResult.error;
+  if (itemsResult.error) throw itemsResult.error;
+
+  return {
+    ...quotation,
+    customer: customerResult.data ?? null,
+    customers: customerResult.data ?? null,
+    quotation_items: itemsResult.data ?? [],
+  };
+}
+
 // ─── GET /api/sales/quotations ────────────────────────────────────────────────
 
 export async function GET(request: NextRequest) {
@@ -243,14 +293,10 @@ export async function POST(request: NextRequest) {
   if (itemsErr) return serverError(itemsErr.message);
 
   // Return full quotation with items
-  const { data: result, error: resultErr } = await service
-    .schema('icecream_erp')
-    .from('quotations')
-    .select(`*, customers(*), quotation_items(*, items(*))`)
-    .eq('id', (quotation as Record<string, unknown>).id)
-    .single();
-
-  if (resultErr) return serverError(resultErr.message);
-
-  return NextResponse.json(result, { status: 201 });
+  try {
+    const result = await loadQuotationResponse(service, String((quotation as Record<string, unknown>).id));
+    return NextResponse.json(result, { status: 201 });
+  } catch (error) {
+    return serverError(error instanceof Error ? error.message : 'Failed to load quotation.');
+  }
 }

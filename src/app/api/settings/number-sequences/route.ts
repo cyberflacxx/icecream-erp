@@ -1,4 +1,4 @@
-import { NextRequest } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 
 import {
   createNumberSeriesResponse,
@@ -12,10 +12,18 @@ export async function GET(request: NextRequest) {
   if ('error' in auth) return auth.error;
 
   try {
-    return await listOrganizationTable(
+    const response = await listOrganizationTable(
       'number_series',
       auth.ctx.organizationId,
-      'id, series_type, prefix, last_number, padding, is_active, reset_frequency, created_at, updated_at',
+      'id, series_type, prefix, last_number, padding, is_active, created_at, updated_at',
+    );
+    const rows = await response.json() as Array<Record<string, unknown>>;
+
+    return NextResponse.json(
+      rows.map((row) => ({
+        ...row,
+        reset_frequency: row.reset_frequency ?? 'NEVER',
+      })),
     );
   } catch (error) {
     return handleSettingsError(error);

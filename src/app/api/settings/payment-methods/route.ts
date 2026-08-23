@@ -1,4 +1,4 @@
-import { NextRequest } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 
 import {
   createSimpleMasterDataResponse,
@@ -12,10 +12,22 @@ export async function GET(request: NextRequest) {
   if ('error' in auth) return auth.error;
 
   try {
-    return await listOrganizationTable(
+    const response = await listOrganizationTable(
       'settings_payment_methods',
       auth.ctx.organizationId,
-      'id, code, name, description, is_active, created_at',
+      'id, code, name, payment_type, posting_role, requires_reference, is_active, created_at',
+    );
+    const rows = await response.json() as Array<Record<string, unknown>>;
+
+    return NextResponse.json(
+      rows.map((row) => ({
+        ...row,
+        description: [
+          row.payment_type ? String(row.payment_type) : null,
+          row.posting_role ? `Role ${String(row.posting_role)}` : null,
+          row.requires_reference === true ? 'Reference required' : null,
+        ].filter(Boolean).join(' | ') || null,
+      })),
     );
   } catch (error) {
     return handleSettingsError(error);

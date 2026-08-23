@@ -1,6 +1,6 @@
 'use client';
 
-import { type FormEvent, useMemo, useState } from 'react';
+import { type FormEvent, useEffect, useMemo, useState } from 'react';
 import { useParams, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { Plus, ShoppingBasket } from 'lucide-react';
@@ -13,6 +13,7 @@ import { PageHeader } from '@/components/dashboard/page-header';
 import { PaginationControls } from '@/components/inventory/pagination-controls';
 import { Button } from '@/components/ui/button';
 import { useItemSelectorOptions } from '@/hooks/useItemSelectorOptions';
+import { useSalesMeta } from '@/hooks/sales/useSalesMeta';
 import {
   useBranchSales,
   useBranchStock,
@@ -61,6 +62,8 @@ export default function BranchSalesPage() {
   const [expenseError, setExpenseError] = useState<string | null>(null);
   const [shift, setShift] = useState<'DAY' | 'NIGHT'>('DAY');
   const [paymentMethod, setPaymentMethod] = useState<'CASH' | 'ECOCASH' | 'CARD'>('CASH');
+  const [cashAccountId, setCashAccountId] = useState('');
+  const [bankAccountId, setBankAccountId] = useState('');
   const [paymentReference, setPaymentReference] = useState('');
   const [saleItems, setSaleItems] = useState<SaleLineItem[]>([initialSaleLine]);
   const [expenseCategory, setExpenseCategory] = useState('');
@@ -82,11 +85,20 @@ export default function BranchSalesPage() {
   });
   const createSale = useCreateBranchSale(branchId);
   const createExpense = useCreateBranchExpense(branchId);
+  const salesMetaQuery = useSalesMeta();
   const stockRows = stockQuery.data?.data ?? [];
   const stockOptions = useMemo(() => itemOptionsQuery.data ?? [], [itemOptionsQuery.data]);
   const stockOptionByItemId = useMemo(
     () => new Map(stockOptions.map((option) => [option.id, option])),
     [stockOptions],
+  );
+  const availableCashAccounts = useMemo(
+    () => (salesMetaQuery.data?.cashAccounts ?? []).filter((account) => !account.branchId || account.branchId === branchId),
+    [branchId, salesMetaQuery.data?.cashAccounts],
+  );
+  const availableBankAccounts = useMemo(
+    () => salesMetaQuery.data?.bankAccounts ?? [],
+    [salesMetaQuery.data?.bankAccounts],
   );
   const sales = salesQuery.data?.data ?? [];
   const pagination = salesQuery.data?.pagination;
@@ -100,6 +112,19 @@ export default function BranchSalesPage() {
       }, 0),
     [saleItems],
   );
+
+  useEffect(() => {
+    if (paymentMethod === 'CASH') {
+      if (!cashAccountId && availableCashAccounts.length > 0) {
+        setCashAccountId(availableCashAccounts[0].id);
+      }
+      return;
+    }
+
+    if (!bankAccountId && availableBankAccounts.length > 0) {
+      setBankAccountId(availableBankAccounts[0].id);
+    }
+  }, [availableBankAccounts, availableCashAccounts, bankAccountId, cashAccountId, paymentMethod]);
 
   async function handleSaleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -123,8 +148,20 @@ export default function BranchSalesPage() {
       return;
     }
 
+    if (paymentMethod === 'CASH' && !cashAccountId) {
+      setSaleError('Select the cash account that should receive this branch sale.');
+      return;
+    }
+
+    if (paymentMethod !== 'CASH' && !bankAccountId) {
+      setSaleError('Select the bank account that should receive this branch sale.');
+      return;
+    }
+
     try {
       await createSale.mutateAsync({
+        bankAccountId: paymentMethod === 'CASH' ? null : bankAccountId,
+        cashAccountId: paymentMethod === 'CASH' ? cashAccountId : null,
         items: normalizedItems,
         paymentMethod,
         paymentReference: paymentReference || null,
@@ -360,7 +397,10 @@ export default function BranchSalesPage() {
               <span>Payment Method</span>
               <select
                 value={paymentMethod}
-                onChange={(event) => setPaymentMethod(event.target.value as 'CASH' | 'ECOCASH' | 'CARD')}
+                onChange={(event) => {
+                  setPaymentMethod(event.target.value as 'CASH' | 'ECOCASH' | 'CARD');
+                  setSaleError(null);
+                }}
                 className="surface-input-soft"
               >
                 <option value="CASH">CASH</option>
@@ -369,6 +409,44 @@ export default function BranchSalesPage() {
               </select>
             </label>
           </div>
+
+          {paymentMethod === 'CASH' ? (
+            <label className="space-y-2 text-sm text-muted">
+              <span>Cash Account</span>
+              <select
+                value={cashAccountId}
+                onChange={(event) => setCashAccountId(event.target.value)}
+                className="surface-input-soft"
+                required
+              >
+                <option value="">Select cash account</option>
+                {availableCashAccounts.map((account) => (
+                  <option key={account.id} value={account.id}>
+                    {account.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : (
+            <label className="space-y-2 text-sm text-muted">
+              <span>Bank Account</span>
+              <select
+                value={bankAccountId}
+                onChange={(event) => setBankAccountId(event.target.value)}
+                className="surface-input-soft"
+                required
+              >
+                <option value="">Select bank account</option>
+                {availableBankAccounts.map((account) => (
+                  <option key={account.id} value={account.id}>
+                    {account.bankName ? `${account.bankName} - ` : ''}
+                    {account.accountName}
+                    {account.accountNumber ? ` (${account.accountNumber})` : ''}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
 
           <label className="space-y-2 text-sm text-muted">
             <span>Payment Reference</span>
