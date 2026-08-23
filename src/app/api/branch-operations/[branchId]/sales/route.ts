@@ -233,15 +233,20 @@ export async function POST(
     const taxAmount = Number(body.taxAmount ?? 0);
     const totalAmount = grossAmount - discountAmount + taxAmount;
 
+    const primaryLine = body.items[0]!;
+    const saleDateIso = new Date(`${saleDate}T00:00:00.000Z`).toISOString();
+
     const { data: sale, error: saleErr } = await service
       .schema('icecream_erp')
       .from('branch_sales')
       .insert({
         branch_id: branchId,
+        item_id: primaryLine.itemId,
         organization_id: ctx.organizationId,
         sale_number: saleNumber,
         payment_method: normalizedPaymentMethod,
         payment_status: body.paymentStatus ?? (normalizedPaymentMethod === 'CREDIT' ? 'CREDIT' : 'PAID'),
+        quantity: primaryLine.quantity,
         shift: body.shift,
         shift_close_id: openShift.id,
         total_amount: totalAmount,
@@ -251,10 +256,11 @@ export async function POST(
         status: 'POSTED',
         posted_at: new Date().toISOString(),
         posted_by: ctx.userId,
-        sale_date: new Date(`${saleDate}T00:00:00.000Z`).toISOString(),
+        sale_date: saleDateIso,
         served_by: ctx.userId,
         customer_id: body.customerId ?? null,
         payment_reference: body.paymentReference ?? null,
+        unit_price: primaryLine.unitPrice,
       })
       .select()
       .single();
@@ -287,36 +293,44 @@ export async function POST(
       totalInventoryCost += lineInventoryCost;
 
       if (balance) {
+        const nextQuantityOnHand = Math.max(0, Number(balance.quantity_on_hand) - item.quantity);
+        const nextQuantityAvailable = Math.max(0, Number(balance.quantity_available) - item.quantity);
+
         await service.schema('icecream_erp').from('stock_balances').update({
-          quantity_on_hand: Math.max(0, Number(balance.quantity_on_hand) - item.quantity),
-          quantity_available: Math.max(0, Number(balance.quantity_available) - item.quantity),
+          quantity_on_hand: nextQuantityOnHand,
+          quantity_available: nextQuantityAvailable,
           last_updated: new Date().toISOString(),
         }).eq('id', balance.id);
 
         await service.schema('icecream_erp').from('stock_movements').insert({
+          created_by: ctx.userId,
           item_id: item.itemId,
-          warehouse_id: warehouse.id,
           movement_type: 'SALES_ISSUE',
+          organization_id: ctx.organizationId,
+          posting_status: 'POSTED',
           quantity: item.quantity,
-          unit_cost: inventoryUnitCost,
-          total_cost: lineInventoryCost,
           reference_id: sale.id,
           reference_type: 'branch_sale',
-          created_by: ctx.userId,
+          running_balance: nextQuantityOnHand,
+          total_cost: lineInventoryCost,
+          total_value: lineInventoryCost,
+          unit_cost: inventoryUnitCost,
+          warehouse_id: warehouse.id,
         });
 
         await service.schema('icecream_erp').from('branch_stock_ledger').insert({
           branch_id: branchId,
-          warehouse_id: warehouse.id,
+          created_by: ctx.userId,
           item_id: item.itemId,
-          shift_close_id: openShift.id,
-          reference_id: sale.id,
-          reference_type: 'branch_sale',
           movement_type: 'SALE',
           quantity: item.quantity,
-          unit_cost: inventoryUnitCost,
+          reference_id: sale.id,
+          reference_type: 'branch_sale',
+          shift_close_id: openShift.id,
           total_cost: lineInventoryCost,
-          created_by: ctx.userId,
+          transaction_date: saleDateIso,
+          unit_cost: inventoryUnitCost,
+          warehouse_id: warehouse.id,
         });
       }
     }
