@@ -24,9 +24,21 @@ type BranchWarehouseRow = {
 };
 
 type BranchWarehouseResolution = BranchWarehouseRow & {
-  resolutionReason: 'branch-linked-single' | 'branch-operational-evidence' | 'branch-default';
+  resolutionReason: 'branch-linked-single' | 'branch-operational-evidence' | 'branch-operational-type' | 'branch-default';
   score: number;
 };
+
+function normalizeWarehouseKind(warehouse: Pick<BranchWarehouseRow, 'type' | 'warehouse_type'>) {
+  return String(warehouse.warehouse_type ?? warehouse.type ?? '').trim().toUpperCase();
+}
+
+function warehousePriority(warehouse: Pick<BranchWarehouseRow, 'type' | 'warehouse_type'>) {
+  const kind = normalizeWarehouseKind(warehouse);
+  if (kind === 'DISPATCH') return 3;
+  if (kind === 'FINISHED_GOODS') return 2;
+  if (kind === 'MAIN') return 1;
+  return 0;
+}
 
 async function collectBranchWarehouseEvidence(branchId: string, warehouseIds: string[]) {
   const service = branchService();
@@ -115,10 +127,13 @@ export async function resolveBranchWarehouse(branchId: string): Promise<BranchWa
     throw new Error('No active warehouse is linked to this branch.');
   }
 
+  const operationalWarehouses = warehouses.filter((warehouse) => warehousePriority(warehouse) > 0);
+
   const defaultWarehouseId = String(branchResult.data.default_warehouse_id ?? '').trim();
   if (defaultWarehouseId) {
     const defaultWarehouse = warehouses.find((warehouse) => warehouse.id === defaultWarehouseId);
-    if (defaultWarehouse) {
+    const defaultIsOperational = defaultWarehouse ? warehousePriority(defaultWarehouse) > 0 : false;
+    if (defaultWarehouse && (defaultIsOperational || operationalWarehouses.length === 0)) {
       return {
         ...defaultWarehouse,
         resolutionReason: 'branch-default',
@@ -133,6 +148,49 @@ export async function resolveBranchWarehouse(branchId: string): Promise<BranchWa
       resolutionReason: 'branch-linked-single',
       score: 1,
     };
+  }
+
+  const rankedOperationalWarehouses = operationalWarehouses
+    .slice()
+    .sort(
+      (left, right) =>
+        warehousePriority(right) - warehousePriority(left) ||
+        String(left.name ?? '').localeCompare(String(right.name ?? '')),
+    );
+
+  if (rankedOperationalWarehouses.length === 1) {
+    return {
+      ...rankedOperationalWarehouses[0]!,
+      resolutionReason: 'branch-operational-type',
+      score: warehousePriority(rankedOperationalWarehouses[0]!),
+    };
+  }
+
+  if (rankedOperationalWarehouses.length > 1) {
+    const scoreByWarehouseId = await collectBranchWarehouseEvidence(
+      branchId,
+      rankedOperationalWarehouses.map((warehouse) => warehouse.id),
+    );
+    const ranked = rankedOperationalWarehouses
+      .map((warehouse) => ({
+        ...warehouse,
+        score: scoreByWarehouseId.get(warehouse.id) ?? 0,
+      }))
+      .sort(
+        (left, right) =>
+          right.score - left.score ||
+          warehousePriority(right) - warehousePriority(left) ||
+          String(left.name ?? '').localeCompare(String(right.name ?? '')),
+      );
+
+    const top = ranked[0] ?? null;
+    const runnerUp = ranked[1] ?? null;
+    if (top && (top.score > 0 || warehousePriority(top) > 0) && (!runnerUp || top.score > runnerUp.score || warehousePriority(top) > warehousePriority(runnerUp))) {
+      return {
+        ...top,
+        resolutionReason: 'branch-operational-type',
+      };
+    }
   }
 
   const scoreByWarehouseId = await collectBranchWarehouseEvidence(

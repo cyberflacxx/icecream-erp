@@ -168,14 +168,19 @@ export async function POST(
 
     // Validate items
     const itemIds = [...new Set(body.items.map((i) => i.itemId))];
-    const buildItemsQuery = (includeDeletedAtFilter: boolean, typeColumn: 'item_type' | 'type') => {
+    const buildItemsQuery = (includeDeletedAtFilter: boolean, typeFilter: 'item_type' | 'type' | 'both') => {
       let query = service
         .schema('icecream_erp')
         .from('items')
         .select('id, unit_cost, standard_cost')
         .eq('is_active', true)
-        .eq(typeColumn, 'FINISHED_GOOD')
         .in('id', itemIds);
+
+      if (typeFilter === 'both') {
+        query = query.or('item_type.eq.FINISHED_GOOD,type.eq.FINISHED_GOOD');
+      } else {
+        query = query.eq(typeFilter, 'FINISHED_GOOD');
+      }
 
       if (includeDeletedAtFilter) {
         query = query.is('deleted_at', null);
@@ -184,18 +189,15 @@ export async function POST(
       return query;
     };
 
-    let itemsResult = await buildItemsQuery(true, 'item_type');
+    let itemsResult = await buildItemsQuery(true, 'both');
     if (itemsResult.error && isMissingColumnError(itemsResult.error, 'items', 'deleted_at')) {
-      itemsResult = await buildItemsQuery(false, 'item_type');
+      itemsResult = await buildItemsQuery(false, 'both');
     }
     if (itemsResult.error && isMissingColumnError(itemsResult.error, 'items', 'item_type')) {
       itemsResult = await buildItemsQuery(false, 'type');
     }
-    if (
-      itemsResult.error &&
-      isMissingColumnError(itemsResult.error, 'items', 'deleted_at')
-    ) {
-      itemsResult = await buildItemsQuery(false, 'type');
+    if (itemsResult.error && isMissingColumnError(itemsResult.error, 'items', 'type')) {
+      itemsResult = await buildItemsQuery(false, 'item_type');
     }
     if (itemsResult.error) throw itemsResult.error;
     const items = itemsResult.data;
