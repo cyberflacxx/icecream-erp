@@ -54,26 +54,41 @@ async function loadQuotationResponse(
 
   const quotation = quotationResult.data as Record<string, unknown>;
   const customerId = String(quotation.customer_id ?? '');
+  const quotationItemsResult = await service
+    .schema('icecream_erp')
+    .from('quotation_items')
+    .select('*')
+    .eq('quotation_id', quotationId);
 
-  const [customerResult, itemsResult] = await Promise.all([
+  if (quotationItemsResult.error) throw quotationItemsResult.error;
+
+  const quotationItems = (quotationItemsResult.data ?? []) as Array<Record<string, unknown>>;
+  const itemIds = [...new Set(quotationItems.map((row) => String(row.item_id ?? '')).filter(Boolean))];
+
+  const [customerResult, itemRowsResult] = await Promise.all([
     customerId
       ? service.schema('icecream_erp').from('customers').select('*').eq('id', customerId).maybeSingle()
       : Promise.resolve({ data: null, error: null }),
-    service
-      .schema('icecream_erp')
-      .from('quotation_items')
-      .select('*, items(*)')
-      .eq('quotation_id', quotationId),
+    itemIds.length
+      ? service.schema('icecream_erp').from('items').select('*').in('id', itemIds)
+      : Promise.resolve({ data: [], error: null }),
   ]);
 
   if (customerResult.error) throw customerResult.error;
-  if (itemsResult.error) throw itemsResult.error;
+  if (itemRowsResult.error) throw itemRowsResult.error;
+
+  const itemRowsById = new Map(
+    ((itemRowsResult.data ?? []) as Array<Record<string, unknown>>).map((row) => [String(row.id), row]),
+  );
 
   return {
     ...quotation,
     customer: customerResult.data ?? null,
     customers: customerResult.data ?? null,
-    quotation_items: itemsResult.data ?? [],
+    quotation_items: quotationItems.map((row) => ({
+      ...row,
+      items: itemRowsById.get(String(row.item_id ?? '')) ?? null,
+    })),
   };
 }
 
