@@ -302,14 +302,17 @@ export async function GET(request: NextRequest) {
         }));
 
     for (const p of effectivePayments) {
-      const day = p.payment_date.slice(0, 10);
+      const day = String(p.payment_date ?? '').slice(0, 10);
+      if (!day) continue;
       const amount = Number(p.amount ?? 0);
       revenueByDay.set(day, (revenueByDay.get(day) ?? 0) + amount);
-      paymentMethodMap.set(p.payment_method, (paymentMethodMap.get(p.payment_method) ?? 0) + amount);
+      const paymentMethod = String(p.payment_method ?? 'UNKNOWN');
+      paymentMethodMap.set(paymentMethod, (paymentMethodMap.get(paymentMethod) ?? 0) + amount);
     }
 
     for (const e of sections.branchExpenses ?? []) {
-      const day = e.expense_date.slice(0, 10);
+      const day = String(e.expense_date ?? '').slice(0, 10);
+      if (!day) continue;
       expenseByDay.set(day, (expenseByDay.get(day) ?? 0) + Number(e.amount ?? 0));
     }
 
@@ -319,23 +322,23 @@ export async function GET(request: NextRequest) {
       .map((day) => ({ day, revenue: revenueByDay.get(day) ?? 0, expenses: expenseByDay.get(day) ?? 0 }));
 
     const outstandingReceivables = sections.overdueInvoices.reduce(
-      (sum: number, inv: { balance_due: number }) => sum + Number(inv.balance_due ?? 0), 0
+      (sum, inv) => sum + Number((inv as { balance_due?: number | null }).balance_due ?? 0), 0
     );
-    const totalRevenue = effectivePayments.reduce((sum: number, p: { amount: number }) => sum + Number(p.amount ?? 0), 0);
-    const totalBranchExpenses = sections.branchExpenses.reduce((sum: number, e: { amount: number }) => sum + Number(e.amount ?? 0), 0);
-    const totalFinanceExpenses = sections.financeExpenses.reduce((sum: number, e: { amount: number }) => sum + Number(e.amount ?? 0), 0);
+    const totalRevenue = effectivePayments.reduce((sum, p) => sum + Number(p.amount ?? 0), 0);
+    const totalBranchExpenses = sections.branchExpenses.reduce((sum, e) => sum + Number(e.amount ?? 0), 0);
+    const totalFinanceExpenses = sections.financeExpenses.reduce((sum, e) => sum + Number(e.amount ?? 0), 0);
     const totalExpenses = totalBranchExpenses + totalFinanceExpenses;
     const grossProfitSummary = summarizeProfitAndLossFromLedger(sections.ledgerLines);
     const outstandingPayables = Math.max(
       0,
-      sections.supplierInvoices.reduce((sum: number, inv: { invoice_total: number }) => sum + Number(inv.invoice_total ?? 0), 0) -
-        sections.supplierPayments.reduce((sum: number, p: { amount_paid: number }) => sum + Number(p.amount_paid ?? 0), 0),
+      sections.supplierInvoices.reduce((sum, inv) => sum + Number(inv.invoice_total ?? 0), 0) -
+        sections.supplierPayments.reduce((sum, p) => sum + Number(p.amount_paid ?? 0), 0),
     );
-    const bankBalance = sections.bankAccounts.reduce((sum: number, row: { current_balance: number }) => sum + Number(row.current_balance ?? 0), 0);
-    const cashBalance = sections.cashAccounts.reduce((sum: number, row: { balance: number }) => sum + Number(row.balance ?? 0), 0);
+    const bankBalance = sections.bankAccounts.reduce((sum, row) => sum + Number(row.current_balance ?? 0), 0);
+    const cashBalance = sections.cashAccounts.reduce((sum, row) => sum + Number(row.balance ?? 0), 0);
     const pettyCashBalance = sections.pettyCashRequests
-      .filter((row: { status: string }) => row.status === 'APPROVED')
-      .reduce((sum: number, row: { amountRequested: number }) => sum + Number(row.amountRequested ?? 0), 0);
+      .filter((row: { amountRequested?: number | null; status: string }) => row.status === 'APPROVED')
+      .reduce((sum: number, row: { amountRequested?: number | null; status: string }) => sum + Number(row.amountRequested ?? 0), 0);
     const stockValuation = sections.stockBalances.reduce((sum: number, row: Record<string, unknown>) => {
       const item = Array.isArray(row.items) ? row.items[0] : row.items;
       return sum + calculateInventoryValuation(
@@ -353,14 +356,14 @@ export async function GET(request: NextRequest) {
       return sum + summary.totalCost;
     }, 0);
     const branchProfitability = calculateBranchCostSummary(
-      sections.branchSales.reduce((sum: number, row: { total_amount: number }) => sum + Number(row.total_amount ?? 0), 0),
+      sections.branchSales.reduce((sum, row) => sum + Number(row.total_amount ?? 0), 0),
       0,
       totalBranchExpenses,
       0,
     ).netProfit;
     const pendingApprovals =
       sections.pettyCashRequests.filter((row: { status: string }) => row.status === 'PENDING').length +
-      sections.financeExpenses.filter((row: { status: string }) => row.status === 'DRAFT' || row.status === 'PENDING_APPROVAL').length;
+      sections.financeExpenses.filter((row: { status?: string | null }) => row.status === 'DRAFT' || row.status === 'PENDING_APPROVAL').length;
 
     const data = buildEmptyFinanceDashboardData();
     data.stats = {

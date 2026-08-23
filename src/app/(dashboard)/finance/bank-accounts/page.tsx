@@ -1,6 +1,7 @@
 'use client';
 
 import { type FormEvent, useState } from 'react';
+import Link from 'next/link';
 import { AlertCircle, Landmark, Plus } from 'lucide-react';
 
 import { PageHeader } from '@/components/dashboard/page-header';
@@ -8,7 +9,7 @@ import { FinanceEmptyState } from '@/components/finance/finance-empty-state';
 import { FinanceNav } from '@/components/finance/finance-nav';
 import { Button } from '@/components/ui/button';
 import { DataTable, EmptyState, FormDrawer, LoadingState } from '@/components/ui-library';
-import { useBankAccounts, useBankTransactions, useFinanceMutation } from '@/hooks/finance/useFinanceResources';
+import { useBankAccounts, useBankTransactions, useFinanceMeta, useFinanceMutation } from '@/hooks/finance/useFinanceResources';
 import { API_ROUTES } from '@/lib/shared';
 
 const currency = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
@@ -20,6 +21,7 @@ function today() {
 export default function FinanceBankAccountsPage() {
   const query = useBankAccounts();
   const transactionsQuery = useBankTransactions();
+  const metaQuery = useFinanceMeta();
   const createTransaction = useFinanceMutation(API_ROUTES.FINANCE.BANK_TRANSACTIONS);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [bankAccountId, setBankAccountId] = useState('');
@@ -29,6 +31,7 @@ export default function FinanceBankAccountsPage() {
   const [referenceNumber, setReferenceNumber] = useState('');
   const [description, setDescription] = useState('');
   const [sourceDocument, setSourceDocument] = useState('');
+  const [offsetAccountId, setOffsetAccountId] = useState('');
   const [formError, setFormError] = useState<string | null>(null);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -39,6 +42,7 @@ export default function FinanceBankAccountsPage() {
         amount: Number(amount),
         bankAccountId,
         description: description || undefined,
+        offsetAccountId,
         referenceNumber: referenceNumber || undefined,
         sourceDocument: sourceDocument || undefined,
         transactionDate,
@@ -49,6 +53,7 @@ export default function FinanceBankAccountsPage() {
       setReferenceNumber('');
       setDescription('');
       setSourceDocument('');
+      setOffsetAccountId('');
       setFormError(null);
     } catch (error) {
       setFormError(error instanceof Error ? error.message : 'Failed to save bank transaction.');
@@ -75,10 +80,15 @@ export default function FinanceBankAccountsPage() {
         description="View bank balances and record bank deposits, payments, transfers, and manual adjustments."
         status="partial"
         actions={
-          <Button type="button" size="sm" onClick={() => setDrawerOpen(true)}>
-            <Plus className="mr-2 h-4 w-4" />
-            Bank Transaction
-          </Button>
+          <div className="flex gap-2">
+            <Button asChild type="button" size="sm" variant="outline">
+              <Link href="/settings/finance-setup">+ Create Bank Account</Link>
+            </Button>
+            <Button type="button" size="sm" onClick={() => setDrawerOpen(true)}>
+              <Plus className="mr-2 h-4 w-4" />
+              Bank Transaction
+            </Button>
+          </div>
         }
       />
       <FinanceNav />
@@ -228,6 +238,22 @@ export default function FinanceBankAccountsPage() {
               onChange={(event) => setDescription(event.target.value)}
               className="surface-textarea-soft"
             />
+          </label>
+          <label className="space-y-2 text-sm text-muted">
+            <span>Offset Ledger Account</span>
+            <select
+              required
+              value={offsetAccountId}
+              onChange={(event) => setOffsetAccountId(event.target.value)}
+              className="surface-input-soft"
+            >
+              <option value="">Select account</option>
+              {(metaQuery.data?.accounts ?? []).map((account) => (
+                <option key={String(account.id)} value={String(account.id)}>
+                  {String(account.code ?? account.account_code ?? '')} - {String(account.name ?? account.account_name ?? '')}
+                </option>
+              ))}
+            </select>
           </label>
 
           <div className="flex justify-end gap-3">

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { badRequest, can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
+import { resolveBranchWarehouse } from '@/lib/branches-server';
 import { isMissingColumnError, isMissingTableError } from '@/lib/postgrest-compat';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
@@ -22,42 +23,7 @@ export async function GET(
   try {
     if (ctx.isBranchScoped && ctx.branchId && ctx.branchId !== id) return forbidden();
 
-    let warehouseResult = await service
-      .schema('icecream_erp')
-      .from('warehouses')
-      .select('id, code, name, type, warehouse_type')
-      .eq('branch_id', id)
-      .eq('is_active', true)
-      .eq('type', 'BRANCH')
-      .maybeSingle();
-
-    if (
-      warehouseResult.error &&
-      (
-        isMissingColumnError(warehouseResult.error, 'warehouses', 'type') ||
-        isMissingColumnError(warehouseResult.error, 'warehouses', 'warehouse_type')
-      )
-    ) {
-      warehouseResult = await service
-        .schema('icecream_erp')
-        .from('warehouses')
-        .select('id, code, name, type, warehouse_type')
-        .eq('branch_id', id)
-        .eq('is_active', true)
-        .maybeSingle();
-    } else if (!warehouseResult.error && !warehouseResult.data) {
-      warehouseResult = await service
-        .schema('icecream_erp')
-        .from('warehouses')
-        .select('id, code, name, type, warehouse_type')
-        .eq('branch_id', id)
-        .eq('is_active', true)
-        .eq('warehouse_type', 'BRANCH')
-        .maybeSingle();
-    }
-
-    if (warehouseResult.error) throw warehouseResult.error;
-    const warehouse = warehouseResult.data;
+    const warehouse = await resolveBranchWarehouse(id);
     if (!warehouse) return badRequest('No warehouse linked to this branch.');
 
     const buildStockQuery = (includeDeletedItemFilter: boolean) => {

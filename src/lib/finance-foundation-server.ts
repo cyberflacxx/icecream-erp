@@ -11,7 +11,14 @@ import {
   normalizeFinanceFoundationType,
   validateOpeningBalanceDraftLines,
 } from '@/lib/finance-foundation';
-import { financeErrorMessage, financeService, isMissingFinanceColumn, isMissingFinanceTable, writeFinanceAuditLog } from '@/lib/finance-server';
+import {
+  financeErrorMessage,
+  financeService,
+  isMissingFinanceColumn,
+  isMissingFinanceTable,
+  loadBankAccountsCompatibility,
+  writeFinanceAuditLog,
+} from '@/lib/finance-server';
 import { toNumber } from '@/lib/inventory';
 
 type Row = Record<string, unknown>;
@@ -628,7 +635,7 @@ export async function loadFinanceMetaResources(organizationId: string) {
     loadFinanceAccounts(organizationId, { activeStatus: 'active' }),
     service.from('branches').select('id, code, name, status, deleted_at').eq('organization_id', organizationId).order('name', { ascending: true }),
     loadCashAccounts(),
-    service.from('bank_accounts').select('id, account_name, account_number, bank_name, current_balance').eq('organization_id', organizationId).order('account_name', { ascending: true }),
+    loadBankAccountsCompatibility(organizationId, { routeName: 'finance.meta' }),
     loadFinanceCostCentres(organizationId).catch((error) => {
       if (isMissingFinanceTable(error)) return [] as Row[];
       throw error;
@@ -638,18 +645,17 @@ export async function loadFinanceMetaResources(organizationId: string) {
   ]);
 
   if (branches.error) throw branches.error;
-  if (bankAccounts.error && !isMissingFinanceTable(bankAccounts.error)) throw bankAccounts.error;
   if (fiscalPeriods.error && !isMissingFinanceTable(fiscalPeriods.error)) throw fiscalPeriods.error;
 
   return {
     accounts: accounts
       .map((account) => buildFinanceAccountApiRow(account, accounts))
       .filter((account) => Boolean(account.allowPosting) && account.is_active !== false),
-    bankAccounts: ((bankAccounts.data ?? []) as Row[]).map((row) => ({
-      accountName: String(row.account_name ?? ''),
-      accountNumber: String(row.account_number ?? ''),
-      bankName: String(row.bank_name ?? ''),
-      currentBalance: toNumber(row.current_balance),
+    bankAccounts: (bankAccounts as Row[]).map((row) => ({
+      accountName: String(row.accountName ?? row.account_name ?? ''),
+      accountNumber: String(row.accountNumber ?? row.account_number ?? ''),
+      bankName: String(row.bankName ?? row.bank_name ?? ''),
+      currentBalance: toNumber(row.currentBalance ?? row.current_balance),
       id: String(row.id ?? ''),
     })),
     branches: ((branches.data ?? []) as Row[])

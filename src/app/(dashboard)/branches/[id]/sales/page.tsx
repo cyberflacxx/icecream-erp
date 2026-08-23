@@ -413,7 +413,9 @@ export default function BranchSalesPage() {
                     loading={itemOptionsQuery.isLoading}
                     errorMessage={itemOptionsQuery.error?.message ?? null}
                     emptyMessage="No branch sale items are available."
-                    onRetry={() => itemOptionsQuery.refetch()}
+                    onRetry={() => {
+                      void itemOptionsQuery.refetch();
+                    }}
                     onChange={(selectedItemId) => {
                       const selectedStock = stockOptionByItemId.get(selectedItemId);
                       const defaultPrice = Number(selectedStock?.sellingPrice ?? selectedStock?.currentInventoryCost ?? 0);

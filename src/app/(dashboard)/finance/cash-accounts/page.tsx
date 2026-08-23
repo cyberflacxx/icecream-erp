@@ -1,6 +1,7 @@
 'use client';
 
 import { type FormEvent, useState } from 'react';
+import Link from 'next/link';
 import { AlertCircle, Banknote, Plus } from 'lucide-react';
 
 import { PageHeader } from '@/components/dashboard/page-header';
@@ -8,7 +9,7 @@ import { FinanceEmptyState } from '@/components/finance/finance-empty-state';
 import { FinanceNav } from '@/components/finance/finance-nav';
 import { Button } from '@/components/ui/button';
 import { DataTable, EmptyState, FormDrawer, LoadingState } from '@/components/ui-library';
-import { useCashAccounts, useCashTransactions, useFinanceMutation } from '@/hooks/finance/useFinanceResources';
+import { useCashAccounts, useCashTransactions, useFinanceMeta, useFinanceMutation } from '@/hooks/finance/useFinanceResources';
 import { API_ROUTES } from '@/lib/shared';
 
 const currency = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
@@ -20,6 +21,7 @@ function today() {
 export default function FinanceCashAccountsPage() {
   const query = useCashAccounts();
   const transactionsQuery = useCashTransactions();
+  const metaQuery = useFinanceMeta();
   const createTransaction = useFinanceMutation(API_ROUTES.FINANCE.CASH);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [cashAccountId, setCashAccountId] = useState('');
@@ -27,6 +29,7 @@ export default function FinanceCashAccountsPage() {
   const [transactionType, setTransactionType] = useState('ADJUSTMENT_IN');
   const [amount, setAmount] = useState('0');
   const [source, setSource] = useState('CASH');
+  const [offsetAccountId, setOffsetAccountId] = useState('');
   const [reference, setReference] = useState('');
   const [counterparty, setCounterparty] = useState('');
   const [remarks, setRemarks] = useState('');
@@ -40,6 +43,7 @@ export default function FinanceCashAccountsPage() {
         amount: Number(amount),
         cashAccountId,
         counterparty: counterparty || undefined,
+        offsetAccountId,
         reference: reference || undefined,
         remarks: remarks || undefined,
         source,
@@ -49,6 +53,7 @@ export default function FinanceCashAccountsPage() {
       setDrawerOpen(false);
       setAmount('0');
       setReference('');
+      setOffsetAccountId('');
       setCounterparty('');
       setRemarks('');
       setFormError(null);
@@ -77,10 +82,15 @@ export default function FinanceCashAccountsPage() {
         description="Track cash at hand, record cash receipts/payments, and post manual cash adjustments."
         status="partial"
         actions={
-          <Button type="button" size="sm" onClick={() => setDrawerOpen(true)}>
-            <Plus className="mr-2 h-4 w-4" />
-            Cash Transaction
-          </Button>
+          <div className="flex gap-2">
+            <Button asChild type="button" size="sm" variant="outline">
+              <Link href="/settings/finance-setup">+ Create Cash Account</Link>
+            </Button>
+            <Button type="button" size="sm" onClick={() => setDrawerOpen(true)}>
+              <Plus className="mr-2 h-4 w-4" />
+              Cash Transaction
+            </Button>
+          </div>
         }
       />
       <FinanceNav />
@@ -216,6 +226,22 @@ export default function FinanceCashAccountsPage() {
               <option value="PETTY_CASH">Petty Cash</option>
               <option value="JOURNAL">Journal Adjustment</option>
               <option value="BRANCH_CASH_UP">Branch Cash-Up</option>
+            </select>
+          </label>
+          <label className="space-y-2 text-sm text-muted">
+            <span>Offset Ledger Account</span>
+            <select
+              required
+              value={offsetAccountId}
+              onChange={(event) => setOffsetAccountId(event.target.value)}
+              className="surface-input-soft"
+            >
+              <option value="">Select account</option>
+              {(metaQuery.data?.accounts ?? []).map((account) => (
+                <option key={String(account.id)} value={String(account.id)}>
+                  {String(account.code ?? account.account_code ?? '')} - {String(account.name ?? account.account_name ?? '')}
+                </option>
+              ))}
             </select>
           </label>
           <label className="space-y-2 text-sm text-muted">

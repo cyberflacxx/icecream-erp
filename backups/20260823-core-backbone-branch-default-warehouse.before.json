@@ -1,0 +1,23 @@
+[
+  {
+    "id": "7251396b-10ac-47e0-879b-aa9998510a5c",
+    "organization_id": "d81ad59c-f207-40cd-8842-a0c6da10da1c",
+    "code": "MAIN",
+    "name": "Main Branch",
+    "default_warehouse_id": null
+  },
+  {
+    "id": "6e6096f5-01b1-4d79-976b-4342d5284a13",
+    "organization_id": "d81ad59c-f207-40cd-8842-a0c6da10da1c",
+    "code": "MH",
+    "name": "Makoni",
+    "default_warehouse_id": null
+  },
+  {
+    "id": "af0b13bf-9309-4ce4-8ecb-990cd968912f",
+    "organization_id": "d81ad59c-f207-40cd-8842-a0c6da10da1c",
+    "code": "BR-01",
+    "name": "Mbare Branch",
+    "default_warehouse_id": null
+  }
+]

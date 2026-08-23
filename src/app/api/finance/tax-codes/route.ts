@@ -11,12 +11,16 @@ export async function GET(_request: NextRequest) {
   try {
     const { data, error } = await financeService()
       .from('tax_rates')
-      .select('id, code, name, rate, is_active, applies_to_sales, applies_to_purchase, account_id')
+      .select('id, code, name, rate, is_active, applies_to_sales, applies_to_purchase, applies_to_purchases, tax_account_id')
       .eq('organization_id', ctx.organizationId)
       .is('deleted_at', null)
       .order('code', { ascending: true });
     if (error) throw error;
-    return NextResponse.json(data ?? []);
+    return NextResponse.json((data ?? []).map((row) => ({
+      ...row,
+      account_id: row.tax_account_id ?? null,
+      applies_to_purchase: row.applies_to_purchase ?? row.applies_to_purchases ?? true,
+    })));
   } catch (err) {
     if (isMissingFinanceTable(err)) return NextResponse.json([]);
     return serverError(financeErrorMessage(err) || 'Internal server error');
@@ -49,7 +53,7 @@ export async function POST(request: NextRequest) {
         code: body.code,
         name: body.name,
         rate: body.rate,
-        account_id: body.accountId ?? null,
+        tax_account_id: body.accountId ?? null,
         is_active: body.isActive ?? true,
         applies_to_sales: body.appliesToSales ?? true,
         applies_to_purchase: body.appliesToPurchase ?? true,

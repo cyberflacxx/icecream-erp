@@ -57,6 +57,8 @@ export default function FinancePage() {
     { href: '/finance/reports?report=balance-sheet', icon: FileText, label: 'Balance Sheet', visible: canReadFinance },
     { href: '/finance/reports?report=cash-flow', icon: Wallet, label: 'Cash Flow', visible: canReadFinance },
     { href: '/finance/bank-accounts', icon: Landmark, label: 'Bank Reconciliation', visible: canReadFinance },
+    { href: '/settings/finance-setup', icon: BanknoteArrowUp, label: 'Create Cash Account', visible: canWriteFinance },
+    { href: '/settings/finance-setup', icon: Landmark, label: 'Create Bank Account', visible: canWriteFinance },
     { href: '/sales/payments', icon: BanknoteArrowUp, label: 'Customer Receipts', visible: canReadFinance },
     { href: '/procurement/payments', icon: BanknoteArrowDown, label: 'Supplier Payments', visible: canReadFinance },
     { href: '/finance/budgets', icon: Coins, label: 'Budget versus Actual', visible: canReadFinance },

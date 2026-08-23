@@ -5,7 +5,6 @@ import {
   isPostedJournalStatus,
   normalizeCashAccount,
   normalizePettyCashRequest,
-  normalizeFinanceAccountType,
   normalizeTrialBalanceRow,
   resolveLedgerCredit,
   resolveLedgerDebit,
@@ -334,6 +333,82 @@ export async function loadCashAccountsCompatibility(
   return [];
 }
 
+export async function loadBankAccountsCompatibility(
+  organizationId: string,
+  options?: {
+    activeOnly?: boolean;
+    routeName?: string;
+  },
+) {
+  const routeName = options?.routeName ?? 'finance';
+  const attempts = [
+    'id, organization_id, account_id, account_name, bank_name, account_number, branch_name, currency_code, opening_balance, current_balance, is_active, created_at',
+    'id, organization_id, account_id, account_name, bank_name, account_number, branch_name, currency_code, current_balance, is_active, created_at',
+    'id, organization_id, account_name, bank_name, account_number, branch_name, current_balance, is_active, created_at',
+    'id, organization_id, account_name, bank_name, account_number, current_balance',
+    'id, account_name, bank_name',
+  ];
+
+  for (let index = 0; index < attempts.length; index += 1) {
+    let query = financeService()
+      .from('bank_accounts')
+      .select(attempts[index]!)
+      .eq('organization_id', organizationId)
+      .order('bank_name', { ascending: true });
+
+    if (options?.activeOnly) {
+      query = query.eq('is_active', true);
+    }
+
+    const result = await query;
+    if (!result.error) {
+      return ((result.data ?? []) as unknown as FinanceRow[]).map((row) => {
+        const currentBalance = Number(row.current_balance ?? row.balance ?? row.opening_balance ?? 0);
+        const openingBalance = Number(row.opening_balance ?? row.current_balance ?? 0);
+        const isActive = row.is_active === undefined ? true : row.is_active !== false;
+        const currencyCode = row.currency_code ? String(row.currency_code) : null;
+
+        return {
+          accountId: row.account_id ? String(row.account_id) : null,
+          accountName: String(row.account_name ?? ''),
+          accountNumber: row.account_number ? String(row.account_number) : null,
+          bankName: String(row.bank_name ?? ''),
+          branchName: row.branch_name ? String(row.branch_name) : null,
+          createdAt: row.created_at ? String(row.created_at) : null,
+          currency: currencyCode,
+          currencyCode,
+          currentBalance,
+          current_balance: currentBalance,
+          id: String(row.id ?? ''),
+          isActive,
+          is_active: isActive,
+          openingBalance,
+        };
+      });
+    }
+
+    if (isMissingFinanceTable(result.error)) {
+      return [];
+    }
+
+    const compatibilityFailure =
+      isMissingFinanceColumn(result.error, 'bank_accounts', 'currency_code') ||
+      isMissingFinanceColumn(result.error, 'bank_accounts', 'opening_balance') ||
+      isMissingFinanceColumn(result.error, 'bank_accounts', 'branch_name') ||
+      isMissingFinanceColumn(result.error, 'bank_accounts', 'is_active') ||
+      /column\s+bank_accounts\.[a-z_]+\s+does not exist/i.test(financeErrorMessage(result.error));
+
+    if (!compatibilityFailure) {
+      logFinanceRouteError(routeName, `bank_accounts.attempt_${index + 1}`, result.error);
+      throw result.error;
+    }
+
+    logFinanceRouteError(routeName, `bank_accounts.attempt_${index + 1}`, result.error);
+  }
+
+  return [];
+}
+
 export async function loadLedgerLines(
   organizationId: string,
   postedOnly = true,
@@ -346,59 +421,68 @@ export async function loadLedgerLines(
   },
 ) {
   const service = financeService();
-  let modernQuery = service
-    .from('journal_entry_lines')
-    .select(
-      'id, journal_entry_id, account_id, branch_id, cost_center_code, description, debit_amount, credit_amount, accounts(id, account_code, account_name, account_type), journal_entries!inner(id, entry_number, entry_date, organization_id, branch_id, cost_center_code, is_posted, status, reference_type, reference_id)',
-    )
-    .eq('journal_entries.organization_id', organizationId);
-  if (options?.startDate) modernQuery = modernQuery.gte('journal_entries.entry_date', options.startDate);
-  if (options?.endDate) modernQuery = modernQuery.lte('journal_entries.entry_date', options.endDate);
-  const modern = await modernQuery;
+  const modernAttempts = [
+    'id, journal_entry_id, account_id, branch_id, cost_center_code, description, debit_amount, credit_amount, accounts(id, code, name, type), journal_entries!inner(id, entry_number, entry_date, organization_id, branch_id, cost_center_code, is_posted, status, reference_type, reference_id)',
+    'id, journal_entry_id, account_id, branch_id, cost_center_code, description, debit_amount, credit_amount, accounts(id, account_code, account_name, account_type), journal_entries!inner(id, entry_number, entry_date, organization_id, branch_id, cost_center_code, is_posted, status, reference_type, reference_id)',
+    'id, journal_entry_id, account_id, branch_id, cost_center_code, description, debit_amount, credit_amount, accounts(id, code, name, type), journal_entries!inner(id, entry_number, entry_date, organization_id, branch_id, cost_center_code, status, reference_type, reference_id)',
+  ];
 
-  if (!modern.error) {
-    const rows = (modern.data ?? []).filter((row) => {
-      const entry = mapNestedRow(row.journal_entries as FinanceRow | FinanceRow[] | null);
-      if (postedOnly && entry?.is_posted !== true && !isPostedJournalStatus(String(entry?.status ?? ''))) {
-        return false;
-      }
+  for (let index = 0; index < modernAttempts.length; index += 1) {
+    let modernQuery = service
+      .from('journal_entry_lines')
+      .select(modernAttempts[index]!)
+      .eq('journal_entries.organization_id', organizationId);
+    if (options?.startDate) modernQuery = modernQuery.gte('journal_entries.entry_date', options.startDate);
+    if (options?.endDate) modernQuery = modernQuery.lte('journal_entries.entry_date', options.endDate);
+    const modern = await modernQuery;
 
-      const branchId = String(row.branch_id ?? entry?.branch_id ?? '').trim();
-      if (options?.branchId && branchId !== options.branchId) {
-        return false;
-      }
+    if (!modern.error) {
+      const rows = ((modern.data ?? []) as unknown as FinanceRow[]).filter((row) => {
+        const entry = mapNestedRow(row.journal_entries as FinanceRow | FinanceRow[] | null);
+        if (postedOnly && entry?.is_posted !== true && !isPostedJournalStatus(String(entry?.status ?? ''))) {
+          return false;
+        }
 
-      const costCenterCode = String(row.cost_center_code ?? entry?.cost_center_code ?? '').trim();
-      if (options?.costCenterCode && costCenterCode !== options.costCenterCode) {
-        return false;
-      }
+        const branchId = String(row.branch_id ?? entry?.branch_id ?? '').trim();
+        if (options?.branchId && branchId !== options.branchId) {
+          return false;
+        }
 
-      const account = mapNestedRow(row.accounts as FinanceRow | FinanceRow[] | null);
-      const accountCode = String(account?.account_code ?? account?.code ?? '').trim().toUpperCase();
-      if (options?.accountCode && accountCode !== String(options.accountCode).trim().toUpperCase()) {
-        return false;
-      }
+        const costCenterCode = String(row.cost_center_code ?? entry?.cost_center_code ?? '').trim();
+        if (options?.costCenterCode && costCenterCode !== options.costCenterCode) {
+          return false;
+        }
 
-      return true;
-    });
-    return rows.map((row) => mapModernLedgerLine(row as FinanceRow));
-  }
+        const account = mapNestedRow(row.accounts as FinanceRow | FinanceRow[] | null);
+        const accountCode = String(account?.account_code ?? account?.code ?? '').trim().toUpperCase();
+        if (options?.accountCode && accountCode !== String(options.accountCode).trim().toUpperCase()) {
+          return false;
+        }
 
-  const modernCompatibleFailure =
-    isMissingFinanceTable(modern.error) ||
-    isMissingFinanceColumn(modern.error, 'journal_entries', 'is_posted') ||
-    isMissingFinanceColumn(modern.error, 'journal_entries', 'reference_type') ||
-    isMissingFinanceColumn(modern.error, 'journal_entries', 'reference_id') ||
-    isMissingFinanceColumn(modern.error, 'journal_entry_lines', 'debit_amount') ||
-    isMissingFinanceColumn(modern.error, 'journal_entry_lines', 'credit_amount') ||
-    isMissingFinanceColumn(modern.error, 'accounts', 'account_code') ||
-    isMissingFinanceColumn(modern.error, 'accounts', 'account_name') ||
-    isMissingFinanceColumn(modern.error, 'accounts', 'account_type') ||
-    financeErrorMessage(modern.error).includes('journal_entries') ||
-    financeErrorMessage(modern.error).includes('accounts');
+        return true;
+      });
+      return rows.map((row) => mapModernLedgerLine(row as FinanceRow));
+    }
 
-  if (!modernCompatibleFailure) {
-    throw modern.error;
+    const modernCompatibleFailure =
+      isMissingFinanceTable(modern.error) ||
+      isMissingFinanceColumn(modern.error, 'journal_entries', 'is_posted') ||
+      isMissingFinanceColumn(modern.error, 'journal_entries', 'reference_type') ||
+      isMissingFinanceColumn(modern.error, 'journal_entries', 'reference_id') ||
+      isMissingFinanceColumn(modern.error, 'journal_entry_lines', 'debit_amount') ||
+      isMissingFinanceColumn(modern.error, 'journal_entry_lines', 'credit_amount') ||
+      isMissingFinanceColumn(modern.error, 'accounts', 'account_code') ||
+      isMissingFinanceColumn(modern.error, 'accounts', 'account_name') ||
+      isMissingFinanceColumn(modern.error, 'accounts', 'account_type') ||
+      isMissingFinanceColumn(modern.error, 'accounts', 'code') ||
+      isMissingFinanceColumn(modern.error, 'accounts', 'name') ||
+      isMissingFinanceColumn(modern.error, 'accounts', 'type') ||
+      financeErrorMessage(modern.error).includes('journal_entries') ||
+      financeErrorMessage(modern.error).includes('accounts');
+
+    if (!modernCompatibleFailure) {
+      throw modern.error;
+    }
   }
 
   let legacyQuery = service
@@ -697,9 +781,7 @@ export async function createLinkedFinanceTransaction(input: {
 }) {
   const service = financeService();
   const accountTable = input.paymentMethod === 'BANK' ? 'bank_accounts' : 'cash_accounts';
-  const accountSelect = input.paymentMethod === 'BANK'
-    ? 'id, current_balance'
-    : 'id, balance';
+  const accountSelect = 'id, opening_balance, current_balance, is_active';
 
   const accountResult = await service
     .from(accountTable)
@@ -733,14 +815,11 @@ export async function createLinkedFinanceTransaction(input: {
   }
 
   if (input.paymentMethod === 'BANK') {
-    const bankAccount = resolvedAccountResult.data as { current_balance?: number | null; id: string };
-    const direction = input.direction === 'IN' ? 1 : -1;
-    const nextBalance = Number(bankAccount.current_balance ?? 0) + direction * Number(input.amount ?? 0);
     const insertResult = await service
       .from('bank_transactions')
       .insert({
         amount: input.amount,
-        bank_account_id: bankAccount.id,
+        bank_account_id: String(resolvedAccountResult.data.id),
         created_by: input.createdBy,
         description: input.description,
         organization_id: input.organizationId,
@@ -755,18 +834,15 @@ export async function createLinkedFinanceTransaction(input: {
       .select()
       .single();
     if (insertResult.error) throw insertResult.error;
-    await service.from('bank_accounts').update({ current_balance: nextBalance }).eq('id', bankAccount.id);
+    await syncBankAccountCurrentBalance(String(resolvedAccountResult.data.id));
     return { id: String(insertResult.data.id), table: 'bank_transactions' };
   }
 
-  const cashAccount = resolvedAccountResult.data as { balance?: number | null; id: string };
-  const direction = input.direction === 'IN' ? 1 : -1;
-  const nextBalance = Number(cashAccount.balance ?? 0) + direction * Number(input.amount ?? 0);
   const insertResult = await service
     .from('cash_transactions')
     .insert({
       amount: input.amount,
-      cash_account_id: cashAccount.id,
+      cash_account_id: String(resolvedAccountResult.data.id),
       created_by: input.createdBy,
       counterparty: input.sourceDocument,
       organization_id: input.organizationId,
@@ -789,8 +865,77 @@ export async function createLinkedFinanceTransaction(input: {
     .select()
     .single();
   if (insertResult.error) throw insertResult.error;
-  await service.from('cash_accounts').update({ balance: nextBalance }).eq('id', cashAccount.id);
+  await syncCashAccountCurrentBalance(String(resolvedAccountResult.data.id));
   return { id: String(insertResult.data.id), table: 'cash_transactions' };
+}
+
+function getTransactionBalanceEffect(transactionType: string | null | undefined) {
+  const normalized = String(transactionType ?? '').trim().toUpperCase();
+  if (
+    normalized.includes('OUT') ||
+    normalized.includes('PAYMENT') ||
+    normalized.includes('WITHDRAW') ||
+    normalized.includes('DISBURSE')
+  ) {
+    return -1;
+  }
+  return 1;
+}
+
+export async function syncCashAccountCurrentBalance(cashAccountId: string) {
+  const service = financeService();
+  const [accountResult, transactionsResult] = await Promise.all([
+    service.from('cash_accounts').select('id, opening_balance').eq('id', cashAccountId).single(),
+    service
+      .from('cash_transactions')
+      .select('amount, transaction_type, status')
+      .eq('cash_account_id', cashAccountId),
+  ]);
+
+  if (accountResult.error) throw accountResult.error;
+  if (transactionsResult.error && !isMissingFinanceTable(transactionsResult.error)) {
+    throw transactionsResult.error;
+  }
+
+  const openingBalance = Number(accountResult.data.opening_balance ?? 0);
+  const currentBalance = openingBalance + (transactionsResult.data ?? [])
+    .filter((row) => String(row.status ?? 'POSTED').trim().toUpperCase() !== 'VOID')
+    .reduce((sum, row) => sum + getTransactionBalanceEffect(String(row.transaction_type ?? '')) * Number(row.amount ?? 0), 0);
+
+  const updateResult = await service
+    .from('cash_accounts')
+    .update({ current_balance: currentBalance, updated_at: new Date().toISOString() })
+    .eq('id', cashAccountId);
+  if (updateResult.error) throw updateResult.error;
+  return currentBalance;
+}
+
+export async function syncBankAccountCurrentBalance(bankAccountId: string) {
+  const service = financeService();
+  const [accountResult, transactionsResult] = await Promise.all([
+    service.from('bank_accounts').select('id, opening_balance').eq('id', bankAccountId).single(),
+    service
+      .from('bank_transactions')
+      .select('amount, transaction_type, status')
+      .eq('bank_account_id', bankAccountId),
+  ]);
+
+  if (accountResult.error) throw accountResult.error;
+  if (transactionsResult.error && !isMissingFinanceTable(transactionsResult.error)) {
+    throw transactionsResult.error;
+  }
+
+  const openingBalance = Number(accountResult.data.opening_balance ?? 0);
+  const currentBalance = openingBalance + (transactionsResult.data ?? [])
+    .filter((row) => String(row.status ?? 'POSTED').trim().toUpperCase() !== 'VOID')
+    .reduce((sum, row) => sum + getTransactionBalanceEffect(String(row.transaction_type ?? '')) * Number(row.amount ?? 0), 0);
+
+  const updateResult = await service
+    .from('bank_accounts')
+    .update({ current_balance: currentBalance, updated_at: new Date().toISOString() })
+    .eq('id', bankAccountId);
+  if (updateResult.error) throw updateResult.error;
+  return currentBalance;
 }
 
 async function resolvePostingAccounts(
@@ -945,7 +1090,7 @@ async function loadAccountsOnlyLedgerFallback(
 
     if (!result.error) {
       return (result.data ?? [])
-        .map((row) => row as FinanceRow)
+        .map((row) => row as unknown as FinanceRow)
         .filter((row) => row.is_active !== false)
         .filter((row) => {
           if (!accountCode) return true;

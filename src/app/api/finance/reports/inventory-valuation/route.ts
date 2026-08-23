@@ -16,7 +16,7 @@ export async function GET(request: NextRequest) {
     const warehouseId = searchParams.get('warehouseId') ?? undefined;
     let query = financeService()
       .from('stock_balances')
-      .select('quantity_on_hand, average_cost, avg_cost, batch_number, expiry_date, items(name, unit_cost, item_category_id, item_categories(name)), warehouses(id, name, branch_id, branches(id, name))')
+      .select('quantity_on_hand, quantity_available, average_cost, avg_cost, items(id, name, unit_cost, standard_cost), warehouses(id, name, branch_id)')
       .eq('organization_id', ctx.organizationId);
     if (warehouseId) query = query.eq('warehouse_id', warehouseId);
     const { data, error } = branchId
@@ -27,22 +27,19 @@ export async function GET(request: NextRequest) {
     const rows = (data ?? []).map((row) => {
       const item = mapNestedRow(row.items as Record<string, unknown> | Array<Record<string, unknown>> | null);
       const warehouse = mapNestedRow(row.warehouses as Record<string, unknown> | Array<Record<string, unknown>> | null);
-      const branch = warehouse
-        ? mapNestedRow((warehouse.branches as Record<string, unknown> | Array<Record<string, unknown>> | null) ?? null)
-        : null;
-      const category = mapNestedRow((item?.item_categories as Record<string, unknown> | Array<Record<string, unknown>> | null) ?? null);
       const qty = Number(row.quantity_on_hand ?? 0);
-      const unitCost = Number(row.average_cost ?? row.avg_cost ?? item?.unit_cost ?? 0);
+      const unitCost = Number(row.average_cost ?? row.avg_cost ?? item?.standard_cost ?? item?.unit_cost ?? 0);
 
       return {
-        batchNumber: row.batch_number ?? null,
-        branch: branch?.name ?? null,
-        branchId: branch?.id ?? warehouse?.branch_id ?? null,
-        expiryDate: row.expiry_date ?? null,
+        batchNumber: null,
+        branch: null,
+        branchId: warehouse?.branch_id ?? null,
+        expiryDate: null,
         item: item?.name ?? 'Unknown item',
-        itemCategory: category?.name ?? 'Uncategorised',
+        itemCategory: 'Uncategorised',
         quantity: qty,
         quantityOnHand: qty,
+        quantityAvailable: Number(row.quantity_available ?? qty),
         unitCost,
         valuation: calculateInventoryValuation(qty, unitCost),
         warehouseId: warehouse?.id ?? null,

@@ -1,7 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { badRequest, can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
-import { financeService, mapNestedRow, writeFinanceAuditLog } from '@/lib/finance-server';
+import { ensureFinanceAccountCanBePosted } from '@/lib/finance-foundation-server';
+import {
+  financeService,
+  mapNestedRow,
+  postFinanceDocument,
+  syncBankAccountCurrentBalance,
+  writeFinanceAuditLog,
+} from '@/lib/finance-server';
 
 function getBalanceDirection(transactionType: string) {
   const type = transactionType.toUpperCase();
@@ -53,24 +60,27 @@ export async function POST(request: NextRequest) {
       amount: number;
       bankAccountId: string;
       description?: string;
+      offsetAccountId?: string;
       referenceNumber?: string;
       sourceDocument?: string;
       transactionDate: string;
       transactionType: string;
     };
-    if (!body.bankAccountId || !body.transactionDate || !body.transactionType || Number(body.amount) <= 0) {
-      return badRequest('bankAccountId, transactionDate, transactionType, and a positive amount are required');
+    if (!body.bankAccountId || !body.transactionDate || !body.transactionType || Number(body.amount) <= 0 || !body.offsetAccountId) {
+      return badRequest('bankAccountId, offsetAccountId, transactionDate, transactionType, and a positive amount are required');
     }
 
     const service = financeService();
     const amount = Number(body.amount);
     const { data: bankAccount, error: accountError } = await service
       .from('bank_accounts')
-      .select('id, current_balance')
+      .select('id, account_id, current_balance')
       .eq('id', body.bankAccountId)
       .maybeSingle();
     if (accountError) throw accountError;
     if (!bankAccount) return badRequest('Bank account was not found');
+    if (!bankAccount.account_id) return badRequest('Bank account is missing its linked ledger account.');
+    await ensureFinanceAccountCanBePosted(ctx.organizationId, String(body.offsetAccountId));
 
     const { data, error } = await service
       .from('bank_transactions')
@@ -92,15 +102,49 @@ export async function POST(request: NextRequest) {
       .single();
     if (error) throw error;
 
-    const nextBalance = Number(bankAccount.current_balance ?? 0) + getBalanceDirection(body.transactionType) * amount;
-    const { error: balanceError } = await service
-      .from('bank_accounts')
-      .update({ current_balance: nextBalance })
-      .eq('id', body.bankAccountId);
-    if (balanceError) throw balanceError;
+    const increase = getBalanceDirection(body.transactionType) >= 0;
+    const journal = await postFinanceDocument({
+      createdBy: ctx.userId,
+      description: body.description?.trim() || `Bank ${increase ? 'receipt' : 'payment'}`,
+      journalDate: body.transactionDate,
+      lines: increase
+        ? [
+            {
+              accountId: String(bankAccount.account_id),
+              creditAmount: 0,
+              debitAmount: amount,
+              description: body.description?.trim() || 'Bank receipt',
+            },
+            {
+              accountId: String(body.offsetAccountId),
+              creditAmount: amount,
+              debitAmount: 0,
+              description: body.description?.trim() || 'Offset account',
+            },
+          ]
+        : [
+            {
+              accountId: String(body.offsetAccountId),
+              creditAmount: 0,
+              debitAmount: amount,
+              description: body.description?.trim() || 'Offset account',
+            },
+            {
+              accountId: String(bankAccount.account_id),
+              creditAmount: amount,
+              debitAmount: 0,
+              description: body.description?.trim() || 'Bank payment',
+            },
+          ],
+      organizationId: ctx.organizationId,
+      sourceDocumentId: String(data.id),
+      sourceDocumentType: 'bank_transaction',
+      sourceModule: 'finance',
+    });
+    const nextBalance = await syncBankAccountCurrentBalance(body.bankAccountId);
 
-    await writeFinanceAuditLog('BANK_TRANSACTION_CREATED', data.id, ctx.userId, { amount, nextBalance }, 'bank_transaction');
-    return NextResponse.json(data, { status: 201 });
+    await writeFinanceAuditLog('BANK_TRANSACTION_CREATED', data.id, ctx.userId, { amount, journalId: journal.id, nextBalance }, 'bank_transaction');
+    return NextResponse.json({ ...data, journal, nextBalance }, { status: 201 });
   } catch (err) {
     return serverError(err instanceof Error ? err.message : 'Internal server error');
   }
