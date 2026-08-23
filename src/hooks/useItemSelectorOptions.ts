@@ -12,16 +12,21 @@ export interface ItemSelectorOption {
   categoryName: string | null;
   code: string;
   currentInventoryCost: number | null;
+  hasStockRecord: boolean;
   id: string;
   isActive: boolean;
   itemType: string;
   label: string;
   name: string;
+  quantityAvailable: number | null;
+  quantityOnHand: number | null;
+  quantityReserved: number | null;
   sellingPrice: number | null;
   taxStatus?: string | null;
   unitAbbreviation: string | null;
   unitId: string | null;
   unitName: string | null;
+  warehouseName: string | null;
   warehouseQuantity: number | null;
 }
 

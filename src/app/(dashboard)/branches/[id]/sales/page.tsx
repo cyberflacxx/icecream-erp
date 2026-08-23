@@ -14,7 +14,9 @@ import { PaginationControls } from '@/components/inventory/pagination-controls';
 import { Button } from '@/components/ui/button';
 import { useItemSelectorOptions } from '@/hooks/useItemSelectorOptions';
 import { useSalesMeta } from '@/hooks/sales/useSalesMeta';
+import { buildSalesReceiptPrintUrl } from '@/lib/sales-payments';
 import {
+  useBranchCustomers,
   useBranchSales,
   useBranchStock,
   useCreateBranchExpense,
@@ -61,32 +63,46 @@ export default function BranchSalesPage() {
   const [saleError, setSaleError] = useState<string | null>(null);
   const [expenseError, setExpenseError] = useState<string | null>(null);
   const [shift, setShift] = useState<'DAY' | 'NIGHT'>('DAY');
-  const [paymentMethod, setPaymentMethod] = useState<'CASH' | 'ECOCASH' | 'CARD'>('CASH');
+  const [paymentMethod, setPaymentMethod] = useState<'BANK' | 'CASH' | 'CREDIT'>('CASH');
   const [cashAccountId, setCashAccountId] = useState('');
   const [bankAccountId, setBankAccountId] = useState('');
+  const [branchCustomerId, setBranchCustomerId] = useState('');
   const [paymentReference, setPaymentReference] = useState('');
   const [saleItems, setSaleItems] = useState<SaleLineItem[]>([initialSaleLine]);
   const [expenseCategory, setExpenseCategory] = useState('');
   const [expenseDescription, setExpenseDescription] = useState('');
   const [expenseAmount, setExpenseAmount] = useState('0');
-  const [expensePaymentMethod, setExpensePaymentMethod] = useState<'BANK' | 'CARD' | 'CASH' | 'ECOCASH' | 'PETTY_CASH'>('CASH');
+  const [expensePaymentMethod, setExpensePaymentMethod] = useState<'BANK' | 'CASH' | 'PETTY_CASH'>('CASH');
+  const [expenseCashAccountId, setExpenseCashAccountId] = useState('');
+  const [expenseBankAccountId, setExpenseBankAccountId] = useState('');
+  const [expenseReference, setExpenseReference] = useState('');
 
   const salesQuery = useBranchSales(branchId, filters);
   const stockQuery = useBranchStock(branchId, {
     page: 1,
     pageSize: 100
   });
+  const branchCustomersQuery = useBranchCustomers(branchId);
+  const stockRows = useMemo(() => stockQuery.data?.data ?? [], [stockQuery.data?.data]);
+  const resolvedWarehouse = useMemo(() => {
+    const warehouseEntries = stockRows
+      .map((row) => row.warehouse)
+      .filter((warehouse): warehouse is NonNullable<(typeof stockRows)[number]['warehouse']> => Boolean(warehouse?.id))
+      .map((warehouse) => [warehouse.id, warehouse] as const);
+    const warehouses = [...new Map(warehouseEntries).values()];
+    return warehouses[0] ?? null;
+  }, [stockRows]);
   const itemOptionsQuery = useItemSelectorOptions({
     branchId,
     includePrice: true,
     includeStock: true,
     itemType: ['FINISHED_GOOD', 'FINISHED'],
     limit: 250,
+    warehouseId: resolvedWarehouse?.id ?? null,
   });
   const createSale = useCreateBranchSale(branchId);
   const createExpense = useCreateBranchExpense(branchId);
   const salesMetaQuery = useSalesMeta();
-  const stockRows = stockQuery.data?.data ?? [];
   const stockOptions = useMemo(() => itemOptionsQuery.data ?? [], [itemOptionsQuery.data]);
   const stockOptionByItemId = useMemo(
     () => new Map(stockOptions.map((option) => [option.id, option])),
@@ -102,6 +118,7 @@ export default function BranchSalesPage() {
   );
   const sales = salesQuery.data?.data ?? [];
   const pagination = salesQuery.data?.pagination;
+  const branchCustomers = branchCustomersQuery.data ?? [];
   const grandTotal = useMemo(
     () =>
       saleItems.reduce((sum, item) => {
@@ -121,10 +138,19 @@ export default function BranchSalesPage() {
       return;
     }
 
-    if (!bankAccountId && availableBankAccounts.length > 0) {
+    if (paymentMethod === 'BANK' && !bankAccountId && availableBankAccounts.length > 0) {
       setBankAccountId(availableBankAccounts[0].id);
     }
   }, [availableBankAccounts, availableCashAccounts, bankAccountId, cashAccountId, paymentMethod]);
+
+  useEffect(() => {
+    if ((expensePaymentMethod === 'CASH' || expensePaymentMethod === 'PETTY_CASH') && !expenseCashAccountId && availableCashAccounts.length > 0) {
+      setExpenseCashAccountId(availableCashAccounts[0].id);
+    }
+    if (expensePaymentMethod === 'BANK' && !expenseBankAccountId && availableBankAccounts.length > 0) {
+      setExpenseBankAccountId(availableBankAccounts[0].id);
+    }
+  }, [availableBankAccounts, availableCashAccounts, expenseBankAccountId, expenseCashAccountId, expensePaymentMethod]);
 
   async function handleSaleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -148,20 +174,36 @@ export default function BranchSalesPage() {
       return;
     }
 
+    const quantityViolation = normalizedItems.find((item) => {
+      const selectedOption = stockOptionByItemId.get(item.itemId);
+      const availableQuantity = Number(selectedOption?.quantityAvailable ?? selectedOption?.warehouseQuantity ?? selectedOption?.branchQuantity ?? 0);
+      return item.quantity > availableQuantity;
+    });
+    if (quantityViolation) {
+      setSaleError('One or more line quantities exceed available warehouse stock.');
+      return;
+    }
+
     if (paymentMethod === 'CASH' && !cashAccountId) {
       setSaleError('Select the cash account that should receive this branch sale.');
       return;
     }
 
-    if (paymentMethod !== 'CASH' && !bankAccountId) {
+    if (paymentMethod === 'BANK' && !bankAccountId) {
       setSaleError('Select the bank account that should receive this branch sale.');
       return;
     }
 
+    if (paymentMethod === 'CREDIT' && !branchCustomerId) {
+      setSaleError('Select the branch customer for this credit sale.');
+      return;
+    }
+
     try {
-      await createSale.mutateAsync({
-        bankAccountId: paymentMethod === 'CASH' ? null : bankAccountId,
+      const createdSale = await createSale.mutateAsync({
+        bankAccountId: paymentMethod === 'BANK' ? bankAccountId : null,
         cashAccountId: paymentMethod === 'CASH' ? cashAccountId : null,
+        customerId: paymentMethod === 'CREDIT' ? branchCustomerId : null,
         items: normalizedItems,
         paymentMethod,
         paymentReference: paymentReference || null,
@@ -169,8 +211,13 @@ export default function BranchSalesPage() {
         shift
       });
       setSaleDrawerOpen(false);
+      setBranchCustomerId('');
       setSaleItems([initialSaleLine]);
       setSaleError(null);
+      const saleId = String((createdSale as { id?: string } | null)?.id ?? '');
+      if (saleId) {
+        window.open(buildSalesReceiptPrintUrl({ branchSaleId: saleId }, { autoPrint: true }), '_blank', 'noopener,noreferrer');
+      }
     } catch (error) {
       setSaleError(error instanceof Error ? error.message : 'Failed to save branch sale.');
     }
@@ -179,18 +226,31 @@ export default function BranchSalesPage() {
   async function handleExpenseSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
+    if (expensePaymentMethod === 'BANK' && !expenseBankAccountId) {
+      setExpenseError('Select the bank account for this branch expense.');
+      return;
+    }
+    if ((expensePaymentMethod === 'CASH' || expensePaymentMethod === 'PETTY_CASH') && !expenseCashAccountId) {
+      setExpenseError('Select the cash account for this branch expense.');
+      return;
+    }
+
     try {
       await createExpense.mutateAsync({
         amount: Number(expenseAmount),
+        bankAccountId: expensePaymentMethod === 'BANK' ? expenseBankAccountId : null,
         category: expenseCategory,
+        cashAccountId: expensePaymentMethod === 'BANK' ? null : expenseCashAccountId,
         description: expenseDescription,
         expenseDate: formatToday(),
-        paymentMethod: expensePaymentMethod
+        paymentMethod: expensePaymentMethod,
+        referenceNumber: expenseReference || null,
       });
       setExpenseDrawerOpen(false);
       setExpenseCategory('');
       setExpenseDescription('');
       setExpenseAmount('0');
+      setExpenseReference('');
       setExpenseError(null);
     } catch (error) {
       setExpenseError(error instanceof Error ? error.message : 'Failed to save branch expense.');
@@ -246,8 +306,8 @@ export default function BranchSalesPage() {
             label: 'Payment Method',
             options: [
               { label: 'Cash', value: 'CASH' },
-              { label: 'EcoCash', value: 'ECOCASH' },
-              { label: 'Card', value: 'CARD' }
+              { label: 'Bank', value: 'BANK' },
+              { label: 'Credit', value: 'CREDIT' }
             ],
             type: 'select',
             value: filters.paymentMethod
@@ -296,7 +356,9 @@ export default function BranchSalesPage() {
             header: 'Actions',
             render: (row) => (
               <Button asChild size="sm" variant="outline">
-                <Link href={`/branches/${branchId}/sales?sale=${row.id}`}>View</Link>
+                <Link href={buildSalesReceiptPrintUrl({ branchSaleId: row.id }, { autoPrint: true })} target="_blank">
+                  Print Receipt
+                </Link>
               </Button>
             )
           }
@@ -398,14 +460,14 @@ export default function BranchSalesPage() {
               <select
                 value={paymentMethod}
                 onChange={(event) => {
-                  setPaymentMethod(event.target.value as 'CASH' | 'ECOCASH' | 'CARD');
+                  setPaymentMethod(event.target.value as 'BANK' | 'CASH' | 'CREDIT');
                   setSaleError(null);
                 }}
                 className="surface-input-soft"
               >
                 <option value="CASH">CASH</option>
-                <option value="ECOCASH">ECOCASH</option>
-                <option value="CARD">CARD</option>
+                <option value="BANK">BANK</option>
+                <option value="CREDIT">CREDIT</option>
               </select>
             </label>
           </div>
@@ -427,7 +489,7 @@ export default function BranchSalesPage() {
                 ))}
               </select>
             </label>
-          ) : (
+          ) : paymentMethod === 'BANK' ? (
             <label className="space-y-2 text-sm text-muted">
               <span>Bank Account</span>
               <select
@@ -442,6 +504,24 @@ export default function BranchSalesPage() {
                     {account.bankName ? `${account.bankName} - ` : ''}
                     {account.accountName}
                     {account.accountNumber ? ` (${account.accountNumber})` : ''}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : (
+            <label className="space-y-2 text-sm text-muted">
+              <span>Branch Customer</span>
+              <select
+                value={branchCustomerId}
+                onChange={(event) => setBranchCustomerId(event.target.value)}
+                className="surface-input-soft"
+                required
+              >
+                <option value="">Select branch customer</option>
+                {branchCustomers.map((customer) => (
+                  <option key={customer.id} value={customer.id}>
+                    {customer.customer_name}
+                    {customer.credit_allowed ? ` | Credit ${currencyFormatter.format(customer.credit_limit)}` : ''}
                   </option>
                 ))}
               </select>
@@ -542,14 +622,24 @@ export default function BranchSalesPage() {
                 <div className="text-sm text-muted sm:col-span-4">
                   {stockOptionByItemId.get(line.itemId) ? (
                     <span className="mr-3">
-                      Available: {stockOptionByItemId.get(line.itemId)?.branchQuantity?.toFixed(3) ?? '0.000'}
+                      {stockOptionByItemId.get(line.itemId)?.hasStockRecord
+                        ? `On Hand ${Number(stockOptionByItemId.get(line.itemId)?.quantityOnHand ?? 0).toFixed(3)} | Reserved ${Number(stockOptionByItemId.get(line.itemId)?.quantityReserved ?? 0).toFixed(3)} | Available ${Number(stockOptionByItemId.get(line.itemId)?.quantityAvailable ?? 0).toFixed(3)}`
+                        : 'No stock record'}
                     </span>
+                  ) : null}
+                  {stockOptionByItemId.get(line.itemId)?.warehouseName ? (
+                    <span className="mr-3">Warehouse: {stockOptionByItemId.get(line.itemId)?.warehouseName}</span>
                   ) : null}
                   Line Total:{' '}
                   <span className="font-semibold text-brown">
                     {currencyFormatter.format((Number(line.quantity) || 0) * (Number(line.unitPrice) || 0))}
                   </span>
                 </div>
+                {line.itemId && Number(line.quantity || 0) > Number(stockOptionByItemId.get(line.itemId)?.quantityAvailable ?? 0) ? (
+                  <div className="text-sm text-error sm:col-span-4">
+                    Quantity exceeds available stock for the selling warehouse.
+                  </div>
+                ) : null}
                 {saleItems.length > 1 ? (
                   <Button
                     type="button"
@@ -630,18 +720,63 @@ export default function BranchSalesPage() {
               <select
                 value={expensePaymentMethod}
                 onChange={(event) =>
-                  setExpensePaymentMethod(event.target.value as 'BANK' | 'CARD' | 'CASH' | 'ECOCASH' | 'PETTY_CASH')
+                  setExpensePaymentMethod(event.target.value as 'BANK' | 'CASH' | 'PETTY_CASH')
                 }
                 className="surface-input-soft"
               >
                 <option value="CASH">CASH</option>
                 <option value="BANK">BANK</option>
                 <option value="PETTY_CASH">PETTY CASH</option>
-                <option value="ECOCASH">ECOCASH</option>
-                <option value="CARD">CARD</option>
               </select>
             </label>
           </div>
+
+          {expensePaymentMethod === 'BANK' ? (
+            <label className="space-y-2 text-sm text-muted">
+              <span>Bank Account</span>
+              <select
+                value={expenseBankAccountId}
+                onChange={(event) => setExpenseBankAccountId(event.target.value)}
+                className="surface-input-soft"
+                required
+              >
+                <option value="">Select bank account</option>
+                {availableBankAccounts.map((account) => (
+                  <option key={account.id} value={account.id}>
+                    {account.bankName ? `${account.bankName} - ` : ''}
+                    {account.accountName}
+                    {account.accountNumber ? ` (${account.accountNumber})` : ''}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : (
+            <label className="space-y-2 text-sm text-muted">
+              <span>{expensePaymentMethod === 'PETTY_CASH' ? 'Petty Cash Account' : 'Cash Account'}</span>
+              <select
+                value={expenseCashAccountId}
+                onChange={(event) => setExpenseCashAccountId(event.target.value)}
+                className="surface-input-soft"
+                required
+              >
+                <option value="">Select cash account</option>
+                {availableCashAccounts.map((account) => (
+                  <option key={account.id} value={account.id}>
+                    {account.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+
+          <label className="space-y-2 text-sm text-muted">
+            <span>Reference</span>
+            <input
+              value={expenseReference}
+              onChange={(event) => setExpenseReference(event.target.value)}
+              className="surface-input-soft"
+            />
+          </label>
 
           <div className="flex justify-end gap-3">
             <Button type="button" variant="outline" onClick={() => setExpenseDrawerOpen(false)}>

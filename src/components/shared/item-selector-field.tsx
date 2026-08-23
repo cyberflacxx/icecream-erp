@@ -6,13 +6,22 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ItemSelectorOption } from '@/hooks/useItemSelectorOptions';
 
 function formatQuantity(value: number | null) {
-  if (value === null || !Number.isFinite(value)) return 'n/a';
+  if (value === null || !Number.isFinite(value)) return '0.000';
   return value.toFixed(3);
 }
 
 function formatMoney(value: number | null) {
   if (value === null || !Number.isFinite(value)) return 'n/a';
   return value.toFixed(2);
+}
+
+function formatStockSummary(option: ItemSelectorOption) {
+  if (!option.hasStockRecord) return 'No stock record';
+  return `On Hand ${formatQuantity(option.quantityOnHand)} | Reserved ${formatQuantity(option.quantityReserved)} | Available ${formatQuantity(option.quantityAvailable)}`;
+}
+
+function formatCostSummary(option: ItemSelectorOption) {
+  return option.currentInventoryCost === null ? 'Cost not configured' : `Cost ${formatMoney(option.currentInventoryCost)}`;
 }
 
 function optionDisplayValue(option: ItemSelectorOption) {
@@ -88,7 +97,7 @@ export function ItemSelectorField({
   }, [inputValue, options]);
 
   const detailText = selectedOption
-    ? `${selectedOption.code} | ${selectedOption.unitAbbreviation ?? selectedOption.unitName ?? 'Unit'} | Stock ${formatQuantity(selectedOption.warehouseQuantity ?? selectedOption.branchQuantity)} | Cost ${formatMoney(selectedOption.currentInventoryCost)} | Price ${formatMoney(selectedOption.sellingPrice)}`
+    ? `${selectedOption.code} | ${selectedOption.unitAbbreviation ?? selectedOption.unitName ?? 'Unit'} | ${selectedOption.warehouseName ? `Warehouse ${selectedOption.warehouseName} | ` : ''}${formatStockSummary(selectedOption)} | ${formatCostSummary(selectedOption)} | Price ${formatMoney(selectedOption.sellingPrice)}`
     : null;
 
   const helperContent = (() => {
@@ -205,9 +214,9 @@ export function ItemSelectorField({
                         </div>
                         <div className="grid w-full gap-1 text-xs text-[color:var(--app-muted)] sm:grid-cols-2">
                           <span>{option.unitAbbreviation ?? option.unitName ?? 'Unit'}</span>
-                          <span>{option.categoryName ?? 'Uncategorized'}</span>
-                          <span>Stock {formatQuantity(option.warehouseQuantity ?? option.branchQuantity)}</span>
-                          <span>Cost {formatMoney(option.currentInventoryCost)}</span>
+                          <span>{option.warehouseName ?? option.categoryName ?? 'Uncategorized'}</span>
+                          <span>{formatStockSummary(option)}</span>
+                          <span>{formatCostSummary(option)}</span>
                         </div>
                       </button>
                     );

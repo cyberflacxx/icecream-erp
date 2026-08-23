@@ -18,6 +18,7 @@ export type ResolvedSalesItemPricing = {
   availableWarehouseStock: number | null;
   code: string;
   currentInventoryCost: number | null;
+  inventoryCostSource: string | null;
   id: string;
   isActive: boolean;
   itemType: string;
@@ -55,6 +56,211 @@ function pickPositiveCost(...values: unknown[]) {
 function normalizeCode(value: unknown) {
   const normalized = String(value ?? '').trim().toUpperCase();
   return normalized || null;
+}
+
+type InventoryUnitCostResolution = {
+  cost: number | null;
+  source: 'inventory_batch' | 'item_master' | 'production_receipt' | 'stock_balance_average' | null;
+};
+
+function isCompatibilityFailure(error: unknown, table: string) {
+  const message = error instanceof Error ? error.message : String((error as { message?: unknown } | null)?.message ?? error ?? '');
+  return (
+    message.includes(`Could not find the table 'icecream_erp.${table}'`) ||
+    message.includes(`column ${table}.`) ||
+    message.includes('Could not find a relationship between')
+  );
+}
+
+export async function resolveInventoryUnitCost(input: {
+  branchId?: string | null;
+  itemId: string;
+  organizationId: string;
+  service: SalesServiceLike;
+  warehouseId?: string | null;
+}) {
+  const resolved = await resolveInventoryUnitCosts({
+    branchId: input.branchId,
+    itemIds: [input.itemId],
+    organizationId: input.organizationId,
+    service: input.service,
+    warehouseId: input.warehouseId,
+  });
+
+  return resolved.get(input.itemId) ?? { cost: null, source: null };
+}
+
+export async function resolveInventoryUnitCosts(input: {
+  branchId?: string | null;
+  itemIds: string[];
+  organizationId: string;
+  service: SalesServiceLike;
+  warehouseId?: string | null;
+}) {
+  const itemIds = [...new Set(input.itemIds.map((value) => String(value)).filter(Boolean))];
+  if (itemIds.length === 0) {
+    return new Map<string, InventoryUnitCostResolution>();
+  }
+
+  const branchId = input.branchId ? String(input.branchId) : null;
+  const warehouseId = input.warehouseId ? String(input.warehouseId) : null;
+  const itemResult = await input.service
+    .from('items')
+    .select('id, unit_cost, standard_cost')
+    .eq('organization_id', input.organizationId)
+    .in('id', itemIds);
+  if (itemResult.error) throw itemResult.error;
+
+  const stockResult = await input.service
+    .from('stock_balances')
+    .select('item_id, warehouse_id, average_cost, avg_cost')
+    .in('item_id', itemIds);
+  if (stockResult.error) throw stockResult.error;
+
+  let inventoryBatchRows: Array<Record<string, unknown>> = [];
+  const inventoryBatchResult = await input.service
+    .from('inventory_batches')
+    .select('item_id, warehouse_id, unit_cost, quantity_remaining, created_at')
+    .in('item_id', itemIds);
+  if (inventoryBatchResult.error) {
+    if (!isCompatibilityFailure(inventoryBatchResult.error, 'inventory_batches')) {
+      throw inventoryBatchResult.error;
+    }
+  } else {
+    inventoryBatchRows = (inventoryBatchResult.data ?? []) as Array<Record<string, unknown>>;
+  }
+
+  let productionReceiptRows: Array<Record<string, unknown>> = [];
+  const productionReceiptResult = await input.service
+    .from('production_receipt_lines')
+    .select(
+      'finished_product_id, unit_production_cost, current_completed_quantity, total_production_cost, production_receipts!inner(receipt_date, branch_id, finished_goods_warehouse_id)',
+    )
+    .in('finished_product_id', itemIds);
+  if (productionReceiptResult.error) {
+    if (!isCompatibilityFailure(productionReceiptResult.error, 'production_receipt_lines')) {
+      throw productionReceiptResult.error;
+    }
+  } else {
+    productionReceiptRows = (productionReceiptResult.data ?? []) as Array<Record<string, unknown>>;
+  }
+
+  const warehouseIds = [
+    ...new Set(
+      [
+        ...((stockResult.data ?? []) as Array<Record<string, unknown>>).map((row) => String(row.warehouse_id ?? '')).filter(Boolean),
+        ...inventoryBatchRows.map((row) => String(row.warehouse_id ?? '')).filter(Boolean),
+      ],
+    ),
+  ];
+  const warehouseBranchById = new Map<string, string | null>();
+  if (warehouseIds.length > 0) {
+    const warehousesResult = await input.service.from('warehouses').select('id, branch_id').in('id', warehouseIds);
+    if (warehousesResult.error) throw warehousesResult.error;
+    for (const row of (warehousesResult.data ?? []) as Array<Record<string, unknown>>) {
+      warehouseBranchById.set(String(row.id ?? ''), row.branch_id ? String(row.branch_id) : null);
+    }
+  }
+
+  const itemCostById = new Map<string, number | null>();
+  for (const row of (itemResult.data ?? []) as Array<Record<string, unknown>>) {
+    itemCostById.set(String(row.id ?? ''), pickPositiveCost(row.unit_cost, row.standard_cost));
+  }
+
+  const resolutionByItemId = new Map<string, InventoryUnitCostResolution>();
+  for (const itemId of itemIds) {
+    resolutionByItemId.set(itemId, { cost: null, source: null });
+  }
+
+  for (const row of (stockResult.data ?? []) as Array<Record<string, unknown>>) {
+    const itemId = String(row.item_id ?? '');
+    const current = resolutionByItemId.get(itemId);
+    if (!current || current.cost !== null) continue;
+
+    const rowWarehouseId = String(row.warehouse_id ?? '');
+    const rowBranchId = warehouseBranchById.get(rowWarehouseId) ?? null;
+    const inScope =
+      (warehouseId && rowWarehouseId === warehouseId) ||
+      (!warehouseId && branchId && rowBranchId === branchId) ||
+      (!warehouseId && !branchId);
+    if (!inScope) continue;
+
+    const averageCost = pickPositiveCost(row.average_cost, row.avg_cost);
+    if (averageCost !== null) {
+      resolutionByItemId.set(itemId, { cost: averageCost, source: 'stock_balance_average' });
+    }
+  }
+
+  const sortedInventoryBatchRows = inventoryBatchRows
+    .filter((row) => {
+      const remaining = toOptionalNumber(row.quantity_remaining);
+      return remaining === null || remaining > 0;
+    })
+    .sort((left, right) => String(right.created_at ?? '').localeCompare(String(left.created_at ?? '')));
+
+  for (const row of sortedInventoryBatchRows) {
+    const itemId = String(row.item_id ?? '');
+    const current = resolutionByItemId.get(itemId);
+    if (!current || current.cost !== null) continue;
+
+    const rowWarehouseId = String(row.warehouse_id ?? '');
+    const rowBranchId = warehouseBranchById.get(rowWarehouseId) ?? null;
+    const inScope =
+      (warehouseId && rowWarehouseId === warehouseId) ||
+      (!warehouseId && branchId && rowBranchId === branchId) ||
+      (!warehouseId && !branchId);
+    if (!inScope) continue;
+
+    const batchCost = pickPositiveCost(row.unit_cost);
+    if (batchCost !== null) {
+      resolutionByItemId.set(itemId, { cost: batchCost, source: 'inventory_batch' });
+    }
+  }
+
+  const sortedProductionReceiptRows = productionReceiptRows.sort((left, right) => {
+    const leftReceipt = Array.isArray(left.production_receipts) ? left.production_receipts[0] : left.production_receipts;
+    const rightReceipt = Array.isArray(right.production_receipts) ? right.production_receipts[0] : right.production_receipts;
+    return String((rightReceipt as Record<string, unknown> | null)?.receipt_date ?? '').localeCompare(
+      String((leftReceipt as Record<string, unknown> | null)?.receipt_date ?? ''),
+    );
+  });
+
+  for (const row of sortedProductionReceiptRows) {
+    const itemId = String(row.finished_product_id ?? '');
+    const current = resolutionByItemId.get(itemId);
+    if (!current || current.cost !== null) continue;
+
+    const receipt = Array.isArray(row.production_receipts) ? row.production_receipts[0] : row.production_receipts;
+    const receiptRow = (receipt ?? null) as Record<string, unknown> | null;
+    const receiptWarehouseId = receiptRow?.finished_goods_warehouse_id ? String(receiptRow.finished_goods_warehouse_id) : null;
+    const receiptBranchId = receiptRow?.branch_id ? String(receiptRow.branch_id) : null;
+    const inScope =
+      (warehouseId && receiptWarehouseId === warehouseId) ||
+      (!warehouseId && branchId && receiptBranchId === branchId) ||
+      (!warehouseId && !branchId);
+    if (!inScope) continue;
+
+    const productionCost = pickPositiveCost(
+      row.unit_production_cost,
+      toOptionalNumber(row.current_completed_quantity) && toOptionalNumber(row.total_production_cost)
+        ? Number(row.total_production_cost) / Math.max(Number(row.current_completed_quantity), 1)
+        : null,
+    );
+    if (productionCost !== null) {
+      resolutionByItemId.set(itemId, { cost: productionCost, source: 'production_receipt' });
+    }
+  }
+
+  for (const itemId of itemIds) {
+    const current = resolutionByItemId.get(itemId);
+    if (!current || current.cost !== null) continue;
+    const itemCost = itemCostById.get(itemId) ?? null;
+    if (itemCost !== null) {
+      resolutionByItemId.set(itemId, { cost: itemCost, source: 'item_master' });
+    }
+  }
+
+  return resolutionByItemId;
 }
 
 function buildPricePriority(input: {
@@ -164,7 +370,7 @@ export async function loadResolvedSalesItemPricing(input: {
   const warehouseId = input.warehouseId ? String(input.warehouseId) : null;
   const documentDate = input.documentDate ? String(input.documentDate) : new Date().toISOString().slice(0, 10);
 
-  const [itemsResult, pricesResult, stockResult, branchResult] = await Promise.all([
+  const [itemsResult, pricesResult, stockResult, branchResult, resolvedInventoryCosts] = await Promise.all([
     input.service
       .from('items')
       .select('id, organization_id, code, name, type, item_type, unit_id, unit_of_measure_id, unit_cost, standard_cost, selling_price, is_active')
@@ -181,6 +387,13 @@ export async function loadResolvedSalesItemPricing(input: {
     branchId
       ? input.service.from('branches').select('id, code').eq('organization_id', input.organizationId).eq('id', branchId).maybeSingle()
       : Promise.resolve({ data: null, error: null }),
+    resolveInventoryUnitCosts({
+      branchId,
+      itemIds: input.itemIds,
+      organizationId: input.organizationId,
+      service: input.service,
+      warehouseId,
+    }),
   ]);
 
   if (itemsResult.error) throw itemsResult.error;
@@ -234,7 +447,7 @@ export async function loadResolvedSalesItemPricing(input: {
     stockByItem.set(itemId, {
       availableBranchStock: branchId ? 0 : null,
       availableWarehouseStock: warehouseId ? 0 : null,
-      currentInventoryCost: null,
+      currentInventoryCost: resolvedInventoryCosts.get(itemId)?.cost ?? null,
     });
   }
 
@@ -259,7 +472,7 @@ export async function loadResolvedSalesItemPricing(input: {
         (warehouseId && rowWarehouseId === warehouseId) ||
         (!warehouseId && branchId && rowBranchId === branchId) ||
         (!warehouseId && !branchId);
-      if (useCost && bucket.currentInventoryCost === null) {
+      if (useCost && resolvedInventoryCosts.get(itemId)?.source === 'stock_balance_average') {
         bucket.currentInventoryCost = averageCost;
       }
     }
@@ -273,13 +486,14 @@ export async function loadResolvedSalesItemPricing(input: {
     const unit = unitId ? unitById.get(unitId) ?? null : null;
     const resolvedPrice = pickResolvedPrice(id, documentDate, (pricesResult.data ?? []) as Array<Record<string, unknown>>, pricePriority);
     const fallbackPrice = toOptionalNumber(row.selling_price);
-    const fallbackCost = pickPositiveCost(row.unit_cost, row.standard_cost);
+    const resolvedCost = resolvedInventoryCosts.get(id) ?? { cost: null, source: null };
 
     resolved.set(id, {
       availableBranchStock: stock?.availableBranchStock ?? null,
       availableWarehouseStock: stock?.availableWarehouseStock ?? null,
       code: String(row.code ?? ''),
-      currentInventoryCost: stock?.currentInventoryCost ?? fallbackCost,
+      currentInventoryCost: stock?.currentInventoryCost ?? resolvedCost.cost,
+      inventoryCostSource: resolvedCost.source,
       id,
       isActive: row.is_active !== false,
       itemType: String(row.item_type ?? row.type ?? ''),

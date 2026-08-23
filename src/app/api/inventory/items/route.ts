@@ -459,7 +459,7 @@ export async function GET(request: NextRequest) {
 
     let warehouseQuery = service
       .from('warehouses')
-      .select('id, branch_id')
+      .select('id, branch_id, name')
       .eq('organization_id', ctx.organizationId)
       .eq('is_active', true);
 
@@ -588,7 +588,9 @@ export async function GET(request: NextRequest) {
         });
       }
 
-      const batchRows = (selectorResult.data ?? []).filter((row) => matchesRequestedItemTypes(row, typeFilters));
+      const batchRows = ((selectorResult.data ?? []) as unknown as Array<Record<string, unknown>>).filter((row) =>
+        matchesRequestedItemTypes(row, typeFilters),
+      );
       selectorRows.push(...batchRows);
 
       if ((selectorResult.data?.length ?? 0) < selectorFetchSize) {
@@ -612,7 +614,7 @@ export async function GET(request: NextRequest) {
       includeStock || includeCost
         ? service
             .from('stock_balances')
-            .select('item_id, warehouse_id, quantity_on_hand, quantity_available, average_cost, avg_cost')
+            .select('item_id, warehouse_id, quantity_on_hand, quantity_available, quantity_reserved, average_cost, avg_cost')
             .in('item_id', limitedSelectorRows.map((row) => String(row.id)))
         : Promise.resolve({ data: [], error: null }),
     ]);
@@ -728,6 +730,7 @@ export async function GET(request: NextRequest) {
         {
           branchId: row.branch_id ? String(row.branch_id) : null,
           id: String(row.id),
+          name: row.name ? String(row.name) : null,
         },
       ]),
     );
@@ -788,6 +791,9 @@ export async function GET(request: NextRequest) {
             : null,
           quantityOnHand: Number.isFinite(Number(row.quantity_on_hand))
             ? Number(row.quantity_on_hand)
+            : null,
+          quantityReserved: Number.isFinite(Number(row.quantity_reserved))
+            ? Number(row.quantity_reserved)
             : null,
           warehouseId: String(row.warehouse_id ?? ''),
         })),

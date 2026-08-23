@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { apiServerError, badRequest, can, forbidden, getAuthContext, unauthorized } from '@/lib/api-auth';
 import { ensureBranchScope, requireOpenShift, writeBranchAuditLog } from '@/lib/branches-server';
 import { findOpenFiscalPeriod, resolveFinanceCostCentreCode, resolveFinancePostingAccount } from '@/lib/finance-foundation-server';
+import { createLinkedFinanceTransaction, financeErrorMessage, postFinanceDocument } from '@/lib/finance-server';
 import { isMissingColumnError } from '@/lib/postgrest-compat';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
@@ -11,6 +12,56 @@ function paymentMappingKey(paymentMethod: string) {
   if (normalized === 'BANK') return { fallbackAccountCode: '1120', key: 'BANK_ACCOUNT' };
   if (normalized === 'PETTY_CASH') return { fallbackAccountCode: '1130', key: 'PETTY_CASH_ACCOUNT' };
   return { fallbackAccountCode: '1110', key: 'CASH_ACCOUNT' };
+}
+
+function normalizeBranchExpensePaymentMethod(paymentMethod: string) {
+  const normalized = String(paymentMethod ?? '').trim().toUpperCase();
+  if (normalized === 'CARD' || normalized === 'ECOCASH' || normalized === 'BANK_TRANSFER') {
+    return 'BANK';
+  }
+  return normalized;
+}
+
+async function resolveSelectedTenderAccount(input: {
+  bankAccountId?: string | null;
+  cashAccountId?: string | null;
+  organizationId: string;
+  paymentMethod: string;
+  service: ReturnType<typeof createServiceRoleClient>;
+}) {
+  if (input.paymentMethod === 'BANK') {
+    const bankResult = await input.service
+      .schema('icecream_erp')
+      .from('bank_accounts')
+      .select('id, account_id, is_active')
+      .eq('organization_id', input.organizationId)
+      .eq('id', String(input.bankAccountId ?? ''))
+      .maybeSingle();
+    if (bankResult.error) throw bankResult.error;
+    if (!bankResult.data) throw new Error('The selected bank account was not found.');
+    if (bankResult.data.is_active === false) throw new Error('The selected bank account is inactive.');
+    if (!bankResult.data.account_id) throw new Error('The selected bank account is missing its linked ledger account.');
+    return {
+      accountId: String(bankResult.data.account_id),
+      selectedAccountId: String(bankResult.data.id),
+    };
+  }
+
+  const cashResult = await input.service
+    .schema('icecream_erp')
+    .from('cash_accounts')
+    .select('id, account_id, is_active')
+    .eq('organization_id', input.organizationId)
+    .eq('id', String(input.cashAccountId ?? ''))
+    .maybeSingle();
+  if (cashResult.error) throw cashResult.error;
+  if (!cashResult.data) throw new Error('The selected cash account was not found.');
+  if (cashResult.data.is_active === false) throw new Error('The selected cash account is inactive.');
+  if (!cashResult.data.account_id) throw new Error('The selected cash account is missing its linked ledger account.');
+  return {
+    accountId: String(cashResult.data.account_id),
+    selectedAccountId: String(cashResult.data.id),
+  };
 }
 
 export async function GET(
@@ -101,16 +152,27 @@ export async function POST(
 
     const body = await request.json() as {
       amount: number;
+      bankAccountId?: string;
       category: string;
+      cashAccountId?: string;
       description: string;
       expenseDate?: string;
       paymentMethod: string;
+      referenceNumber?: string;
       receiptUrl?: string;
       shift?: string;
     };
 
     if (!body.amount || !body.category || !body.description || !body.paymentMethod) {
       return badRequest('amount, category, description, paymentMethod are required');
+    }
+
+    const normalizedPaymentMethod = normalizeBranchExpensePaymentMethod(body.paymentMethod);
+    if (normalizedPaymentMethod === 'BANK' && !String(body.bankAccountId ?? '').trim()) {
+      return badRequest('bankAccountId is required for bank branch expenses');
+    }
+    if ((normalizedPaymentMethod === 'CASH' || normalizedPaymentMethod === 'PETTY_CASH') && !String(body.cashAccountId ?? '').trim()) {
+      return badRequest('cashAccountId is required for cash branch expenses');
     }
 
     const expenseDate = body.expenseDate ?? new Date().toISOString().slice(0, 10);
@@ -138,7 +200,7 @@ export async function POST(
     }
 
     try {
-      const mapping = paymentMappingKey(body.paymentMethod);
+      const mapping = paymentMappingKey(normalizedPaymentMethod);
       await Promise.all([
         findOpenFiscalPeriod(ctx.organizationId, expenseDate),
         resolveFinancePostingAccount(ctx.organizationId, mapping.key, {
@@ -215,15 +277,80 @@ export async function POST(
       throw expenseResult.error ?? new Error('Failed to record branch expense.');
     }
 
+    let journal: Awaited<ReturnType<typeof postFinanceDocument>> | null = null;
+    let linkedTransaction: Awaited<ReturnType<typeof createLinkedFinanceTransaction>> | null = null;
+    try {
+      const paymentAccount = await resolveSelectedTenderAccount({
+        bankAccountId: body.bankAccountId ?? null,
+        cashAccountId: body.cashAccountId ?? null,
+        organizationId: ctx.organizationId,
+        paymentMethod: normalizedPaymentMethod,
+        service,
+      });
+      const expenseAccount = await resolveFinancePostingAccount(ctx.organizationId, 'DEFAULT_BRANCH_EXPENSE', {
+        branchId,
+        fallbackAccountCode: '6100',
+      });
+
+      journal = await postFinanceDocument({
+        branchId,
+        createdBy: ctx.userId,
+        description: `Branch expense ${body.category}`,
+        journalDate: expenseDate,
+        lines: [
+          {
+            accountId: expenseAccount.id,
+            branchId,
+            creditAmount: 0,
+            debitAmount: Number(body.amount),
+            description: body.description,
+          },
+          {
+            accountId: paymentAccount.accountId,
+            branchId,
+            creditAmount: Number(body.amount),
+            debitAmount: 0,
+            description: body.description,
+          },
+        ],
+        organizationId: ctx.organizationId,
+        sourceDocumentId: String(expenseResult.data.id),
+        sourceDocumentType: 'branch_expense',
+        sourceModule: 'branches',
+      });
+
+      linkedTransaction = await createLinkedFinanceTransaction({
+        amount: Number(body.amount),
+        createdBy: ctx.userId,
+        description: body.description,
+        direction: 'OUT',
+        organizationId: ctx.organizationId,
+        paymentMethod: normalizedPaymentMethod === 'BANK' ? 'BANK' : normalizedPaymentMethod === 'PETTY_CASH' ? 'PETTY_CASH' : 'CASH',
+        referenceNumber: body.referenceNumber ?? null,
+        selectedAccountId: paymentAccount.selectedAccountId,
+        sourceDocument: journal.sourceReference,
+        transactionDate: expenseDate,
+      });
+    } catch (postingError) {
+      return badRequest(financeErrorMessage(postingError) || 'Failed to post branch expense to finance.');
+    }
+
     await writeBranchAuditLog(
       'BRANCH_EXPENSE_CREATED',
       String(expenseResult.data.id),
       ctx.userId,
-      { amount: body.amount, branchId, category: body.category },
+      {
+        amount: body.amount,
+        branchId,
+        category: body.category,
+        journalId: journal?.id ?? null,
+        linkedTransactionId: linkedTransaction?.id ?? null,
+        paymentMethod: normalizedPaymentMethod,
+      },
       'branch_expense',
     );
 
-    return NextResponse.json(expenseResult.data, { status: 201 });
+    return NextResponse.json({ ...expenseResult.data, journal, linkedTransaction }, { status: 201 });
   } catch (error) {
     return apiServerError({
       branchId,

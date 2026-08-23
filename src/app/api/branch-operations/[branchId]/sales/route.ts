@@ -6,6 +6,7 @@ import { ensureBranchScope, getActiveBranchWarehouse, requireOpenShift, writeBra
 import { resolveFinancePostingAccount } from '@/lib/finance-foundation-server';
 import { createLinkedFinanceTransaction, financeErrorMessage, postFinanceDocument } from '@/lib/finance-server';
 import { isMissingColumnError } from '@/lib/postgrest-compat';
+import { resolveInventoryUnitCosts } from '@/lib/sales-pricing';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
 function normalizeBranchPaymentMethod(value: string) {
@@ -14,6 +15,51 @@ function normalizeBranchPaymentMethod(value: string) {
     return 'BANK';
   }
   return normalized;
+}
+
+async function resolveSelectedTenderAccountId(input: {
+  bankAccountId?: string | null;
+  cashAccountId?: string | null;
+  normalizedPaymentMethod: string;
+  organizationId: string;
+  service: ReturnType<typeof createServiceRoleClient>;
+}) {
+  if (input.normalizedPaymentMethod === 'CREDIT') {
+    const receivable = await resolveFinancePostingAccount(
+      input.organizationId,
+      'ACCOUNTS_RECEIVABLE',
+      { fallbackAccountCode: '1017' },
+    );
+    return receivable.id;
+  }
+
+  if (input.normalizedPaymentMethod === 'BANK') {
+    const bankResult = await input.service
+      .schema('icecream_erp')
+      .from('bank_accounts')
+      .select('id, account_id, is_active')
+      .eq('organization_id', input.organizationId)
+      .eq('id', String(input.bankAccountId ?? ''))
+      .maybeSingle();
+    if (bankResult.error) throw bankResult.error;
+    if (!bankResult.data) throw new Error('The selected bank account was not found.');
+    if (bankResult.data.is_active === false) throw new Error('The selected bank account is inactive.');
+    if (!bankResult.data.account_id) throw new Error('The selected bank account is missing its linked ledger account.');
+    return String(bankResult.data.account_id);
+  }
+
+  const cashResult = await input.service
+    .schema('icecream_erp')
+    .from('cash_accounts')
+    .select('id, account_id, is_active')
+    .eq('organization_id', input.organizationId)
+    .eq('id', String(input.cashAccountId ?? ''))
+    .maybeSingle();
+  if (cashResult.error) throw cashResult.error;
+  if (!cashResult.data) throw new Error('The selected cash account was not found.');
+  if (cashResult.data.is_active === false) throw new Error('The selected cash account is inactive.');
+  if (!cashResult.data.account_id) throw new Error('The selected cash account is missing its linked ledger account.');
+  return String(cashResult.data.account_id);
 }
 
 export async function GET(
@@ -112,6 +158,9 @@ export async function POST(
     if ((normalizedPaymentMethod === 'CASH' || normalizedPaymentMethod === 'PETTY_CASH') && !String(body.cashAccountId ?? '').trim()) {
       return badRequest('cashAccountId is required for cash branch sales');
     }
+    if (normalizedPaymentMethod === 'CREDIT' && !String(body.customerId ?? '').trim()) {
+      return badRequest('customerId is required for credit branch sales');
+    }
 
     const saleDate = body.saleDate ?? new Date().toISOString().slice(0, 10);
     const openShift = await requireOpenShift(branchId, body.shift, saleDate);
@@ -168,6 +217,13 @@ export async function POST(
       }
     }
 
+    const resolvedItemCosts = await resolveInventoryUnitCosts({
+      itemIds,
+      organizationId: ctx.organizationId,
+      service: service.schema('icecream_erp'),
+      warehouseId: warehouse.id,
+    });
+
     const { count } = await service.schema('icecream_erp').from('branch_sales').select('*', { count: 'exact', head: true });
     const saleNumber = `BS-${String((count ?? 0) + 1).padStart(5, '0')}`;
     const grossAmount = body.items.reduce((s, i) => s + i.totalPrice, 0);
@@ -216,7 +272,9 @@ export async function POST(
     for (const item of body.items) {
       const balance = stockBalanceByItemId.get(item.itemId);
       const itemRow = itemById.get(item.itemId) as Record<string, unknown> | undefined;
+      const resolvedCost = resolvedItemCosts.get(item.itemId)?.cost;
       const inventoryUnitCost = Number(
+        resolvedCost ??
         balance?.average_cost ??
         balance?.avg_cost ??
         itemRow?.unit_cost ??
@@ -283,14 +341,13 @@ export async function POST(
     let journal: Awaited<ReturnType<typeof postFinanceDocument>> | null = null;
     let linkedTransaction: Awaited<ReturnType<typeof createLinkedFinanceTransaction>> | null = null;
     try {
-      const tenderAccount =
-        normalizedPaymentMethod === 'BANK'
-          ? await resolveFinancePostingAccount(ctx.organizationId, 'BANK_ACCOUNT', { fallbackAccountCode: '1007' })
-          : normalizedPaymentMethod === 'PETTY_CASH'
-            ? await resolveFinancePostingAccount(ctx.organizationId, 'PETTY_CASH_ACCOUNT', { fallbackAccountCode: '1002' })
-            : normalizedPaymentMethod === 'CREDIT'
-              ? await resolveFinancePostingAccount(ctx.organizationId, 'ACCOUNTS_RECEIVABLE', { fallbackAccountCode: '1017' })
-              : await resolveFinancePostingAccount(ctx.organizationId, 'CASH_ACCOUNT', { fallbackAccountCode: '1000' });
+      const tenderAccountId = await resolveSelectedTenderAccountId({
+        bankAccountId: body.bankAccountId ?? null,
+        cashAccountId: body.cashAccountId ?? null,
+        normalizedPaymentMethod,
+        organizationId: ctx.organizationId,
+        service,
+      });
       const revenueAccount = await resolveFinancePostingAccount(
         ctx.organizationId,
         'BRANCH_SALES_REVENUE',
@@ -309,7 +366,7 @@ export async function POST(
 
       const lines = [
         {
-          accountId: tenderAccount.id,
+          accountId: tenderAccountId,
           branchId,
           creditAmount: 0,
           debitAmount: totalAmount,

@@ -8,6 +8,7 @@ import { BranchOperationsNav } from '@/components/branch-operations/branch-opera
 import { PageHeader } from '@/components/dashboard/page-header';
 import { Button } from '@/components/ui/button';
 import { DataTable, EmptyState, FormDrawer, LoadingState } from '@/components/ui-library';
+import { useSalesMeta } from '@/hooks/sales/useSalesMeta';
 import { useBranchExpenses, useCreateBranchExpense } from '@/hooks/branch-operations';
 
 const currencyFormatter = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
@@ -21,29 +22,48 @@ export default function BranchExpensesPage() {
   const branchId = params.id;
   const query = useBranchExpenses(branchId, { page: 1, pageSize: 50 });
   const createExpense = useCreateBranchExpense(branchId);
+  const salesMetaQuery = useSalesMeta();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [expenseDate, setExpenseDate] = useState(today());
   const [category, setCategory] = useState('');
   const [description, setDescription] = useState('');
   const [amount, setAmount] = useState('0');
-  const [paymentMethod, setPaymentMethod] = useState<'BANK' | 'CARD' | 'CASH' | 'ECOCASH' | 'PETTY_CASH'>('CASH');
+  const [paymentMethod, setPaymentMethod] = useState<'BANK' | 'CASH' | 'PETTY_CASH'>('CASH');
+  const [cashAccountId, setCashAccountId] = useState('');
+  const [bankAccountId, setBankAccountId] = useState('');
+  const [referenceNumber, setReferenceNumber] = useState('');
   const [formError, setFormError] = useState<string | null>(null);
+  const cashAccounts = (salesMetaQuery.data?.cashAccounts ?? []).filter((account) => !account.branchId || account.branchId === branchId);
+  const bankAccounts = salesMetaQuery.data?.bankAccounts ?? [];
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
+    if (paymentMethod === 'BANK' && !bankAccountId) {
+      setFormError('Select the bank account for this branch expense.');
+      return;
+    }
+    if ((paymentMethod === 'CASH' || paymentMethod === 'PETTY_CASH') && !cashAccountId) {
+      setFormError('Select the cash account for this branch expense.');
+      return;
+    }
+
     try {
       await createExpense.mutateAsync({
         amount: Number(amount),
+        bankAccountId: paymentMethod === 'BANK' ? bankAccountId : null,
+        cashAccountId: paymentMethod === 'BANK' ? null : cashAccountId,
         category,
         description,
         expenseDate,
         paymentMethod,
+        referenceNumber: referenceNumber || null,
       });
       setDrawerOpen(false);
       setCategory('');
       setDescription('');
       setAmount('0');
+      setReferenceNumber('');
       setFormError(null);
     } catch (error) {
       setFormError(error instanceof Error ? error.message : 'Failed to save branch expense.');
@@ -129,17 +149,53 @@ export default function BranchExpensesPage() {
               <span>Payment Method</span>
               <select
                 value={paymentMethod}
-                onChange={(event) => setPaymentMethod(event.target.value as 'BANK' | 'CARD' | 'CASH' | 'ECOCASH' | 'PETTY_CASH')}
+                onChange={(event) => setPaymentMethod(event.target.value as 'BANK' | 'CASH' | 'PETTY_CASH')}
                 className="surface-input-soft"
               >
                 <option value="CASH">Cash</option>
                 <option value="BANK">Bank</option>
                 <option value="PETTY_CASH">Petty Cash</option>
-                <option value="ECOCASH">EcoCash</option>
-                <option value="CARD">Card</option>
               </select>
             </label>
           </div>
+
+          {paymentMethod === 'BANK' ? (
+            <label className="space-y-2 text-sm text-muted">
+              <span>Bank Account</span>
+              <select
+                required
+                value={bankAccountId}
+                onChange={(event) => setBankAccountId(event.target.value)}
+                className="surface-input-soft"
+              >
+                <option value="">Select bank account</option>
+                {bankAccounts.map((account) => (
+                  <option key={account.id} value={account.id}>
+                    {account.bankName ? `${account.bankName} - ` : ''}
+                    {account.accountName}
+                    {account.accountNumber ? ` (${account.accountNumber})` : ''}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : (
+            <label className="space-y-2 text-sm text-muted">
+              <span>{paymentMethod === 'PETTY_CASH' ? 'Petty Cash Account' : 'Cash Account'}</span>
+              <select
+                required
+                value={cashAccountId}
+                onChange={(event) => setCashAccountId(event.target.value)}
+                className="surface-input-soft"
+              >
+                <option value="">Select cash account</option>
+                {cashAccounts.map((account) => (
+                  <option key={account.id} value={account.id}>
+                    {account.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
 
           <label className="space-y-2 text-sm text-muted">
             <span>Description</span>
@@ -150,6 +206,15 @@ export default function BranchExpensesPage() {
               onChange={(event) => setDescription(event.target.value)}
               className="surface-textarea-soft"
               placeholder="Describe the expense incurred"
+            />
+          </label>
+
+          <label className="space-y-2 text-sm text-muted">
+            <span>Reference</span>
+            <input
+              value={referenceNumber}
+              onChange={(event) => setReferenceNumber(event.target.value)}
+              className="surface-input-soft"
             />
           </label>
 
