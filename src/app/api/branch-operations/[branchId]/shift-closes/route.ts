@@ -2,11 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { badRequest, can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
 import { getActiveBranchWarehouse } from '@/lib/branches-server';
+import { isMissingColumnError } from '@/lib/postgrest-compat';
 import { createServiceRoleClient } from '@/lib/supabase/server';
-
-function isMissingColumnError(error: unknown, table: string, columnName: string) {
-  return error instanceof Error && error.message.includes(`column ${table}.${columnName} does not exist`);
-}
 
 async function findExistingShiftClose(
   service: ReturnType<typeof createServiceRoleClient>,
