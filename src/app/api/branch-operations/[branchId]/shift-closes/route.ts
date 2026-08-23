@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import { badRequest, can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
+import { apiServerError, badRequest, can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
+import { buildExistingOpenShiftFilters } from '@/lib/branch-shift-open';
 import { getActiveBranchWarehouse } from '@/lib/branches-server';
 import { isMissingColumnError } from '@/lib/postgrest-compat';
 import { createServiceRoleClient } from '@/lib/supabase/server';
@@ -9,22 +10,42 @@ async function findExistingShiftClose(
   service: ReturnType<typeof createServiceRoleClient>,
   branchId: string,
   shiftDate: string,
+  shift: string,
+  organizationId: string | null,
 ) {
-  const buildQuery = () => service
+  const filters = buildExistingOpenShiftFilters({
+    branchId,
+    organizationId,
+    shift,
+    shiftDate,
+  });
+
+  let query = service
     .schema('icecream_erp')
     .from('branch_shift_closes')
     .select('id')
-    .eq('branch_id', branchId)
-    .eq('shift_date', shiftDate)
-    .in('status', ['OPEN', 'SUBMITTED', 'APPROVED']);
+    .eq('branch_id', filters.branchId)
+    .eq('shift_date', filters.shiftDate)
+    .eq('shift', filters.shift)
+    .eq('status', filters.status)
+    .limit(1);
 
-  let result = await buildQuery().is('deleted_at', null).maybeSingle();
-  if (result.error && isMissingColumnError(result.error, 'branch_shift_closes', 'deleted_at')) {
-    result = await buildQuery().maybeSingle();
+  if (filters.organizationId) {
+    query = query.eq('organization_id', filters.organizationId);
   }
 
+  const result = await query;
   if (result.error) throw result.error;
-  return result.data;
+
+  const existing = Array.isArray(result.data) ? result.data[0] : null;
+  return existing ?? null;
+}
+
+function buildShiftConflictResponse(existingShiftId: string) {
+  return NextResponse.json({
+    error: 'An open shift already exists for this branch, date, and shift.',
+    existingShiftId,
+  }, { status: 409 });
 }
 
 export async function GET(
@@ -51,7 +72,6 @@ export async function GET(
       .schema('icecream_erp')
       .from('branch_shift_closes')
       .select('id, shift_date, shift_type, status, expected_cash, actual_cash, cash_variance, stock_variance', { count: 'exact' })
-      .is('deleted_at', null)
       .eq('branch_id', branchId)
       .order('shift_date', { ascending: false });
 
@@ -67,8 +87,7 @@ export async function GET(
         isMissingColumnError(primary.error, 'branch_shift_closes', 'expected_cash') ||
         isMissingColumnError(primary.error, 'branch_shift_closes', 'actual_cash') ||
         isMissingColumnError(primary.error, 'branch_shift_closes', 'cash_variance') ||
-        isMissingColumnError(primary.error, 'branch_shift_closes', 'stock_variance') ||
-        isMissingColumnError(primary.error, 'branch_shift_closes', 'deleted_at');
+        isMissingColumnError(primary.error, 'branch_shift_closes', 'stock_variance');
 
       if (!compatibleLegacy) throw primary.error;
 
@@ -140,9 +159,13 @@ export async function POST(
     const shiftDate = new Date(`${body.date}T00:00:00.000Z`);
 
     // Check for existing open shift close
-    const existing = await findExistingShiftClose(service, branchId, body.date);
+    const existing = await findExistingShiftClose(service, branchId, body.date, body.shift, ctx.organizationId);
+    const existingShiftId =
+      existing && typeof existing === 'object' && 'id' in existing
+        ? String((existing as { id?: unknown }).id ?? '')
+        : '';
 
-    if (existing) return badRequest('A shift close already exists for this branch and date.');
+    if (existingShiftId) return buildShiftConflictResponse(existingShiftId);
 
     const warehouse = await getActiveBranchWarehouse(branchId);
 
@@ -229,7 +252,14 @@ export async function POST(
 
     return NextResponse.json(shiftClose, { status: 201 });
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Internal server error';
-    return serverError(message);
+    return apiServerError({
+      branchId,
+      ctx,
+      error: err,
+      message: 'Branch shift open failed.',
+      module: 'branches.shift-open',
+      path: `/api/branch-operations/${branchId}/shift-closes`,
+      status: 500,
+    });
   }
 }
