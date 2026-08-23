@@ -33,6 +33,7 @@ test('buildExistingOpenShiftFilters keeps duplicate detection on live-supported 
 
 test('shift open route uses a controlled duplicate response ahead of warehouse and insert work', () => {
   const route = fs.readFileSync('src/app/api/branch-operations/[branchId]/shift-closes/route.ts', 'utf8');
+  const wrapperRoute = fs.readFileSync('src/app/api/branches/[id]/shifts/open/route.ts', 'utf8');
   const duplicateIndex = route.indexOf('if (existingShiftId) return buildShiftConflictResponse(existingShiftId);');
   const warehouseIndex = route.indexOf('const warehouse = await getActiveBranchWarehouse(branchId);');
   const insertIndex = route.indexOf('const primaryInsert = await service', duplicateIndex);
@@ -49,4 +50,6 @@ test('shift open route uses a controlled duplicate response ahead of warehouse a
   assert.ok(warehouseIndex > duplicateIndex);
   assert.ok(insertIndex > duplicateIndex);
   assert.match(route, /apiServerError\(\{\s*branchId,/);
+  assert.match(wrapperRoute, /Promise\.resolve\(\{ branchId: id \}\)/);
+  assert.doesNotMatch(wrapperRoute, /export \{ POST \}/);
 });
