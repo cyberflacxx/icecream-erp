@@ -1,10 +1,33 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { badRequest, can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
+import { getActiveBranchWarehouse } from '@/lib/branches-server';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
 function isMissingColumnError(error: unknown, table: string, columnName: string) {
   return error instanceof Error && error.message.includes(`column ${table}.${columnName} does not exist`);
+}
+
+async function findExistingShiftClose(
+  service: ReturnType<typeof createServiceRoleClient>,
+  branchId: string,
+  shiftDateIso: string,
+) {
+  let query = service
+    .schema('icecream_erp')
+    .from('branch_shift_closes')
+    .select('id')
+    .eq('branch_id', branchId)
+    .eq('shift_date', shiftDateIso)
+    .in('status', ['OPEN', 'SUBMITTED', 'APPROVED']);
+
+  let result = await query.is('deleted_at', null).maybeSingle();
+  if (result.error && isMissingColumnError(result.error, 'branch_shift_closes', 'deleted_at')) {
+    result = await query.maybeSingle();
+  }
+
+  if (result.error) throw result.error;
+  return result.data;
 }
 
 export async function GET(
@@ -120,27 +143,11 @@ export async function POST(
     const shiftDate = new Date(`${body.date}T00:00:00.000Z`);
 
     // Check for existing open shift close
-    const { data: existing } = await service
-      .schema('icecream_erp')
-      .from('branch_shift_closes')
-      .select('id')
-      .is('deleted_at', null)
-      .eq('branch_id', branchId)
-      .eq('shift_date', shiftDate.toISOString())
-      .in('status', ['OPEN', 'SUBMITTED', 'APPROVED'])
-      .maybeSingle();
+    const existing = await findExistingShiftClose(service, branchId, shiftDate.toISOString());
 
     if (existing) return badRequest('A shift close already exists for this branch and date.');
 
-    const { data: warehouse } = await service
-      .schema('icecream_erp')
-      .from('warehouses')
-      .select('id')
-      .eq('branch_id', branchId)
-      .eq('is_active', true)
-      .eq('type', 'BRANCH')
-      .maybeSingle();
-    if (!warehouse) return badRequest('No active branch warehouse found');
+    const warehouse = await getActiveBranchWarehouse(branchId);
 
     // Calculate opening stock value
     const { data: balances } = await service
@@ -160,6 +167,7 @@ export async function POST(
       .schema('icecream_erp')
       .from('branch_shift_closes')
       .insert({
+        organization_id: ctx.organizationId,
         branch_id: branchId,
         shift_date: shiftDate.toISOString(),
         shift_type: body.shift,
@@ -169,12 +177,9 @@ export async function POST(
         actual_cash: 0,
         expected_cash: 0,
         cash_variance: 0,
-        card_total: 0,
-        ecocash_total: 0,
         expenses_total: 0,
         stock_received_value: 0,
         stock_sold_value: 0,
-        stock_variance: 0,
         damaged_stock_value: 0,
         closed_by: ctx.userId,
       })
