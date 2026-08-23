@@ -170,6 +170,7 @@ export async function POST(
         organization_id: ctx.organizationId,
         branch_id: branchId,
         shift_date: shiftDate.toISOString(),
+        shift: body.shift,
         shift_type: body.shift,
         status: 'OPEN',
         opening_stock_value: openingStockValue,
