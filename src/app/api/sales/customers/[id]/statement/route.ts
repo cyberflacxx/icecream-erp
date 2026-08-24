@@ -91,6 +91,24 @@ export async function GET(
       returns = (returnsResult.data ?? []) as Array<Record<string, unknown>>;
     }
 
+    let branchCreditSales: Array<Record<string, unknown>> = [];
+    let branchCreditSalesIncluded = true;
+    const branchCreditSalesResult = await service
+      .from('branch_sales')
+      .select('id, sale_number, sale_date, total_amount, status, customer_id, payment_method')
+      .eq('organization_id', ctx.organizationId)
+      .eq('customer_id', params.id)
+      .eq('payment_method', 'CREDIT');
+    if (branchCreditSalesResult.error) {
+      if (isMissingStatementSource(branchCreditSalesResult.error) || isMissingSalesColumn(branchCreditSalesResult.error, 'branch_sales', 'customer_id')) {
+        branchCreditSalesIncluded = false;
+      } else {
+        throw branchCreditSalesResult.error;
+      }
+    } else {
+      branchCreditSales = (branchCreditSalesResult.data ?? []) as Array<Record<string, unknown>>;
+    }
+
     const entries: CustomerStatementEntry[] = [
       ...((invoicesResult.data ?? []) as Array<Record<string, unknown>>)
         .filter((invoice) => !['CANCELLED', 'VOIDED', 'DRAFT'].includes(String(invoice.status ?? '').toUpperCase()))
@@ -137,6 +155,18 @@ export async function GET(
           referenceType: 'customer_return',
           type: 'RETURN',
         })),
+      ...branchCreditSales
+        .filter((sale) => !['CANCELLED', 'VOIDED', 'DRAFT'].includes(String(sale.status ?? '').toUpperCase()))
+        .map((sale) => ({
+          credit: 0,
+          date: sale.sale_date ? String(sale.sale_date) : null,
+          debit: toNumber(sale.total_amount),
+          documentId: String(sale.id),
+          documentNumber: String(sale.sale_number ?? sale.id),
+          paymentMethod: 'CREDIT',
+          referenceType: 'branch_sale',
+          type: 'BRANCH_CREDIT_SALE',
+        })),
     ];
 
     const statement = buildCustomerStatement({ entries, fromDate, toDate });
@@ -149,8 +179,10 @@ export async function GET(
       },
       filters: { fromDate, toDate },
       limitations: {
-        branchCreditSalesIncluded: false,
-        branchCreditSalesReason: 'Live branch_sales has no customer_id column, so customer statement cannot safely attach branch credit sales without a relationship.',
+        branchCreditSalesIncluded,
+        branchCreditSalesReason: branchCreditSalesIncluded
+          ? null
+          : 'branch_sales.customer_id is not available, so attributed branch credit sales cannot be included.',
       },
       summary: {
         closingBalance: statement.closingBalance,

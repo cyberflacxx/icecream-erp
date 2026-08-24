@@ -1,5 +1,5 @@
 import { asArray, asObject, ensureNonNegative, ensurePositiveQuantity, normalizeDate, normalizeWarehouseCode, toCsv, toNumber } from './inventory';
-import { buildProductionCostSummary, summarizeBatchLabour, type CostStatus } from './red-module-costing';
+import { buildProductionCostSummary, summarizeBatchLabour, summarizeProductionMaterialCosts, type CostStatus } from './red-module-costing';
 
 export const PRODUCTION_PLAN_STATUSES = [
   'DRAFT',
@@ -747,12 +747,7 @@ export function buildCostingRows(
     const recipe = asObject(batch.recipes);
     const finishedItem = asObject(recipe?.finished_item);
     const materials = asArray(batch.production_batch_materials);
-    const derivedMaterialCost = materials.reduce((sum, row) => {
-      const actualQuantity = toNumber(row.quantity_actual ?? row.quantity_issued);
-      const item = asObject(row.items);
-      const unitCost = toNumber(row.unit_cost ?? item?.unit_cost);
-      return sum + (actualQuantity * unitCost);
-    }, 0);
+    const materialCosts = summarizeProductionMaterialCosts(materials as Array<Record<string, unknown>>);
     const acceptedOutput = toNumber(batch.actual_output);
     const labour = summarizeBatchLabour({
       assignments: asArray(batch.production_worker_assignments),
@@ -763,7 +758,8 @@ export function buildCostingRows(
       goodUnitsProduced: acceptedOutput,
       labourCost: labour.totalLabourCost || batch.total_labour_cost || batch.labour_cost,
       overheadCost: batch.total_overhead_cost ?? batch.overhead_cost,
-      rawMaterialCost: batch.total_material_cost ?? batch.material_cost ?? derivedMaterialCost,
+      packagingCost: materialCosts.packagingCost,
+      rawMaterialCost: materialCosts.rawMaterialCost || batch.total_material_cost || batch.material_cost,
       totalProductionCost: batch.actual_cost,
       wastageCost: batch.wastage_cost,
     });

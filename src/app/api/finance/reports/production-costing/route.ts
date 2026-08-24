@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
 import { financeService } from '@/lib/finance-server';
-import { buildProductionCostSummary, summarizeBatchLabour } from '@/lib/red-module-costing';
+import { buildProductionCostSummary, summarizeBatchLabour, summarizeProductionMaterialCosts } from '@/lib/red-module-costing';
 
 function toNumber(value: unknown) {
   const parsed = Number(value);
@@ -53,7 +53,7 @@ export async function GET(request: NextRequest) {
     const batchByNumber = mapByStringKey(batches, 'batch_number');
     const batchIds = batches.map((row) => String(row.id ?? '')).filter(Boolean);
 
-    const [labourResult, assignmentResult] = await Promise.all([
+    const [labourResult, assignmentResult, materialResult] = await Promise.all([
       batchIds.length
         ? service
             .from('hr_labour_cost_allocations')
@@ -66,9 +66,16 @@ export async function GET(request: NextRequest) {
             .select('batch_id, employee_id')
             .in('batch_id', batchIds)
         : Promise.resolve({ data: [], error: null }),
+      batchIds.length
+        ? service
+            .from('production_batch_materials')
+            .select('batch_id, quantity_actual, quantity_issued, quantity_required, unit_cost, total_cost, material_type, is_packaging, items(unit_cost, standard_cost, item_type, type, stock_type, production_category, name, code)')
+            .in('batch_id', batchIds)
+        : Promise.resolve({ data: [], error: null }),
     ]);
     if (labourResult.error && !String(labourResult.error.message ?? '').includes('does not exist')) throw labourResult.error;
     if (assignmentResult.error && !String(assignmentResult.error.message ?? '').includes('does not exist')) throw assignmentResult.error;
+    if (materialResult.error && !String(materialResult.error.message ?? '').includes('does not exist')) throw materialResult.error;
 
     const labourByBatchId = new Map<string, Array<Record<string, unknown>>>();
     for (const row of ((labourResult.data ?? []) as Array<Record<string, unknown>>)) {
@@ -86,6 +93,14 @@ export async function GET(request: NextRequest) {
       assignmentsByBatchId.set(batchId, next);
     }
 
+    const materialsByBatchId = new Map<string, Array<Record<string, unknown>>>();
+    for (const row of ((materialResult.data ?? []) as Array<Record<string, unknown>>)) {
+      const batchId = String(row.batch_id ?? '');
+      const next = materialsByBatchId.get(batchId) ?? [];
+      next.push(row);
+      materialsByBatchId.set(batchId, next);
+    }
+
     const rows = receiptLines.map((row) => {
       const receipt = Array.isArray(row.production_receipts) ? row.production_receipts[0] : row.production_receipts;
       const batch = batchByNumber.get(String(row.batch_number ?? '').trim()) ?? {};
@@ -97,11 +112,13 @@ export async function GET(request: NextRequest) {
         labourAllocations: labourByBatchId.get(batchId) ?? [],
       });
       const batchLabourCost = toNumber(batch.total_labour_cost ?? batch.labour_cost);
+      const materialCosts = summarizeProductionMaterialCosts(materialsByBatchId.get(batchId) ?? []);
       const productionCost = buildProductionCostSummary({
         goodUnitsProduced,
         labourCost: labour.totalLabourCost > 0 ? labour.totalLabourCost : batchLabourCost,
         overheadCost: batch.total_overhead_cost ?? batch.overhead_cost,
-        rawMaterialCost: batch.total_material_cost ?? batch.material_cost,
+        packagingCost: materialCosts.packagingCost,
+        rawMaterialCost: materialCosts.rawMaterialCost || batch.total_material_cost || batch.material_cost,
         receiptUnitCost: row.unit_production_cost,
         totalProductionCost: row.total_production_cost,
         wastageCost: toNumber(row.current_wastage_quantity) * toNumber(row.unit_production_cost),

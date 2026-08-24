@@ -16,7 +16,6 @@ import { useItemSelectorOptions } from '@/hooks/useItemSelectorOptions';
 import { useSalesMeta } from '@/hooks/sales/useSalesMeta';
 import { buildSalesReceiptPrintUrl } from '@/lib/sales-payments';
 import {
-  useBranchCustomers,
   useBranchSales,
   useBranchStock,
   useCreateBranchExpense,
@@ -66,7 +65,7 @@ export default function BranchSalesPage() {
   const [paymentMethod, setPaymentMethod] = useState<'BANK' | 'CASH' | 'CREDIT'>('CASH');
   const [cashAccountId, setCashAccountId] = useState('');
   const [bankAccountId, setBankAccountId] = useState('');
-  const [branchCustomerId, setBranchCustomerId] = useState('');
+  const [customerId, setCustomerId] = useState('');
   const [paymentReference, setPaymentReference] = useState('');
   const [saleItems, setSaleItems] = useState<SaleLineItem[]>([initialSaleLine]);
   const [expenseCategory, setExpenseCategory] = useState('');
@@ -82,7 +81,6 @@ export default function BranchSalesPage() {
     page: 1,
     pageSize: 100
   });
-  const branchCustomersQuery = useBranchCustomers(branchId);
   const stockRows = useMemo(() => stockQuery.data?.data ?? [], [stockQuery.data?.data]);
   const resolvedWarehouse = useMemo(() => {
     const warehouseEntries = stockRows
@@ -118,7 +116,10 @@ export default function BranchSalesPage() {
   );
   const sales = salesQuery.data?.data ?? [];
   const pagination = salesQuery.data?.pagination;
-  const branchCustomers = branchCustomersQuery.data ?? [];
+  const customers = useMemo(
+    () => (salesMetaQuery.data?.customers ?? []).filter((customer) => String(customer.status ?? 'ACTIVE').toUpperCase() === 'ACTIVE'),
+    [salesMetaQuery.data?.customers],
+  );
   const grandTotal = useMemo(
     () =>
       saleItems.reduce((sum, item) => {
@@ -194,8 +195,8 @@ export default function BranchSalesPage() {
       return;
     }
 
-    if (paymentMethod === 'CREDIT' && !branchCustomerId) {
-      setSaleError('Select the branch customer for this credit sale.');
+    if (paymentMethod === 'CREDIT' && !customerId) {
+      setSaleError('Customer is required for a credit sale.');
       return;
     }
 
@@ -203,7 +204,7 @@ export default function BranchSalesPage() {
       const createdSale = await createSale.mutateAsync({
         bankAccountId: paymentMethod === 'BANK' ? bankAccountId : null,
         cashAccountId: paymentMethod === 'CASH' ? cashAccountId : null,
-        customerId: paymentMethod === 'CREDIT' ? branchCustomerId : null,
+        customerId: paymentMethod === 'CREDIT' ? customerId : null,
         items: normalizedItems,
         paymentMethod,
         paymentReference: paymentReference || null,
@@ -211,7 +212,7 @@ export default function BranchSalesPage() {
         shift
       });
       setSaleDrawerOpen(false);
-      setBranchCustomerId('');
+      setCustomerId('');
       setSaleItems([initialSaleLine]);
       setSaleError(null);
       const saleId = String((createdSale as { id?: string } | null)?.id ?? '');
@@ -510,18 +511,18 @@ export default function BranchSalesPage() {
             </label>
           ) : (
             <label className="space-y-2 text-sm text-muted">
-              <span>Branch Customer</span>
+              <span>Customer</span>
               <select
-                value={branchCustomerId}
-                onChange={(event) => setBranchCustomerId(event.target.value)}
+                value={customerId}
+                onChange={(event) => setCustomerId(event.target.value)}
                 className="surface-input-soft"
                 required
               >
-                <option value="">Select branch customer</option>
-                {branchCustomers.map((customer) => (
+                <option value="">Select customer</option>
+                {customers.map((customer) => (
                   <option key={customer.id} value={customer.id}>
-                    {customer.customer_name}
-                    {customer.credit_allowed ? ` | Credit ${currencyFormatter.format(customer.credit_limit)}` : ''}
+                    {customer.name}
+                    {customer.creditAllowed ? ` | Credit ${currencyFormatter.format(customer.creditLimit)}` : ''}
                   </option>
                 ))}
               </select>

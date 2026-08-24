@@ -11,7 +11,7 @@ import {
   Warehouse,
   XCircle,
 } from 'lucide-react';
-import { type FormEvent, type ReactNode, useEffect, useState } from 'react';
+import { type FormEvent, type ReactNode, useEffect, useMemo, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useSearchParams } from 'next/navigation';
 
@@ -23,6 +23,7 @@ import { useBatch, useBatches } from '@/hooks/production/useBatches';
 import { useBatchAction } from '@/hooks/production/useBatchAction';
 import { type ProductionMetaRecipe, useProductionMeta } from '@/hooks/production/useProductionMeta';
 import { useProductionRequest } from '@/hooks/production/useProductionRequest';
+import { buildProductionCostSummary, summarizeProductionMaterialCosts } from '@/lib/red-module-costing';
 
 const today = new Date().toISOString().slice(0, 10);
 
@@ -64,6 +65,14 @@ function asRows(value: unknown) {
 
 function formatNumber(value: unknown) {
   return Number(value ?? 0).toLocaleString(undefined, { maximumFractionDigits: 3 });
+}
+
+function formatCurrency(value: unknown) {
+  return Number(value ?? 0).toLocaleString(undefined, {
+    currency: 'USD',
+    minimumFractionDigits: 2,
+    style: 'currency',
+  });
 }
 
 function formatStatus(status: unknown) {
@@ -183,6 +192,29 @@ export default function ProductionBatchesPage() {
     units: metaQuery.data?.unitsOfMeasure ?? [],
     warehouseId: String(batchDetail?.warehouseId ?? ''),
   });
+  const costingPanel = useMemo(() => {
+    const materials = asRows(batchDetail?.materials);
+    const materialCosts = summarizeProductionMaterialCosts(materials);
+    const goodUnitsProduced = Number(batchDetail?.actualOutput ?? releaseQuantity ?? 0);
+    const wastageQuantity = Number(batchDetail?.wastageQuantity ?? 0);
+    const estimatedUnitMaterialCost = goodUnitsProduced > 0
+      ? materialCosts.totalMaterialCost / goodUnitsProduced
+      : 0;
+    const summary = buildProductionCostSummary({
+      goodUnitsProduced,
+      labourCost: batchDetail?.labourCost,
+      overheadCost: batchDetail?.overheadCost,
+      packagingCost: materialCosts.packagingCost,
+      rawMaterialCost: materialCosts.rawMaterialCost || batchDetail?.materialCost,
+      wastageCost: wastageQuantity * estimatedUnitMaterialCost,
+    });
+
+    return {
+      ...summary,
+      hasMaterials: materials.length > 0,
+      materialRows: materials.length,
+    };
+  }, [batchDetail, releaseQuantity]);
 
   const summary = visibleRows.reduce<{ inProduction: number; released: number; toIssue: number; total: number }>(
     (accumulator, row) => {
@@ -547,10 +579,60 @@ export default function ProductionBatchesPage() {
                 </Button>
               ) : null}
             </FlowStep>
+
+            <CostingPanel costing={costingPanel} />
           </div>
         )}
       </FormDrawer>
     </div>
+  );
+}
+
+function CostingPanel({
+  costing,
+}: {
+  costing: ReturnType<typeof buildProductionCostSummary> & { hasMaterials: boolean; materialRows: number };
+}) {
+  return (
+    <section className="rounded-3xl border border-border/70 bg-white p-5 shadow-sm">
+      <div className="flex flex-col gap-2 border-b border-border/70 pb-4 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <p className="text-sm font-semibold uppercase tracking-[0.18em] text-orange">Production Costing Inputs</p>
+          <p className="mt-1 text-sm text-muted">Cost is calculated from issued materials, packaging, labour allocations, overhead, wastage, and actual good output.</p>
+        </div>
+        <StatusBadge
+          status={costing.costStatus.replaceAll('_', ' ')}
+          variant={costing.costStatus === 'COMPLETE' ? 'success' : costing.costStatus === 'PARTIAL' ? 'warning' : 'error'}
+        />
+      </div>
+
+      <div className="mt-4 grid gap-3 md:grid-cols-3">
+        <MetricCard label="Raw Materials" value={formatCurrency(costing.rawMaterialCost)} />
+        <MetricCard label="Packaging" value={formatCurrency(costing.packagingCost)} />
+        <MetricCard label="Direct Labour" value={formatCurrency(costing.labourCost)} />
+        <MetricCard label="Overhead" value={formatCurrency(costing.overheadCost)} />
+        <MetricCard label="Wastage Cost" value={formatCurrency(costing.wastageCost)} />
+        <MetricCard label="Good Units" value={formatNumber(costing.goodUnitsProduced)} />
+        <MetricCard label="Total Production Cost" value={formatCurrency(costing.totalProductionCost)} />
+        <MetricCard label="Cost Per Unit" value={costing.costPerGoodUnit == null ? 'Not ready' : formatCurrency(costing.costPerGoodUnit)} />
+        <MetricCard label="Finished Goods Value" value={formatCurrency(costing.finishedGoodsValue)} />
+      </div>
+
+      {costing.missingComponents.length ? (
+        <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          Missing inputs: {costing.missingComponents.join(', ')}.
+        </div>
+      ) : null}
+
+      <div className="mt-4 grid gap-3 text-sm text-muted md:grid-cols-2">
+        <div className="rounded-2xl border border-border/70 bg-cream/40 px-4 py-3">
+          Material rows: <span className="font-semibold text-brown">{costing.materialRows}</span>. Use Issue to Production or material usage to capture actual consumption.
+        </div>
+        <div className="rounded-2xl border border-border/70 bg-cream/40 px-4 py-3">
+          Labour and overhead are captured from HR labour costing and batch overhead fields; no selling-price fallback is used.
+        </div>
+      </div>
+    </section>
   );
 }
 

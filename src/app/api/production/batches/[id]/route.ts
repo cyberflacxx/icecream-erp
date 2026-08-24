@@ -114,7 +114,7 @@ export async function GET(
       service
         .schema('icecream_erp')
         .from('production_batch_materials')
-        .select('id, item_id, quantity_required, quantity_issued, quantity_actual, variance, unit_id, notes, items(unit_cost)')
+        .select('id, item_id, material_type, is_packaging, quantity_required, quantity_issued, quantity_actual, variance, unit_id, notes, items(unit_cost)')
         .eq('batch_id', id),
       service
         .schema('icecream_erp')

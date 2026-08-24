@@ -86,7 +86,7 @@ export async function GET(
     let query = service
       .schema('icecream_erp')
       .from('branch_sales')
-      .select('id, sale_number, sale_date, shift, item_id, quantity, unit_price, total_amount, payment_method, served_by, status', { count: 'exact' })
+      .select('id, sale_number, sale_date, shift, item_id, quantity, unit_price, total_amount, payment_method, served_by, status, customer_id', { count: 'exact' })
       .eq('branch_id', branchId)
       .order('sale_date', { ascending: false });
 
@@ -110,6 +110,7 @@ export async function GET(
         paymentMethod: row.payment_method,
         servedBy: row.served_by,
         status: row.status ?? 'POSTED',
+        customerId: row.customer_id ?? null,
       })),
       pagination: { page, pageSize, total: count ?? 0 },
     });
@@ -159,7 +160,23 @@ export async function POST(
       return badRequest('cashAccountId is required for cash branch sales');
     }
     if (normalizedPaymentMethod === 'CREDIT' && !String(body.customerId ?? '').trim()) {
-      return badRequest('customerId is required for credit branch sales');
+      return badRequest('Customer is required for a credit sale.');
+    }
+
+    if (normalizedPaymentMethod === 'CREDIT') {
+      const customerResult = await service
+        .schema('icecream_erp')
+        .from('customers')
+        .select('id, status')
+        .eq('organization_id', ctx.organizationId)
+        .eq('id', String(body.customerId))
+        .is('deleted_at', null)
+        .maybeSingle();
+      if (customerResult.error) throw customerResult.error;
+      if (!customerResult.data) return badRequest('Customer is required for a credit sale.');
+      if (String(customerResult.data.status ?? '').toUpperCase() !== 'ACTIVE') {
+        return badRequest('Customer is required for a credit sale.');
+      }
     }
 
     const saleDate = body.saleDate ?? new Date().toISOString().slice(0, 10);
@@ -256,6 +273,7 @@ export async function POST(
       served_by: ctx.userId,
       payment_reference: body.paymentReference ?? null,
       unit_price: primaryLine.unitPrice,
+      customer_id: normalizedPaymentMethod === 'CREDIT' ? String(body.customerId) : null,
     };
 
     const { data: sale, error: saleErr } = await service
@@ -336,16 +354,19 @@ export async function POST(
     }
 
     if (normalizedPaymentMethod === 'CREDIT' && body.customerId) {
-      const { data: customer } = await service
+      const customerResult = await service
         .schema('icecream_erp')
-        .from('branch_customers')
+        .from('customers')
         .select('id, current_balance')
+        .eq('organization_id', ctx.organizationId)
         .eq('id', body.customerId)
         .maybeSingle();
+      if (customerResult.error) throw customerResult.error;
+      const customer = customerResult.data;
       if (customer) {
         await service
           .schema('icecream_erp')
-          .from('branch_customers')
+          .from('customers')
           .update({
             current_balance: Number(customer.current_balance ?? 0) + totalAmount,
             updated_at: new Date().toISOString(),

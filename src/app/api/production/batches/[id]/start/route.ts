@@ -7,7 +7,9 @@ import { firstRelation } from '@/lib/supabase-relations';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
 type Requirement = {
+  isPackaging: boolean;
   itemId: string;
+  materialType: 'RAW_MATERIAL' | 'PACKAGING' | 'MIXED';
   quantityRequired: number;
   unitCost: number;
   unitId: string | null;
@@ -152,6 +154,8 @@ export async function POST(
           .schema('icecream_erp')
           .from('production_batch_materials')
           .update({
+            is_packaging: requirement.isPackaging,
+            material_type: requirement.materialType,
             quantity_actual: requirement.quantityRequired,
             quantity_issued: requirement.quantityRequired,
             quantity_remaining: 0,
@@ -168,7 +172,9 @@ export async function POST(
           .from('production_batch_materials')
           .insert({
             batch_id: id,
+            is_packaging: requirement.isPackaging,
             item_id: requirement.itemId,
+            material_type: requirement.materialType,
             quantity_actual: requirement.quantityRequired,
             quantity_issued: requirement.quantityRequired,
             quantity_remaining: 0,
@@ -256,22 +262,33 @@ async function buildBatchRequirements(
   const scale = plannedQuantity / standardOutput;
   const requirementsByItem = new Map<string, Requirement>();
 
-  for (const line of [...(ingredientResult.data ?? []), ...(packagingResult.data ?? [])]) {
+  async function addRequirement(line: Record<string, unknown>, materialType: 'RAW_MATERIAL' | 'PACKAGING') {
     const itemId = String(line.item_id ?? '');
-    if (!itemId) continue;
+    if (!itemId) return;
 
     const item = await requireItem(service.schema('icecream_erp'), itemId);
     const baseQuantity = ensurePositiveQuantity(line.quantity_required, 'BOM quantity');
     const wastagePercent = Math.max(0, Number(line.wastage_allowance_percent ?? 0));
     const quantityRequired = (baseQuantity * scale) + ((baseQuantity * scale * wastagePercent) / 100);
     const current = requirementsByItem.get(itemId);
+    const nextMaterialType = current && current.materialType !== materialType ? 'MIXED' : materialType;
 
     requirementsByItem.set(itemId, {
+      isPackaging: nextMaterialType === 'PACKAGING',
       itemId,
+      materialType: nextMaterialType,
       quantityRequired: (current?.quantityRequired ?? 0) + quantityRequired,
       unitCost: Number(item.unit_cost ?? current?.unitCost ?? 0),
       unitId: current?.unitId ?? (line.unit_id ? String(line.unit_id) : null),
     });
+  }
+
+  for (const line of ingredientResult.data ?? []) {
+    await addRequirement(line as Record<string, unknown>, 'RAW_MATERIAL');
+  }
+
+  for (const line of packagingResult.data ?? []) {
+    await addRequirement(line as Record<string, unknown>, 'PACKAGING');
   }
 
   return Array.from(requirementsByItem.values());

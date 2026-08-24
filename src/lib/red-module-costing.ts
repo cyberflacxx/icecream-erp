@@ -160,6 +160,62 @@ export function buildProductionCostSummary(input: {
   };
 }
 
+export type ProductionMaterialCostRow = Record<string, unknown> & {
+  items?: Record<string, unknown> | Array<Record<string, unknown>> | null;
+};
+
+function firstRelation(value: unknown) {
+  if (Array.isArray(value)) return value[0] ?? null;
+  if (value && typeof value === 'object') return value as Record<string, unknown>;
+  return null;
+}
+
+export function classifyProductionMaterial(row: ProductionMaterialCostRow) {
+  if (row.is_packaging === true || row.isPackaging === true) return 'PACKAGING' as const;
+
+  const materialType = String(row.material_type ?? row.materialType ?? '').trim().toUpperCase();
+  if (materialType.includes('PACK')) return 'PACKAGING' as const;
+  if (materialType.includes('RAW')) return 'RAW_MATERIAL' as const;
+
+  const item = firstRelation(row.items);
+  const itemText = [
+    item?.type,
+    item?.item_type,
+    item?.stock_type,
+    item?.production_category,
+    item?.category,
+    item?.name,
+    item?.code,
+  ].map((value) => String(value ?? '').toUpperCase()).join(' ');
+
+  return itemText.includes('PACK') ? 'PACKAGING' as const : 'RAW_MATERIAL' as const;
+}
+
+export function summarizeProductionMaterialCosts(rows: ProductionMaterialCostRow[]) {
+  let rawMaterialCost = 0;
+  let packagingCost = 0;
+
+  for (const row of rows) {
+    const item = firstRelation(row.items);
+    const actualQuantity = toNumber(row.quantity_actual ?? row.quantity_issued ?? row.quantity_used ?? row.quantity);
+    const unitCost = toNumber(row.unit_cost ?? item?.unit_cost ?? item?.standard_cost);
+    const rowCost = toNumber(row.total_cost, Number.NaN);
+    const cost = Number.isFinite(rowCost) && rowCost > 0 ? rowCost : actualQuantity * unitCost;
+
+    if (classifyProductionMaterial(row) === 'PACKAGING') {
+      packagingCost += cost;
+    } else {
+      rawMaterialCost += cost;
+    }
+  }
+
+  return {
+    packagingCost: round(packagingCost),
+    rawMaterialCost: round(rawMaterialCost),
+    totalMaterialCost: round(rawMaterialCost + packagingCost),
+  };
+}
+
 export type CustomerStatementEntry = {
   credit: number;
   date: string | null;

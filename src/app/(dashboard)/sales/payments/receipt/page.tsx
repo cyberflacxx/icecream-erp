@@ -89,12 +89,15 @@ async function loadBranchSaleReceiptRecord(organizationId: string, branchSaleId:
   const branchId = String(sale.branch_id ?? '');
   const customerId = String(sale.customer_id ?? '');
 
-  const [branchResult, itemsResult, customerResult, cashierName, warehouse] = await Promise.all([
+  const [branchResult, itemsResult, customerResult, legacyBranchCustomerResult, cashierName, warehouse] = await Promise.all([
     service.from('branches').select('id, name, code').eq('organization_id', organizationId).eq('id', branchId).maybeSingle(),
     service
       .from('branch_sale_items')
       .select('quantity, unit_price, total_price, items(id, code, name)')
       .eq('branch_sale_id', branchSaleId),
+    customerId
+      ? service.from('customers').select('id, code, name').eq('organization_id', organizationId).eq('id', customerId).maybeSingle()
+      : Promise.resolve({ data: null, error: null }),
     customerId
       ? service.from('branch_customers').select('id, customer_name, customer_code').eq('id', customerId).maybeSingle()
       : Promise.resolve({ data: null, error: null }),
@@ -105,6 +108,7 @@ async function loadBranchSaleReceiptRecord(organizationId: string, branchSaleId:
   if (branchResult.error) throw branchResult.error;
   if (itemsResult.error) throw itemsResult.error;
   if (customerResult.error) throw customerResult.error;
+  if (legacyBranchCustomerResult.error) throw legacyBranchCustomerResult.error;
 
   const lines = (itemsResult.data ?? []).map((row) => {
     const item = Array.isArray(row.items) ? row.items[0] : row.items;
@@ -127,7 +131,7 @@ async function loadBranchSaleReceiptRecord(organizationId: string, branchSaleId:
     branchName: String(branchResult.data?.name ?? branchResult.data?.code ?? 'Branch'),
     cashierName,
     changeAmount: 0,
-    customerName: String(customerResult.data?.customer_name ?? customerResult.data?.customer_code ?? 'Walk-in Customer'),
+    customerName: String(customerResult.data?.name ?? customerResult.data?.code ?? legacyBranchCustomerResult.data?.customer_name ?? legacyBranchCustomerResult.data?.customer_code ?? 'Walk-in Customer'),
     dateTime: String(sale.sale_date ?? new Date().toISOString()),
     discountAmount,
     lines,

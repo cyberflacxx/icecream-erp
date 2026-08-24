@@ -5,8 +5,10 @@ import {
   buildCustomerStatement,
   buildProductionCostSummary,
   calculateWorkerLabourCost,
+  classifyProductionMaterial,
   resolveLabourRate,
   summarizeBatchLabour,
+  summarizeProductionMaterialCosts,
 } from '../src/lib/red-module-costing';
 
 test('labour costing uses actual hours and configured hourly rate', () => {
@@ -67,6 +69,34 @@ test('production costing marks complete and partial batches without inventing ov
   assert.ok(partial.missingComponents.includes('DIRECT_LABOUR_COST'));
 });
 
+test('production material costing separates raw materials from packaging inputs', () => {
+  const rows = [
+    {
+      is_packaging: false,
+      material_type: 'RAW_MATERIAL',
+      quantity_actual: 2,
+      unit_cost: 3,
+    },
+    {
+      is_packaging: true,
+      material_type: 'PACKAGING',
+      quantity_actual: 10,
+      unit_cost: 0.2,
+    },
+    {
+      items: { item_type: 'PACKAGING_MATERIAL', unit_cost: 0.5 },
+      quantity_issued: 4,
+    },
+  ];
+
+  assert.equal(classifyProductionMaterial(rows[1]), 'PACKAGING');
+  assert.deepEqual(summarizeProductionMaterialCosts(rows), {
+    packagingCost: 4,
+    rawMaterialCost: 6,
+    totalMaterialCost: 10,
+  });
+});
+
 test('customer statement calculates opening, period movement, running, and closing balances', () => {
   const statement = buildCustomerStatement({
     fromDate: '2026-08-01',
@@ -84,4 +114,17 @@ test('customer statement calculates opening, period movement, running, and closi
   assert.equal(statement.periodCredits, 4);
   assert.equal(statement.closingBalance, 11);
   assert.deepEqual(statement.periodEntries.map((entry) => entry.runningBalance), [15, 12, 11]);
+});
+
+test('customer statement includes attributed branch credit sales as debits', () => {
+  const statement = buildCustomerStatement({
+    entries: [
+      { credit: 0, date: '2026-08-02', debit: 5, documentId: 'branch-sale-1', documentNumber: 'BS-00001', paymentMethod: 'CREDIT', referenceType: 'branch_sale', type: 'BRANCH_CREDIT_SALE' },
+      { credit: 2, date: '2026-08-03', debit: 0, documentId: 'pay-1', documentNumber: 'PAY-1', referenceType: 'payment', type: 'PAYMENT' },
+    ],
+  });
+
+  assert.equal(statement.periodDebits, 5);
+  assert.equal(statement.periodCredits, 2);
+  assert.equal(statement.closingBalance, 3);
 });

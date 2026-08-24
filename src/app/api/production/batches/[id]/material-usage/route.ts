@@ -17,6 +17,8 @@ export async function POST(
     const body = await request.json() as {
       materials: Array<{
         id: string;
+        isPackaging?: boolean;
+        materialType?: string;
         note?: string;
         quantityActual: number;
         quantityIssued?: number;
@@ -70,14 +72,21 @@ export async function POST(
 
       const resolvedUnitCost = unitCost ?? Number((existing?.items as { unit_cost?: unknown } | null)?.unit_cost ?? 0);
       materialCost += actual * resolvedUnitCost;
+      const materialUpdate: Record<string, unknown> = {
+        notes: material.note ?? null,
+        quantity_actual: actual,
+        quantity_issued: issued,
+        variance: actual - Number(existing?.quantity_required ?? 0),
+      };
+      if (material.materialType !== undefined) {
+        materialUpdate.material_type = String(material.materialType).trim().toUpperCase() || null;
+      }
+      if (material.isPackaging !== undefined) {
+        materialUpdate.is_packaging = Boolean(material.isPackaging);
+      }
       await service
         .from('production_batch_materials')
-        .update({
-          notes: material.note ?? null,
-          quantity_actual: actual,
-          quantity_issued: issued,
-          variance: actual - Number(existing?.quantity_required ?? 0),
-        })
+        .update(materialUpdate)
         .eq('id', material.id)
         .eq('batch_id', id);
     }
