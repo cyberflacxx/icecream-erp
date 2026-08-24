@@ -58,7 +58,7 @@ function normalizeCode(value: unknown) {
   return normalized || null;
 }
 
-type InventoryUnitCostResolution = {
+export type InventoryUnitCostResolution = {
   cost: number | null;
   source: 'inventory_batch' | 'item_master' | 'production_receipt' | 'stock_balance_average' | null;
 };
@@ -164,12 +164,47 @@ export async function resolveInventoryUnitCosts(input: {
 
   const itemCostById = new Map<string, number | null>();
   for (const row of (itemResult.data ?? []) as Array<Record<string, unknown>>) {
-    itemCostById.set(String(row.id ?? ''), pickPositiveCost(row.unit_cost, row.standard_cost));
+    const configuredStandardCost = row.unit_cost ?? row.standard_cost;
+    itemCostById.set(String(row.id ?? ''), pickPositiveCost(configuredStandardCost));
   }
 
   const resolutionByItemId = new Map<string, InventoryUnitCostResolution>();
   for (const itemId of itemIds) {
     resolutionByItemId.set(itemId, { cost: null, source: null });
+  }
+
+  const sortedProductionReceiptRows = productionReceiptRows.sort((left, right) => {
+    const leftReceipt = Array.isArray(left.production_receipts) ? left.production_receipts[0] : left.production_receipts;
+    const rightReceipt = Array.isArray(right.production_receipts) ? right.production_receipts[0] : right.production_receipts;
+    return String((rightReceipt as Record<string, unknown> | null)?.receipt_date ?? '').localeCompare(
+      String((leftReceipt as Record<string, unknown> | null)?.receipt_date ?? ''),
+    );
+  });
+
+  for (const row of sortedProductionReceiptRows) {
+    const itemId = String(row.finished_product_id ?? '');
+    const current = resolutionByItemId.get(itemId);
+    if (!current || current.cost !== null) continue;
+
+    const receipt = Array.isArray(row.production_receipts) ? row.production_receipts[0] : row.production_receipts;
+    const receiptRow = (receipt ?? null) as Record<string, unknown> | null;
+    const receiptWarehouseId = receiptRow?.finished_goods_warehouse_id ? String(receiptRow.finished_goods_warehouse_id) : null;
+    const receiptBranchId = receiptRow?.branch_id ? String(receiptRow.branch_id) : null;
+    const inScope =
+      (warehouseId && receiptWarehouseId === warehouseId) ||
+      (!warehouseId && branchId && receiptBranchId === branchId) ||
+      (!warehouseId && !branchId);
+    if (!inScope) continue;
+
+    const productionCost = pickPositiveCost(
+      row.unit_production_cost,
+      toOptionalNumber(row.current_completed_quantity) && toOptionalNumber(row.total_production_cost)
+        ? Number(row.total_production_cost) / Math.max(Number(row.current_completed_quantity), 1)
+        : null,
+    );
+    if (productionCost !== null) {
+      resolutionByItemId.set(itemId, { cost: productionCost, source: 'production_receipt' });
+    }
   }
 
   for (const row of (stockResult.data ?? []) as Array<Record<string, unknown>>) {
@@ -214,40 +249,6 @@ export async function resolveInventoryUnitCosts(input: {
     const batchCost = pickPositiveCost(row.unit_cost);
     if (batchCost !== null) {
       resolutionByItemId.set(itemId, { cost: batchCost, source: 'inventory_batch' });
-    }
-  }
-
-  const sortedProductionReceiptRows = productionReceiptRows.sort((left, right) => {
-    const leftReceipt = Array.isArray(left.production_receipts) ? left.production_receipts[0] : left.production_receipts;
-    const rightReceipt = Array.isArray(right.production_receipts) ? right.production_receipts[0] : right.production_receipts;
-    return String((rightReceipt as Record<string, unknown> | null)?.receipt_date ?? '').localeCompare(
-      String((leftReceipt as Record<string, unknown> | null)?.receipt_date ?? ''),
-    );
-  });
-
-  for (const row of sortedProductionReceiptRows) {
-    const itemId = String(row.finished_product_id ?? '');
-    const current = resolutionByItemId.get(itemId);
-    if (!current || current.cost !== null) continue;
-
-    const receipt = Array.isArray(row.production_receipts) ? row.production_receipts[0] : row.production_receipts;
-    const receiptRow = (receipt ?? null) as Record<string, unknown> | null;
-    const receiptWarehouseId = receiptRow?.finished_goods_warehouse_id ? String(receiptRow.finished_goods_warehouse_id) : null;
-    const receiptBranchId = receiptRow?.branch_id ? String(receiptRow.branch_id) : null;
-    const inScope =
-      (warehouseId && receiptWarehouseId === warehouseId) ||
-      (!warehouseId && branchId && receiptBranchId === branchId) ||
-      (!warehouseId && !branchId);
-    if (!inScope) continue;
-
-    const productionCost = pickPositiveCost(
-      row.unit_production_cost,
-      toOptionalNumber(row.current_completed_quantity) && toOptionalNumber(row.total_production_cost)
-        ? Number(row.total_production_cost) / Math.max(Number(row.current_completed_quantity), 1)
-        : null,
-    );
-    if (productionCost !== null) {
-      resolutionByItemId.set(itemId, { cost: productionCost, source: 'production_receipt' });
     }
   }
 

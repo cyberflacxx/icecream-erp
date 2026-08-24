@@ -1,4 +1,5 @@
 import { asArray, asObject, ensureNonNegative, ensurePositiveQuantity, normalizeDate, normalizeWarehouseCode, toCsv, toNumber } from './inventory';
+import { buildProductionCostSummary, summarizeBatchLabour, type CostStatus } from './red-module-costing';
 
 export const PRODUCTION_PLAN_STATUSES = [
   'DRAFT',
@@ -193,9 +194,20 @@ export type ProductionCostingRow = {
   acceptedOutput: number;
   batchNumber: string;
   costPerUnit: number;
+  costStatus?: CostStatus;
+  finishedGoodsValue?: number;
+  labourCost?: number;
+  labourCostPerUnit?: number | null;
+  missingComponents?: string[];
+  overheadCost?: number;
+  packagingCost?: number;
   productName: string;
+  rawMaterialCost?: number;
   shift: string;
   totalBatchCost: number;
+  totalLabourHours?: number;
+  unitsPerWorker?: number | null;
+  wastageCost?: number;
 };
 
 export type ShiftPerformanceRow = {
@@ -735,21 +747,46 @@ export function buildCostingRows(
     const recipe = asObject(batch.recipes);
     const finishedItem = asObject(recipe?.finished_item);
     const materials = asArray(batch.production_batch_materials);
-    const totalBatchCost = materials.reduce((sum, row) => {
+    const derivedMaterialCost = materials.reduce((sum, row) => {
       const actualQuantity = toNumber(row.quantity_actual ?? row.quantity_issued);
       const item = asObject(row.items);
       const unitCost = toNumber(row.unit_cost ?? item?.unit_cost);
       return sum + (actualQuantity * unitCost);
     }, 0);
     const acceptedOutput = toNumber(batch.actual_output);
+    const labour = summarizeBatchLabour({
+      assignments: asArray(batch.production_worker_assignments),
+      goodUnitsProduced: acceptedOutput,
+      labourAllocations: asArray(batch.hr_labour_cost_allocations),
+    });
+    const summary = buildProductionCostSummary({
+      goodUnitsProduced: acceptedOutput,
+      labourCost: labour.totalLabourCost || batch.total_labour_cost || batch.labour_cost,
+      overheadCost: batch.total_overhead_cost ?? batch.overhead_cost,
+      rawMaterialCost: batch.total_material_cost ?? batch.material_cost ?? derivedMaterialCost,
+      totalProductionCost: batch.actual_cost,
+      wastageCost: batch.wastage_cost,
+    });
+    const missingComponents = [...new Set([...summary.missingComponents, ...labour.missingComponents])];
 
     return {
       acceptedOutput,
       batchNumber: String(batch.batch_number ?? ''),
-      costPerUnit: acceptedOutput > 0 ? calculateCostPerUnit(totalBatchCost, acceptedOutput) : 0,
+      costPerUnit: acceptedOutput > 0 ? calculateCostPerUnit(summary.totalProductionCost, acceptedOutput) : 0,
+      costStatus: missingComponents.length === 0 ? summary.costStatus : summary.costStatus === 'NOT_CONFIGURED' ? 'NOT_CONFIGURED' : 'PARTIAL',
+      finishedGoodsValue: summary.finishedGoodsValue,
+      labourCost: summary.labourCost,
+      labourCostPerUnit: labour.labourCostPerUnit,
+      missingComponents,
+      overheadCost: summary.overheadCost,
+      packagingCost: summary.packagingCost,
       productName: String(finishedItem?.name ?? recipe?.name ?? 'Unknown product'),
+      rawMaterialCost: summary.rawMaterialCost,
       shift: String(batch.shift ?? ''),
-      totalBatchCost,
+      totalBatchCost: summary.totalProductionCost,
+      totalLabourHours: labour.totalLabourHours,
+      unitsPerWorker: labour.unitsPerWorker,
+      wastageCost: summary.wastageCost,
     };
   });
 }
