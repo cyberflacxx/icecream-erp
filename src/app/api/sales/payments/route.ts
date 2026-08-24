@@ -119,6 +119,10 @@ export async function POST(request: NextRequest) {
     if (!body.customerId || !body.invoiceId || !body.paymentDate || !body.paymentMethod) {
       return badRequest('customerId, invoiceId, paymentDate, and paymentMethod are required.');
     }
+    const paymentAmount = Number(body.amount);
+    if (!Number.isFinite(paymentAmount) || paymentAmount <= 0) {
+      return badRequest('Receipt amount must be greater than zero.');
+    }
     const normalizedPaymentMethod = normalizeSalesPaymentMethod(body.paymentMethod);
     if (normalizedPaymentMethod === 'BANK' && !String(body.bankAccountId ?? '').trim()) {
       return badRequest('bankAccountId is required for bank receipts.');
@@ -151,14 +155,14 @@ export async function POST(request: NextRequest) {
     if (ctx.isBranchScoped && ctx.branchId && invoiceBranchId && invoiceBranchId !== ctx.branchId) {
       return forbidden('This role is limited to its assigned branch.');
     }
-    if (!canRecordPayment(Number(invoice.balance_due ?? 0), body.amount)) {
+    if (!canRecordPayment(Number(invoice.balance_due ?? 0), paymentAmount)) {
       return badRequest('Payment amount exceeds invoice balance.');
     }
 
     try {
       const transaction = await postSalesPaymentTransaction(
         {
-          amount: body.amount,
+          amount: paymentAmount,
           branchId: invoiceBranchId || body.branchId || null,
           costCenterCode: body.costCenterCode ?? null,
           currencyCode: body.currencyCode ?? null,
@@ -195,7 +199,7 @@ export async function POST(request: NextRequest) {
     let paymentResult: { data: Record<string, unknown> | null; error: unknown } = await service
       .from('payments')
       .insert({
-        amount: body.amount,
+        amount: paymentAmount,
         created_by: ctx.userId,
         customer_id: body.customerId,
         invoice_id: body.invoiceId,
@@ -213,7 +217,7 @@ export async function POST(request: NextRequest) {
       paymentResult = {
         data: {
           id: compatPaymentId,
-          amount: body.amount,
+          amount: paymentAmount,
           customer_id: body.customerId,
           invoice_id: body.invoiceId,
           payment_date: body.paymentDate,
@@ -230,8 +234,8 @@ export async function POST(request: NextRequest) {
     const payment = (data ?? {}) as Record<string, unknown>;
 
     const invoiceRow = invoice as Record<string, unknown>;
-    const nextAmountPaid = Number(invoiceRow.amount_paid ?? invoiceRow.paid_amount ?? 0) + body.amount;
-    const nextBalance = Math.max(0, Number(invoiceRow.balance_due ?? 0) - body.amount);
+    const nextAmountPaid = Number(invoiceRow.amount_paid ?? invoiceRow.paid_amount ?? 0) + paymentAmount;
+    const nextBalance = Math.max(0, Number(invoiceRow.balance_due ?? 0) - paymentAmount);
     const nextInvoiceStatus = nextBalance === 0 ? 'PAID' : 'PARTIAL_PAID';
     const invoiceUpdate = await service.from('invoices').update({
       amount_paid: nextAmountPaid,
@@ -273,11 +277,11 @@ export async function POST(request: NextRequest) {
     }
     const customer = (customerResult.data ?? null) as Record<string, unknown> | null;
     const customerUpdate = await service.from('customers').update({
-      current_balance: Math.max(0, Number(customer?.current_balance ?? customer?.outstanding_balance ?? 0) - body.amount),
+      current_balance: Math.max(0, Number(customer?.current_balance ?? customer?.outstanding_balance ?? 0) - paymentAmount),
     }).eq('id', body.customerId);
     if (customerUpdate.error && salesErrorMessage(customerUpdate.error).includes('current_balance')) {
       await service.from('customers').update({
-        outstanding_balance: Math.max(0, Number(customer?.outstanding_balance ?? 0) - body.amount),
+        outstanding_balance: Math.max(0, Number(customer?.outstanding_balance ?? 0) - paymentAmount),
       }).eq('id', body.customerId);
     }
 
@@ -306,12 +310,12 @@ export async function POST(request: NextRequest) {
           {
             accountId: tenderAccount.id,
             creditAmount: 0,
-            debitAmount: Number(body.amount),
+            debitAmount: paymentAmount,
             description: `Customer payment via ${paymentMethod}`,
           },
           {
             accountId: receivableAccount.id,
-            creditAmount: Number(body.amount),
+            creditAmount: paymentAmount,
             debitAmount: 0,
             description: `Reduce accounts receivable for invoice ${String(invoice.invoice_number ?? body.invoiceId)}`,
           },
@@ -328,7 +332,7 @@ export async function POST(request: NextRequest) {
     if (paymentMethod === 'BANK' || paymentMethod === 'CASH' || paymentMethod === 'PETTY_CASH') {
       try {
         linkedTransaction = await createLinkedFinanceTransaction({
-          amount: Number(body.amount),
+          amount: paymentAmount,
           createdBy: ctx.userId,
           description: `Customer payment for invoice ${String(invoice.invoice_number ?? body.invoiceId)}`,
           direction: 'IN',
@@ -352,7 +356,7 @@ export async function POST(request: NextRequest) {
       paymentId,
       ctx.userId,
       {
-        amount: Number(body.amount),
+        amount: paymentAmount,
         customerId: body.customerId,
         invoiceId: body.invoiceId,
         journalId: journal?.id ?? null,

@@ -10,8 +10,8 @@ function formatQuantity(value: number | null) {
   return value.toFixed(3);
 }
 
-function formatMoney(value: number | null) {
-  if (value === null || !Number.isFinite(value)) return 'n/a';
+function formatMoney(value: number | null, fallback = 'Not configured') {
+  if (value === null || !Number.isFinite(value)) return fallback;
   return value.toFixed(2);
 }
 
@@ -96,8 +96,22 @@ export function ItemSelectorField({
       .slice(0, 12);
   }, [inputValue, options]);
 
+  function commitExactTypedMatch() {
+    if (selectedOption) return;
+    const normalizedInput = inputValue.trim().toLowerCase();
+    if (!normalizedInput) return;
+    const exactMatch = options.find((option) =>
+      [option.code, option.name, option.label]
+        .filter(Boolean)
+        .some((candidate) => String(candidate).trim().toLowerCase() === normalizedInput),
+    );
+    if (!exactMatch) return;
+    setInputValue(optionDisplayValue(exactMatch));
+    onChange(exactMatch.id);
+  }
+
   const detailText = selectedOption
-    ? `${selectedOption.code} | ${selectedOption.unitAbbreviation ?? selectedOption.unitName ?? 'Unit'} | ${selectedOption.warehouseName ? `Warehouse ${selectedOption.warehouseName} | ` : ''}${formatStockSummary(selectedOption)} | ${formatCostSummary(selectedOption)} | Price ${formatMoney(selectedOption.sellingPrice)}`
+    ? `${selectedOption.code} | ${selectedOption.unitAbbreviation ?? selectedOption.unitName ?? 'Unit'} | ${selectedOption.warehouseName ? `Warehouse ${selectedOption.warehouseName} | ` : ''}${formatStockSummary(selectedOption)} | ${formatCostSummary(selectedOption)} | Price ${formatMoney(selectedOption.sellingPrice, 'Price not configured')}`
     : null;
 
   const helperContent = (() => {
@@ -169,6 +183,7 @@ export function ItemSelectorField({
           onFocus={() => setIsOpen(true)}
           onBlur={() => {
             window.setTimeout(() => {
+              commitExactTypedMatch();
               setIsOpen(false);
               if (!selectedOption) {
                 setInputValue((current) => current.trim());

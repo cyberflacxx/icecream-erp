@@ -1,4 +1,5 @@
 import { notFound } from 'next/navigation';
+import Image from 'next/image';
 
 import { getAuthContext } from '@/lib/api-auth';
 import { getActiveBranchWarehouse } from '@/lib/branches-server';
@@ -7,7 +8,7 @@ import { buildBranchSaleReceiptNumber, formatPaymentMethodLabel } from '@/lib/sa
 import { getCompanyProfile } from '@/lib/settings-server';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
-import { PrintOnLoad } from './print-on-load';
+import { PrintOnLoad, PrintReceiptButton } from './print-on-load';
 
 const currencyFormatter = new Intl.NumberFormat('en-US', {
   currency: 'USD',
@@ -278,14 +279,29 @@ export default async function SalesPaymentReceiptPage({
     <main className="min-h-screen bg-white px-4 py-6 text-brown print:px-0 print:py-0">
       <PrintOnLoad enabled={autoPrint} />
       <div className="mx-auto max-w-4xl rounded-[28px] border border-border/70 bg-white shadow-lg print:max-w-none print:rounded-none print:border-0 print:shadow-none">
+        <div className="flex items-center justify-end border-b border-border/70 px-8 py-4 print:hidden">
+          <PrintReceiptButton />
+        </div>
         <section className="border-b border-border/70 px-8 py-8">
           <div className="flex flex-col gap-6 sm:flex-row sm:items-start sm:justify-between">
             <div className="space-y-3">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.24em] text-muted">Printable Receipt</p>
-                <h1 className="mt-2 text-3xl font-semibold text-brown">{companyName}</h1>
+              <div className="flex items-center gap-4">
+                <Image
+                  src="/icon.png"
+                  alt="Absolute Quality Icecream logo"
+                  className="h-16 w-16 rounded-2xl object-contain"
+                  height={64}
+                  priority
+                  width={64}
+                />
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.24em] text-muted">Printable Receipt</p>
+                  <h1 className="mt-2 text-3xl font-semibold text-brown">ABSOLUTE QUALITY ICECREAM</h1>
+                  <p className="mt-1 text-xs font-semibold uppercase tracking-[0.2em] text-orange">Richer, Creamier Taste</p>
+                </div>
               </div>
               <div className="space-y-1 text-sm text-muted">
+                {companyName !== 'Absolute Ice Cream' && companyName !== 'ABSOLUTE QUALITY ICECREAM' ? <p>{companyName}</p> : null}
                 {companyAddress ? <p>{companyAddress}</p> : null}
                 {companyPhone ? <p>{companyPhone}</p> : null}
                 {companyEmail ? <p>{companyEmail}</p> : null}
@@ -315,10 +331,10 @@ export default async function SalesPaymentReceiptPage({
             <table className="w-full border-collapse text-left text-sm">
               <thead className="bg-cream/70 text-muted">
                 <tr>
-                  <th className="px-4 py-3 font-semibold">Product</th>
+                  <th className="px-4 py-3 font-semibold">Description</th>
                   <th className="px-4 py-3 font-semibold">Qty</th>
                   <th className="px-4 py-3 font-semibold">Unit Price</th>
-                  <th className="px-4 py-3 font-semibold">Line Total</th>
+                  <th className="px-4 py-3 font-semibold">Amount</th>
                 </tr>
               </thead>
               <tbody>
@@ -354,7 +370,7 @@ export default async function SalesPaymentReceiptPage({
           </div>
 
           <div className="mt-8 border-t border-dashed border-border/80 pt-5 text-center text-sm text-muted">
-            Absolute Ice Cream thanks you for your business.
+            Thank you for choosing Absolute Quality Icecream
           </div>
         </section>
       </div>

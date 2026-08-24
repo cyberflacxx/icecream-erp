@@ -130,6 +130,18 @@ export default function InvoicesPage() {
       setFormError('Direct invoices require a warehouse and at least one item.');
       return;
     }
+    if (!invoiceForm.salesOrderId) {
+      const overdrawnLine = lines.find((line) => {
+        const selectedOption = itemOptionsQuery.data?.find((item) => item.id === line.itemId);
+        if (!selectedOption?.hasStockRecord) return true;
+        const availableQuantity = Number(selectedOption.quantityAvailable ?? selectedOption.warehouseQuantity ?? 0);
+        return Number(line.quantity) > availableQuantity;
+      });
+      if (overdrawnLine) {
+        setFormError('Direct invoice quantity exceeds live available warehouse stock, or the selected item has no stock record.');
+        return;
+      }
+    }
 
     try {
       await request(API_ROUTES.SALES.INVOICES, {

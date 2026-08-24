@@ -28,7 +28,7 @@ export async function GET(
   const invoice = invoiceResult.data as Record<string, unknown>;
   const customerId = invoice.customer_id ? String(invoice.customer_id) : null;
 
-  const [customerResult, invoiceItemsResult] = await Promise.all([
+  const [customerResult, invoiceItemsResult, paymentsResult] = await Promise.all([
     customerId
       ? service
         .from('customers')
@@ -41,10 +41,17 @@ export async function GET(
       .from('invoice_items')
       .select('*')
       .eq('invoice_id', params.id),
+    service
+      .from('payments')
+      .select('id, payment_number, payment_method, reference_number, amount, payment_date')
+      .eq('organization_id', ctx.organizationId)
+      .eq('invoice_id', params.id)
+      .order('payment_date', { ascending: false }),
   ]);
 
   if (customerResult.error) return serverError(customerResult.error.message);
   if (invoiceItemsResult.error) return serverError(invoiceItemsResult.error.message);
+  if (paymentsResult.error) return serverError(paymentsResult.error.message);
 
   const invoiceItems = (invoiceItemsResult.data ?? []) as Array<Record<string, unknown>>;
   const itemIds = [...new Set(invoiceItems.map((row) => String(row.item_id ?? '')).filter(Boolean))];
@@ -116,6 +123,7 @@ export async function GET(
       ...row,
       items: itemsById.get(String(row.item_id ?? '')) ?? null,
     })),
+    payments: paymentsResult.data ?? [],
     branch,
     company: companyResult.data ?? null,
     displayStatus: deriveSalesInvoiceStatus({
