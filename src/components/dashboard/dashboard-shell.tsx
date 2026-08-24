@@ -27,13 +27,14 @@ export function DashboardShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const { currentUser, isLoading } = useUserContext();
+  const isStandaloneReceipt = pathname === '/sales/payments/receipt';
 
   useEffect(() => {
     setSidebarOpen(false);
   }, [pathname]);
 
   useEffect(() => {
-    if (isLoading || !currentUser) return;
+    if (isStandaloneReceipt || isLoading || !currentUser) return;
     const persona = resolveDashboardPersona({
       permissions: currentUser.permissions,
       role: currentUser.profile.role,
@@ -42,7 +43,11 @@ export function DashboardShell({ children }: { children: ReactNode }) {
     if (!canAccessDashboardPath(persona, pathname)) {
       router.replace('/dashboard');
     }
-  }, [currentUser, isLoading, pathname, router]);
+  }, [currentUser, isLoading, isStandaloneReceipt, pathname, router]);
+
+  if (isStandaloneReceipt) {
+    return <>{children}</>;
+  }
 
   if (!isLoading && currentUser) {
     const persona = resolveDashboardPersona({

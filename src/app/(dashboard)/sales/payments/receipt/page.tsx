@@ -2,6 +2,7 @@ import { notFound } from 'next/navigation';
 
 import { getAuthContext } from '@/lib/api-auth';
 import { getActiveBranchWarehouse } from '@/lib/branches-server';
+import { isMissingColumnError } from '@/lib/postgrest-compat';
 import { buildBranchSaleReceiptNumber, formatPaymentMethodLabel } from '@/lib/sales-payments';
 import { getCompanyProfile } from '@/lib/settings-server';
 import { createServiceRoleClient } from '@/lib/supabase/server';
@@ -66,14 +67,20 @@ async function loadCashierName(service: ReturnType<typeof createServiceRoleClien
 
 async function loadBranchSaleReceiptRecord(organizationId: string, branchSaleId: string): Promise<ReceiptRecord | null> {
   const service = createServiceRoleClient().schema('icecream_erp');
-  const saleResult = await service
-    .from('branch_sales')
-    .select(
-      'id, branch_id, customer_id, sale_number, sale_date, total_amount, discount_amount, tax_amount, payment_method, payment_reference, remarks, served_by',
-    )
-    .eq('organization_id', organizationId)
-    .eq('id', branchSaleId)
-    .maybeSingle();
+  const buildSaleQuery = (selectClause: string) => service
+      .from('branch_sales')
+      .select(selectClause)
+      .eq('organization_id', organizationId)
+      .eq('id', branchSaleId)
+      .maybeSingle();
+  let saleResult = await buildSaleQuery(
+    'id, branch_id, customer_id, sale_number, sale_date, total_amount, discount_amount, tax_amount, payment_method, payment_reference, remarks, served_by',
+  );
+  if (saleResult.error && isMissingColumnError(saleResult.error, 'branch_sales', 'customer_id')) {
+    saleResult = await buildSaleQuery(
+      'id, branch_id, sale_number, sale_date, total_amount, discount_amount, tax_amount, payment_method, payment_reference, remarks, served_by',
+    );
+  }
   if (saleResult.error) throw saleResult.error;
   if (!saleResult.data) return null;
 

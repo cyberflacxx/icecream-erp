@@ -256,6 +256,18 @@ test('branch sale route aligns header insert with live legacy schema', () => {
   assert.match(branchSaleRoute, /transaction_date: saleDateIso/);
 });
 
+test('branch sale receipt loads without live customer_id and bypasses dashboard chrome', () => {
+  const receiptPage = fs.readFileSync('src/app/(dashboard)/sales/payments/receipt/page.tsx', 'utf8');
+  const shell = fs.readFileSync('src/components/dashboard/dashboard-shell.tsx', 'utf8');
+
+  assert.match(receiptPage, /isMissingColumnError/);
+  assert.match(receiptPage, /branch_sales', 'customer_id'/);
+  assert.match(receiptPage, /id, branch_id, sale_number, sale_date/);
+  assert.match(shell, /isStandaloneReceipt/);
+  assert.match(shell, /pathname === '\/sales\/payments\/receipt'/);
+  assert.match(shell, /return <>\{children\}<\/>/);
+});
+
 test('shared dashboard and form layout primitives use the widened navigation and roomier form spacing', () => {
   const shell = fs.readFileSync('src/components/dashboard/dashboard-shell.tsx', 'utf8');
   const sidebar = fs.readFileSync('src/components/dashboard/sidebar.tsx', 'utf8');
