@@ -8,6 +8,7 @@ import {
   normalizeTrialBalanceRow,
   resolveLedgerCredit,
   resolveLedgerDebit,
+  validateOutgoingCashBalance,
   validateJournalLines,
 } from '@/lib/finance';
 import {
@@ -855,6 +856,13 @@ export async function createLinkedFinanceTransaction(input: {
     .maybeSingle();
   if (existingResult.error && !isMissingFinanceTable(existingResult.error)) throw existingResult.error;
   if (existingResult.data?.id) return { id: String(existingResult.data.id), table: 'cash_transactions' };
+
+  const balanceError = validateOutgoingCashBalance({
+    amount: input.amount,
+    currentBalance: Number(resolvedAccountResult.data.current_balance ?? resolvedAccountResult.data.opening_balance ?? 0),
+    isOutgoing: input.direction === 'OUT',
+  });
+  if (balanceError) throw new Error(balanceError);
 
   const insertResult = await service
     .from('cash_transactions')

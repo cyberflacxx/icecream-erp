@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { badRequest, can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
 import { ensureFinanceAccountCanBePosted } from '@/lib/finance-foundation-server';
+import { validateOutgoingCashBalance } from '@/lib/finance';
 import {
   financeService,
   postFinanceDocument,
@@ -71,6 +72,13 @@ export async function POST(request: NextRequest) {
     if (!account) return badRequest('Cash account was not found');
     if (!account.account_id) return badRequest('Cash account is missing its linked ledger account.');
     await ensureFinanceAccountCanBePosted(ctx.organizationId, String(body.offsetAccountId));
+
+    const balanceError = validateOutgoingCashBalance({
+      amount,
+      currentBalance: Number(account.current_balance ?? 0),
+      isOutgoing: signedAmount(body.transactionType, amount) < 0,
+    });
+    if (balanceError) return badRequest(balanceError);
 
     const { data, error } = await service
       .from('cash_transactions')

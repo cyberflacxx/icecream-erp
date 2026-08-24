@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { apiServerError, badRequest, can, forbidden, getAuthContext, unauthorized } from '@/lib/api-auth';
 import { ensureBranchScope, requireOpenShift, writeBranchAuditLog } from '@/lib/branches-server';
 import { findOpenFiscalPeriod, resolveFinanceCostCentreCode, resolveFinancePostingAccount } from '@/lib/finance-foundation-server';
+import { validateOutgoingCashBalance } from '@/lib/finance';
 import { createLinkedFinanceTransaction, financeErrorMessage, postFinanceDocument } from '@/lib/finance-server';
 import { isMissingColumnError } from '@/lib/postgrest-compat';
 import { createServiceRoleClient } from '@/lib/supabase/server';
@@ -33,7 +34,7 @@ async function resolveSelectedTenderAccount(input: {
     const bankResult = await input.service
       .schema('icecream_erp')
       .from('bank_accounts')
-      .select('id, account_id, is_active')
+      .select('id, account_id, current_balance, is_active')
       .eq('organization_id', input.organizationId)
       .eq('id', String(input.bankAccountId ?? ''))
       .maybeSingle();
@@ -44,13 +45,14 @@ async function resolveSelectedTenderAccount(input: {
     return {
       accountId: String(bankResult.data.account_id),
       selectedAccountId: String(bankResult.data.id),
+      currentBalance: Number(bankResult.data.current_balance ?? 0),
     };
   }
 
   const cashResult = await input.service
     .schema('icecream_erp')
     .from('cash_accounts')
-    .select('id, account_id, is_active')
+    .select('id, account_id, current_balance, is_active')
     .eq('organization_id', input.organizationId)
     .eq('id', String(input.cashAccountId ?? ''))
     .maybeSingle();
@@ -61,6 +63,7 @@ async function resolveSelectedTenderAccount(input: {
   return {
     accountId: String(cashResult.data.account_id),
     selectedAccountId: String(cashResult.data.id),
+    currentBalance: Number(cashResult.data.current_balance ?? 0),
   };
 }
 
@@ -199,9 +202,12 @@ export async function POST(
       return badRequest('The branch cost centre has not been configured.');
     }
 
+    let paymentAccount: Awaited<ReturnType<typeof resolveSelectedTenderAccount>> | null = null;
+    let expenseAccount: Awaited<ReturnType<typeof resolveFinancePostingAccount>> | null = null;
+
     try {
       const mapping = paymentMappingKey(normalizedPaymentMethod);
-      await Promise.all([
+      const [, , resolvedExpenseAccount] = await Promise.all([
         findOpenFiscalPeriod(ctx.organizationId, expenseDate),
         resolveFinancePostingAccount(ctx.organizationId, mapping.key, {
           branchId,
@@ -212,6 +218,21 @@ export async function POST(
           fallbackAccountCode: '6100',
         }),
       ]);
+      paymentAccount = await resolveSelectedTenderAccount({
+        bankAccountId: body.bankAccountId ?? null,
+        cashAccountId: body.cashAccountId ?? null,
+        organizationId: ctx.organizationId,
+        paymentMethod: normalizedPaymentMethod,
+        service,
+      });
+      expenseAccount = resolvedExpenseAccount;
+
+      const balanceError = validateOutgoingCashBalance({
+        amount: Number(body.amount),
+        currentBalance: paymentAccount.currentBalance,
+        isOutgoing: normalizedPaymentMethod === 'CASH' || normalizedPaymentMethod === 'PETTY_CASH',
+      });
+      if (balanceError) return badRequest(balanceError);
     } catch (error) {
       const message = error instanceof Error ? error.message : '';
       if (message.includes('No open fiscal period')) {
@@ -219,6 +240,9 @@ export async function POST(
       }
       if (message.includes('Missing active account mapping') || message.includes('Fallback account')) {
         return badRequest('No payment account is linked to this branch.');
+      }
+      if (message.includes('selected cash account') || message.includes('selected bank account')) {
+        return badRequest(message);
       }
       if (message.includes('inactive')) {
         return badRequest('The expense account is inactive.');
@@ -282,17 +306,9 @@ export async function POST(
     let journal: Awaited<ReturnType<typeof postFinanceDocument>> | null = null;
     let linkedTransaction: Awaited<ReturnType<typeof createLinkedFinanceTransaction>> | null = null;
     try {
-      const paymentAccount = await resolveSelectedTenderAccount({
-        bankAccountId: body.bankAccountId ?? null,
-        cashAccountId: body.cashAccountId ?? null,
-        organizationId: ctx.organizationId,
-        paymentMethod: normalizedPaymentMethod,
-        service,
-      });
-      const expenseAccount = await resolveFinancePostingAccount(ctx.organizationId, 'DEFAULT_BRANCH_EXPENSE', {
-        branchId,
-        fallbackAccountCode: '6100',
-      });
+      if (!paymentAccount || !expenseAccount) {
+        return badRequest('Branch expense finance setup could not be resolved.');
+      }
 
       journal = await postFinanceDocument({
         branchId,

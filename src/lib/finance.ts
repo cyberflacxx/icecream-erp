@@ -269,6 +269,19 @@ export function resolveCashAccountBalance(row: Record<string, unknown>) {
   );
 }
 
+export function validateOutgoingCashBalance(input: {
+  amount: number;
+  allowNegative?: boolean;
+  currentBalance: number;
+  isOutgoing: boolean;
+}) {
+  const amount = ensureNonNegative(input.amount, 'amount');
+  const currentBalance = toNumber(input.currentBalance);
+  if (!input.isOutgoing || input.allowNegative) return null;
+  if (amount > currentBalance) return 'Insufficient cash balance.';
+  return null;
+}
+
 export function normalizeCashAccount(row: Record<string, unknown>): NormalizedCashAccount {
   const name = String(row.name ?? row.account_name ?? '');
   const accountName = String(row.account_name ?? row.name ?? '');

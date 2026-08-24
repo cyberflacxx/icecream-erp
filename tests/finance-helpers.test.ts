@@ -46,6 +46,7 @@ import {
   validateChartOfAccountImportRows,
   validateFixedAssetImportRows,
   validateJournalLines,
+  validateOutgoingCashBalance,
   validateOpeningBalanceImportRows,
 } from '../src/lib/finance';
 import {
@@ -253,6 +254,13 @@ test('cash account helpers fall back across compatible balance columns safely', 
   assert.equal(resolveCashAccountBalance({ opening_balance: 45 }), 45);
   assert.equal(resolveCashAccountBalance({ amount: 12 }), 12);
   assert.equal(resolveCashAccountBalance({}), 0);
+});
+
+test('outgoing cash validation blocks unconfigured negative balances without blocking receipts', () => {
+  assert.equal(validateOutgoingCashBalance({ amount: 0.25, currentBalance: 0.1, isOutgoing: true }), 'Insufficient cash balance.');
+  assert.equal(validateOutgoingCashBalance({ amount: 0.25, currentBalance: 0.1, isOutgoing: false }), null);
+  assert.equal(validateOutgoingCashBalance({ amount: 0.25, currentBalance: 0.1, isOutgoing: true, allowNegative: true }), null);
+  assert.equal(validateOutgoingCashBalance({ amount: 0.25, currentBalance: 0.25, isOutgoing: true }), null);
 });
 
 test('normalizeCashAccount returns canonical cash account fields from legacy shapes', () => {
