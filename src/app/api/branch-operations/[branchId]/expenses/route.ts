@@ -236,6 +236,7 @@ export async function POST(
         created_by: ctx.userId,
         description: body.description,
         expense_date: new Date(`${expenseDate}T00:00:00.000Z`).toISOString(),
+        organization_id: ctx.organizationId,
         payment_method: body.paymentMethod,
         posted_at: new Date().toISOString(),
         posted_by: ctx.userId,
@@ -266,6 +267,7 @@ export async function POST(
           created_by: ctx.userId,
           description: body.description,
           expense_date: new Date(`${expenseDate}T00:00:00.000Z`).toISOString(),
+          organization_id: ctx.organizationId,
           payment_method: body.paymentMethod,
           status: 'POSTED',
         })

@@ -223,6 +223,7 @@ test('branch selector and sales order routes use shared authorization-aware bran
 
 test('branch expense route validates finance setup and falls back across legacy branch expense columns', () => {
   const branchExpenseRoute = fs.readFileSync('src/app/api/branch-operations/[branchId]/expenses/route.ts', 'utf8');
+  const branchExpenseMigration = fs.readFileSync('migrations/053_branch_expenses_foundation.sql', 'utf8');
 
   assert.match(branchExpenseRoute, /resolveFinanceCostCentreCode/);
   assert.match(branchExpenseRoute, /resolveFinancePostingAccount/);
@@ -233,7 +234,11 @@ test('branch expense route validates finance setup and falls back across legacy 
   assert.match(branchExpenseRoute, /isMissingColumnError/);
   assert.match(branchExpenseRoute, /receipt_url/);
   assert.match(branchExpenseRoute, /shift_close_id/);
+  assert.match(branchExpenseRoute, /organization_id: ctx\.organizationId/);
   assert.match(branchExpenseRoute, /apiServerError/);
+  assert.match(branchExpenseMigration, /create table if not exists icecream_erp\.branch_expenses/);
+  assert.match(branchExpenseMigration, /organization_id uuid not null/);
+  assert.match(branchExpenseMigration, /branch_expenses_service_role_full_access/);
 });
 
 test('branch sale route aligns header insert with live legacy schema', () => {
