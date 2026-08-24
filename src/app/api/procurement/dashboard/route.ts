@@ -37,21 +37,36 @@ export async function GET(_request: NextRequest) {
 
   const orderIds = (orders.data ?? []).map((row) => String(row.id));
   const supplierIds = [...new Set((orders.data ?? []).map((row) => String(row.supplier_id ?? '')).filter(Boolean))];
-  const [orderItems, suppliersResult] = await Promise.all([
-    orderIds.length ? service.from('purchase_order_items').select('po_id, purchase_order_id, quantity, quantity_ordered, received_qty, quantity_received, item_id').or(`po_id.in.(${orderIds.join(',')}),purchase_order_id.in.(${orderIds.join(',')})`) : Promise.resolve({ data: [], error: null }),
+  const orderItemSelect = 'po_id, purchase_order_id, quantity, quantity_ordered, received_qty, quantity_received, item_id';
+  const [orderItemsByPurchaseOrderId, orderItemsByLegacyPoId, suppliersResult] = await Promise.all([
+    orderIds.length ? service.from('purchase_order_items').select(orderItemSelect).in('purchase_order_id', orderIds) : Promise.resolve({ data: [], error: null }),
+    orderIds.length ? service.from('purchase_order_items').select(orderItemSelect).in('po_id', orderIds) : Promise.resolve({ data: [], error: null }),
     supplierIds.length ? service.from('suppliers').select('id, name').in('id', supplierIds) : Promise.resolve({ data: [], error: null }),
   ]);
-  if (orderItems.error) return serverError(orderItems.error.message);
+  if (orderItemsByPurchaseOrderId.error) return serverError(orderItemsByPurchaseOrderId.error.message);
+  if (orderItemsByLegacyPoId.error) return serverError(orderItemsByLegacyPoId.error.message);
   if (suppliersResult.error) return serverError(suppliersResult.error.message);
 
-  const itemIds = [...new Set((orderItems.data ?? []).map((row) => String(row.item_id ?? '')).filter(Boolean))];
+  const orderItemRowsByKey = new Map<string, Record<string, unknown>>();
+  for (const row of [...(orderItemsByPurchaseOrderId.data ?? []), ...(orderItemsByLegacyPoId.data ?? [])]) {
+    const key = [
+      row.purchase_order_id ?? '',
+      row.po_id ?? '',
+      row.item_id ?? '',
+      row.quantity_ordered ?? row.quantity ?? '',
+      row.quantity_received ?? row.received_qty ?? '',
+    ].join(':');
+    orderItemRowsByKey.set(key, row as Record<string, unknown>);
+  }
+  const orderItemRows = [...orderItemRowsByKey.values()];
+  const itemIds = [...new Set(orderItemRows.map((row) => String(row.item_id ?? '')).filter(Boolean))];
   const itemsResult = itemIds.length ? await service.from('items').select('id, name').in('id', itemIds) : { data: [], error: null };
   if (itemsResult.error) return serverError(itemsResult.error.message);
 
   const suppliersById = new Map((suppliersResult.data ?? []).map((row) => [String(row.id), row]));
   const itemsById = new Map((itemsResult.data ?? []).map((row) => [String(row.id), row]));
   const itemsByOrder = new Map<string, Array<Record<string, unknown>>>();
-  for (const item of orderItems.data ?? []) {
+  for (const item of orderItemRows) {
     const key = String(item.purchase_order_id ?? item.po_id);
     itemsByOrder.set(key, [...(itemsByOrder.get(key) ?? []), {
       quantity_ordered: item.quantity_ordered ?? item.quantity,
