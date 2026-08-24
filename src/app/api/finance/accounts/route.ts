@@ -4,7 +4,12 @@ import { can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
 function isMissingColumnError(error: unknown, columnName: string) {
-  return error instanceof Error && error.message.includes(`column accounts.${columnName} does not exist`);
+  const message = error instanceof Error
+    ? error.message
+    : typeof error === 'object' && error !== null && 'message' in error
+      ? String((error as { message?: unknown }).message ?? '')
+      : '';
+  return message.includes(`column accounts.${columnName} does not exist`);
 }
 
 export async function GET(request: NextRequest) {

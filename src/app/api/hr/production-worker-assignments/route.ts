@@ -2,6 +2,60 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { badRequest, can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
 import { ensureEmployeeAssignable, hrService, writeHrAuditLog } from '@/lib/hr-server';
+import { isMissingTableError } from '@/lib/postgrest-compat';
+
+type Row = Record<string, unknown>;
+
+function errorMessage(error: unknown) {
+  if (error instanceof Error) return error.message;
+  if (typeof error === 'object' && error !== null && 'message' in error) {
+    return String((error as { message?: unknown }).message ?? '');
+  }
+  return '';
+}
+
+async function loadAssignmentFallback(
+  service: ReturnType<typeof hrService>,
+  filters: { batchId?: string | null; employeeId?: string | null },
+) {
+  let query = service
+    .from('production_worker_assignments')
+    .select('*')
+    .order('created_at', { ascending: false });
+
+  if (filters.batchId) query = query.eq('batch_id', filters.batchId);
+  if (filters.employeeId) query = query.eq('employee_id', filters.employeeId);
+
+  const result = await query;
+  if (result.error) {
+    if (isMissingTableError(result.error, 'production_worker_assignments')) return [];
+    throw result.error;
+  }
+
+  const assignments = (result.data ?? []) as Row[];
+  const employeeIds = [...new Set(assignments.map((row) => String(row.employee_id ?? '')).filter(Boolean))];
+  const batchIds = [...new Set(assignments.map((row) => String(row.batch_id ?? row.production_batch ?? '')).filter(Boolean))];
+
+  const [employeesResult, batchesResult] = await Promise.all([
+    employeeIds.length
+      ? service.from('employees').select('id, employee_number, first_name, last_name, department, branch_id').in('id', employeeIds)
+      : Promise.resolve({ data: [], error: null }),
+    batchIds.length
+      ? service.from('production_batches').select('id, batch_number, shift, production_date, warehouse_id').in('id', batchIds)
+      : Promise.resolve({ data: [], error: null }),
+  ]);
+
+  const employees = employeesResult.error ? [] : (employeesResult.data ?? []) as Row[];
+  const batches = batchesResult.error ? [] : (batchesResult.data ?? []) as Row[];
+  const employeesById = new Map(employees.map((row) => [String(row.id ?? ''), row]));
+  const batchesById = new Map(batches.map((row) => [String(row.id ?? ''), row]));
+
+  return assignments.map((row) => ({
+    ...row,
+    batch: batchesById.get(String(row.batch_id ?? row.production_batch ?? '')) ?? null,
+    employee: employeesById.get(String(row.employee_id ?? '')) ?? null,
+  }));
+}
 
 export async function GET(request: NextRequest) {
   const ctx = await getAuthContext();
@@ -23,8 +77,18 @@ export async function GET(request: NextRequest) {
     if (searchParams.get('batchId')) query = query.eq('batch_id', searchParams.get('batchId'));
     if (searchParams.get('employeeId')) query = query.eq('employee_id', searchParams.get('employeeId'));
 
-    const { data, error } = await query;
-    if (error) throw error;
+    let { data, error } = await query;
+    if (error && /relationship|schema cache|column/i.test(errorMessage(error))) {
+      data = await loadAssignmentFallback(service, {
+        batchId: searchParams.get('batchId'),
+        employeeId: searchParams.get('employeeId'),
+      });
+      error = null;
+    }
+    if (error) {
+      if (isMissingTableError(error, 'production_worker_assignments')) return NextResponse.json([]);
+      throw error;
+    }
 
     const rows = (data ?? []).filter((row: Record<string, unknown>) => {
       if (!ctx.isBranchScoped) return true;

@@ -100,6 +100,61 @@ async function loadMachineProfiles(service: ReturnType<typeof createServiceRoleC
   );
 }
 
+async function loadMaintenanceSchedules(service: ReturnType<typeof createServiceRoleClient>, machineIds: string[]) {
+  if (!machineIds.length) return [] as MaintenanceScheduleRow[];
+
+  const attempts = [
+    { orderBy: 'completed_date', select: 'machine_id, scheduled_date, completed_date, status, cost' },
+    { orderBy: 'scheduled_date', select: 'machine_id, scheduled_date, status, cost' },
+    { orderBy: 'scheduled_date', select: 'machine_id, scheduled_date, status' },
+    { orderBy: 'machine_id', select: 'machine_id, status' },
+  ] as const;
+
+  for (const attempt of attempts) {
+    const result = await service
+      .schema('icecream_erp')
+      .from('maintenance_schedules')
+      .select(attempt.select)
+      .in('machine_id', machineIds)
+      .order(attempt.orderBy, { ascending: false });
+
+    if (!result.error) return (result.data ?? []) as MaintenanceScheduleRow[];
+    if (isMissingTableError(result.error, 'maintenance_schedules')) return [];
+    if (!isMissingColumnError(result.error, 'maintenance_schedules', attempt.orderBy) && !/column maintenance_schedules\./i.test(String(result.error.message ?? ''))) {
+      throw result.error;
+    }
+  }
+
+  return [];
+}
+
+async function loadMachineBreakdowns(service: ReturnType<typeof createServiceRoleClient>, machineIds: string[]) {
+  if (!machineIds.length) return [] as MachineBreakdownRow[];
+
+  const attempts = [
+    { orderBy: 'breakdown_date', select: 'machine_id, status, repair_cost, breakdown_date' },
+    { orderBy: 'created_at', select: 'machine_id, status, repair_cost' },
+    { orderBy: 'machine_id', select: 'machine_id, status' },
+  ] as const;
+
+  for (const attempt of attempts) {
+    const result = await service
+      .schema('icecream_erp')
+      .from('machine_breakdowns')
+      .select(attempt.select)
+      .in('machine_id', machineIds)
+      .order(attempt.orderBy, { ascending: false });
+
+    if (!result.error) return (result.data ?? []) as MachineBreakdownRow[];
+    if (isMissingTableError(result.error, 'machine_breakdowns')) return [];
+    if (!isMissingColumnError(result.error, 'machine_breakdowns', attempt.orderBy) && !/column machine_breakdowns\./i.test(String(result.error.message ?? ''))) {
+      throw result.error;
+    }
+  }
+
+  return [];
+}
+
 function buildMachinePayload(params: {
   body: {
     code: string;
@@ -240,33 +295,12 @@ export async function GET(request: NextRequest) {
     const machineIds = machineRows.map((row) => String(row.id ?? '')).filter(Boolean);
     const [profilesByMachineId, schedulesResult, breakdownsResult] = await Promise.all([
       loadMachineProfiles(service, machineIds),
-      machineIds.length
-        ? service
-            .schema('icecream_erp')
-            .from('maintenance_schedules')
-            .select('machine_id, scheduled_date, completed_date, status, cost')
-            .in('machine_id', machineIds)
-            .order('completed_date', { ascending: false, nullsFirst: false })
-        : Promise.resolve({ data: [], error: null }),
-      machineIds.length
-        ? service
-            .schema('icecream_erp')
-            .from('machine_breakdowns')
-            .select('machine_id, status, repair_cost')
-            .in('machine_id', machineIds)
-            .order('breakdown_date', { ascending: false })
-        : Promise.resolve({ data: [], error: null }),
+      loadMaintenanceSchedules(service, machineIds),
+      loadMachineBreakdowns(service, machineIds),
     ]);
 
-    if (schedulesResult.error && !isMissingTableError(schedulesResult.error, 'maintenance_schedules')) {
-      throw schedulesResult.error;
-    }
-    if (breakdownsResult.error && !isMissingTableError(breakdownsResult.error, 'machine_breakdowns')) {
-      throw breakdownsResult.error;
-    }
-
     const schedulesByMachineId = new Map<string, MaintenanceScheduleRow[]>();
-    for (const row of schedulesResult.data ?? []) {
+    for (const row of schedulesResult) {
       const machineId = String(row.machine_id ?? '');
       const current = schedulesByMachineId.get(machineId) ?? [];
       current.push(row as MaintenanceScheduleRow);
@@ -274,7 +308,7 @@ export async function GET(request: NextRequest) {
     }
 
     const breakdownsByMachineId = new Map<string, MachineBreakdownRow[]>();
-    for (const row of breakdownsResult.data ?? []) {
+    for (const row of breakdownsResult) {
       const machineId = String(row.machine_id ?? '');
       const current = breakdownsByMachineId.get(machineId) ?? [];
       current.push(row as MachineBreakdownRow);
