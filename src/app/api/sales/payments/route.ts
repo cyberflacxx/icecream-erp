@@ -181,7 +181,34 @@ export async function POST(request: NextRequest) {
         },
         ctx,
       );
-      return NextResponse.json(transaction, { status: 201 });
+      const transactionRow = transaction as Record<string, unknown>;
+      const transactionPaymentId = String(
+        transactionRow.paymentId ??
+        (transactionRow.payment as Record<string, unknown> | undefined)?.id ??
+        transactionRow.id ??
+        '',
+      );
+      const sourceReference = buildFinanceSourceReference('sales', 'invoice_payment', transactionPaymentId);
+      let linkedTransaction: { id: string; table: string } | null = null;
+      if (transactionPaymentId && ['BANK', 'CASH', 'PETTY_CASH'].includes(normalizedPaymentMethod)) {
+        try {
+          linkedTransaction = await createLinkedFinanceTransaction({
+            amount: paymentAmount,
+            createdBy: ctx.userId,
+            description: `Customer payment for invoice ${String(invoice.invoice_number ?? body.invoiceId)}`,
+            direction: 'IN',
+            organizationId: ctx.organizationId,
+            paymentMethod: normalizedPaymentMethod as 'BANK' | 'CASH' | 'PETTY_CASH',
+            selectedAccountId: normalizedPaymentMethod === 'BANK' ? body.bankAccountId ?? null : body.cashAccountId ?? null,
+            referenceNumber: body.referenceNumber ?? null,
+            sourceDocument: sourceReference,
+            transactionDate: body.paymentDate,
+          });
+        } catch (linkedTransactionError) {
+          return serverError(financeErrorMessage(linkedTransactionError) || 'Receipt posted, but cash/bank transaction update failed.');
+        }
+      }
+      return NextResponse.json({ ...transactionRow, linkedTransaction }, { status: 201 });
     } catch (transactionError) {
       if (shouldRequireSalesTransactionRpc() || !isSalesTransactionRpcUnavailable(transactionError)) {
         return serverError(salesErrorMessage(transactionError) || 'Failed to post customer payment transaction.');

@@ -815,6 +815,15 @@ export async function createLinkedFinanceTransaction(input: {
   }
 
   if (input.paymentMethod === 'BANK') {
+    const existingResult = await service
+      .from('bank_transactions')
+      .select('id')
+      .eq('organization_id', input.organizationId)
+      .eq('source_document', input.sourceDocument)
+      .maybeSingle();
+    if (existingResult.error && !isMissingFinanceTable(existingResult.error)) throw existingResult.error;
+    if (existingResult.data?.id) return { id: String(existingResult.data.id), table: 'bank_transactions' };
+
     const insertResult = await service
       .from('bank_transactions')
       .insert({
@@ -837,6 +846,15 @@ export async function createLinkedFinanceTransaction(input: {
     await syncBankAccountCurrentBalance(String(resolvedAccountResult.data.id));
     return { id: String(insertResult.data.id), table: 'bank_transactions' };
   }
+
+  const existingResult = await service
+    .from('cash_transactions')
+    .select('id')
+    .eq('organization_id', input.organizationId)
+    .eq('source', input.sourceDocument)
+    .maybeSingle();
+  if (existingResult.error && !isMissingFinanceTable(existingResult.error)) throw existingResult.error;
+  if (existingResult.data?.id) return { id: String(existingResult.data.id), table: 'cash_transactions' };
 
   const insertResult = await service
     .from('cash_transactions')
