@@ -75,11 +75,13 @@ export function useBatchAction() {
       id,
       ...payload
     }: {
+      actualOutput?: number;
       id: string;
       labourCost?: number;
       overheadCost?: number;
       peopleOffCount?: number;
       productionLine?: string;
+      wastageQuantity?: number;
       workerCount?: number;
     }) => {
       const token = await getToken();

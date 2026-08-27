@@ -1081,8 +1081,8 @@ export default function PurchaseOrdersPage() {
                       />
                       <div className="rounded-2xl border border-border/60 bg-white/90 px-3 py-2 text-xs text-muted">
                         {selectedMetaItem
-                          ? `${selectedMetaItem.description ?? 'No saved item description.'}${selectedMetaItem.unitName ? ` | UOM: ${selectedMetaItem.unitName}` : ''}`
-                          : 'Select an item to auto-fill the saved description, UOM, and default purchase price.'}
+                          ? (selectedMetaItem.description ?? 'No saved item description.')
+                          : 'Select an item to auto-fill the saved description and default purchase price.'}
                       </div>
                     </div>
 
@@ -1145,17 +1145,6 @@ export default function PurchaseOrdersPage() {
                         Remove
                       </Button>
                     </div>
-                  </div>
-                  <div className="mt-3 rounded-2xl border border-border/60 bg-white/90 px-3 py-2 text-xs text-muted">
-                    {selectedMetaItem ? (
-                      <div className="grid gap-1 sm:grid-cols-2">
-                        <span>{selectedMetaItem.name}</span>
-                        <span>Available: {Number(selectedMetaItem.branchQuantity ?? selectedMetaItem.warehouseQuantity ?? selectedMetaItem.quantityAvailable ?? 0).toFixed(3)}</span>
-                        <span>Unit: {selectedMetaItem.unitAbbreviation ?? selectedMetaItem.unitName ?? 'Unit'}</span>
-                      </div>
-                    ) : (
-                      'Choose an item to confirm availability and unit.'
-                    )}
                   </div>
                 </div>
               )})}

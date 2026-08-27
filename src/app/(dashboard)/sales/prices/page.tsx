@@ -91,7 +91,7 @@ export default function SalesPricesPage() {
             render: (row) => {
               const item = (row as { items?: { code?: string; name?: string } | Array<{ code?: string; name?: string }> }).items;
               const resolved = Array.isArray(item) ? item[0] : item;
-              return resolved ? `${resolved.code ? `${resolved.code} - ` : ''}${resolved.name ?? ''}` : String((row as { item_id?: string }).item_id ?? '');
+              return resolved?.name ?? String((row as { item_id?: string }).item_id ?? '');
             },
           },
           { key: 'price_list_code', header: 'Price List' },

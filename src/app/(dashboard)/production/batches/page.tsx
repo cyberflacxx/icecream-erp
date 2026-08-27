@@ -12,7 +12,7 @@ import {
   XCircle,
 } from 'lucide-react';
 import { type FormEvent, type ReactNode, useEffect, useMemo, useState } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useSearchParams } from 'next/navigation';
 
 import { PageHeader } from '@/components/dashboard/page-header';
@@ -154,10 +154,17 @@ export default function ProductionBatchesPage() {
   const [feedback, setFeedback] = useState<FeedbackState | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [actualUnitsProduced, setActualUnitsProduced] = useState('');
+  const [assignmentEmployeeId, setAssignmentEmployeeId] = useState('');
+  const [assignmentRole, setAssignmentRole] = useState('Operator');
   const [releaseQuantity, setReleaseQuantity] = useState('');
   const [releaseNotes, setReleaseNotes] = useState('');
 
   const batchDetailQuery = useBatch(manageBatchId ?? '');
+  const employeesQuery = useQuery({
+    enabled: Boolean(manageBatchId),
+    queryFn: () => request<{ data?: Array<Record<string, unknown>> }>('/api/hr/employees?pageSize=100&status=ACTIVE'),
+    queryKey: ['hr', 'employees', 'active', manageBatchId],
+  });
   const batchDetail = batchDetailQuery.data as Record<string, unknown> | undefined;
   const rows =
     batchesQuery.data && typeof batchesQuery.data === 'object' && Array.isArray((batchesQuery.data as { data?: unknown }).data)
@@ -216,6 +223,13 @@ export default function ProductionBatchesPage() {
       materialRows: materials.length,
     };
   }, [batchDetail, releaseQuantity]);
+  const workerRows = asRows(batchDetail?.workers);
+  const activeEmployees = employeesQuery.data?.data ?? [];
+  const assignedEmployeeIds = new Set(workerRows.map((row) => String(row.employee_id ?? row.employeeId ?? '')).filter(Boolean));
+  const availableEmployees = activeEmployees.filter((employee) => !assignedEmployeeIds.has(String(employee.id ?? '')));
+  const workerCount = workerRows.length || Number(batchDetail?.workerCount ?? 0);
+  const actualGoodUnits = Number(actualUnitsProduced || batchDetail?.actualOutput || 0);
+  const labourHours = workerRows.reduce((sum, row) => sum + Number(row.hours_worked ?? row.hoursWorked ?? 0), 0);
 
   const summary = visibleRows.reduce<{ inProduction: number; released: number; toIssue: number; total: number }>(
     (accumulator, row) => {
@@ -234,6 +248,7 @@ export default function ProductionBatchesPage() {
     const actual = Number(batchDetail.actualOutput ?? 0);
     const expected = Number(batchDetail.expectedOutput ?? batchDetail.plannedQuantity ?? 0);
     setActualUnitsProduced(String(actual > 0 ? actual : expected));
+    setAssignmentEmployeeId('');
     setReleaseQuantity(String(actual > 0 ? actual : expected));
     setReleaseNotes('');
   }, [batchDetail]);
@@ -309,6 +324,35 @@ export default function ProductionBatchesPage() {
         method: 'PATCH',
       });
       setReleaseQuantity(String(actualOutput));
+    });
+  }
+
+  async function assignWorkerToBatch() {
+    if (!manageBatchId) return;
+    if (!assignmentEmployeeId) {
+      setFormError('Select an active employee to assign to this production batch.');
+      return;
+    }
+
+    await runAction('Worker assigned to production batch.', async () => {
+      await request('/api/hr/production-worker-assignments', {
+        body: JSON.stringify({
+          employee_id: assignmentEmployeeId,
+          production_batch: manageBatchId,
+          role_on_batch: assignmentRole || 'Operator',
+          shift: String(batchDetail?.shift ?? 'DAY'),
+        }),
+        method: 'POST',
+      });
+      setAssignmentEmployeeId('');
+    });
+  }
+
+  async function unassignWorker(assignmentId: string) {
+    await runAction('Worker unassigned from production batch.', async () => {
+      await request(`/api/hr/production-worker-assignments/${assignmentId}`, {
+        method: 'DELETE',
+      });
     });
   }
 
@@ -610,22 +654,65 @@ export default function ProductionBatchesPage() {
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                   <div>
                     <p className="text-sm font-semibold uppercase tracking-[0.18em] text-orange">Productivity + Add Workers</p>
-                    <p className="mt-1 text-sm text-muted">Worker assignment records are read from HR production worker assignments.</p>
+                    <p className="mt-1 text-sm text-muted">Assign active employees to this batch and review productivity from actual good units.</p>
                   </div>
                   <Button type="button" variant="outline" asChild>
-                    <a href="/hr/productivity">Add Workers</a>
+                    <a href="/hr/productivity">Open HR Productivity</a>
                   </Button>
                 </div>
                 <div className="mt-4 grid gap-4 md:grid-cols-3">
-                  <MetricCard label="Assigned Workers" value={formatNumber(asRows(batchDetail?.workers).length || batchDetail?.workerCount || 0)} />
-                  <MetricCard
-                    label="Units per Worker"
-                    value={formatNumber(
-                      (Number(actualUnitsProduced || 0) || Number(batchDetail?.actualOutput ?? 0)) /
-                        Math.max(1, Number(asRows(batchDetail?.workers).length || batchDetail?.workerCount || 0)),
-                    )}
-                  />
-                  <MetricCard label="Labour Cost per Unit" value={costingPanel.costPerGoodUnit == null ? 'Not ready' : formatCurrency(Number(batchDetail?.labourCost ?? 0) / Math.max(1, Number(actualUnitsProduced || batchDetail?.actualOutput || 0)))} />
+                  <MetricCard label="Assigned Workers" value={formatNumber(workerCount)} />
+                  <MetricCard label="Worker Count" value={formatNumber(workerCount)} />
+                  <MetricCard label="Actual Good Units" value={formatNumber(actualGoodUnits)} />
+                  <MetricCard label="Units per Worker" value={workerCount > 0 ? formatNumber(actualGoodUnits / workerCount) : 'Not ready'} />
+                  <MetricCard label="Labour Hours" value={formatNumber(labourHours)} />
+                  <MetricCard label="Labour Cost" value={formatCurrency(batchDetail?.labourCost)} />
+                  <MetricCard label="Labour Cost per Unit" value={actualGoodUnits > 0 ? formatCurrency(Number(batchDetail?.labourCost ?? 0) / actualGoodUnits) : 'Not ready'} />
+                </div>
+                <div className="mt-4 grid gap-3 rounded-2xl border border-border/70 bg-cream/40 p-3 md:grid-cols-[minmax(0,1fr)_160px_auto]">
+                  <label className="space-y-2 text-sm text-muted">
+                    <span>Add Workers</span>
+                    <select
+                      className="surface-input-soft"
+                      disabled={employeesQuery.isLoading || String(batchDetail?.status ?? '').toUpperCase() === 'COMPLETED'}
+                      value={assignmentEmployeeId}
+                      onChange={(event) => setAssignmentEmployeeId(event.target.value)}
+                    >
+                      <option value="">{employeesQuery.isLoading ? 'Loading active employees...' : 'Select active employee'}</option>
+                      {availableEmployees.map((employee) => (
+                        <option key={String(employee.id)} value={String(employee.id)}>
+                          {[employee.first_name, employee.last_name].filter(Boolean).join(' ') || String(employee.employee_number ?? 'Unnamed employee')}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <InputField label="Role" value={assignmentRole} onChange={setAssignmentRole} />
+                  <div className="flex items-end">
+                    <Button type="button" variant="outline" onClick={assignWorkerToBatch} disabled={!assignmentEmployeeId}>
+                      Add Worker
+                    </Button>
+                  </div>
+                </div>
+                <div className="mt-4 space-y-2">
+                  {workerRows.length ? workerRows.map((worker) => {
+                    const employee = Array.isArray(worker.employees) ? worker.employees[0] : worker.employees as Record<string, unknown> | undefined;
+                    const name = String(worker.worker_name ?? [employee?.first_name, employee?.last_name].filter(Boolean).join(' ') ?? 'Assigned worker');
+                    return (
+                      <div key={String(worker.id)} className="flex flex-col gap-3 rounded-2xl border border-border/70 bg-white px-3 py-2 text-sm sm:flex-row sm:items-center sm:justify-between">
+                        <div>
+                          <p className="font-semibold text-brown">{name}</p>
+                          <p className="text-xs text-muted">{String(worker.role_in_production ?? 'Operator')} · Hours {formatNumber(worker.hours_worked)}</p>
+                        </div>
+                        {String(batchDetail?.status ?? '').toUpperCase() !== 'COMPLETED' ? (
+                          <Button type="button" size="sm" variant="outline" onClick={() => void unassignWorker(String(worker.id))}>
+                            Unassign
+                          </Button>
+                        ) : null}
+                      </div>
+                    );
+                  }) : (
+                    <p className="rounded-2xl border border-border/70 bg-white px-3 py-2 text-sm text-muted">No workers assigned yet.</p>
+                  )}
                 </div>
               </div>
 
@@ -751,7 +838,7 @@ function RequirementPreview({ issued, requirements, title }: { issued: boolean; 
             return (
               <div key={row.itemId} className="grid gap-3 rounded-2xl border border-border/70 bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(255,247,232,0.82))] p-3 md:grid-cols-[1fr_110px_110px_110px]">
                 <div>
-                  <p className="font-semibold text-brown">{row.itemCode ? `${row.itemCode} - ` : ''}{row.itemName}</p>
+                  <p className="font-semibold text-brown">{row.itemName}</p>
                   <p className="text-xs text-muted">{row.unit || 'unit'} from production raw material inventory</p>
                 </div>
                 <MetricText label="Required" value={formatNumber(row.requiredQuantity)} />

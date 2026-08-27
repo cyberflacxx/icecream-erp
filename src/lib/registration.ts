@@ -670,8 +670,14 @@ export async function getPublicRegistrationRoles(service: SupabaseSchemaClient) 
 
 export async function resolveRegistrationRole(service: SupabaseSchemaClient, selectedRole: string) {
   const normalizedRole = selectedRole.trim();
+  const normalizedRoleLower = normalizedRole.toLowerCase();
   const roles = await getPublicRegistrationRoles(service);
-  const match = roles.find((role) => role.id === normalizedRole || role.name.toLowerCase() === normalizedRole.toLowerCase());
+  const match = roles.find((role) => (
+    role.id === normalizedRole ||
+    role.name.toLowerCase() === normalizedRoleLower ||
+    String(role.code ?? '').toLowerCase() === normalizedRoleLower ||
+    role.legacyRole.toLowerCase() === normalizedRoleLower
+  ));
 
   if (!match) {
     return null;

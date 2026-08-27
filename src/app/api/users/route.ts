@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { workIdToEmail } from '@/lib/auth-roles';
-import { assignUserRole, generateNextWorkId, getPrimaryOrganizationId, resolveRegistrationRole } from '@/lib/registration';
+import { assignUserRole, generateNextWorkId, getPrimaryOrganizationId, resolveRegistrationRole, syncUserBranchAssignment } from '@/lib/registration';
 import { createClient, createServiceRoleClient } from '@/lib/supabase/server';
 
 export async function GET(request: NextRequest) {
@@ -132,6 +132,13 @@ export async function POST(request: NextRequest) {
   await assignUserRole({
     assignedBy: String(caller.id),
     roleId: roleRecord.id,
+    service: schemaService,
+    userProfileId: String(newUser.id),
+  });
+  await syncUserBranchAssignment({
+    assignedBy: String(caller.id),
+    branchId: branchId ?? null,
+    roleName: roleRecord.name,
     service: schemaService,
     userProfileId: String(newUser.id),
   });

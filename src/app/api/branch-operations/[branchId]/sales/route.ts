@@ -232,7 +232,7 @@ export async function POST(
     const stockBalanceByItemId = new Map((availableBalances.data ?? []).map((row) => [String(row.item_id), row]));
     for (const item of body.items) {
       if (!validateBranchSaleQuantity(item.quantity, Number(stockBalanceByItemId.get(item.itemId)?.quantity_available ?? 0))) {
-        return badRequest(`Insufficient branch stock for item ${item.itemId}`);
+        return badRequest('Insufficient stock available.');
       }
     }
 

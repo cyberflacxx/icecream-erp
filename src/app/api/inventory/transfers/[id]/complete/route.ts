@@ -206,6 +206,12 @@ export async function POST(
       if (!transferItem) {
         return badRequest('Receipt line references an invalid transfer item.');
       }
+      const quantitySent = toTransferQuantity(transferItem.quantity_sent) || toTransferQuantity(transferItem.quantity_requested);
+      const quantityReceived = toTransferQuantity(transferItem.quantity_received);
+      const remainingQuantity = Math.max(0, quantitySent - quantityReceived);
+      if (line.quantityReceived > remainingQuantity) {
+        return badRequest('Receipt quantity exceeds the remaining in-transit quantity.');
+      }
       receiptValue += line.quantityReceived * toTransferQuantity(transferItem.unit_cost);
     }
 

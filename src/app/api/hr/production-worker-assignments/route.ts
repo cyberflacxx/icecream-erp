@@ -131,6 +131,17 @@ export async function POST(request: NextRequest) {
     if (batchError) throw batchError;
     if (!batch) return badRequest('Production batch not found.');
 
+    const { data: existingAssignment, error: existingAssignmentError } = await service
+      .from('production_worker_assignments')
+      .select('id')
+      .eq('batch_id', body.production_batch)
+      .eq('employee_id', body.employee_id)
+      .maybeSingle();
+    if (existingAssignmentError) throw existingAssignmentError;
+    if (existingAssignment) {
+      return badRequest('This worker is already assigned to the selected production batch.');
+    }
+
     const { data, error } = await service
       .from('production_worker_assignments')
       .insert({

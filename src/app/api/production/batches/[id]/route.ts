@@ -124,7 +124,7 @@ export async function GET(
       service
         .schema('icecream_erp')
         .from('production_worker_assignments')
-        .select('id, employee_id, worker_name, attendance_status, is_off_shift, hours_worked, output_quantity, remarks')
+        .select('id, employee_id, worker_name, role_in_production, shift, attendance_status, is_off_shift, hours_worked, output_quantity, remarks, employees(id, employee_number, first_name, last_name, status)')
         .eq('batch_id', id),
     ]);
 
@@ -209,7 +209,7 @@ export async function PATCH(
     const { data: existing, error: existingError } = await service
       .schema('icecream_erp')
       .from('production_batches')
-      .select('id, status, warehouses(branch_id)')
+      .select('id, status, expected_output, wastage_quantity, warehouses(branch_id)')
       .eq('id', id)
       .is('deleted_at', null)
       .single();
@@ -237,6 +237,12 @@ export async function PATCH(
     if (body.labourCost !== undefined) updates.labour_cost = Number(body.labourCost);
     if (body.overheadCost !== undefined) updates.overhead_cost = Number(body.overheadCost);
     if (body.materialCost !== undefined) updates.material_cost = Number(body.materialCost);
+    if (body.wastageQuantity !== undefined) updates.wastage_quantity = Number(body.wastageQuantity);
+    if (body.wastageQuantity !== undefined || body.expectedOutput !== undefined) {
+      const expectedOutput = Number(body.expectedOutput ?? existing.expected_output ?? 0);
+      const wastageQuantity = Number(body.wastageQuantity ?? existing.wastage_quantity ?? 0);
+      updates.wastage_percentage = expectedOutput > 0 ? (wastageQuantity / expectedOutput) * 100 : 0;
+    }
     if (body.warehouseId !== undefined) updates.warehouse_id = body.warehouseId;
 
     const { data, error } = await service
