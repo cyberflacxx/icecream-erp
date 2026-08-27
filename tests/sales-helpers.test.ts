@@ -210,7 +210,7 @@ test('sales quotations, orders, and invoices use the shared searchable item sele
   assert.match(invoicesPage, /Preview \/ Print/);
   assert.match(invoicePreviewPage, /window\.print/);
   assert.match(lineEditor, /ItemSelectorField/);
-  assert.match(lineEditor, /onRetry\?: \(\(\) => void \| Promise<void>\) \| null/);
+  assert.match(lineEditor, /onRetry\?: \(\(\) => unknown\) \| null/);
   assert.match(lineEditor, /onRetry=\{onRetry\}/);
   assert.match(lineEditor, /errorMessage=\{errorMessage\}/);
   assert.match(lineEditor, /readOnly/);
@@ -255,7 +255,9 @@ test('sales pricing and receipt printing routes use organization-scoped prices a
   assert.match(salesMetaRoute, /fetchRows\(service, 'cash_accounts'\)/);
   assert.match(receiptPage, /searchParams: Promise<Record<string, string \| string\[] \| undefined>>/);
   assert.match(receiptPage, /paymentId/);
-  assert.match(receiptPage, /loadReceiptRecord/);
-  assert.match(paymentsHelper, /paymentId: string/);
-  assert.match(paymentsHelper, /searchParams = new URLSearchParams\(\{\s*paymentId:/);
+  assert.match(receiptPage, /loadPaymentReceiptRecord/);
+  assert.match(receiptPage, /loadBranchSaleReceiptRecord/);
+  assert.doesNotMatch(receiptPage, /buildMetaRow\('Warehouse'/);
+  assert.match(paymentsHelper, /paymentId\?: string/);
+  assert.match(paymentsHelper, /searchParams\.set\('paymentId', payload\.paymentId\)/);
 });

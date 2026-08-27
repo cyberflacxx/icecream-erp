@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { BadgePercent, ClipboardList, FileSpreadsheet, LayoutDashboard, ReceiptText, RotateCcw, Tags, Truck, Users, WalletCards } from 'lucide-react';
+import { BadgePercent, BarChart3, ClipboardList, FileSpreadsheet, LayoutDashboard, ReceiptText, RotateCcw, Store, Tags, Truck, Users, WalletCards } from 'lucide-react';
 import { usePathname } from 'next/navigation';
 
 import { cn } from '@/lib/utils';
@@ -12,11 +12,14 @@ const links = [
   { href: '/sales/prices', icon: Tags, label: 'Prices' },
   { href: '/sales/discounts', icon: BadgePercent, label: 'Discounts' },
   { href: '/sales/quotations', icon: FileSpreadsheet, label: 'Quotations' },
-  { href: '/sales/orders', icon: ClipboardList, label: 'Orders' },
+  { href: '/sales/orders', icon: ClipboardList, label: 'Sales Orders' },
   { href: '/sales/invoices', icon: ReceiptText, label: 'Invoices' },
+  { href: '/sales/payments', icon: WalletCards, label: 'Receipts' },
+  { href: '/branches', icon: Store, label: 'Cash Sales' },
+  { href: '/branches', icon: Store, label: 'Credit Sales' },
   { href: '/sales/dispatches', icon: Truck, label: 'Dispatches' },
-  { href: '/sales/payments', icon: WalletCards, label: 'Payments' },
-  { href: '/sales/returns', icon: RotateCcw, label: 'Returns' },
+  { href: '/sales/returns', icon: RotateCcw, label: 'Sales Returns' },
+  { href: '/sales/reports', icon: BarChart3, label: 'Sales Reports' },
 ] as const;
 
 export function SalesNav() {
@@ -24,6 +27,9 @@ export function SalesNav() {
 
   return (
     <div className="rounded-xl border border-[color:var(--app-border)] bg-[color:var(--app-surface)] shadow-sm">
+      <div className="border-b border-[color:var(--app-border)] px-4 py-2 text-xs font-semibold uppercase tracking-[0.22em] text-[color:var(--app-muted)]">
+        Sales
+      </div>
       <div className="overflow-x-auto px-1.5 py-1.5 [scrollbar-width:thin]">
         <div className="flex min-w-max gap-2 pr-2">
         {links.map((link) => {
@@ -32,7 +38,7 @@ export function SalesNav() {
 
           return (
             <Link
-              key={link.href}
+              key={`${link.href}:${link.label}`}
               href={link.href}
               className={cn(
                 'inline-flex items-center gap-2 rounded-lg px-3.5 py-2 text-[13px] font-medium transition',

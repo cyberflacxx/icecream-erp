@@ -5,38 +5,14 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 
 import type { ItemSelectorOption } from '@/hooks/useItemSelectorOptions';
 
-function formatQuantity(value: number | null) {
-  if (value === null || !Number.isFinite(value)) return '0.000';
-  return value.toFixed(3);
-}
-
-function formatMoney(value: number | null, fallback = 'Not configured') {
-  if (value === null || !Number.isFinite(value)) return fallback;
-  return value.toFixed(2);
-}
-
-function formatStockSummary(option: ItemSelectorOption) {
-  if (!option.hasStockRecord) return 'No stock record';
-  return `On Hand ${formatQuantity(option.quantityOnHand)} | Reserved ${formatQuantity(option.quantityReserved)} | Available ${formatQuantity(option.quantityAvailable)}`;
-}
-
-function formatCostSummary(option: ItemSelectorOption) {
-  return option.currentInventoryCost === null ? 'Cost not configured' : `Cost ${formatMoney(option.currentInventoryCost)}`;
-}
-
 function optionDisplayValue(option: ItemSelectorOption) {
-  return option.label;
+  return option.name;
 }
 
 function optionSearchText(option: ItemSelectorOption) {
   return [
     option.code,
     option.name,
-    option.categoryName,
-    option.itemType,
-    option.unitAbbreviation,
-    option.unitName,
-    option.taxStatus,
     optionDisplayValue(option),
   ]
     .filter(Boolean)
@@ -60,7 +36,7 @@ export function ItemSelectorField({
   errorMessage?: string | null;
   loading?: boolean;
   onChange: (value: string) => void;
-  onRetry?: (() => void | Promise<void>) | null;
+  onRetry?: (() => unknown) | null;
   options: ItemSelectorOption[];
   placeholder?: string;
   value: string;
@@ -110,10 +86,6 @@ export function ItemSelectorField({
     onChange(exactMatch.id);
   }
 
-  const detailText = selectedOption
-    ? `${selectedOption.code} | ${selectedOption.unitAbbreviation ?? selectedOption.unitName ?? 'Unit'} | ${selectedOption.warehouseName ? `Warehouse ${selectedOption.warehouseName} | ` : ''}${formatStockSummary(selectedOption)} | ${formatCostSummary(selectedOption)} | Price ${formatMoney(selectedOption.sellingPrice, 'Price not configured')}`
-    : null;
-
   const helperContent = (() => {
     if (errorMessage) {
       return (
@@ -152,8 +124,8 @@ export function ItemSelectorField({
       );
     }
 
-    if (detailText) {
-      return <p className="text-xs text-muted">{detailText}</p>;
+    if (selectedOption) {
+      return null;
     }
 
     if (loading) {
@@ -222,16 +194,9 @@ export function ItemSelectorField({
                       >
                         <div className="flex w-full items-start justify-between gap-3">
                           <span className="min-w-0 text-sm font-semibold text-[color:var(--app-text)]">
-                            {option.code ? `${option.code} - ` : ''}
                             {option.name}
                           </span>
                           {isSelected ? <Check className="mt-0.5 h-4 w-4 flex-shrink-0 text-emerald-600" /> : null}
-                        </div>
-                        <div className="grid w-full gap-1 text-xs text-[color:var(--app-muted)] sm:grid-cols-2">
-                          <span>{option.unitAbbreviation ?? option.unitName ?? 'Unit'}</span>
-                          <span>{option.warehouseName ?? option.categoryName ?? 'Uncategorized'}</span>
-                          <span>{formatStockSummary(option)}</span>
-                          <span>{formatCostSummary(option)}</span>
                         </div>
                       </button>
                     );

@@ -1148,17 +1148,13 @@ export default function PurchaseOrdersPage() {
                   </div>
                   <div className="mt-3 rounded-2xl border border-border/60 bg-white/90 px-3 py-2 text-xs text-muted">
                     {selectedMetaItem ? (
-                      <div className="grid gap-1 sm:grid-cols-2 xl:grid-cols-3">
-                        <span>Default Price: {currencyFormatter.format(selectedMetaItem.currentInventoryCost ?? selectedMetaItem.sellingPrice ?? 0)}</span>
-                        <span>Stock: {Number(selectedMetaItem.branchQuantity ?? selectedMetaItem.warehouseQuantity ?? 0).toFixed(3)}</span>
-                        <span>Inventory Cost: {selectedMetaItem.currentInventoryCost === null ? 'n/a' : currencyFormatter.format(selectedMetaItem.currentInventoryCost)}</span>
-                        <span>Selling Price: {selectedMetaItem.sellingPrice === null ? 'n/a' : currencyFormatter.format(selectedMetaItem.sellingPrice)}</span>
-                        <span>Type: {selectedMetaItem.itemType.replaceAll('_', ' ')}</span>
-                        <span>Category: {selectedMetaItem.categoryName ?? 'Uncategorized'}</span>
+                      <div className="grid gap-1 sm:grid-cols-2">
+                        <span>{selectedMetaItem.name}</span>
+                        <span>Available: {Number(selectedMetaItem.branchQuantity ?? selectedMetaItem.warehouseQuantity ?? selectedMetaItem.quantityAvailable ?? 0).toFixed(3)}</span>
                         <span>Unit: {selectedMetaItem.unitAbbreviation ?? selectedMetaItem.unitName ?? 'Unit'}</span>
                       </div>
                     ) : (
-                      'Live stock, reorder, and receipt context appears here after item selection.'
+                      'Choose an item to confirm availability and unit.'
                     )}
                   </div>
                 </div>

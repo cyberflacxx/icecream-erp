@@ -230,6 +230,7 @@ export async function PATCH(
     if (body.shift !== undefined) updates.shift = body.shift;
     if (body.productionLine !== undefined) updates.production_line = body.productionLine;
     if (body.expectedOutput !== undefined) updates.expected_output = Number(body.expectedOutput);
+    if (body.actualOutput !== undefined) updates.actual_output = Number(body.actualOutput);
     if (body.plannedQuantity !== undefined) updates.planned_quantity = Number(body.plannedQuantity);
     if (body.workerCount !== undefined) updates.worker_count = Number(body.workerCount);
     if (body.peopleOffCount !== undefined) updates.people_off_count = Number(body.peopleOffCount);

@@ -499,7 +499,7 @@ export default function ProcurementInvoicesPage() {
                   <option value="">Select item</option>
                   {(metaQuery.data?.items ?? []).map((row) => (
                     <option key={row.id} value={row.id}>
-                      {row.code} - {row.name}
+                      {row.name}
                     </option>
                   ))}
                 </select>

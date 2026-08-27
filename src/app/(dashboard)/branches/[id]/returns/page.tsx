@@ -96,7 +96,7 @@ export default function BranchReturnsPage() {
               <option value="">Select item</option>
               {(stockQuery.data?.data ?? []).map((row) => (
                 <option key={row.item.id} value={row.item.id}>
-                  {row.item.code} - {row.item.name}
+                  {row.item.name}
                 </option>
               ))}
             </select>

@@ -3,6 +3,13 @@ import { NextRequest, NextResponse } from 'next/server';
 import { badRequest, can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
 import { financeErrorMessage, financeService, isMissingFinanceTable, writeFinanceAuditLog } from '@/lib/finance-server';
 
+function normalizeExpensePaymentMethod(value: unknown) {
+  const method = String(value ?? 'CASH').trim().toUpperCase().replace(/\s+/g, '_');
+  if (method === 'BANK') return 'BANK';
+  if (method === 'PETTY_CASH') return 'PETTY_CASH';
+  return 'CASH';
+}
+
 export async function GET(_request: NextRequest) {
   const ctx = await getAuthContext();
   if (!ctx) return unauthorized();
@@ -11,7 +18,7 @@ export async function GET(_request: NextRequest) {
   try {
     const { data, error } = await financeService()
       .from('finance_expenses')
-      .select('id, expense_date, category, branch_id, department_id, account_id, amount, payment_method, description, status, source_document')
+      .select('id, expense_date, category, branch_id, department_id, account_id, cash_account_id, bank_account_id, amount, payment_method, description, status, source_document')
       .eq('organization_id', ctx.organizationId)
       .is('deleted_at', null)
       .order('expense_date', { ascending: false });
@@ -32,7 +39,9 @@ export async function POST(request: NextRequest) {
     const body = await request.json() as {
       accountId?: string;
       amount: number;
+      bankAccountId?: string;
       branchId?: string;
+      cashAccountId?: string;
       category: string;
       departmentId?: string;
       description: string;
@@ -46,6 +55,14 @@ export async function POST(request: NextRequest) {
       return badRequest('expenseDate, category, description, and a positive amount are required');
     }
 
+    const paymentMethod = normalizeExpensePaymentMethod(body.paymentMethod);
+    if ((paymentMethod === 'CASH' || paymentMethod === 'PETTY_CASH') && !body.cashAccountId) {
+      return badRequest('cashAccountId is required for cash expenses.');
+    }
+    if (paymentMethod === 'BANK' && !body.bankAccountId) {
+      return badRequest('bankAccountId is required for bank expenses.');
+    }
+
     const { data, error } = await financeService()
       .from('finance_expenses')
       .insert({
@@ -55,8 +72,10 @@ export async function POST(request: NextRequest) {
         branch_id: body.branchId ?? null,
         department_id: body.departmentId ?? null,
         account_id: body.accountId ?? null,
+        cash_account_id: paymentMethod === 'CASH' || paymentMethod === 'PETTY_CASH' ? body.cashAccountId : null,
+        bank_account_id: paymentMethod === 'BANK' ? body.bankAccountId : null,
         amount: body.amount,
-        payment_method: body.paymentMethod ?? 'Cash',
+        payment_method: paymentMethod,
         supporting_document: body.supportingDocument ?? null,
         description: body.description,
         source_document: body.sourceDocument ?? null,

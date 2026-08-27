@@ -61,6 +61,7 @@ interface PurchaseOrderDetail {
   total: number;
   items: Array<{
     id: string;
+    description?: string | null;
     item: {
       id: string;
       code: string;
@@ -68,6 +69,7 @@ interface PurchaseOrderDetail {
     } | null;
     quantityOrdered: number;
     quantityReceived: number;
+    taxRate?: number | null;
     unitCost: number;
     totalCost: number;
     unitOfMeasure: {
@@ -88,8 +90,10 @@ interface PurchaseOrderDetail {
 
 type EditLine = {
   rowId: string;
+  description: string;
   itemId: string;
   quantityOrdered: string;
+  taxRate: string;
   unitCost: string;
   unitOfMeasureId: string;
 };
@@ -121,12 +125,14 @@ const currencyFormatter = new Intl.NumberFormat('en-US', {
 
 function createLineDraft(): EditLine {
   return {
+    description: '',
     itemId: '',
     quantityOrdered: '1',
     rowId:
       typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
         ? crypto.randomUUID()
         : `po-edit-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    taxRate: '0',
     unitCost: '0',
     unitOfMeasureId: '',
   };
@@ -167,8 +173,10 @@ function createEditState(order: PurchaseOrderDetail): EditFormState {
       order.items.length > 0
         ? order.items.map((item) => ({
             rowId: item.id,
+            description: item.description ?? '',
             itemId: item.item?.id ?? '',
             quantityOrdered: String(item.quantityOrdered ?? 1),
+            taxRate: String(item.taxRate ?? 0),
             unitCost: String(item.unitCost ?? 0),
             unitOfMeasureId: item.unitOfMeasure?.id ?? '',
           }))
@@ -265,8 +273,11 @@ export default function PurchaseOrderDetailPage({ params }: PurchaseOrderDetailP
     const items = formState.items
       .filter((item) => item.itemId)
       .map((item) => ({
+        id: item.rowId,
+        description: item.description || undefined,
         itemId: item.itemId,
         quantityOrdered: Number(item.quantityOrdered),
+        taxRate: Number(item.taxRate || 0),
         unitCost: Number(item.unitCost),
         unitOfMeasureId: item.unitOfMeasureId,
       }));
@@ -849,7 +860,7 @@ export default function PurchaseOrderDetailPage({ params }: PurchaseOrderDetailP
                             <option value="">Select item</option>
                             {(metaQuery.data?.items ?? []).map((row) => (
                               <option key={row.id} value={row.id}>
-                                {row.code} - {row.name}
+                                {row.name}
                               </option>
                             ))}
                           </select>
@@ -929,6 +940,28 @@ export default function PurchaseOrderDetailPage({ params }: PurchaseOrderDetailP
                               </option>
                             ))}
                           </select>
+                        </div>
+
+                        <div className="space-y-2 xl:col-span-2">
+                          <label className="text-xs font-semibold uppercase tracking-[0.18em] text-muted">Description</label>
+                          <input
+                            value={item.description}
+                            onChange={(event) => updateLineItem(item.rowId, 'description', event.target.value)}
+                            className="surface-input-soft"
+                            placeholder="Line description"
+                          />
+                        </div>
+
+                        <div className="space-y-2">
+                          <label className="text-xs font-semibold uppercase tracking-[0.18em] text-muted">VAT %</label>
+                          <input
+                            min="0"
+                            step="0.01"
+                            type="number"
+                            value={item.taxRate}
+                            onChange={(event) => updateLineItem(item.rowId, 'taxRate', event.target.value)}
+                            className="surface-input-soft"
+                          />
                         </div>
 
                         <div className="flex items-end">

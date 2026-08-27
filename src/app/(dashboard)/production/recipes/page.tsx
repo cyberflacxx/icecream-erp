@@ -781,7 +781,7 @@ function FormulaLines({
   errorMessage?: string | null;
   lines: FormulaLine[];
   loading?: boolean;
-  onRetry?: (() => void | Promise<void>) | null;
+  onRetry?: (() => unknown) | null;
   onAdd: () => void;
   onRemove: (index: number) => void;
   onUpdate: (index: number, next: Partial<FormulaLine>) => void;

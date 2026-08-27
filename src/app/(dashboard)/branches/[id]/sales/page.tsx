@@ -489,6 +489,9 @@ export default function BranchSalesPage() {
                   </option>
                 ))}
               </select>
+              {availableCashAccounts.length === 0 ? (
+                <span className="text-xs text-error">No active cash account is configured for this branch.</span>
+              ) : null}
             </label>
           ) : paymentMethod === 'BANK' ? (
             <label className="space-y-2 text-sm text-muted">
@@ -624,12 +627,9 @@ export default function BranchSalesPage() {
                   {stockOptionByItemId.get(line.itemId) ? (
                     <span className="mr-3">
                       {stockOptionByItemId.get(line.itemId)?.hasStockRecord
-                        ? `On Hand ${Number(stockOptionByItemId.get(line.itemId)?.quantityOnHand ?? 0).toFixed(3)} | Reserved ${Number(stockOptionByItemId.get(line.itemId)?.quantityReserved ?? 0).toFixed(3)} | Available ${Number(stockOptionByItemId.get(line.itemId)?.quantityAvailable ?? 0).toFixed(3)}`
+                        ? `Available ${Number(stockOptionByItemId.get(line.itemId)?.quantityAvailable ?? 0).toFixed(3)}`
                         : 'No stock record'}
                     </span>
-                  ) : null}
-                  {stockOptionByItemId.get(line.itemId)?.warehouseName ? (
-                    <span className="mr-3">Warehouse: {stockOptionByItemId.get(line.itemId)?.warehouseName}</span>
                   ) : null}
                   Line Total:{' '}
                   <span className="font-semibold text-brown">
@@ -767,6 +767,9 @@ export default function BranchSalesPage() {
                   </option>
                 ))}
               </select>
+              {availableCashAccounts.length === 0 ? (
+                <span className="text-xs text-error">No active cash account is configured for this branch.</span>
+              ) : null}
             </label>
           )}
 

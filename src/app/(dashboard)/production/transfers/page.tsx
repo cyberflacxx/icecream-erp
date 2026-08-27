@@ -474,7 +474,7 @@ export default function ProductionTransfersPage() {
                     <select className="surface-input-soft" value={line.itemId} onChange={(event) => updateRawLine(line.rowId, { itemId: event.target.value })}>
                       <option value="">Select raw material</option>
                       {materialItems.map((item) => (
-                        <option key={item.id} value={item.id}>{String(item.code ?? '')} - {item.name}</option>
+                        <option key={item.id} value={item.id}>{item.name}</option>
                       ))}
                     </select>
                     <input className="surface-input-soft" min="0.001" step="0.001" type="number" value={line.quantity} onChange={(event) => updateRawLine(line.rowId, { quantity: event.target.value })} />
@@ -540,7 +540,7 @@ export default function ProductionTransfersPage() {
                     <select className="surface-input-soft" value={line.itemId} onChange={(event) => setReturnLines((current) => current.map((row) => row.rowId === line.rowId ? { ...row, itemId: event.target.value } : row))}>
                       <option value="">Select production item</option>
                       {[...materialItems, ...(metaQuery.data?.finishedGoods ?? [])].map((item) => (
-                        <option key={item.id} value={item.id}>{String(item.code ?? '')} - {item.name}</option>
+                        <option key={item.id} value={item.id}>{item.name}</option>
                       ))}
                     </select>
                     <input className="surface-input-soft" min="0.001" step="0.001" type="number" value={line.quantity} onChange={(event) => setReturnLines((current) => current.map((row) => row.rowId === line.rowId ? { ...row, quantity: event.target.value } : row))} />
@@ -573,7 +573,7 @@ export default function ProductionTransfersPage() {
           <SelectField label="Item" value={damageItemId} onChange={setDamageItemId}>
             <option value="">Select item</option>
             {[...materialItems, ...(metaQuery.data?.finishedGoods ?? [])].map((item) => (
-              <option key={item.id} value={item.id}>{String(item.code ?? '')} - {item.name}</option>
+              <option key={item.id} value={item.id}>{item.name}</option>
             ))}
           </SelectField>
           <InputField label="Quantity" type="number" value={damageQuantity} onChange={setDamageQuantity} />

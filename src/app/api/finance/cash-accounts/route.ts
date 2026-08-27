@@ -39,6 +39,7 @@ export async function POST(request: NextRequest) {
     const body = await request.json() as {
       accountId: string;
       accountName: string;
+      branchId?: string | null;
       currencyCode: string;
       isActive?: boolean;
       openingBalance?: number;
@@ -57,6 +58,7 @@ export async function POST(request: NextRequest) {
       .insert({
         account_name: body.accountName.trim(),
         account_id: body.accountId,
+        branch_id: body.branchId || null,
         created_by: ctx.userId,
         current_balance: openingBalance,
         currency_code: body.currencyCode.trim().toUpperCase(),
@@ -91,6 +93,7 @@ export async function PATCH(request: NextRequest) {
   try {
     const body = await request.json() as {
       accountName?: string;
+      branchId?: string | null;
       currencyCode?: string;
       id: string;
       isActive?: boolean;
@@ -102,6 +105,7 @@ export async function PATCH(request: NextRequest) {
       updated_by: ctx.userId,
     };
     if (body.accountName !== undefined) payload.account_name = String(body.accountName).trim();
+    if (body.branchId !== undefined) payload.branch_id = body.branchId || null;
     if (body.currencyCode !== undefined) payload.currency_code = String(body.currencyCode).trim().toUpperCase();
     if (body.isActive !== undefined) payload.is_active = body.isActive;
 

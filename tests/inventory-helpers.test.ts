@@ -907,12 +907,13 @@ test('item selector helper preserves missing cost and price values while aggrega
         itemId: 'item-1',
         quantityAvailable: 12,
         quantityOnHand: 12,
+        quantityReserved: 0,
         warehouseId: 'wh-1',
       },
     ],
     warehouseId: 'wh-1',
     warehousesById: new Map([
-      ['wh-1', { branchId: 'branch-1', id: 'wh-1' }],
+      ['wh-1', { branchId: 'branch-1', id: 'wh-1', name: 'Branch Warehouse' }],
     ]),
   });
 
@@ -920,24 +921,27 @@ test('item selector helper preserves missing cost and price values while aggrega
   assert.equal(options[0]?.warehouseQuantity, 12);
   assert.equal(options[0]?.currentInventoryCost, 4.25);
   assert.equal(options[0]?.sellingPrice, null);
-  assert.match(options[0]?.label ?? '', /Stock 12\.000/);
+  assert.match(options[0]?.label ?? '', /Available 12\.000/);
 });
 
 test('item selector label shows missing configuration explicitly instead of masking it with zeroes', () => {
   const label = buildItemSelectorLabel({
-    branchQuantity: null,
     code: 'FG-001',
     currentInventoryCost: null,
+    hasStockRecord: false,
     itemType: 'FINISHED_GOOD',
     name: 'Vanilla Tub',
+    quantityAvailable: null,
+    quantityOnHand: null,
+    quantityReserved: null,
     sellingPrice: null,
     unitAbbreviation: 'ea',
     unitName: 'Each',
-    warehouseQuantity: null,
+    warehouseName: null,
   });
 
-  assert.match(label, /Stock n\/a/);
-  assert.match(label, /Cost n\/a/);
+  assert.match(label, /No stock record/);
+  assert.match(label, /Cost not configured/);
   assert.match(label, /Price n\/a/);
 });
 
@@ -1000,7 +1004,7 @@ test('shared item selector hook and field expose retry, search, and stable empty
   assert.match(hook, /Items could not be loaded\./);
   assert.match(hook, /API \$\{error\.status\}/);
   assert.match(hook, /Request \$\{error\.requestId\}/);
-  assert.match(field, /onRetry\?: \(\(\) => void \| Promise<void>\) \| null/);
+  assert.match(field, /onRetry\?: \(\(\) => unknown\) \| null/);
   assert.match(field, /Search by item code or item name/);
   assert.match(field, /No items found for this search/);
 });

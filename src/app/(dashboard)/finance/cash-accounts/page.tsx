@@ -1,7 +1,6 @@
 'use client';
 
 import { type FormEvent, useState } from 'react';
-import Link from 'next/link';
 import { AlertCircle, Banknote, Plus } from 'lucide-react';
 
 import { PageHeader } from '@/components/dashboard/page-header';
@@ -22,8 +21,16 @@ export default function FinanceCashAccountsPage() {
   const query = useCashAccounts();
   const transactionsQuery = useCashTransactions();
   const metaQuery = useFinanceMeta();
+  const createCashAccount = useFinanceMutation('/api/finance/cash-accounts', { invalidateKey: 'cash-accounts' });
   const createTransaction = useFinanceMutation(API_ROUTES.FINANCE.CASH);
+  const [createDrawerOpen, setCreateDrawerOpen] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [newAccountName, setNewAccountName] = useState('');
+  const [newLedgerAccountId, setNewLedgerAccountId] = useState('');
+  const [newCurrencyCode, setNewCurrencyCode] = useState('USD');
+  const [newOpeningBalance, setNewOpeningBalance] = useState('0');
+  const [newBranchId, setNewBranchId] = useState('');
+  const [newIsActive, setNewIsActive] = useState(true);
   const [cashAccountId, setCashAccountId] = useState('');
   const [transactionDate, setTransactionDate] = useState(today());
   const [transactionType, setTransactionType] = useState('ADJUSTMENT_IN');
@@ -33,7 +40,37 @@ export default function FinanceCashAccountsPage() {
   const [reference, setReference] = useState('');
   const [counterparty, setCounterparty] = useState('');
   const [remarks, setRemarks] = useState('');
+  const [createFormError, setCreateFormError] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
+
+  async function handleCreateAccount(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setCreateFormError(null);
+    if (!newAccountName.trim() || !newLedgerAccountId || !newCurrencyCode.trim()) {
+      setCreateFormError('Cash account name, linked GL account, and currency are required.');
+      return;
+    }
+
+    try {
+      await createCashAccount.mutateAsync({
+        accountId: newLedgerAccountId,
+        accountName: newAccountName.trim(),
+        branchId: newBranchId || null,
+        currencyCode: newCurrencyCode.trim().toUpperCase(),
+        isActive: newIsActive,
+        openingBalance: Number(newOpeningBalance || 0),
+      });
+      setCreateDrawerOpen(false);
+      setNewAccountName('');
+      setNewLedgerAccountId('');
+      setNewCurrencyCode('USD');
+      setNewOpeningBalance('0');
+      setNewBranchId('');
+      setNewIsActive(true);
+    } catch (error) {
+      setCreateFormError(error instanceof Error ? error.message : 'Failed to create cash account.');
+    }
+  }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -83,8 +120,8 @@ export default function FinanceCashAccountsPage() {
         status="partial"
         actions={
           <div className="flex gap-2">
-            <Button asChild type="button" size="sm" variant="outline">
-              <Link href="/settings/finance-setup">+ Create Cash Account</Link>
+            <Button type="button" size="sm" variant="outline" onClick={() => setCreateDrawerOpen(true)}>
+              + Create Cash Account
             </Button>
             <Button type="button" size="sm" onClick={() => setDrawerOpen(true)}>
               <Plus className="mr-2 h-4 w-4" />
@@ -94,6 +131,95 @@ export default function FinanceCashAccountsPage() {
         }
       />
       <FinanceNav />
+      <FormDrawer title="Create Cash Account" open={createDrawerOpen} onClose={() => setCreateDrawerOpen(false)}>
+        <form className="space-y-5" onSubmit={handleCreateAccount}>
+          {createFormError ? (
+            <div className="rounded-2xl border border-error/20 bg-error/5 px-4 py-3 text-sm text-error">
+              {createFormError}
+            </div>
+          ) : null}
+          <label className="space-y-2 text-sm text-muted">
+            <span>Cash Account Name</span>
+            <input
+              required
+              value={newAccountName}
+              onChange={(event) => setNewAccountName(event.target.value)}
+              className="surface-input-soft"
+              placeholder="Main Branch Cash"
+            />
+          </label>
+          <label className="space-y-2 text-sm text-muted">
+            <span>Linked GL Account</span>
+            <select
+              required
+              value={newLedgerAccountId}
+              onChange={(event) => setNewLedgerAccountId(event.target.value)}
+              className="surface-input-soft"
+            >
+              <option value="">Select ledger account</option>
+              {(metaQuery.data?.accounts ?? []).map((account) => (
+                <option key={String(account.id)} value={String(account.id)}>
+                  {String(account.code ?? account.account_code ?? '')} - {String(account.name ?? account.account_name ?? '')}
+                </option>
+              ))}
+            </select>
+          </label>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <label className="space-y-2 text-sm text-muted">
+              <span>Currency</span>
+              <input
+                required
+                maxLength={3}
+                value={newCurrencyCode}
+                onChange={(event) => setNewCurrencyCode(event.target.value)}
+                className="surface-input-soft uppercase"
+              />
+            </label>
+            <label className="space-y-2 text-sm text-muted">
+              <span>Opening Balance</span>
+              <input
+                min="0"
+                step="0.01"
+                type="number"
+                value={newOpeningBalance}
+                onChange={(event) => setNewOpeningBalance(event.target.value)}
+                className="surface-input-soft"
+              />
+            </label>
+          </div>
+          <label className="space-y-2 text-sm text-muted">
+            <span>Branch / Head Office Assignment</span>
+            <select
+              value={newBranchId}
+              onChange={(event) => setNewBranchId(event.target.value)}
+              className="surface-input-soft"
+            >
+              <option value="">Head Office / Unassigned</option>
+              {(metaQuery.data?.branches ?? []).map((branch) => (
+                <option key={String(branch.id)} value={String(branch.id)}>
+                  {String(branch.name ?? branch.code ?? branch.id)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="flex items-center gap-3 rounded-2xl border border-border/70 px-4 py-3 text-sm text-muted">
+            <input
+              type="checkbox"
+              checked={newIsActive}
+              onChange={(event) => setNewIsActive(event.target.checked)}
+            />
+            Active and available in module selectors
+          </label>
+          <div className="flex justify-end gap-3">
+            <Button type="button" variant="outline" onClick={() => setCreateDrawerOpen(false)}>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={createCashAccount.isPending || metaQuery.isLoading}>
+              {createCashAccount.isPending ? 'Creating...' : 'Create Cash Account'}
+            </Button>
+          </div>
+        </form>
+      </FormDrawer>
       <DataTable
         columns={[
           { key: 'name', header: 'Cash Account' },

@@ -153,6 +153,7 @@ export default function ProductionBatchesPage() {
   const [createState, setCreateState] = useState(initialCreateState);
   const [feedback, setFeedback] = useState<FeedbackState | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
+  const [actualUnitsProduced, setActualUnitsProduced] = useState('');
   const [releaseQuantity, setReleaseQuantity] = useState('');
   const [releaseNotes, setReleaseNotes] = useState('');
 
@@ -232,6 +233,7 @@ export default function ProductionBatchesPage() {
     if (!batchDetail) return;
     const actual = Number(batchDetail.actualOutput ?? 0);
     const expected = Number(batchDetail.expectedOutput ?? batchDetail.plannedQuantity ?? 0);
+    setActualUnitsProduced(String(actual > 0 ? actual : expected));
     setReleaseQuantity(String(actual > 0 ? actual : expected));
     setReleaseNotes('');
   }, [batchDetail]);
@@ -291,6 +293,23 @@ export default function ProductionBatchesPage() {
     } catch (error) {
       setFormError(error instanceof Error ? error.message : 'Production action failed.');
     }
+  }
+
+  async function saveActualProductionInputs() {
+    if (!manageBatchId) return;
+    const actualOutput = Number(actualUnitsProduced);
+    if (!Number.isFinite(actualOutput) || actualOutput < 0) {
+      setFormError('Actual Units Produced must be zero or above.');
+      return;
+    }
+
+    await runAction('Actual production units saved and costing recalculated.', async () => {
+      await request(`/api/production/batches/${manageBatchId}`, {
+        body: JSON.stringify({ actualOutput }),
+        method: 'PATCH',
+      });
+      setReleaseQuantity(String(actualOutput));
+    });
   }
 
   async function issueToProduction() {
@@ -568,6 +587,48 @@ export default function ProductionBatchesPage() {
               index="3"
               title="Release to Production Warehouse"
             >
+              <div className="rounded-3xl border border-border/70 bg-white/80 p-4">
+                <div className="grid gap-4 md:grid-cols-3">
+                  <MetricCard label="Planned Units" value={formatNumber(batchDetail?.plannedQuantity)} />
+                  <MetricCard label="Actual Units Produced" value={formatNumber(actualUnitsProduced)} />
+                  <MetricCard
+                    label="Variance"
+                    value={formatNumber(Number(actualUnitsProduced || 0) - Number(batchDetail?.plannedQuantity ?? 0))}
+                  />
+                </div>
+                <div className="mt-4 grid gap-4 md:grid-cols-[1fr_auto]">
+                  <InputField label="Actual Units Produced" type="number" value={actualUnitsProduced} onChange={setActualUnitsProduced} />
+                  <div className="flex items-end">
+                    <Button type="button" variant="outline" onClick={saveActualProductionInputs}>
+                      Save Actual Units
+                    </Button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-3xl border border-border/70 bg-white/80 p-4">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <p className="text-sm font-semibold uppercase tracking-[0.18em] text-orange">Productivity + Add Workers</p>
+                    <p className="mt-1 text-sm text-muted">Worker assignment records are read from HR production worker assignments.</p>
+                  </div>
+                  <Button type="button" variant="outline" asChild>
+                    <a href="/hr/productivity">Add Workers</a>
+                  </Button>
+                </div>
+                <div className="mt-4 grid gap-4 md:grid-cols-3">
+                  <MetricCard label="Assigned Workers" value={formatNumber(asRows(batchDetail?.workers).length || batchDetail?.workerCount || 0)} />
+                  <MetricCard
+                    label="Units per Worker"
+                    value={formatNumber(
+                      (Number(actualUnitsProduced || 0) || Number(batchDetail?.actualOutput ?? 0)) /
+                        Math.max(1, Number(asRows(batchDetail?.workers).length || batchDetail?.workerCount || 0)),
+                    )}
+                  />
+                  <MetricCard label="Labour Cost per Unit" value={costingPanel.costPerGoodUnit == null ? 'Not ready' : formatCurrency(Number(batchDetail?.labourCost ?? 0) / Math.max(1, Number(actualUnitsProduced || batchDetail?.actualOutput || 0)))} />
+                </div>
+              </div>
+
               <div className="grid gap-4 md:grid-cols-2">
                 <InputField label="Actual Quantity Produced" type="number" value={releaseQuantity} onChange={setReleaseQuantity} />
                 <InputField label="Release Note" value={releaseNotes} onChange={setReleaseNotes} />

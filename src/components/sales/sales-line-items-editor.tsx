@@ -46,7 +46,7 @@ interface SalesLineItemsEditorProps {
   lines: SalesLineDraft[];
   loading?: boolean;
   onChange: (lines: SalesLineDraft[]) => void;
-  onRetry?: (() => void | Promise<void>) | null;
+  onRetry?: (() => unknown) | null;
 }
 
 export function SalesLineItemsEditor({

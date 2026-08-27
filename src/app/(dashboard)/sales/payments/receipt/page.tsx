@@ -85,7 +85,7 @@ async function loadBranchSaleReceiptRecord(organizationId: string, branchSaleId:
   if (saleResult.error) throw saleResult.error;
   if (!saleResult.data) return null;
 
-  const sale = saleResult.data as Record<string, unknown>;
+  const sale = saleResult.data as unknown as Record<string, unknown>;
   const branchId = String(sale.branch_id ?? '');
   const customerId = String(sale.customer_id ?? '');
 
@@ -327,8 +327,6 @@ export default async function SalesPaymentReceiptPage({
             {buildMetaRow('Cashier', receipt.cashierName)}
             {buildMetaRow('Customer', receipt.customerName)}
             {buildMetaRow('Payment Method', formatPaymentMethodLabel(receipt.paymentMethod))}
-            {buildMetaRow('Warehouse', receipt.warehouseName)}
-            {buildMetaRow('Reference', receipt.referenceNumber || receipt.sourceLabel)}
           </div>
 
           <div className="mt-8 overflow-hidden rounded-[28px] border border-border/70">

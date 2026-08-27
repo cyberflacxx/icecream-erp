@@ -194,6 +194,9 @@ export default function BranchExpensesPage() {
                   </option>
                 ))}
               </select>
+              {cashAccounts.length === 0 ? (
+                <span className="text-xs text-error">No active cash account is configured for this branch.</span>
+              ) : null}
             </label>
           )}
 

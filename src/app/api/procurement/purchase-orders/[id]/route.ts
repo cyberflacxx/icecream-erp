@@ -233,9 +233,12 @@ export async function PATCH(
     approverUserId?: string | null;
     approvalNotes?: string | null;
     items?: Array<{
+      description?: string | null;
+      id?: string;
       itemId: string;
       unitOfMeasureId: string;
       quantityOrdered: number;
+      taxRate?: number;
       unitCost: number;
     }>;
   };
@@ -249,7 +252,7 @@ export async function PATCH(
   try {
     const { data: existing, error: fetchErr } = await service
       .from('purchase_orders')
-      .select('id, status, subtotal, tax_amount, discount_amount, purchase_order_items(id, item_id, unit_of_measure_id, quantity_ordered, unit_cost)')
+      .select('id, status, subtotal, tax_amount, discount_amount, purchase_order_items(id, item_id, unit_of_measure_id, quantity_ordered, quantity_received, unit_cost)')
       .is('deleted_at', null)
       .eq('organization_id', ctx.organizationId)
       .eq('id', id)
@@ -331,6 +334,7 @@ export async function PATCH(
       ? body.items
       : ((order.purchase_order_items as Record<string, unknown>[]) ?? []).map((i) => ({
           itemId: i.item_id as string,
+          id: i.id as string,
           unitOfMeasureId: i.unit_of_measure_id as string,
           quantityOrdered: Number(i.quantity_ordered ?? 0),
           unitCost: Number(i.unit_cost ?? 0),
@@ -368,22 +372,62 @@ export async function PATCH(
     }
     if (updateErr) return serverError(updateErr.message);
 
-    // Replace items if provided
+    // Reconcile draft lines without losing received quantities or stable line IDs.
     if (body.items) {
-      await service.from('purchase_order_items').delete().eq('purchase_order_id', id);
+      const existingItems = ((order.purchase_order_items as Record<string, unknown>[]) ?? []);
+      const existingById = new Map(existingItems.map((item) => [String(item.id), item]));
+      const submittedIds = new Set(body.items.map((item) => item.id).filter(Boolean).map(String));
 
-      const { error: itemsErr } = await service.from('purchase_order_items').insert(
-        body.items.map((item) => ({
-          purchase_order_id: id,
+      for (const item of body.items) {
+        if (!item.id) continue;
+        const existingItem = existingById.get(String(item.id));
+        if (!existingItem) return badRequest('One or more purchase order lines are no longer available. Please refresh and try again.');
+        const receivedQuantity = Number(existingItem.quantity_received ?? 0);
+        if (item.quantityOrdered < receivedQuantity) {
+          return badRequest('Ordered quantity cannot be reduced below quantity already received.');
+        }
+      }
+
+      for (const existingItem of existingItems) {
+        const lineId = String(existingItem.id);
+        if (submittedIds.has(lineId)) continue;
+        const receivedQuantity = Number(existingItem.quantity_received ?? 0);
+        if (receivedQuantity > 0) {
+          return badRequest('Cannot remove a purchase order line that has received stock.');
+        }
+        const deleteResult = await service.from('purchase_order_items').delete().eq('id', lineId);
+        if (deleteResult.error) return serverError(deleteResult.error.message);
+      }
+
+      for (const item of body.items) {
+        const lineTotal = item.quantityOrdered * item.unitCost;
+        const payload = {
+          description: item.description?.trim() || null,
           item_id: item.itemId,
-          unit_of_measure_id: item.unitOfMeasureId,
           quantity_ordered: item.quantityOrdered,
-          quantity_received: 0,
+          tax_rate: Number(item.taxRate ?? 0),
+          total_cost: lineTotal,
           unit_cost: item.unitCost,
-          total_cost: item.quantityOrdered * item.unitCost,
-        })),
-      );
-      if (itemsErr) return serverError(itemsErr.message);
+          unit_of_measure_id: item.unitOfMeasureId,
+          updated_at: new Date().toISOString(),
+        };
+
+        if (item.id) {
+          const updateResult = await service
+            .from('purchase_order_items')
+            .update(payload)
+            .eq('id', item.id)
+            .eq('purchase_order_id', id);
+          if (updateResult.error) return serverError(updateResult.error.message);
+        } else {
+          const insertResult = await service.from('purchase_order_items').insert({
+            ...payload,
+            purchase_order_id: id,
+            quantity_received: 0,
+          });
+          if (insertResult.error) return serverError(insertResult.error.message);
+        }
+      }
     }
 
     const { data: full } = await service

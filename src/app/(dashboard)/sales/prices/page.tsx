@@ -116,7 +116,6 @@ export default function SalesPricesPage() {
               <option value="">Select item</option>
               {metaQuery.data?.items.map((item) => (
                 <option key={item.id} value={item.id}>
-                  {item.code ? `${item.code} - ` : ''}
                   {item.name}
                 </option>
               ))}
