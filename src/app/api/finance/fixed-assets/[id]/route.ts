@@ -16,18 +16,23 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       location?: string;
       name?: string;
       residualValue?: number;
+      status?: string;
     };
     if (body.currentValue !== undefined && Number(body.currentValue) < 0) return badRequest('currentValue must not be negative');
 
+    const updateData: Record<string, unknown> = {};
+    if (body.currentValue !== undefined) updateData.net_book_value = body.currentValue;
+    if (body.location !== undefined) updateData.location = body.location;
+    if (body.name !== undefined) updateData.asset_name = body.name;
+    if (body.residualValue !== undefined) updateData.residual_value = body.residualValue;
+    if (body.status !== undefined) updateData.status = body.status;
+    if (body.isActive !== undefined && body.status === undefined) {
+      updateData.status = body.isActive ? 'ACTIVE' : 'RETIRED';
+    }
+
     const { data, error } = await financeService()
       .from('fixed_assets')
-      .update({
-        current_value: body.currentValue,
-        is_active: body.isActive,
-        location: body.location,
-        name: body.name,
-        residual_value: body.residualValue,
-      })
+      .update(updateData)
       .eq('organization_id', ctx.organizationId)
       .eq('id', id)
       .is('deleted_at', null)

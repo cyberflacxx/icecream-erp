@@ -3,11 +3,11 @@
 import Link from 'next/link';
 import { type FormEvent, useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, ArrowLeft, Plus, Wrench } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, Pencil, Plus, Power, Wrench } from 'lucide-react';
 
 import { PageHeader } from '@/components/dashboard/page-header';
 import { Button } from '@/components/ui/button';
-import { EmptyState, FormDrawer, LoadingState } from '@/components/ui-library';
+import { ConfirmDialog, EmptyState, FormDrawer, LoadingState } from '@/components/ui-library';
 import { useAppAuth } from '@/hooks/useAppAuth';
 import { apiFetch } from '@/lib/api';
 
@@ -129,7 +129,10 @@ export default function MachinesPage() {
   const { getToken, isLoaded, isSignedIn, userId } = useAppAuth();
   const queryClient = useQueryClient();
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [editingMachine, setEditingMachine] = useState<MaintenanceMachineRow | null>(null);
+  const [statusTarget, setStatusTarget] = useState<MaintenanceMachineRow | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [isCreating, setIsCreating] = useState(false);
   const [form, setForm] = useState(initialForm);
 
@@ -158,7 +161,40 @@ export default function MachinesPage() {
     [machines],
   );
 
-  async function handleCreateMachine(event: FormEvent<HTMLFormElement>) {
+  function openCreateDrawer() {
+    setEditingMachine(null);
+    setForm(initialForm);
+    setFormError(null);
+    setDrawerOpen(true);
+  }
+
+  function openEditDrawer(machine: MaintenanceMachineRow) {
+    setEditingMachine(machine);
+    setForm({
+      branchName: machine.branchName ?? '',
+      code: machine.code ?? '',
+      healthStatus: machine.healthStatus ?? 'HEALTHY',
+      lastServiceCost: String(machine.lastServiceCost ?? 0),
+      lastServiceDate: machine.lastServiceDate ?? '',
+      location: machine.location ?? '',
+      machineType: machine.machineType ?? 'GENERAL',
+      manufacturer: machine.manufacturer ?? '',
+      model: machine.model ?? '',
+      name: machine.name ?? '',
+      nextServiceDate: machine.nextServiceDate ?? '',
+      notes: machine.notes ?? '',
+      operationalStatus: machine.operationalStatus ?? 'ACTIVE',
+      purchaseCost: String(machine.purchaseCost ?? 0),
+      purchaseDate: machine.purchaseDate ?? '',
+      serialNumber: machine.serialNumber ?? '',
+      serviceInterval: String(machine.serviceInterval ?? 30),
+      serviceProvider: machine.serviceProvider ?? '',
+    });
+    setFormError(null);
+    setDrawerOpen(true);
+  }
+
+  async function handleSaveMachine(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setFormError(null);
 
@@ -170,8 +206,7 @@ export default function MachinesPage() {
     setIsCreating(true);
     try {
       const token = await getToken();
-      await apiFetch('/api/maintenance/machines', {
-        body: JSON.stringify({
+      const payload = {
           branchName: form.branchName || null,
           code: form.code.trim().toUpperCase(),
           healthStatus: form.healthStatus,
@@ -190,15 +225,41 @@ export default function MachinesPage() {
           serialNumber: form.serialNumber.trim() || null,
           serviceInterval: Number(form.serviceInterval || 0),
           serviceProvider: form.serviceProvider.trim() || null,
-        }),
-        method: 'POST',
+      };
+      await apiFetch(editingMachine ? `/api/maintenance/machines/${editingMachine.id}` : '/api/maintenance/machines', {
+        body: JSON.stringify(payload),
+        method: editingMachine ? 'PATCH' : 'POST',
         token,
       });
       setDrawerOpen(false);
+      setEditingMachine(null);
       setForm(initialForm);
       await queryClient.invalidateQueries({ queryKey: ['maintenance', 'machines'] });
     } catch (error) {
-      setFormError(error instanceof Error ? error.message : 'Failed to create machine.');
+      setFormError(error instanceof Error ? error.message : 'Failed to save machine.');
+    } finally {
+      setIsCreating(false);
+    }
+  }
+
+  async function toggleMachineStatus() {
+    if (!statusTarget) return;
+    setActionError(null);
+    setIsCreating(true);
+    try {
+      const token = await getToken();
+      await apiFetch(`/api/maintenance/machines/${statusTarget.id}`, {
+        body: JSON.stringify({
+          isActive: statusTarget.operationalStatus !== 'INACTIVE',
+          status: statusTarget.operationalStatus === 'INACTIVE' ? 'ACTIVE' : 'INACTIVE',
+        }),
+        method: 'PATCH',
+        token,
+      });
+      setStatusTarget(null);
+      await queryClient.invalidateQueries({ queryKey: ['maintenance', 'machines'] });
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'Failed to update machine status.');
     } finally {
       setIsCreating(false);
     }
@@ -239,7 +300,7 @@ export default function MachinesPage() {
               <ArrowLeft className="h-4 w-4" />
               Back
             </Link>
-            <Button type="button" onClick={() => { setFormError(null); setDrawerOpen(true); }}>
+            <Button type="button" onClick={openCreateDrawer}>
               <Plus className="mr-2 h-4 w-4" />
               Add Machine
             </Button>
@@ -345,13 +406,39 @@ export default function MachinesPage() {
                   {machine.notes}
                 </div>
               ) : null}
+
+              <div className="mt-4 flex flex-wrap gap-2">
+                <Button type="button" size="sm" variant="outline" onClick={() => openEditDrawer(machine)}>
+                  <Pencil className="mr-2 h-4 w-4" />
+                  Edit
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={machine.operationalStatus === 'INACTIVE' ? 'outline' : 'destructive'}
+                  onClick={() => {
+                    setActionError(null);
+                    setStatusTarget(machine);
+                  }}
+                >
+                  <Power className="mr-2 h-4 w-4" />
+                  {machine.operationalStatus === 'INACTIVE' ? 'Activate' : 'Deactivate'}
+                </Button>
+              </div>
             </article>
           ))}
         </div>
       )}
 
-      <FormDrawer title="Add Machine" open={drawerOpen} onClose={() => setDrawerOpen(false)}>
-        <form className="space-y-5" onSubmit={handleCreateMachine}>
+      <FormDrawer
+        title={editingMachine ? `Edit Machine: ${editingMachine.name}` : 'Add Machine'}
+        open={drawerOpen}
+        onClose={() => {
+          setDrawerOpen(false);
+          setEditingMachine(null);
+        }}
+      >
+        <form className="space-y-5" onSubmit={handleSaveMachine}>
           {formError ? (
             <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
               {formError}
@@ -543,11 +630,29 @@ export default function MachinesPage() {
               Cancel
             </Button>
             <Button type="submit" disabled={isCreating}>
-              {isCreating ? 'Saving...' : 'Save Machine'}
+              {isCreating ? 'Saving...' : editingMachine ? 'Save Changes' : 'Save Machine'}
             </Button>
           </div>
         </form>
       </FormDrawer>
+
+      <ConfirmDialog
+        open={Boolean(statusTarget)}
+        title={statusTarget?.operationalStatus === 'INACTIVE' ? 'Activate machine' : 'Deactivate machine'}
+        description={
+          statusTarget?.operationalStatus === 'INACTIVE'
+            ? 'This returns the machine to active maintenance planning.'
+            : 'This retires the machine from active maintenance planning while preserving service and cost history.'
+        }
+        confirmLabel={statusTarget?.operationalStatus === 'INACTIVE' ? 'Activate' : 'Deactivate'}
+        loading={isCreating}
+        errorMessage={actionError}
+        onCancel={() => {
+          setStatusTarget(null);
+          setActionError(null);
+        }}
+        onConfirm={() => void toggleMachineStatus()}
+      />
     </div>
   );
 }

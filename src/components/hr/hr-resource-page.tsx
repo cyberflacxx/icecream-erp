@@ -1,10 +1,12 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useMemo, useState } from 'react';
-import { AlertCircle, ArrowLeft, Loader2 } from 'lucide-react';
+import { type FormEvent, useEffect, useMemo, useState } from 'react';
+import { AlertCircle, ArrowLeft, Loader2, Pencil, Power } from 'lucide-react';
 
 import { PageHeader } from '@/components/dashboard/page-header';
+import { Button } from '@/components/ui/button';
+import { ConfirmDialog, FormDrawer } from '@/components/ui-library';
 
 interface Column {
   key: string;
@@ -45,6 +47,18 @@ export function HrResourcePage({ backHref = '/hr', columns, description, endpoin
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
+  const [reloadKey, setReloadKey] = useState(0);
+  const [editingRow, setEditingRow] = useState<Record<string, unknown> | null>(null);
+  const [statusTarget, setStatusTarget] = useState<Record<string, unknown> | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [employeeForm, setEmployeeForm] = useState({
+    department: '',
+    full_name: '',
+    job_title: '',
+    status: 'ACTIVE',
+  });
+  const supportsEmployeeActions = endpoint.startsWith('/api/hr/employees');
 
   useEffect(() => {
     let mounted = true;
@@ -69,7 +83,7 @@ export function HrResourcePage({ backHref = '/hr', columns, description, endpoin
     return () => {
       mounted = false;
     };
-  }, [endpoint]);
+  }, [endpoint, reloadKey]);
 
   const filteredRows = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -78,6 +92,54 @@ export function HrResourcePage({ backHref = '/hr', columns, description, endpoin
       Object.values(row).some((value) => formatCell(value).toLowerCase().includes(query)),
     );
   }, [rows, search]);
+
+  function openEmployeeEdit(row: Record<string, unknown>) {
+    setEditingRow(row);
+    setEmployeeForm({
+      department: String(row.department ?? ''),
+      full_name: String(row.full_name ?? [row.first_name, row.last_name].filter(Boolean).join(' ') ?? ''),
+      job_title: String(row.job_title ?? row.position ?? ''),
+      status: String(row.status ?? 'ACTIVE').toUpperCase(),
+    });
+    setActionError(null);
+  }
+
+  async function saveEmployee(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!editingRow?.id) return;
+    setSaving(true);
+    setActionError(null);
+    try {
+      const response = await fetch(`/api/hr/employees/${editingRow.id}`, {
+        body: JSON.stringify(employeeForm),
+        headers: { 'Content-Type': 'application/json' },
+        method: 'PATCH',
+      });
+      if (!response.ok) throw new Error(await response.text());
+      setEditingRow(null);
+      setReloadKey((current) => current + 1);
+    } catch (saveError) {
+      setActionError(saveError instanceof Error ? saveError.message : 'Failed to save employee.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function deactivateEmployee() {
+    if (!statusTarget?.id) return;
+    setSaving(true);
+    setActionError(null);
+    try {
+      const response = await fetch(`/api/hr/employees/${statusTarget.id}/deactivate`, { method: 'POST' });
+      if (!response.ok) throw new Error(await response.text());
+      setStatusTarget(null);
+      setReloadKey((current) => current + 1);
+    } catch (deactivateError) {
+      setActionError(deactivateError instanceof Error ? deactivateError.message : 'Failed to deactivate employee.');
+    } finally {
+      setSaving(false);
+    }
+  }
 
   return (
     <div className="space-y-6">
@@ -126,6 +188,11 @@ export function HrResourcePage({ backHref = '/hr', columns, description, endpoin
                     {column.label}
                   </th>
                 ))}
+                {supportsEmployeeActions ? (
+                  <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-brown/45 dark:text-white/40">
+                    Actions
+                  </th>
+                ) : null}
               </tr>
             </thead>
             <tbody>
@@ -136,11 +203,35 @@ export function HrResourcePage({ backHref = '/hr', columns, description, endpoin
                       {formatCell(row[column.key])}
                     </td>
                   ))}
+                  {supportsEmployeeActions ? (
+                    <td className="px-4 py-3">
+                      <div className="flex flex-wrap gap-2">
+                        <Button type="button" size="sm" variant="outline" onClick={() => openEmployeeEdit(row)}>
+                          <Pencil className="mr-2 h-4 w-4" />
+                          Edit
+                        </Button>
+                        {String(row.status ?? '').toUpperCase() === 'ACTIVE' ? (
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="destructive"
+                            onClick={() => {
+                              setActionError(null);
+                              setStatusTarget(row);
+                            }}
+                          >
+                            <Power className="mr-2 h-4 w-4" />
+                            Deactivate
+                          </Button>
+                        ) : null}
+                      </div>
+                    </td>
+                  ) : null}
                 </tr>
               ))}
               {filteredRows.length === 0 ? (
                 <tr>
-                  <td colSpan={columns.length} className="px-4 py-10 text-center text-sm text-brown/45 dark:text-white/35">
+                  <td colSpan={columns.length + (supportsEmployeeActions ? 1 : 0)} className="px-4 py-10 text-center text-sm text-brown/45 dark:text-white/35">
                     No records found.
                   </td>
                 </tr>
@@ -149,6 +240,60 @@ export function HrResourcePage({ backHref = '/hr', columns, description, endpoin
           </table>
         </div>
       )}
+
+      <FormDrawer title="Edit Employee" open={Boolean(editingRow)} onClose={() => { setEditingRow(null); setActionError(null); }}>
+        <form className="space-y-5" onSubmit={saveEmployee}>
+          {actionError ? (
+            <div className="rounded-2xl border border-error/20 bg-error/5 px-4 py-3 text-sm text-error">
+              {actionError}
+            </div>
+          ) : null}
+          <label className="space-y-2 text-sm text-muted">
+            <span>Full Name</span>
+            <input required value={employeeForm.full_name} onChange={(event) => setEmployeeForm((current) => ({ ...current, full_name: event.target.value }))} className="surface-input-soft" />
+          </label>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <label className="space-y-2 text-sm text-muted">
+              <span>Department</span>
+              <input value={employeeForm.department} onChange={(event) => setEmployeeForm((current) => ({ ...current, department: event.target.value }))} className="surface-input-soft" />
+            </label>
+            <label className="space-y-2 text-sm text-muted">
+              <span>Job Role</span>
+              <input value={employeeForm.job_title} onChange={(event) => setEmployeeForm((current) => ({ ...current, job_title: event.target.value }))} className="surface-input-soft" />
+            </label>
+          </div>
+          <label className="space-y-2 text-sm text-muted">
+            <span>Status</span>
+            <select value={employeeForm.status} onChange={(event) => setEmployeeForm((current) => ({ ...current, status: event.target.value }))} className="surface-input-soft">
+              <option value="ACTIVE">Active</option>
+              <option value="INACTIVE">Inactive</option>
+              <option value="TERMINATED">Terminated</option>
+            </select>
+          </label>
+          <div className="flex justify-end gap-3">
+            <Button type="button" variant="outline" onClick={() => setEditingRow(null)}>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={saving}>
+              {saving ? 'Saving...' : 'Save Changes'}
+            </Button>
+          </div>
+        </form>
+      </FormDrawer>
+
+      <ConfirmDialog
+        open={Boolean(statusTarget)}
+        title="Deactivate employee"
+        description="This preserves HR history and removes the employee from active operational selectors."
+        confirmLabel="Deactivate"
+        loading={saving}
+        errorMessage={actionError}
+        onCancel={() => {
+          setStatusTarget(null);
+          setActionError(null);
+        }}
+        onConfirm={() => void deactivateEmployee()}
+      />
     </div>
   );
 }
