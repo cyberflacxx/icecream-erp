@@ -753,6 +753,33 @@ test('transfer page collects receipt lines before calling the atomic completion 
   assert.match(page, /\/api\/inventory\/transfers\/\$\{receiptState\.transferId\}\/complete/);
 });
 
+test('stock transfer receipt semantics migration preserves explicit zero sent and received quantities', () => {
+  const migration = fs.readFileSync('migrations/057_fix_stock_transfer_dispatch_receipt_semantics.sql', 'utf8');
+
+  assert.match(migration, /create or replace function icecream_erp\.sync_stock_transfer_items_compat\(\)/i);
+  assert.match(migration, /if new\.quantity_sent is null then\s+new\.quantity_sent := 0;/i);
+  assert.match(migration, /if new\.quantity_received is null then\s+new\.quantity_received := 0;/i);
+  assert.doesNotMatch(migration, /quantity_sent is null or new\.quantity_sent = 0/i);
+  assert.doesNotMatch(migration, /quantity_received is null or new\.quantity_received = 0/i);
+  assert.doesNotMatch(migration, /new\.quantity_received := coalesce\(new\.quantity, new\.quantity_sent, new\.quantity_requested, 0\)/i);
+  assert.match(migration, /notify pgrst, 'reload schema';/i);
+});
+
+test('stock transfer receipt status migration casts enum writes in receive RPC', () => {
+  const migration = fs.readFileSync('migrations/058_fix_receive_stock_transfer_status_enum_cast.sql', 'utf8');
+
+  assert.match(migration, /create or replace function icecream_erp\.receive_stock_transfer_atomic/i);
+  assert.match(
+    migration,
+    /set status = \(\s*case\s+when coalesce\(v_total_received, 0\) >= coalesce\(v_total_sent, 0\) then 'COMPLETED'\s+else 'PARTIALLY_RECEIVED'\s+end\s*\)::icecream_erp\.transfer_status/is,
+  );
+  assert.doesNotMatch(
+    migration,
+    /set status = case\s+when coalesce\(v_total_received, 0\) >= coalesce\(v_total_sent, 0\) then 'COMPLETED'\s+else 'PARTIALLY_RECEIVED'\s+end,/is,
+  );
+  assert.match(migration, /notify pgrst, 'reload schema';/i);
+});
+
 test('phase 1g reversal migration keeps RPCs schema-local and enforces transfer unwind order', () => {
   const migration = fs.readFileSync('migrations/045_inventory_operational_reversals.sql', 'utf8');
 
