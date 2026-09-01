@@ -88,7 +88,7 @@ export async function GET(
 
     if (batchError || !batch) return notFound('Production batch not found');
 
-    const [warehouseResult, recipeResult, recipeItemsResult, packagingItemsResult, materialsResult, outputsResult, workersResult] = await Promise.all([
+    const [warehouseResult, recipeResult, recipeItemsResult, packagingItemsResult, materialsResult, outputsResult, workersResult, labourResult] = await Promise.all([
       service
         .schema('icecream_erp')
         .from('warehouses')
@@ -126,6 +126,11 @@ export async function GET(
         .from('production_worker_assignments')
         .select('id, employee_id, worker_name, shift_name, attendance_status, is_off_shift, hours_worked, output_quantity, remarks, employees(id, employee_number, first_name, last_name, status)')
         .eq('batch_id', id),
+      service
+        .schema('icecream_erp')
+        .from('hr_labour_cost_allocations')
+        .select('id, employee_id, rate_type, rate, hours_worked, labour_cost, overhead_allocation, total_cost, approval_status')
+        .eq('batch_id', id),
     ]);
 
     if (warehouseResult.error) throw warehouseResult.error;
@@ -135,6 +140,7 @@ export async function GET(
     if (materialsResult.error) throw materialsResult.error;
     if (outputsResult.error) throw outputsResult.error;
     if (workersResult.error) throw workersResult.error;
+    if (labourResult.error) throw labourResult.error;
 
     if (ctx.isBranchScoped && ctx.branchId && warehouseResult.data?.branch_id && warehouseResult.data.branch_id !== ctx.branchId) return forbidden();
 
@@ -154,6 +160,27 @@ export async function GET(
         quantity_remaining: Math.max(0, quantityIssued - quantityActual),
         total_cost: Number(row.total_cost ?? quantityActual * unitCost),
         unit_cost: unitCost,
+      };
+    });
+    const labourByEmployee = new Map<string, { hours: number; rate: number; labourCost: number; rateType: string }>();
+    for (const row of (labourResult.data ?? []) as Array<Record<string, unknown>>) {
+      const employeeId = String(row.employee_id ?? '');
+      if (!employeeId) continue;
+      const existingLabour = labourByEmployee.get(employeeId) ?? { hours: 0, labourCost: 0, rate: 0, rateType: String(row.rate_type ?? 'HOURLY') };
+      existingLabour.hours += Number(row.hours_worked ?? 0);
+      existingLabour.labourCost += Number(row.labour_cost ?? 0);
+      existingLabour.rate = Number(row.rate ?? existingLabour.rate);
+      existingLabour.rateType = String(row.rate_type ?? existingLabour.rateType);
+      labourByEmployee.set(employeeId, existingLabour);
+    }
+    const workers = ((workersResult.data ?? []) as Array<Record<string, unknown>>).map((row) => {
+      const labour = labourByEmployee.get(String(row.employee_id ?? ''));
+      return {
+        ...row,
+        labour_cost: labour?.labourCost ?? 0,
+        labour_hours: labour?.hours ?? Number(row.hours_worked ?? 0),
+        labour_rate: labour?.rate ?? 0,
+        labour_rate_type: labour?.rateType ?? null,
       };
     });
 
@@ -185,7 +212,8 @@ export async function GET(
       warehouse: warehouseResult.data,
       materials,
       outputs: outputsResult.data ?? [],
-      workers: workersResult.data ?? [],
+      labourAllocations: labourResult.data ?? [],
+      workers,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Internal server error';

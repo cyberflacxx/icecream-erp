@@ -156,7 +156,9 @@ export default function ProductionBatchesPage() {
   const [actualUnitsProduced, setActualUnitsProduced] = useState('');
   const [assignmentEmployeeId, setAssignmentEmployeeId] = useState('');
   const [assignmentHours, setAssignmentHours] = useState('0');
+  const [assignmentRate, setAssignmentRate] = useState('0');
   const [assignmentRole, setAssignmentRole] = useState('Operator');
+  const [materialInputs, setMaterialInputs] = useState<Record<string, { isPackaging: boolean; materialType: string; note: string; quantityActual: string; quantityIssued: string; unitCost: string }>>({});
   const [releaseQuantity, setReleaseQuantity] = useState('');
   const [releaseNotes, setReleaseNotes] = useState('');
 
@@ -251,6 +253,18 @@ export default function ProductionBatchesPage() {
     setActualUnitsProduced(String(actual > 0 ? actual : expected));
     setAssignmentEmployeeId('');
     setAssignmentHours('0');
+    setAssignmentRate('0');
+    setMaterialInputs(Object.fromEntries(asRows(batchDetail.materials).map((material) => {
+      const key = String(material.id ?? '');
+      return [key, {
+        isPackaging: Boolean(material.is_packaging ?? material.isPackaging ?? String(material.material_type ?? '').toUpperCase() === 'PACKAGING'),
+        materialType: String(material.material_type ?? material.materialType ?? ''),
+        note: String(material.notes ?? ''),
+        quantityActual: String(material.quantity_actual ?? material.quantityActual ?? material.quantity_issued ?? material.quantity_required ?? 0),
+        quantityIssued: String(material.quantity_issued ?? material.quantityIssued ?? material.quantity_actual ?? material.quantity_required ?? 0),
+        unitCost: String(material.unit_cost ?? material.unitCost ?? 0),
+      }];
+    })));
     setReleaseQuantity(String(actual > 0 ? actual : expected));
     setReleaseNotes('');
   }, [batchDetail]);
@@ -341,7 +355,9 @@ export default function ProductionBatchesPage() {
         body: JSON.stringify({
           employee_id: assignmentEmployeeId,
           hoursWorked: Number(assignmentHours || 0),
+          labourRate: Number(assignmentRate || 0),
           production_batch: manageBatchId,
+          rateType: 'HOURLY',
           role_on_batch: assignmentRole || 'Operator',
           shift: String(batchDetail?.shift ?? 'DAY'),
         }),
@@ -349,7 +365,47 @@ export default function ProductionBatchesPage() {
       });
       setAssignmentEmployeeId('');
       setAssignmentHours('0');
+      setAssignmentRate('0');
     });
+  }
+
+  async function saveMaterialUsage() {
+    if (!manageBatchId) return;
+    const materials = asRows(batchDetail?.materials).map((material) => {
+      const id = String(material.id ?? '');
+      const input = materialInputs[id] ?? {
+        isPackaging: Boolean(material.is_packaging),
+        materialType: String(material.material_type ?? ''),
+        note: String(material.notes ?? ''),
+        quantityActual: String(material.quantity_actual ?? 0),
+        quantityIssued: String(material.quantity_issued ?? 0),
+        unitCost: String(material.unit_cost ?? 0),
+      };
+      return {
+        id,
+        isPackaging: input.isPackaging,
+        materialType: input.materialType,
+        note: input.note,
+        quantityActual: Number(input.quantityActual || 0),
+        quantityIssued: Number(input.quantityIssued || input.quantityActual || 0),
+        unitCost: Number(input.unitCost || 0),
+      };
+    }).filter((material) => material.id);
+
+    if (materials.length === 0) {
+      setFormError('No production material lines are available to update.');
+      return;
+    }
+
+    await runAction(
+      ['COMPLETED', 'CANCELLED'].includes(String(batchDetail?.status ?? '').toUpperCase())
+        ? 'Posted production cost adjustment recorded without rewriting stock history.'
+        : 'Raw material usage and cost inputs saved.',
+      () => request(`/api/production/batches/${manageBatchId}/material-usage`, {
+        body: JSON.stringify({ materials }),
+        method: 'POST',
+      }),
+    );
   }
 
   async function unassignWorker(assignmentId: string) {
@@ -621,6 +677,64 @@ export default function ProductionBatchesPage() {
                 requirements={detailRequirements}
                 title="Calculated raw materials"
               />
+              {asRows(batchDetail?.materials).length ? (
+                <div className="rounded-3xl border border-border/70 bg-white/80 p-4">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <p className="text-sm font-semibold uppercase tracking-[0.18em] text-orange">Raw Materials Used + Cost Inputs</p>
+                      <p className="mt-1 text-sm text-muted">
+                        Edit actual usage and unit cost before closure. For completed batches, unit-cost changes are saved as posted cost overrides with the line note as the reason.
+                      </p>
+                    </div>
+                    <Button type="button" variant="outline" onClick={saveMaterialUsage}>
+                      {['COMPLETED', 'CANCELLED'].includes(String(batchDetail?.status ?? '').toUpperCase()) ? 'Record Cost Override' : 'Save Material Usage'}
+                    </Button>
+                  </div>
+                  <div className="mt-4 space-y-3">
+                    {asRows(batchDetail?.materials).map((material) => {
+                      const id = String(material.id ?? '');
+                      const input = materialInputs[id] ?? {
+                        isPackaging: Boolean(material.is_packaging ?? material.isPackaging),
+                        materialType: String(material.material_type ?? material.materialType ?? ''),
+                        note: String(material.notes ?? ''),
+                        quantityActual: String(material.quantity_actual ?? material.quantityActual ?? 0),
+                        quantityIssued: String(material.quantity_issued ?? material.quantityIssued ?? 0),
+                        unitCost: String(material.unit_cost ?? material.unitCost ?? 0),
+                      };
+                      const item = Array.isArray(material.items) ? material.items[0] : material.items as Record<string, unknown> | undefined;
+                      const lineCost = Number(input.quantityActual || 0) * Number(input.unitCost || 0);
+                      return (
+                        <div key={id} className="rounded-2xl border border-border/70 bg-cream/40 p-3">
+                          <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                            <div>
+                              <p className="font-semibold text-brown">{String(material.item_name ?? item?.name ?? material.item_id ?? 'Material')}</p>
+                              <p className="text-xs text-muted">Required {formatNumber(material.quantity_required)} | Issued {formatNumber(material.quantity_issued)} | Line cost {formatCurrency(lineCost)}</p>
+                            </div>
+                            <label className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-muted">
+                              <input
+                                type="checkbox"
+                                checked={input.isPackaging}
+                                onChange={(event) => setMaterialInputs((current) => ({
+                                  ...current,
+                                  [id]: { ...input, isPackaging: event.target.checked, materialType: event.target.checked ? 'PACKAGING' : input.materialType },
+                                }))}
+                              />
+                              Packaging
+                            </label>
+                          </div>
+                          <div className="mt-3 grid gap-3 md:grid-cols-5">
+                            <InputField label="Actual Qty Used" type="number" value={input.quantityActual} onChange={(value) => setMaterialInputs((current) => ({ ...current, [id]: { ...input, quantityActual: value } }))} />
+                            <InputField label="Issued Qty" type="number" value={input.quantityIssued} onChange={(value) => setMaterialInputs((current) => ({ ...current, [id]: { ...input, quantityIssued: value } }))} />
+                            <InputField label="Unit Cost" type="number" value={input.unitCost} onChange={(value) => setMaterialInputs((current) => ({ ...current, [id]: { ...input, unitCost: value } }))} />
+                            <InputField label="Type" value={input.materialType} onChange={(value) => setMaterialInputs((current) => ({ ...current, [id]: { ...input, materialType: value } }))} />
+                            <InputField label="Note / Adjustment Reason" value={input.note} onChange={(value) => setMaterialInputs((current) => ({ ...current, [id]: { ...input, note: value } }))} />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : null}
               {canIssue(String(batchDetail?.status ?? '').toUpperCase()) ? (
                 <Button type="button" variant="outline" className={actionButtonClassNames.issue} onClick={issueToProduction}>
                   <Scale className="mr-2 h-4 w-4" />
@@ -673,7 +787,7 @@ export default function ProductionBatchesPage() {
                   <MetricCard label="Labour Cost" value={formatCurrency(batchDetail?.labourCost)} />
                   <MetricCard label="Labour Cost per Unit" value={actualGoodUnits > 0 ? formatCurrency(Number(batchDetail?.labourCost ?? 0) / actualGoodUnits) : 'Not ready'} />
                 </div>
-                <div className="mt-4 grid gap-3 rounded-2xl border border-border/70 bg-cream/40 p-3 md:grid-cols-[minmax(0,1fr)_120px_160px_auto]">
+                <div className="mt-4 grid gap-3 rounded-2xl border border-border/70 bg-cream/40 p-3 md:grid-cols-[minmax(0,1fr)_110px_110px_160px_auto]">
                   <label className="space-y-2 text-sm text-muted">
                     <span>Add Workers</span>
                     <select
@@ -691,6 +805,7 @@ export default function ProductionBatchesPage() {
                     </select>
                   </label>
                   <InputField label="Hours" type="number" value={assignmentHours} onChange={setAssignmentHours} />
+                  <InputField label="Rate" type="number" value={assignmentRate} onChange={setAssignmentRate} />
                   <InputField label="Role" value={assignmentRole} onChange={setAssignmentRole} />
                   <div className="flex items-end">
                     <Button type="button" variant="outline" onClick={assignWorkerToBatch} disabled={!assignmentEmployeeId}>
@@ -703,11 +818,14 @@ export default function ProductionBatchesPage() {
                     const employee = Array.isArray(worker.employees) ? worker.employees[0] : worker.employees as Record<string, unknown> | undefined;
                     const name = String(worker.worker_name ?? [employee?.first_name, employee?.last_name].filter(Boolean).join(' ') ?? 'Assigned worker');
                     const role = String(worker.role_in_production ?? worker.remarks ?? 'Operator').replace(/^Role:\s*/i, '');
+                    const workerHours = Number(worker.labour_hours ?? worker.hours_worked ?? 0);
+                    const workerRate = Number(worker.labour_rate ?? 0);
+                    const workerCost = Number(worker.labour_cost ?? (workerHours * workerRate));
                     return (
                       <div key={String(worker.id)} className="flex flex-col gap-3 rounded-2xl border border-border/70 bg-white px-3 py-2 text-sm sm:flex-row sm:items-center sm:justify-between">
                         <div>
                           <p className="font-semibold text-brown">{name}</p>
-                          <p className="text-xs text-muted">{role} · Hours {formatNumber(worker.hours_worked)}</p>
+                          <p className="text-xs text-muted">{role} | Hours {formatNumber(workerHours)} | Rate {formatCurrency(workerRate)} | Labour Cost {formatCurrency(workerCost)}</p>
                         </div>
                         {String(batchDetail?.status ?? '').toUpperCase() !== 'COMPLETED' ? (
                           <Button type="button" size="sm" variant="outline" onClick={() => void unassignWorker(String(worker.id))}>

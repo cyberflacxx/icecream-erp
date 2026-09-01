@@ -52,8 +52,46 @@ export async function POST(
       .maybeSingle();
     if (batchError) throw batchError;
     if (!batch) return notFound('Production batch not found.');
-    if (['COMPLETED', 'CANCELLED'].includes(String(batch.status))) {
-      return badRequest('Completed or cancelled batches cannot be edited.');
+    if (['COMPLETED', 'CANCELLED'].includes(String(batch.status ?? '').toUpperCase())) {
+      const overrides = [];
+      for (const material of body.materials) {
+        if (material.unitCost === undefined) continue;
+        const reason = String(material.note ?? '').trim();
+        if (!reason) return badRequest('Adjustment reason is required for posted production cost corrections.');
+        const adjustedUnitCost = ensureNonNegative(material.unitCost, 'unitCost');
+        const { data: existing, error: existingError } = await service
+          .from('production_batch_materials')
+          .select('id, item_id, unit_cost')
+          .eq('id', material.id)
+          .eq('batch_id', id)
+          .maybeSingle();
+        if (existingError) throw existingError;
+        if (!existing) return badRequest('Production material line not found.');
+        const previousUnitCost = Number(existing.unit_cost ?? 0);
+        const { data: override, error: overrideError } = await service
+          .from('production_cost_overrides')
+          .insert({
+            adjusted_by: ctx.userId,
+            adjusted_unit_cost: adjustedUnitCost,
+            adjustment_reason: reason,
+            batch_id: id,
+            item_id: existing.item_id,
+            material_id: existing.id,
+            organization_id: batch.organization_id ?? ctx.organizationId,
+            previous_unit_cost: previousUnitCost,
+          })
+          .select()
+          .single();
+        if (overrideError) throw overrideError;
+        overrides.push(override);
+      }
+      if (overrides.length === 0) {
+        return badRequest('At least one unitCost correction is required for posted production cost adjustment.');
+      }
+      await writeProductionAuditLog('PRODUCTION_COST_OVERRIDE_RECORDED', id, ctx.userId, {
+        overrideCount: overrides.length,
+      }, 'production_batch');
+      return NextResponse.json({ adjusted: true, overrides });
     }
 
     let materialCost = 0;

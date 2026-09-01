@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { badRequest, can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
-import { ensureEmployeeAssignable, hrService, writeHrAuditLog } from '@/lib/hr-server';
+import { createLabourCostAllocation, ensureEmployeeAssignable, hrService, writeHrAuditLog } from '@/lib/hr-server';
 import { isMissingTableError } from '@/lib/postgrest-compat';
 
 type Row = Record<string, unknown>;
@@ -113,9 +113,12 @@ export async function POST(request: NextRequest) {
     const body = await request.json() as {
       employee_id?: string;
       hoursWorked?: number;
+      labourRate?: number;
       labourHours?: number;
+      overheadAllocation?: number;
       outputQuantity?: number;
       production_batch?: string;
+      rateType?: string;
       role_on_batch?: string;
       shift?: string;
     };
@@ -128,7 +131,7 @@ export async function POST(request: NextRequest) {
     const service = hrService();
     const { data: batch, error: batchError } = await service
       .from('production_batches')
-      .select('id, status, worker_count')
+      .select('id, status, worker_count, labour_cost, overhead_cost')
       .eq('id', body.production_batch)
       .maybeSingle();
     if (batchError) throw batchError;
@@ -177,13 +180,38 @@ export async function POST(request: NextRequest) {
       .single();
     if (error) throw error;
 
+    let labourAllocation: Record<string, unknown> | null = null;
+    const labourRate = body.labourRate !== undefined ? Number(body.labourRate) : null;
+    const labourHours = Number(body.hoursWorked ?? body.labourHours ?? 0);
+    const overheadAllocation = Number(body.overheadAllocation ?? 0);
+    if (labourRate !== null) {
+      if (labourRate < 0 || labourHours < 0 || overheadAllocation < 0) {
+        return badRequest('Labour rate, hours, and overhead allocation must not be negative.');
+      }
+      labourAllocation = await createLabourCostAllocation({
+        approvalStatus: 'APPROVED',
+        batchId: body.production_batch,
+        branchId: ctx.branchId ?? null,
+        departmentId: null,
+        employeeId: body.employee_id,
+        hoursWorked: labourHours,
+        overheadAllocation,
+        rate: labourRate,
+        rateType: body.rateType ?? 'HOURLY',
+        scheduleId: null,
+        shiftName: body.shift,
+      }) as Record<string, unknown>;
+    }
+
     await service.from('production_batches').update({
+      labour_cost: Number(batch.labour_cost ?? 0) + Number(labourAllocation?.labour_cost ?? 0),
+      overhead_cost: Number(batch.overhead_cost ?? 0) + Number(labourAllocation?.overhead_allocation ?? 0),
       updated_at: new Date().toISOString(),
       worker_count: Number(batch.worker_count ?? 0) + 1,
     }).eq('id', body.production_batch);
 
-    await writeHrAuditLog('HR_WORKER_ASSIGNED_TO_BATCH', String(data.id), ctx.userId, data as Record<string, unknown>, 'production_worker_assignment');
-    return NextResponse.json(data, { status: 201 });
+    await writeHrAuditLog('HR_WORKER_ASSIGNED_TO_BATCH', String(data.id), ctx.userId, { assignment: data, labourAllocation }, 'production_worker_assignment');
+    return NextResponse.json({ ...data, labourAllocation }, { status: 201 });
   } catch (error) {
     return serverError(error instanceof Error ? error.message : 'Failed to assign worker to batch.');
   }
