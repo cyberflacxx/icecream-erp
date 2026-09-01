@@ -11,12 +11,16 @@ export function formatPaymentMethodLabel(value: string) {
     .join(' ');
 }
 
-export function buildSalesReceiptPrintUrl(payload: SalesReceiptPrintPayload, options?: { autoPrint?: boolean }) {
+export function buildSalesReceiptPrintUrl(
+  payload: SalesReceiptPrintPayload,
+  options?: { autoPrint?: boolean; paperSize?: '58mm' | '80mm' },
+) {
   const searchParams = new URLSearchParams();
   if (payload.paymentId) searchParams.set('paymentId', payload.paymentId);
   if (payload.branchSaleId) searchParams.set('branchSaleId', payload.branchSaleId);
 
   if (options?.autoPrint) searchParams.set('autoprint', '1');
+  if (options?.paperSize === '58mm') searchParams.set('paper', '58');
 
   return `/sales/payments/receipt?${searchParams.toString()}`;
 }

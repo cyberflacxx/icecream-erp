@@ -21,6 +21,11 @@ function readParam(value: string | string[] | undefined, fallback = '') {
   return value ?? fallback;
 }
 
+function resolveReceiptPaper(value: string) {
+  const normalized = value.trim().toLowerCase();
+  return normalized === '58' || normalized === '58mm' ? '58mm' : '80mm';
+}
+
 type ReceiptLine = {
   lineTotal: number;
   name: string;
@@ -261,6 +266,7 @@ export default async function SalesPaymentReceiptPage({
   const paymentId = readParam(params.paymentId);
   const branchSaleId = readParam(params.branchSaleId);
   const autoPrint = readParam(params.autoprint) === '1';
+  const paperSize = resolveReceiptPaper(readParam(params.paper));
   const ctx = await getAuthContext();
   if (!ctx || (!paymentId && !branchSaleId)) {
     notFound();
@@ -280,7 +286,10 @@ export default async function SalesPaymentReceiptPage({
   const companyEmail = company?.email?.trim() || '';
 
   return (
-    <main className="receipt-print-shell min-h-screen bg-white px-4 py-6 text-brown print:px-0 print:py-0">
+    <main
+      className="receipt-print-shell min-h-screen bg-white px-4 py-6 text-brown print:px-0 print:py-0"
+      data-receipt-paper={paperSize}
+    >
       <PrintOnLoad enabled={autoPrint} />
       <div className="receipt-print-card mx-auto max-w-4xl rounded-[28px] border border-border/70 bg-white shadow-lg print:max-w-none print:rounded-none print:border-0 print:shadow-none">
         <div className="receipt-no-print flex items-center justify-end border-b border-border/70 px-8 py-4 print:hidden">

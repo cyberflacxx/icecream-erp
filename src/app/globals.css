@@ -850,6 +850,16 @@
     margin: 3mm;
   }
 
+  @page receipt-80 {
+    size: 80mm auto;
+    margin: 3mm;
+  }
+
+  @page receipt-58 {
+    size: 58mm auto;
+    margin: 2mm;
+  }
+
   html,
   body {
     background: #ffffff !important;
@@ -869,6 +879,15 @@
     min-height: auto !important;
     padding: 0 !important;
     width: 100% !important;
+  }
+
+  .receipt-print-shell[data-receipt-paper='80mm'] {
+    page: receipt-80;
+  }
+
+  .receipt-print-shell[data-receipt-paper='58mm'] {
+    max-width: 58mm !important;
+    page: receipt-58;
   }
 
   .receipt-print-card {
