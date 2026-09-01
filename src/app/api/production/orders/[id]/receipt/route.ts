@@ -4,6 +4,7 @@ import { badRequest, can, forbidden, getAuthContext, unauthorized } from '@/lib/
 import {
   findOpenFiscalPeriod,
   getFinanceModuleDefaultCostCentreCodes,
+  NO_OPEN_ACCOUNTING_PERIOD_MESSAGE,
   resolveFinanceCostCentreCode,
   resolveFinancePostingAccount,
 } from '@/lib/finance-foundation-server';
@@ -91,7 +92,7 @@ export async function POST(
       const postingDate = toDateOnly(String(receiptResult.data.receipt_date ?? body.receiptDate ?? ''));
       const period = await findOpenFiscalPeriod(ctx.organizationId, postingDate);
       if (!period) {
-        throw new Error(`No open fiscal period exists for ${postingDate}.`);
+        throw new Error(NO_OPEN_ACCOUNTING_PERIOD_MESSAGE);
       }
 
       const branchId = receiptResult.data.branch_id ? String(receiptResult.data.branch_id) : null;

@@ -280,10 +280,10 @@ export default async function SalesPaymentReceiptPage({
   const companyEmail = company?.email?.trim() || '';
 
   return (
-    <main className="min-h-screen bg-white px-4 py-6 text-brown print:px-0 print:py-0">
+    <main className="receipt-print-shell min-h-screen bg-white px-4 py-6 text-brown print:px-0 print:py-0">
       <PrintOnLoad enabled={autoPrint} />
-      <div className="mx-auto max-w-4xl rounded-[28px] border border-border/70 bg-white shadow-lg print:max-w-none print:rounded-none print:border-0 print:shadow-none">
-        <div className="flex items-center justify-end border-b border-border/70 px-8 py-4 print:hidden">
+      <div className="receipt-print-card mx-auto max-w-4xl rounded-[28px] border border-border/70 bg-white shadow-lg print:max-w-none print:rounded-none print:border-0 print:shadow-none">
+        <div className="receipt-no-print flex items-center justify-end border-b border-border/70 px-8 py-4 print:hidden">
           <PrintReceiptButton />
         </div>
         <section className="border-b border-border/70 px-8 py-8">

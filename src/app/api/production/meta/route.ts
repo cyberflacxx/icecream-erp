@@ -83,7 +83,11 @@ export async function GET() {
       ),
       safeList<Record<string, unknown>>(service.from('stock_balances').select('*')),
       safeList<Record<string, unknown>>(
-        service.from('employees').select('*').order('full_name', { ascending: true }),
+        service
+          .from('employees')
+          .select('id, employee_number, first_name, last_name, department, position, status, branch_id')
+          .eq('status', 'ACTIVE')
+          .order('first_name', { ascending: true }),
       ),
       safeList<Record<string, unknown>>(
         service.from('production_flavours').select('*').eq('is_active', true).order('name', { ascending: true }),
@@ -202,7 +206,10 @@ export async function GET() {
       branches,
       employees: employees.map((employee) => ({
         ...employee,
-        displayName: employee.full_name ?? employee.name ?? employee.employee_name ?? 'Unnamed employee',
+        displayName:
+          [employee.first_name, employee.last_name].filter(Boolean).join(' ').trim() ||
+          String(employee.employee_number ?? '') ||
+          'Unnamed employee',
       })),
       flavours,
       items: normalizedItems,

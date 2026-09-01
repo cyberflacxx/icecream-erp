@@ -112,6 +112,9 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json() as {
       employee_id?: string;
+      hoursWorked?: number;
+      labourHours?: number;
+      outputQuantity?: number;
       production_batch?: string;
       role_on_batch?: string;
       shift?: string;
@@ -125,11 +128,24 @@ export async function POST(request: NextRequest) {
     const service = hrService();
     const { data: batch, error: batchError } = await service
       .from('production_batches')
-      .select('id, worker_count')
+      .select('id, status, worker_count')
       .eq('id', body.production_batch)
       .maybeSingle();
     if (batchError) throw batchError;
     if (!batch) return badRequest('Production batch not found.');
+    if (['COMPLETED', 'CANCELLED'].includes(String(batch.status ?? '').toUpperCase())) {
+      return badRequest('Workers cannot be assigned to completed or cancelled production batches.');
+    }
+
+    const { data: employee, error: employeeError } = await service
+      .from('employees')
+      .select('id, employee_number, first_name, last_name')
+      .eq('id', body.employee_id)
+      .maybeSingle();
+    if (employeeError) throw employeeError;
+    const workerName = employee
+      ? [employee.first_name, employee.last_name].filter(Boolean).join(' ') || String(employee.employee_number ?? '')
+      : null;
 
     const { data: existingAssignment, error: existingAssignmentError } = await service
       .from('production_worker_assignments')
@@ -145,10 +161,17 @@ export async function POST(request: NextRequest) {
     const { data, error } = await service
       .from('production_worker_assignments')
       .insert({
+        attendance_status: 'PRESENT',
         batch_id: body.production_batch,
+        created_by: ctx.userId,
         employee_id: body.employee_id,
-        role_in_production: body.role_on_batch ?? 'Operator',
-        shift: body.shift,
+        hours_worked: Number(body.hoursWorked ?? body.labourHours ?? 0),
+        is_off_shift: false,
+        organization_id: ctx.organizationId,
+        output_quantity: Number(body.outputQuantity ?? 0),
+        remarks: body.role_on_batch ? `Role: ${body.role_on_batch}` : null,
+        shift_name: body.shift,
+        worker_name: workerName,
       })
       .select()
       .single();

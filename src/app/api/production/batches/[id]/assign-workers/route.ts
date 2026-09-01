@@ -28,15 +28,22 @@ export async function POST(
     if (!Array.isArray(body.workers) || body.workers.length === 0) {
       return badRequest('workers are required.');
     }
+    const employeeIds = body.workers.map((worker) => String(worker.employeeId ?? '').trim()).filter(Boolean);
+    if (new Set(employeeIds).size !== employeeIds.length) {
+      return badRequest('A worker can only be assigned once to the same production batch.');
+    }
 
     const service = productionService();
     const { data: batch, error: batchError } = await service
       .from('production_batches')
-      .select('id, shift')
+      .select('id, shift, status')
       .eq('id', id)
       .maybeSingle();
     if (batchError) throw batchError;
     if (!batch) return notFound('Production batch not found.');
+    if (['COMPLETED', 'CANCELLED'].includes(String(batch.status ?? '').toUpperCase())) {
+      return badRequest('Workers cannot be assigned to completed or cancelled production batches.');
+    }
 
     await service.from('production_worker_assignments').delete().eq('batch_id', id);
 

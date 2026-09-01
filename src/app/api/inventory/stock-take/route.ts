@@ -152,7 +152,7 @@ export async function POST(request: NextRequest) {
 
     const period = await findOpenFiscalPeriod(ctx.organizationId, postingDate);
     if (!period) {
-      return badRequest(`No open fiscal period exists for ${postingDate}.`);
+      return badRequest('No open accounting period covers this transaction date.');
     }
 
     const costCenterCode = await resolveFinanceCostCentreCode(ctx.organizationId, {

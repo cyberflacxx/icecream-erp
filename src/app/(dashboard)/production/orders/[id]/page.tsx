@@ -47,6 +47,7 @@ type ReceiptFormState = {
   receiptDate: string;
   rejectedQuantity: string;
   remarks: string;
+  wastageReason: string;
   wastageQuantity: string;
 };
 
@@ -122,6 +123,7 @@ export default function ProductionOrderDetailPage() {
     receiptDate: today,
     rejectedQuantity: '',
     remarks: '',
+    wastageReason: '',
     wastageQuantity: '',
   });
   const [closingNotes, setClosingNotes] = useState('');
@@ -171,6 +173,7 @@ export default function ProductionOrderDetailPage() {
       receiptDate: today,
       rejectedQuantity: '',
       remarks: '',
+      wastageReason: '',
       wastageQuantity: '',
     });
   }
@@ -242,6 +245,8 @@ export default function ProductionOrderDetailPage() {
       .map(({ component, remaining }) => ({
         componentId: component.id,
         currentIssueQuantity: Number(issueQuantities[String(component.id)] || remaining),
+        unitCost: Number(component.unit_cost_snapshot ?? 0),
+        warehouseId: component.warehouse_id ? String(component.warehouse_id) : null,
       }))
       .filter((line) => line.currentIssueQuantity > 0);
     const succeeded = await runAction(API_ROUTES.PRODUCTION.ORDER_ISSUE(id), {
@@ -274,7 +279,7 @@ export default function ProductionOrderDetailPage() {
       productionDate: receipt.productionDate || null,
       receiptDate: receipt.receiptDate || null,
       rejectedQuantity: Number(receipt.rejectedQuantity || 0),
-      remarks: receipt.remarks || null,
+      remarks: [receipt.remarks, receipt.wastageReason ? `Wastage reason: ${receipt.wastageReason}` : ''].filter(Boolean).join('\n') || null,
       wastageQuantity: Number(receipt.wastageQuantity || 0),
     }, {
       onSuccess: resetReceiptForm,
@@ -515,8 +520,10 @@ export default function ProductionOrderDetailPage() {
               </div>
               <div className="mt-4 space-y-2">
                 {issueLines.map(({ component, remaining }) => (
-                  <div key={String(component.id)} className="grid gap-2 rounded-lg bg-[color:var(--app-bg-subtle)] p-3 text-sm md:grid-cols-[1fr_140px_160px]">
+                  <div key={String(component.id)} className="grid gap-2 rounded-lg bg-[color:var(--app-bg-subtle)] p-3 text-sm md:grid-cols-[1fr_130px_120px_120px_160px]">
                     <span>{String(component.component_number_snapshot)} {String(component.component_description_snapshot)}</span>
+                    <span>Warehouse {String(component.warehouse_id ?? 'Not set')}</span>
+                    <span>Unit {money(component.unit_cost_snapshot)}</span>
                     <span>Remaining {qty(remaining)}</span>
                     <input className="surface-input-soft" min="0" max={remaining} step="0.001" type="number" value={issueQuantities[String(component.id)] ?? String(remaining)} onChange={(event) => setIssueQuantities((current) => ({ ...current, [String(component.id)]: event.target.value }))} />
                   </div>
@@ -592,6 +599,7 @@ export default function ProductionOrderDetailPage() {
                 <input className="surface-input-soft" type="date" value={receipt.receiptDate} onChange={(event) => setReceipt((current) => ({ ...current, receiptDate: event.target.value }))} />
                 <input className="surface-input-soft" type="date" value={receipt.productionDate} onChange={(event) => setReceipt((current) => ({ ...current, productionDate: event.target.value }))} />
                 <input className="surface-input-soft" type="date" value={receipt.expiryDate} onChange={(event) => setReceipt((current) => ({ ...current, expiryDate: event.target.value }))} />
+                <input className="surface-input-soft" placeholder="Wastage reason" value={receipt.wastageReason} onChange={(event) => setReceipt((current) => ({ ...current, wastageReason: event.target.value }))} />
                 <input className="surface-input-soft md:col-span-2" placeholder="Receipt remarks" value={receipt.remarks} onChange={(event) => setReceipt((current) => ({ ...current, remarks: event.target.value }))} />
               </div>
               <div className="mt-4 flex justify-end"><Button type="submit" disabled={isPending('receipt') || isClosed}>Post Receipt</Button></div>

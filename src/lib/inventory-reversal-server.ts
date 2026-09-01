@@ -71,10 +71,13 @@ export function mapInventoryReversalError(error: unknown) {
         ? String((error as { message?: unknown }).message ?? '')
         : 'Inventory reversal failed.';
 
+  if (message.includes('No open fiscal period') || message.includes('No open accounting period')) {
+    return { message: 'No open accounting period covers this transaction date.', status: 400 };
+  }
+
   if (
     message.includes('not found') ||
     message.includes('not eligible') ||
-    message.includes('No open fiscal period') ||
     message.includes('was not found')
   ) {
     return { message, status: 404 };

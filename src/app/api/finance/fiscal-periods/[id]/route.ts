@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import { can, forbidden, getAuthContext, notFound, serverError, unauthorized } from '@/lib/api-auth';
+import { badRequest, can, forbidden, getAuthContext, notFound, serverError, unauthorized } from '@/lib/api-auth';
 import { financeService, writeFinanceAuditLog } from '@/lib/finance-server';
 
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -18,19 +18,50 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       status?: string;
     };
 
-    const existing = await financeService().from('fiscal_periods').select('id').eq('organization_id', ctx.organizationId).eq('id', id).single();
+    const service = financeService();
+    const existing = await service
+      .from('fiscal_periods')
+      .select('id, start_date, end_date')
+      .eq('organization_id', ctx.organizationId)
+      .eq('id', id)
+      .single();
     if (existing.error || !existing.data) return notFound('Fiscal period not found');
 
-    const { data, error } = await financeService()
+    const nextStartDate = String(body.startDate ?? existing.data.start_date ?? '');
+    const nextEndDate = String(body.endDate ?? existing.data.end_date ?? '');
+    if (nextStartDate && nextEndDate && nextEndDate < nextStartDate) {
+      return badRequest('End date must be on or after start date.');
+    }
+
+    if (body.startDate !== undefined || body.endDate !== undefined) {
+      const overlap = await service
+        .from('fiscal_periods')
+        .select('id')
+        .eq('organization_id', ctx.organizationId)
+        .neq('id', id)
+        .lte('start_date', nextEndDate)
+        .gte('end_date', nextStartDate)
+        .limit(1);
+      if (overlap.error) throw overlap.error;
+      if ((overlap.data ?? []).length > 0) return badRequest('Fiscal period overlaps an existing period');
+    }
+
+    const updates: Record<string, unknown> = { updated_by: ctx.userId };
+    if (body.periodName !== undefined) updates.period_name = String(body.periodName).trim();
+    if (body.startDate !== undefined) updates.start_date = body.startDate;
+    if (body.endDate !== undefined) updates.end_date = body.endDate;
+    if (body.status !== undefined) {
+      const status = String(body.status).trim().toUpperCase();
+      if (!['OPEN', 'CLOSED'].includes(status)) return badRequest('status must be OPEN or CLOSED.');
+      updates.status = status;
+      updates.is_locked = status === 'CLOSED';
+    }
+    if (body.isLocked !== undefined) updates.is_locked = Boolean(body.isLocked);
+    if (updates.period_name === '') return badRequest('periodName cannot be empty.');
+
+    const { data, error } = await service
       .from('fiscal_periods')
-      .update({
-        period_name: body.periodName,
-        start_date: body.startDate,
-        end_date: body.endDate,
-        status: body.status,
-        is_locked: body.isLocked,
-        updated_by: ctx.userId,
-      })
+      .update(updates)
       .eq('organization_id', ctx.organizationId)
       .eq('id', id)
       .select()

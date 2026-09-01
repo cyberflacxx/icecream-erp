@@ -114,7 +114,7 @@ export async function GET(
       service
         .schema('icecream_erp')
         .from('production_batch_materials')
-        .select('id, item_id, material_type, is_packaging, quantity_required, quantity_issued, quantity_actual, variance, unit_id, notes, items(unit_cost)')
+        .select('id, item_id, material_type, is_packaging, quantity_required, quantity_issued, quantity_actual, variance, unit_id, unit_cost, total_cost, notes, items(unit_cost)')
         .eq('batch_id', id),
       service
         .schema('icecream_erp')
@@ -124,7 +124,7 @@ export async function GET(
       service
         .schema('icecream_erp')
         .from('production_worker_assignments')
-        .select('id, employee_id, worker_name, role_in_production, shift, attendance_status, is_off_shift, hours_worked, output_quantity, remarks, employees(id, employee_number, first_name, last_name, status)')
+        .select('id, employee_id, worker_name, shift_name, attendance_status, is_off_shift, hours_worked, output_quantity, remarks, employees(id, employee_number, first_name, last_name, status)')
         .eq('batch_id', id),
     ]);
 
@@ -146,13 +146,13 @@ export async function GET(
         }
       : null;
     const materials = (materialsResult.data ?? []).map((row: Record<string, unknown>) => {
-      const unitCost = Number((row.items as { unit_cost?: unknown } | null)?.unit_cost ?? 0);
+      const unitCost = Number(row.unit_cost ?? (row.items as { unit_cost?: unknown } | null)?.unit_cost ?? 0);
       const quantityIssued = Number(row.quantity_issued ?? row.quantity_required ?? 0);
       const quantityActual = Number(row.quantity_actual ?? quantityIssued);
       return {
         ...row,
         quantity_remaining: Math.max(0, quantityIssued - quantityActual),
-        total_cost: quantityActual * unitCost,
+        total_cost: Number(row.total_cost ?? quantityActual * unitCost),
         unit_cost: unitCost,
       };
     });

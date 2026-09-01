@@ -16,10 +16,12 @@ export async function GET(request: NextRequest) {
 
   const service = financeService();
   const { searchParams } = new URL(request.url);
+  const activeOnly = searchParams.get('activeOnly') === 'true';
   const branchId = searchParams.get('branchId');
 
   try {
     const data = await loadCashAccountsCompatibility(ctx.organizationId, {
+      activeOnly,
       branchId: branchId ?? undefined,
       routeName: 'finance.cash-accounts',
     });

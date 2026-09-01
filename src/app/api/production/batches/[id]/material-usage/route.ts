@@ -40,6 +40,9 @@ export async function POST(
     if (!Array.isArray(body.materials) || body.materials.length === 0) {
       return badRequest('materials are required.');
     }
+    if ((body.closingStocks ?? []).length > 0) {
+      return badRequest('Stock balances must be changed through production issue, reversal, or inventory adjustment posting.');
+    }
 
     const service = productionService();
     const { data: batch, error: batchError } = await service
@@ -65,12 +68,12 @@ export async function POST(
 
       const { data: existing } = await service
         .from('production_batch_materials')
-        .select('item_id, quantity_required, items(unit_cost)')
+        .select('item_id, quantity_required, unit_cost, items(unit_cost)')
         .eq('id', material.id)
         .eq('batch_id', id)
         .maybeSingle();
 
-      const resolvedUnitCost = unitCost ?? Number((existing?.items as { unit_cost?: unknown } | null)?.unit_cost ?? 0);
+      const resolvedUnitCost = unitCost ?? Number(existing?.unit_cost ?? (existing?.items as { unit_cost?: unknown } | null)?.unit_cost ?? 0);
       materialCost += actual * resolvedUnitCost;
       const materialUpdate: Record<string, unknown> = {
         notes: material.note ?? null,
@@ -84,47 +87,15 @@ export async function POST(
       if (material.isPackaging !== undefined) {
         materialUpdate.is_packaging = Boolean(material.isPackaging);
       }
+      if (unitCost !== undefined) {
+        materialUpdate.unit_cost = resolvedUnitCost;
+      }
+      materialUpdate.total_cost = actual * resolvedUnitCost;
       await service
         .from('production_batch_materials')
         .update(materialUpdate)
         .eq('id', material.id)
         .eq('batch_id', id);
-    }
-
-    for (const closure of body.closingStocks ?? []) {
-      const closingQuantity = ensureNonNegative(closure.closingQuantity, 'closingQuantity');
-      const warehouseId = closure.warehouseId ?? String(batch.warehouse_id ?? '');
-      if (!closure.itemId || !warehouseId) continue;
-
-      const { data: balance } = await service
-        .from('stock_balances')
-        .select('id, quantity_reserved')
-        .eq('item_id', closure.itemId)
-        .eq('warehouse_id', warehouseId)
-        .maybeSingle();
-
-      if (balance) {
-        const reserved = Number(balance.quantity_reserved ?? 0);
-        await service
-          .from('stock_balances')
-          .update({
-            last_updated: new Date().toISOString(),
-            quantity_available: Math.max(0, closingQuantity - reserved),
-            quantity_on_hand: closingQuantity,
-          })
-          .eq('id', balance.id);
-      } else {
-        await service
-          .from('stock_balances')
-          .insert({
-            item_id: closure.itemId,
-            organization_id: String(batch.organization_id),
-            quantity_available: closingQuantity,
-            quantity_on_hand: closingQuantity,
-            quantity_reserved: 0,
-            warehouse_id: warehouseId,
-          });
-      }
     }
 
     await service

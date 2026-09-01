@@ -103,7 +103,7 @@ export async function POST(
     );
     const period = await findOpenFiscalPeriod(ctx.organizationId, postingDate);
     if (!period) {
-      return badRequest(`No open fiscal period exists for ${postingDate}.`);
+      return badRequest('No open accounting period covers this transaction date.');
     }
 
     const branchId = warehouse?.branch_id ? String(warehouse.branch_id) : null;

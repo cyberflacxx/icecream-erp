@@ -27,6 +27,7 @@ const ACCOUNT_SELECT_WITH_CONTROLS =
   'id, organization_id, code, name, type, parent_id, is_active, balance, description, allow_posting, normal_balance';
 const ACCOUNT_SELECT_BASE =
   'id, organization_id, code, name, type, parent_id, is_active, balance, description';
+export const NO_OPEN_ACCOUNTING_PERIOD_MESSAGE = 'No open accounting period covers this transaction date.';
 
 function isMissingAccountControlColumn(error: unknown) {
   return (
@@ -536,6 +537,7 @@ export async function loadFinanceMetaResources(organizationId: string) {
         .from('cash_accounts')
         .select(attempt.select)
         .eq('organization_id', organizationId)
+        .eq('is_active', true)
         .order(attempt.orderBy, { ascending: true });
 
       if (!result.error) {
@@ -551,7 +553,8 @@ export async function loadFinanceMetaResources(organizationId: string) {
         isMissingFinanceColumn(result.error, 'cash_accounts', 'account_name') ||
         isMissingFinanceColumn(result.error, 'cash_accounts', 'branch_id') ||
         isMissingFinanceColumn(result.error, 'cash_accounts', 'balance') ||
-        isMissingFinanceColumn(result.error, 'cash_accounts', 'current_balance');
+        isMissingFinanceColumn(result.error, 'cash_accounts', 'current_balance') ||
+        isMissingFinanceColumn(result.error, 'cash_accounts', 'is_active');
 
       if (!missingHandled) {
         throw result.error;
@@ -800,7 +803,7 @@ export async function createFinanceOpeningBalanceDraft(
 
   const period = await findOpenFiscalPeriod(ctx.organizationId, effectiveDate);
   if (!period) {
-    throw new Error(`No open fiscal period exists for ${effectiveDate}.`);
+    throw new Error(NO_OPEN_ACCOUNTING_PERIOD_MESSAGE);
   }
 
   const debitAmount = toNumber(body.debitAmount, 0);
@@ -946,7 +949,7 @@ export async function postFinanceOpeningBalanceDrafts(
 
   const effectiveDate = effectiveDates[0]!;
   const period = await findOpenFiscalPeriod(ctx.organizationId, effectiveDate);
-  if (!period) throw new Error(`No open fiscal period exists for ${effectiveDate}.`);
+  if (!period) throw new Error(NO_OPEN_ACCOUNTING_PERIOD_MESSAGE);
 
   for (const row of rows) {
     await ensureFinanceAccountCanBePosted(ctx.organizationId, String(row.account_id ?? ''));

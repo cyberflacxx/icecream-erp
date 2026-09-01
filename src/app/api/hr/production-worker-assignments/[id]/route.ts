@@ -18,13 +18,22 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
     if (fetchError) throw fetchError;
     if (!existing) return notFound('Production worker assignment not found.');
 
-    const updates = {
-      end_time: body.end_time ?? undefined,
-      notes: body.notes ?? undefined,
-      role_in_production: body.role_on_batch ?? body.role_in_production ?? undefined,
-      start_time: body.start_time ?? undefined,
+    const updates: Record<string, unknown> = {
       updated_at: new Date().toISOString(),
     };
+    if (body.attendanceStatus !== undefined || body.attendance_status !== undefined) {
+      updates.attendance_status = String(body.attendanceStatus ?? body.attendance_status ?? '').toUpperCase();
+      updates.is_off_shift = ['ABSENT', 'OFF'].includes(String(updates.attendance_status));
+    }
+    if (body.hoursWorked !== undefined || body.hours_worked !== undefined) {
+      updates.hours_worked = Number(body.hoursWorked ?? body.hours_worked ?? 0);
+    }
+    if (body.outputQuantity !== undefined || body.output_quantity !== undefined) {
+      updates.output_quantity = Number(body.outputQuantity ?? body.output_quantity ?? 0);
+    }
+    if (body.remarks !== undefined || body.notes !== undefined || body.role_on_batch !== undefined) {
+      updates.remarks = body.remarks ?? body.notes ?? (body.role_on_batch ? `Role: ${String(body.role_on_batch)}` : null);
+    }
     const { data, error } = await service
       .from('production_worker_assignments')
       .update(updates)
@@ -50,15 +59,17 @@ export async function DELETE(_request: NextRequest, { params }: RouteContext) {
     const service = hrService();
     const { data: existing, error: fetchError } = await service
       .from('production_worker_assignments')
-      .select('id, batch_id, production_batch, employee_id, production_batches(id, status, worker_count)')
+      .select('id, batch_id, employee_id')
       .eq('id', id)
       .maybeSingle();
     if (fetchError) throw fetchError;
     if (!existing) return notFound('Production worker assignment not found.');
 
-    const batch = Array.isArray(existing.production_batches)
-      ? existing.production_batches[0]
-      : existing.production_batches as Record<string, unknown> | null | undefined;
+    const batchId = String(existing.batch_id ?? '');
+    const { data: batch, error: batchError } = batchId
+      ? await service.from('production_batches').select('id, status, worker_count').eq('id', batchId).maybeSingle()
+      : { data: null, error: null };
+    if (batchError) throw batchError;
     if (batch && ['COMPLETED', 'CANCELLED'].includes(String(batch.status ?? '').toUpperCase())) {
       return badRequest('Workers cannot be unassigned from completed or cancelled production batches.');
     }
@@ -69,7 +80,6 @@ export async function DELETE(_request: NextRequest, { params }: RouteContext) {
       .eq('id', id);
     if (error) throw error;
 
-    const batchId = String(existing.batch_id ?? existing.production_batch ?? batch?.id ?? '');
     if (batchId) {
       await service.from('production_batches').update({
         updated_at: new Date().toISOString(),

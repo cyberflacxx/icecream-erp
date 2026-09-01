@@ -207,7 +207,7 @@ export async function POST(
 
     try {
       const mapping = paymentMappingKey(normalizedPaymentMethod);
-      const [, , resolvedExpenseAccount] = await Promise.all([
+      const [period, , resolvedExpenseAccount] = await Promise.all([
         findOpenFiscalPeriod(ctx.organizationId, expenseDate),
         resolveFinancePostingAccount(ctx.organizationId, mapping.key, {
           branchId,
@@ -218,6 +218,7 @@ export async function POST(
           fallbackAccountCode: '6100',
         }),
       ]);
+      if (!period) return badRequest('No open accounting period covers this transaction date.');
       paymentAccount = await resolveSelectedTenderAccount({
         bankAccountId: body.bankAccountId ?? null,
         cashAccountId: body.cashAccountId ?? null,
@@ -235,8 +236,8 @@ export async function POST(
       if (balanceError) return badRequest(balanceError);
     } catch (error) {
       const message = error instanceof Error ? error.message : '';
-      if (message.includes('No open fiscal period')) {
-        return badRequest('The selected financial period is closed.');
+      if (message.includes('No open fiscal period') || message.includes('No open accounting period')) {
+        return badRequest('No open accounting period covers this transaction date.');
       }
       if (message.includes('Missing active account mapping') || message.includes('Fallback account')) {
         return badRequest('No payment account is linked to this branch.');

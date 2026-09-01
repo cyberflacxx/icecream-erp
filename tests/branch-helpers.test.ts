@@ -231,7 +231,7 @@ test('branch expense route validates finance setup and falls back across legacy 
   assert.match(branchExpenseRoute, /findOpenFiscalPeriod/);
   assert.match(branchExpenseRoute, /The branch cost centre has not been configured\./);
   assert.match(branchExpenseRoute, /No payment account is linked to this branch\./);
-  assert.match(branchExpenseRoute, /The selected financial period is closed\./);
+  assert.match(branchExpenseRoute, /No open accounting period covers this transaction date\./);
   assert.match(branchExpenseRoute, /isMissingColumnError/);
   assert.match(branchExpenseRoute, /receipt_url/);
   assert.match(branchExpenseRoute, /shift_close_id/);

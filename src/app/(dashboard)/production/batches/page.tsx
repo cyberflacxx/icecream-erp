@@ -155,6 +155,7 @@ export default function ProductionBatchesPage() {
   const [formError, setFormError] = useState<string | null>(null);
   const [actualUnitsProduced, setActualUnitsProduced] = useState('');
   const [assignmentEmployeeId, setAssignmentEmployeeId] = useState('');
+  const [assignmentHours, setAssignmentHours] = useState('0');
   const [assignmentRole, setAssignmentRole] = useState('Operator');
   const [releaseQuantity, setReleaseQuantity] = useState('');
   const [releaseNotes, setReleaseNotes] = useState('');
@@ -249,6 +250,7 @@ export default function ProductionBatchesPage() {
     const expected = Number(batchDetail.expectedOutput ?? batchDetail.plannedQuantity ?? 0);
     setActualUnitsProduced(String(actual > 0 ? actual : expected));
     setAssignmentEmployeeId('');
+    setAssignmentHours('0');
     setReleaseQuantity(String(actual > 0 ? actual : expected));
     setReleaseNotes('');
   }, [batchDetail]);
@@ -338,6 +340,7 @@ export default function ProductionBatchesPage() {
       await request('/api/hr/production-worker-assignments', {
         body: JSON.stringify({
           employee_id: assignmentEmployeeId,
+          hoursWorked: Number(assignmentHours || 0),
           production_batch: manageBatchId,
           role_on_batch: assignmentRole || 'Operator',
           shift: String(batchDetail?.shift ?? 'DAY'),
@@ -345,6 +348,7 @@ export default function ProductionBatchesPage() {
         method: 'POST',
       });
       setAssignmentEmployeeId('');
+      setAssignmentHours('0');
     });
   }
 
@@ -669,7 +673,7 @@ export default function ProductionBatchesPage() {
                   <MetricCard label="Labour Cost" value={formatCurrency(batchDetail?.labourCost)} />
                   <MetricCard label="Labour Cost per Unit" value={actualGoodUnits > 0 ? formatCurrency(Number(batchDetail?.labourCost ?? 0) / actualGoodUnits) : 'Not ready'} />
                 </div>
-                <div className="mt-4 grid gap-3 rounded-2xl border border-border/70 bg-cream/40 p-3 md:grid-cols-[minmax(0,1fr)_160px_auto]">
+                <div className="mt-4 grid gap-3 rounded-2xl border border-border/70 bg-cream/40 p-3 md:grid-cols-[minmax(0,1fr)_120px_160px_auto]">
                   <label className="space-y-2 text-sm text-muted">
                     <span>Add Workers</span>
                     <select
@@ -686,6 +690,7 @@ export default function ProductionBatchesPage() {
                       ))}
                     </select>
                   </label>
+                  <InputField label="Hours" type="number" value={assignmentHours} onChange={setAssignmentHours} />
                   <InputField label="Role" value={assignmentRole} onChange={setAssignmentRole} />
                   <div className="flex items-end">
                     <Button type="button" variant="outline" onClick={assignWorkerToBatch} disabled={!assignmentEmployeeId}>
@@ -697,11 +702,12 @@ export default function ProductionBatchesPage() {
                   {workerRows.length ? workerRows.map((worker) => {
                     const employee = Array.isArray(worker.employees) ? worker.employees[0] : worker.employees as Record<string, unknown> | undefined;
                     const name = String(worker.worker_name ?? [employee?.first_name, employee?.last_name].filter(Boolean).join(' ') ?? 'Assigned worker');
+                    const role = String(worker.role_in_production ?? worker.remarks ?? 'Operator').replace(/^Role:\s*/i, '');
                     return (
                       <div key={String(worker.id)} className="flex flex-col gap-3 rounded-2xl border border-border/70 bg-white px-3 py-2 text-sm sm:flex-row sm:items-center sm:justify-between">
                         <div>
                           <p className="font-semibold text-brown">{name}</p>
-                          <p className="text-xs text-muted">{String(worker.role_in_production ?? 'Operator')} · Hours {formatNumber(worker.hours_worked)}</p>
+                          <p className="text-xs text-muted">{role} · Hours {formatNumber(worker.hours_worked)}</p>
                         </div>
                         {String(batchDetail?.status ?? '').toUpperCase() !== 'COMPLETED' ? (
                           <Button type="button" size="sm" variant="outline" onClick={() => void unassignWorker(String(worker.id))}>

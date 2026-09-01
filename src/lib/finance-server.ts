@@ -237,6 +237,7 @@ async function runCashAccountsCompatibilityQuery(
   selectClause: string,
   organizationId: string,
   options?: {
+    activeOnly?: boolean;
     branchId?: string;
     routeName?: string;
   },
@@ -249,6 +250,9 @@ async function runCashAccountsCompatibilityQuery(
 
   if (options?.branchId) {
     withDeletedAt = withDeletedAt.eq('branch_id', options.branchId);
+  }
+  if (options?.activeOnly) {
+    withDeletedAt = withDeletedAt.eq('is_active', true);
   }
 
   const withDeletedAtResult = await withDeletedAt.order('name', { ascending: true });
@@ -268,6 +272,9 @@ async function runCashAccountsCompatibilityQuery(
   if (options?.branchId) {
     fallback = fallback.eq('branch_id', options.branchId);
   }
+  if (options?.activeOnly) {
+    fallback = fallback.eq('is_active', true);
+  }
 
   return fallback.order('name', { ascending: true });
 }
@@ -275,6 +282,7 @@ async function runCashAccountsCompatibilityQuery(
 export async function loadCashAccountsCompatibility(
   organizationId: string,
   options?: {
+    activeOnly?: boolean;
     branchId?: string;
     routeName?: string;
   },

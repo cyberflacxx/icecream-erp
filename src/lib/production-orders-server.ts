@@ -1,4 +1,5 @@
 import type { AuthContext } from '@/lib/api-auth';
+import { NO_OPEN_ACCOUNTING_PERIOD_MESSAGE } from '@/lib/finance-foundation-server';
 import { productionErrorMessage, productionService } from '@/lib/production-server';
 
 export type ProductionRpcResult = {
@@ -14,6 +15,9 @@ function userAccountId(ctx: AuthContext) {
 
 export function mapProductionRpcError(error: unknown) {
   const message = productionErrorMessage(error) || 'Production workflow operation failed.';
+  if (message.includes('No open fiscal period') || message.includes('No open accounting period')) {
+    return { message: NO_OPEN_ACCOUNTING_PERIOD_MESSAGE, status: 400 };
+  }
   if (message.includes('not found') || message.includes('No active Bill of Materials')) return { message, status: 404 };
   if (message.includes('already') || message.includes('Only ') || message.includes('Cannot ') || message.includes('requires') || message.includes('Insufficient')) {
     return { message, status: 409 };

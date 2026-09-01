@@ -150,8 +150,12 @@ export async function POST(request: NextRequest) {
   }
 
   const [bankAccountResult, cashAccountResult, pettyCashResult] = await Promise.all([
-    bankAccountId ? service.from('bank_accounts').select('id').eq('id', bankAccountId).maybeSingle() : Promise.resolve({ data: null, error: null }),
-    cashAccountId ? service.from('cash_accounts').select('id').eq('id', cashAccountId).maybeSingle() : Promise.resolve({ data: null, error: null }),
+    bankAccountId
+      ? service.from('bank_accounts').select('id, account_id, is_active').eq('id', bankAccountId).eq('organization_id', ctx.organizationId).maybeSingle()
+      : Promise.resolve({ data: null, error: null }),
+    cashAccountId
+      ? service.from('cash_accounts').select('id, account_id, is_active').eq('id', cashAccountId).eq('organization_id', ctx.organizationId).maybeSingle()
+      : Promise.resolve({ data: null, error: null }),
     pettyCashRequestId ? service.from('petty_cash_requests').select('id').eq('id', pettyCashRequestId).maybeSingle() : Promise.resolve({ data: null, error: null }),
   ]);
 
@@ -160,6 +164,18 @@ export async function POST(request: NextRequest) {
   }
   if (cashAccountId && (cashAccountResult.error || !cashAccountResult.data)) {
     return badRequest('Selected cash account is no longer available. Please refresh and try again.');
+  }
+  if (bankAccountResult.data && bankAccountResult.data.is_active === false) {
+    return badRequest('Selected bank account is inactive. Please choose an active bank account.');
+  }
+  if (cashAccountResult.data && cashAccountResult.data.is_active === false) {
+    return badRequest('Selected cash account is inactive. Please choose an active cash account.');
+  }
+  if (bankAccountResult.data && !bankAccountResult.data.account_id) {
+    return badRequest('Selected bank account is missing its linked ledger account.');
+  }
+  if (cashAccountResult.data && !cashAccountResult.data.account_id) {
+    return badRequest('Selected cash account is missing its linked ledger account.');
   }
   if (pettyCashRequestId && (pettyCashResult.error || !pettyCashResult.data)) {
     return badRequest('Selected petty cash request is no longer available. Please refresh and try again.');

@@ -69,8 +69,11 @@ export default function ProcurementPaymentsPage() {
     enabled: isDrawerOpen,
   });
   const cashAccountsQuery = useQuery({
-    queryKey: ['finance', 'cash-accounts'],
-    queryFn: () => request<Array<{ id: string; name?: string | null }>>('/api/finance/cash-accounts'),
+    queryKey: ['finance', 'cash-accounts', 'active'],
+    queryFn: () =>
+      request<Array<{ accountName?: string | null; account_name?: string | null; branchId?: string | null; id: string; name?: string | null }>>(
+        '/api/finance/cash-accounts?activeOnly=true',
+      ),
     enabled: isDrawerOpen,
   });
   const pettyCashQuery = useQuery({
@@ -363,7 +366,7 @@ export default function ProcurementPaymentsPage() {
                   <option value="">{cashAccountsQuery.isLoading ? 'Loading cash accounts...' : 'Select cash account'}</option>
                   {(cashAccountsQuery.data ?? []).map((account) => (
                     <option key={account.id} value={account.id}>
-                      {account.name ?? 'Cash account'}
+                      {account.accountName ?? account.account_name ?? account.name ?? 'Cash account'}
                     </option>
                   ))}
                 </select>
