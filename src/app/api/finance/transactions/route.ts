@@ -253,7 +253,7 @@ async function loadCashTransactions(organizationId: string) {
     [
       {
         select:
-          'id, organization_id, transaction_date, transaction_type, amount, source, reference, counterparty, remarks, status, cash_accounts(name)',
+          'id, organization_id, transaction_date, transaction_type, amount, source, reference, counterparty, remarks, status, cash_accounts(account_name)',
         step: 'cash_transactions.modern',
       },
       {
@@ -278,7 +278,7 @@ async function loadCashTransactions(organizationId: string) {
     });
     return {
       amount: normalized.amount,
-      counterparty: String(row.counterparty ?? account?.name ?? 'Cash'),
+      counterparty: String(row.counterparty ?? account?.account_name ?? 'Cash'),
       date: normalized.date,
       description: normalized.description,
       id: normalized.id,

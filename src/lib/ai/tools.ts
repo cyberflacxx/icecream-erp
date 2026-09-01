@@ -885,14 +885,14 @@ async function diagnoseFinanceOpeningBalances(context: AbsoluteAiToolExecutionCo
       const issues: string[] = [];
       const cashAccountsProbe = await service
         .from('cash_accounts')
-        .select('id, name, account_name, branch_id, balance, current_balance')
+        .select('id, account_name, account_id, branch_id, current_balance')
         .eq('organization_id', auth.organizationId)
         .limit(1);
 
       if (cashAccountsProbe.error) {
         const message = String(cashAccountsProbe.error.message ?? '');
         if (
-          /column cash_accounts\.(name|branch_id|current_balance) does not exist/i.test(message)
+          /column cash_accounts\.(account_name|account_id|branch_id|current_balance) does not exist/i.test(message)
         ) {
           issues.push(message);
         } else {

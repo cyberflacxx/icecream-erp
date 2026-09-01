@@ -285,7 +285,14 @@ export function validateOutgoingCashBalance(input: {
 export function normalizeCashAccount(row: Record<string, unknown>): NormalizedCashAccount {
   const name = String(row.name ?? row.account_name ?? '');
   const accountName = String(row.account_name ?? row.name ?? '');
-  const accountNumber = row.account_number ? String(row.account_number) : null;
+  const linkedAccount = Array.isArray(row.accounts)
+    ? row.accounts[0] as Record<string, unknown> | undefined
+    : row.accounts as Record<string, unknown> | undefined;
+  const accountNumber = row.account_number
+    ? String(row.account_number)
+    : linkedAccount?.code
+      ? String(linkedAccount.code)
+      : null;
   const balance = resolveCashAccountBalance(row);
   const branchId = row.branch_id ? String(row.branch_id) : row.branchId ? String(row.branchId) : null;
   const branch = row.branches as Record<string, unknown> | Array<Record<string, unknown>> | null | undefined;

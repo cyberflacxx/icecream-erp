@@ -287,6 +287,40 @@ test('normalizeCashAccount returns canonical cash account fields from legacy sha
   assert.equal(normalized.isActive, true);
 });
 
+test('normalizeCashAccount maps live cash account shape and linked GL code without legacy columns', () => {
+  const normalized = normalizeCashAccount({
+    account_id: 'gl-1',
+    account_name: 'System Test Cash',
+    accounts: { code: '1001', name: 'Cash on Hand' },
+    branch_id: 'branch-1',
+    current_balance: 12.5,
+    id: 'cash-live-1',
+    is_active: true,
+  });
+
+  assert.equal(normalized.id, 'cash-live-1');
+  assert.equal(normalized.name, 'System Test Cash');
+  assert.equal(normalized.accountName, 'System Test Cash');
+  assert.equal(normalized.accountNumber, '1001');
+  assert.equal(normalized.currentBalance, 12.5);
+});
+
+test('finance cash account queries do not request live-missing name or account_number columns', () => {
+  const financeServer = readFileSync(join(process.cwd(), 'src/lib/finance-server.ts'), 'utf8');
+  const financeMeta = readFileSync(join(process.cwd(), 'src/lib/finance-foundation-server.ts'), 'utf8');
+  const transactionsRoute = readFileSync(join(process.cwd(), 'src/app/api/finance/transactions/route.ts'), 'utf8');
+
+  for (const source of [financeServer, financeMeta, transactionsRoute]) {
+    assert.doesNotMatch(source, /cash_accounts\([^)]*\bname\b(?!\s*\))/);
+    assert.doesNotMatch(source, /cash_accounts\([^)]*account_number/);
+    assert.doesNotMatch(source, /from\('cash_accounts'\)[\s\S]{0,600}order\('name', \{ ascending: true \}\)/);
+  }
+
+  assert.match(financeServer, /account_name/);
+  assert.match(financeServer, /accounts\(code, name\)/);
+  assert.match(transactionsRoute, /cash_accounts\(account_name\)/);
+});
+
 test('normalizeFinanceCollectionResponse handles array and wrapped finance payload shapes', () => {
   assert.deepEqual(normalizeFinanceCollectionResponse([{ id: 1 }]), [{ id: 1 }]);
   assert.deepEqual(normalizeFinanceCollectionResponse({ data: [{ id: 2 }] }), [{ id: 2 }]);

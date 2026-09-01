@@ -255,7 +255,7 @@ async function runCashAccountsCompatibilityQuery(
     withDeletedAt = withDeletedAt.eq('is_active', true);
   }
 
-  const withDeletedAtResult = await withDeletedAt.order('name', { ascending: true });
+  const withDeletedAtResult = await withDeletedAt.order('account_name', { ascending: true });
   if (!withDeletedAtResult.error) {
     return withDeletedAtResult;
   }
@@ -276,7 +276,7 @@ async function runCashAccountsCompatibilityQuery(
     fallback = fallback.eq('is_active', true);
   }
 
-  return fallback.order('name', { ascending: true });
+  return fallback.order('account_name', { ascending: true });
 }
 
 export async function loadCashAccountsCompatibility(
@@ -291,25 +291,25 @@ export async function loadCashAccountsCompatibility(
   const attempts = [
     {
       select:
-        'id, organization_id, branch_id, account_id, account_name, account_number, name, current_balance, opening_balance, status, is_active, currency_code, currency, created_at, branches(name)',
+        'id, organization_id, branch_id, account_id, account_name, current_balance, opening_balance, is_active, currency_code, created_at, branches(name), accounts(code, name)',
       step: 'cash_accounts.modern',
     },
     {
       select:
-        'id, organization_id, branch_id, account_id, account_name, account_number, name, balance, opening_balance, status, is_active, currency_code, currency, created_at, branches(name)',
-      step: 'cash_accounts.balance',
+        'id, organization_id, branch_id, account_id, account_name, current_balance, opening_balance, is_active, currency_code, created_at, branches(name)',
+      step: 'cash_accounts.with_branch',
     },
     {
       select:
-        'id, organization_id, branch_id, account_name, account_number, name, current_balance, balance, status, is_active, created_at, branches(name)',
-      step: 'cash_accounts.lean',
+        'id, organization_id, branch_id, account_id, account_name, current_balance, opening_balance, is_active, currency_code, created_at',
+      step: 'cash_accounts.live_shape',
     },
     {
-      select: 'id, organization_id, branch_id, name, account_name, balance, current_balance, is_active, branches(name)',
+      select: 'id, organization_id, account_name, current_balance, is_active',
       step: 'cash_accounts.minimal_balance',
     },
     {
-      select: 'id, organization_id, name, account_name, created_at',
+      select: 'id, organization_id, account_name, created_at',
       step: 'cash_accounts.minimal_identity',
     },
   ];

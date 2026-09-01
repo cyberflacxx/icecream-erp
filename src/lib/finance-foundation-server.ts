@@ -525,8 +525,8 @@ export async function loadFinanceMetaResources(organizationId: string) {
   const service = financeService();
   const loadCashAccounts = async () => {
     const attempts = [
-      { orderBy: 'name', select: 'id, name, account_name, branch_id, balance, current_balance' },
-      { orderBy: 'account_name', select: 'id, account_name, branch_id, current_balance' },
+      { orderBy: 'account_name', select: 'id, account_name, account_id, branch_id, current_balance, currency_code, accounts(code, name)' },
+      { orderBy: 'account_name', select: 'id, account_name, account_id, branch_id, current_balance, currency_code' },
       { orderBy: 'account_name', select: 'id, account_name, current_balance' },
       { orderBy: 'account_name', select: 'id, account_name' },
       { orderBy: 'id', select: 'id' },
@@ -549,12 +549,13 @@ export async function loadFinanceMetaResources(organizationId: string) {
       }
 
       const missingHandled =
-        isMissingFinanceColumn(result.error, 'cash_accounts', 'name') ||
         isMissingFinanceColumn(result.error, 'cash_accounts', 'account_name') ||
+        isMissingFinanceColumn(result.error, 'cash_accounts', 'account_id') ||
         isMissingFinanceColumn(result.error, 'cash_accounts', 'branch_id') ||
-        isMissingFinanceColumn(result.error, 'cash_accounts', 'balance') ||
+        isMissingFinanceColumn(result.error, 'cash_accounts', 'currency_code') ||
         isMissingFinanceColumn(result.error, 'cash_accounts', 'current_balance') ||
-        isMissingFinanceColumn(result.error, 'cash_accounts', 'is_active');
+        isMissingFinanceColumn(result.error, 'cash_accounts', 'is_active') ||
+        String(result.error.message ?? '').includes('Could not find a relationship between');
 
       if (!missingHandled) {
         throw result.error;
@@ -669,12 +670,18 @@ export async function loadFinanceMetaResources(organizationId: string) {
         id: String(row.id ?? ''),
         name: String(row.name ?? row.code ?? ''),
       })),
-    cashAccounts: cashAccounts.map((row) => ({
-      balance: toNumber(row.current_balance ?? row.balance),
-      branchId: row.branch_id ? String(row.branch_id) : null,
-      id: String(row.id ?? ''),
-      name: String(row.name ?? row.account_name ?? ''),
-    })),
+    cashAccounts: cashAccounts.map((row) => {
+      const linkedAccount = Array.isArray(row.accounts)
+        ? row.accounts[0] as Row | undefined
+        : row.accounts as Row | undefined;
+      return {
+        accountNumber: String(linkedAccount?.code ?? ''),
+        balance: toNumber(row.current_balance),
+        branchId: row.branch_id ? String(row.branch_id) : null,
+        id: String(row.id ?? ''),
+        name: String(row.account_name ?? ''),
+      };
+    }),
     costCentres: costCentres.map((row) => ({
       branchId: row.branch_id ? String(row.branch_id) : null,
       code: String(row.code ?? ''),
