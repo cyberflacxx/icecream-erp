@@ -278,7 +278,6 @@ export function useCreateUser() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (body: {
-      adminKey: string;
       firstName: string;
       lastName: string;
       email: string;

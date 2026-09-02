@@ -2,7 +2,7 @@ import { createServerClient } from '@supabase/ssr';
 import { createClient as createSupabaseClient } from '@supabase/supabase-js';
 import { cookies } from 'next/headers';
 
-import { assertServerRuntimeEnv } from '@/lib/runtime-env';
+import { assertServerRuntimeEnv } from '../runtime-env';
 
 import { createSupabaseFetch } from './fetch';
 

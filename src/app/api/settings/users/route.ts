@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { badRequest, can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
-import { resolveAdminActionKeyValidation } from '@/lib/admin-delete-server';
 import { workIdToEmail } from '@/lib/auth-roles';
 import { assignUserRole, generateNextWorkId, getPrimaryOrganizationId, resolveRegistrationRole, syncUserBranchAssignment, toStoredUserRole } from '@/lib/registration';
 import { createServiceRoleClient } from '@/lib/supabase/server';
@@ -94,8 +93,6 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = (await request.json().catch(() => ({}))) as {
-      adminKey?: string;
-      admin_key?: string;
       firstName?: string;
       lastName?: string;
       email?: string;
@@ -105,27 +102,6 @@ export async function POST(request: NextRequest) {
     };
 
     const { firstName, lastName, email, idNumber, roleId, branchId } = body;
-    const adminKeyInput = String(body.adminKey ?? body.admin_key ?? '').trim();
-
-    const adminKeyValidation = resolveAdminActionKeyValidation({
-      body: { adminKey: adminKeyInput },
-      messages: {
-        invalid: 'Invalid admin key.',
-        notConfigured: 'Admin action key is not configured.',
-        required: 'Admin key is required.',
-      },
-      request,
-    });
-
-    if (adminKeyValidation.error === 'Admin action key is not configured.') {
-      return NextResponse.json({ error: adminKeyValidation.error }, { status: 500 });
-    }
-    if (adminKeyValidation.error === 'Admin key is required.') {
-      return NextResponse.json({ error: adminKeyValidation.error }, { status: 400 });
-    }
-    if (adminKeyValidation.error === 'Invalid admin key.') {
-      return NextResponse.json({ error: adminKeyValidation.error }, { status: 403 });
-    }
 
     if (!firstName?.trim()) return badRequest('First name is required.');
     if (!lastName?.trim()) return badRequest('Last name is required.');
