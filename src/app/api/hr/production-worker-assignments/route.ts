@@ -195,6 +195,7 @@ export async function POST(request: NextRequest) {
         departmentId: null,
         employeeId: body.employee_id,
         hoursWorked: labourHours,
+        organizationId: ctx.organizationId,
         overheadAllocation,
         rate: labourRate,
         rateType: body.rateType ?? 'HOURLY',

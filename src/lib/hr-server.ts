@@ -428,6 +428,7 @@ export async function createLabourCostAllocation(input: {
   departmentId?: string | null;
   employeeId?: string | null;
   hoursWorked: number;
+  organizationId: string;
   overheadAllocation?: number;
   rate: number;
   rateType: string;
@@ -449,6 +450,7 @@ export async function createLabourCostAllocation(input: {
       employee_id: input.employeeId ?? null,
       hours_worked: input.hoursWorked,
       labour_cost: labourCost,
+      organization_id: input.organizationId,
       overhead_allocation: overheadAllocation,
       rate: input.rate,
       rate_type: input.rateType,
