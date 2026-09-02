@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import { badRequest, can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
+import { apiServerError, badRequest, can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
 import { createLabourCostAllocation, ensureEmployeeAssignable, hrService, writeHrAuditLog } from '@/lib/hr-server';
 import { isMissingTableError } from '@/lib/postgrest-compat';
 
@@ -214,6 +214,12 @@ export async function POST(request: NextRequest) {
     await writeHrAuditLog('HR_WORKER_ASSIGNED_TO_BATCH', String(data.id), ctx.userId, { assignment: data, labourAllocation }, 'production_worker_assignment');
     return NextResponse.json({ ...data, labourAllocation }, { status: 201 });
   } catch (error) {
-    return serverError(error instanceof Error ? error.message : 'Failed to assign worker to batch.');
+    return apiServerError({
+      ctx,
+      error,
+      message: 'Failed to assign worker to batch.',
+      module: 'HR',
+      path: '/api/hr/production-worker-assignments',
+    });
   }
 }
