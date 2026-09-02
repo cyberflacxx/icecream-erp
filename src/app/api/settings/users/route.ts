@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { badRequest, can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
 import { workIdToEmail } from '@/lib/auth-roles';
-import { assignUserRole, generateNextWorkId, getPrimaryOrganizationId, resolveRegistrationRole, syncUserBranchAssignment, toStoredUserRole } from '@/lib/registration';
+import { assignUserRole, generateAvailableWorkId, getPrimaryOrganizationId, resolveRegistrationRole, syncUserBranchAssignment, toStoredUserRole } from '@/lib/registration';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 import { parseUserPhoneValue, serializeUserPhoneValue } from '@/lib/user-access-profile';
 
@@ -136,7 +136,7 @@ export async function POST(request: NextRequest) {
     }
 
     const [workId, organizationId] = await Promise.all([
-      generateNextWorkId(schemaService),
+      generateAvailableWorkId(schemaService),
       getPrimaryOrganizationId(schemaService),
     ]);
     const syntheticEmail = workIdToEmail(workId);
