@@ -54,7 +54,7 @@ export async function ensureEmployeeAssignable(employeeId: string) {
   const service = hrService();
   const { data, error } = await service
     .from('employees')
-    .select('id, status, branch_id, department, job_title, employee_number, first_name, last_name')
+    .select('id, status, branch_id, department, position, employee_number, first_name, last_name')
     .eq('id', employeeId)
     .is('deleted_at', null)
     .maybeSingle();
