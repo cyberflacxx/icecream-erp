@@ -205,12 +205,13 @@ function getLegacyPermissions(role: string) {
 }
 
 function sanitizePermissionsForRole(role: string, permissions: string[]) {
-  if (role === 'branch_manager') {
-    const allowed = new Set(getLegacyPermissions(role));
-    return permissions.filter((permission) => allowed.has(permission));
-  }
+  if (role === 'super_admin') return permissions;
 
-  return permissions;
+  const legacyPermissions = getLegacyPermissions(role);
+  if (legacyPermissions.length === 0) return permissions;
+
+  const allowed = new Set(legacyPermissions);
+  return permissions.filter((permission) => allowed.has(permission));
 }
 
 function getFallbackResolvedRoles(legacyRole: string) {

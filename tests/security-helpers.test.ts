@@ -80,6 +80,11 @@ test('hasPermissionAccess resolves sales customer aliases to legacy sales permis
   assert.equal(hasPermissionAccess(permissions, 'sales.customer.deactivate'), true);
 });
 
+test('finance dashboard access requires finance permission, not generic reports access', () => {
+  assert.equal(hasPermissionAccess(['reports.read'], 'finance.dashboard.view'), false);
+  assert.equal(hasPermissionAccess(['finance.read'], 'finance.dashboard.view'), true);
+});
+
 test('resolveAdminActionKeyValidation returns the expected messages for missing, missing-env, and invalid keys', () => {
   const originalEnv = process.env;
   process.env = { ...originalEnv };

@@ -36,7 +36,7 @@ const PERMISSION_ALIASES: Record<string, string[]> = {
   'stores.gin.edit': ['stores.gin.edit', 'inventory.write'],
   'stores.gin.approve': ['stores.gin.approve', 'inventory.write'],
   'stores.gin.post': ['stores.gin.post', 'inventory.write'],
-  'finance.dashboard.view': ['finance.dashboard.view', 'finance.read', 'reports.read'],
+  'finance.dashboard.view': ['finance.dashboard.view', 'finance.read'],
   'finance.gl.view': ['finance.gl.view', 'finance.read', 'reports.read'],
   'finance.gl.create': ['finance.gl.create', 'finance.write'],
   'finance.gl.approve': ['finance.gl.approve', 'finance.approve', 'finance.write'],

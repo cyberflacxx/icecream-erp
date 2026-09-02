@@ -46,7 +46,7 @@ function sectionWarning(label: string) {
 export async function GET(request: NextRequest) {
   const ctx = await getAuthContext();
   if (!ctx) return unauthorized();
-  if (!can(ctx, 'finance.dashboard.view', 'finance.read', 'reports.read')) return forbidden();
+  if (!can(ctx, 'finance.dashboard.view', 'finance.read')) return forbidden();
 
   const service = createServiceRoleClient();
   const { searchParams } = new URL(request.url);
