@@ -52,12 +52,22 @@ export async function writeHrAuditLog(
 
 export async function ensureEmployeeAssignable(employeeId: string) {
   const service = hrService();
-  const { data, error } = await service
+  let { data, error } = await service
     .from('employees')
     .select('id, status, branch_id, department, position, employee_number, first_name, last_name')
     .eq('id', employeeId)
     .is('deleted_at', null)
     .maybeSingle();
+
+  if (error && isMissingColumnOrRelation(error, 'employees.deleted_at')) {
+    const fallback = await service
+      .from('employees')
+      .select('id, status, branch_id, department, position, employee_number, first_name, last_name')
+      .eq('id', employeeId)
+      .maybeSingle();
+    data = fallback.data;
+    error = fallback.error;
+  }
 
   if (error) throw error;
   if (!data) throw new Error('Employee not found.');
