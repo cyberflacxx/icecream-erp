@@ -2949,3 +2949,13 @@ test('procurement receiving routes and UI use the repaired Batch 1 status contra
   assert.match(purchaseOrdersRoute, /rollbackCreatedPurchaseOrder/);
   assert.match(purchaseOrdersRoute, /requestId/);
 });
+
+test('supplier payments post journals to the selected cash or bank account ledger', () => {
+  const supplierPaymentsRoute = fs.readFileSync('src/app/api/procurement/supplier-payments/route.ts', 'utf8');
+
+  assert.match(supplierPaymentsRoute, /paymentSourceType === 'BANK' && bankAccountResult\.data\?\.account_id/);
+  assert.match(supplierPaymentsRoute, /id: String\(bankAccountResult\.data\.account_id\)/);
+  assert.match(supplierPaymentsRoute, /paymentSourceType === 'CASH' && cashAccountResult\.data\?\.account_id/);
+  assert.match(supplierPaymentsRoute, /id: String\(cashAccountResult\.data\.account_id\)/);
+  assert.match(supplierPaymentsRoute, /selectedAccountId: paymentSourceType === 'BANK' \? bankAccountId/);
+});

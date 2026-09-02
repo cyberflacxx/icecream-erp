@@ -226,11 +226,15 @@ export async function POST(request: NextRequest) {
   try {
     const payableAccount = await resolveFinancePostingAccount(ctx.organizationId, 'SUPPLIER_PAYABLES', { fallbackAccountCode: '2110' });
     const tenderAccount =
-      paymentSourceType === 'BANK'
-        ? await resolveFinancePostingAccount(ctx.organizationId, 'BANK_ACCOUNT', { fallbackAccountCode: '1120' })
-        : paymentSourceType === 'PETTY_CASH'
-          ? await resolveFinancePostingAccount(ctx.organizationId, 'PETTY_CASH_ACCOUNT', { fallbackAccountCode: '1130' })
-          : await resolveFinancePostingAccount(ctx.organizationId, 'CASH_ACCOUNT', { fallbackAccountCode: '1110' });
+      paymentSourceType === 'BANK' && bankAccountResult.data?.account_id
+        ? { id: String(bankAccountResult.data.account_id) }
+        : paymentSourceType === 'CASH' && cashAccountResult.data?.account_id
+          ? { id: String(cashAccountResult.data.account_id) }
+          : paymentSourceType === 'PETTY_CASH'
+            ? await resolveFinancePostingAccount(ctx.organizationId, 'PETTY_CASH_ACCOUNT', { fallbackAccountCode: '1130' })
+            : paymentSourceType === 'BANK'
+              ? await resolveFinancePostingAccount(ctx.organizationId, 'BANK_ACCOUNT', { fallbackAccountCode: '1120' })
+              : await resolveFinancePostingAccount(ctx.organizationId, 'CASH_ACCOUNT', { fallbackAccountCode: '1110' });
 
     journal = await postFinanceDocument({
       createdBy: ctx.userId,
