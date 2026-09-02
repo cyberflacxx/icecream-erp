@@ -114,7 +114,7 @@ export async function GET(
       service
         .schema('icecream_erp')
         .from('production_batch_materials')
-        .select('id, item_id, material_type, is_packaging, quantity_required, quantity_issued, quantity_actual, variance, unit_id, unit_cost, total_cost, notes, items(unit_cost)')
+        .select('id, item_id, material_type, is_packaging, quantity_required, quantity_issued, quantity_actual, variance, unit_id, unit_cost, total_cost, notes')
         .eq('batch_id', id),
       service
         .schema('icecream_erp')
@@ -124,7 +124,7 @@ export async function GET(
       service
         .schema('icecream_erp')
         .from('production_worker_assignments')
-        .select('id, employee_id, worker_name, shift_name, attendance_status, is_off_shift, hours_worked, output_quantity, remarks, employees(id, employee_number, first_name, last_name, status)')
+        .select('id, employee_id, worker_name, shift_name, attendance_status, is_off_shift, hours_worked, output_quantity, remarks')
         .eq('batch_id', id),
       service
         .schema('icecream_erp')
@@ -151,8 +151,22 @@ export async function GET(
           recipe_packaging_items: packagingItemsResult.data ?? [],
         }
       : null;
-    const materials = (materialsResult.data ?? []).map((row: Record<string, unknown>) => {
-      const unitCost = Number(row.unit_cost ?? (row.items as { unit_cost?: unknown } | null)?.unit_cost ?? 0);
+    const materialRows = (materialsResult.data ?? []) as Array<Record<string, unknown>>;
+    const materialItemIds = [...new Set(materialRows.map((row) => String(row.item_id ?? '')).filter(Boolean))];
+    const materialItemsResult = materialItemIds.length
+      ? await service
+          .schema('icecream_erp')
+          .from('items')
+          .select('id, unit_cost')
+          .in('id', materialItemIds)
+      : { data: [], error: null };
+    if (materialItemsResult.error) throw materialItemsResult.error;
+    const materialItemCostById = new Map(
+      ((materialItemsResult.data ?? []) as Array<Record<string, unknown>>).map((row) => [String(row.id ?? ''), Number(row.unit_cost ?? 0)] as const),
+    );
+
+    const materials = materialRows.map((row: Record<string, unknown>) => {
+      const unitCost = Number(row.unit_cost ?? materialItemCostById.get(String(row.item_id ?? '')) ?? 0);
       const quantityIssued = Number(row.quantity_issued ?? row.quantity_required ?? 0);
       const quantityActual = Number(row.quantity_actual ?? quantityIssued);
       return {
@@ -173,10 +187,24 @@ export async function GET(
       existingLabour.rateType = String(row.rate_type ?? existingLabour.rateType);
       labourByEmployee.set(employeeId, existingLabour);
     }
-    const workers = ((workersResult.data ?? []) as Array<Record<string, unknown>>).map((row) => {
+    const workerRows = (workersResult.data ?? []) as Array<Record<string, unknown>>;
+    const workerEmployeeIds = [...new Set(workerRows.map((row) => String(row.employee_id ?? '')).filter(Boolean))];
+    const employeeResult = workerEmployeeIds.length
+      ? await service
+          .schema('icecream_erp')
+          .from('employees')
+          .select('id, employee_number, first_name, last_name, status')
+          .in('id', workerEmployeeIds)
+      : { data: [], error: null };
+    if (employeeResult.error) throw employeeResult.error;
+    const employeeById = new Map(
+      ((employeeResult.data ?? []) as Array<Record<string, unknown>>).map((row) => [String(row.id ?? ''), row] as const),
+    );
+    const workers = workerRows.map((row) => {
       const labour = labourByEmployee.get(String(row.employee_id ?? ''));
       return {
         ...row,
+        employees: employeeById.get(String(row.employee_id ?? '')) ?? null,
         labour_cost: labour?.labourCost ?? 0,
         labour_hours: labour?.hours ?? Number(row.hours_worked ?? 0),
         labour_rate: labour?.rate ?? 0,
