@@ -556,3 +556,59 @@ export async function PATCH(
     return serverError((err as Error).message);
   }
 }
+
+export async function DELETE(
+  _request: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const ctx = await getAuthContext();
+  if (!ctx) return unauthorized();
+  if (!can(ctx, 'procurement.write')) return forbidden();
+
+  const { id } = await params;
+  const service = createServiceRoleClient();
+
+  try {
+    const { data: existing, error: fetchError } = await service
+      .from('purchase_requisitions')
+      .select('id, status')
+      .eq('organization_id', ctx.organizationId)
+      .eq('id', id)
+      .is('deleted_at', null)
+      .maybeSingle();
+
+    if (fetchError) {
+      return serverError(fetchError.message);
+    }
+
+    if (!existing) {
+      return notFound('Purchase requisition not found.');
+    }
+
+    if (String(existing.status ?? '').toLowerCase() !== 'draft') {
+      return badRequest('Only draft requisitions can be deleted.');
+    }
+
+    const { error: deleteError } = await service
+      .from('purchase_requisitions')
+      .update({
+        deleted_at: new Date().toISOString(),
+      })
+      .eq('organization_id', ctx.organizationId)
+      .eq('id', id)
+      .eq('status', 'draft')
+      .is('deleted_at', null);
+
+    if (deleteError) {
+      return serverError(deleteError.message);
+    }
+
+    return NextResponse.json({
+      success: true,
+      message: 'Purchase requisition deleted successfully.',
+    });
+  } catch (err) {
+    return serverError((err as Error).message);
+  }
+}
+

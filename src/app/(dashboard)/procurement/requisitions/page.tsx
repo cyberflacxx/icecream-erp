@@ -272,6 +272,33 @@ export default function RequisitionsPage() {
     }
   }
 
+  async function deleteRequisition(row: RequisitionRow) {
+    const confirmed = window.confirm(
+      `Delete requisition ${row.requisitionNumber}? This can only be done while the requisition is still a draft.`,
+    );
+
+    if (!confirmed) return;
+
+    setWorkspaceError(null);
+    setActiveActionId(row.id);
+
+    try {
+      await request(API_ROUTES.PROCUREMENT.REQUISITION(row.id), {
+        method: 'DELETE',
+      });
+
+      await refresh();
+    } catch (error) {
+      setWorkspaceError(
+        error instanceof Error
+          ? error.message
+          : 'Failed to delete requisition.',
+      );
+    } finally {
+      setActiveActionId(null);
+    }
+  }
+
   async function runRowAction(id: string, action: 'approve' | 'reject' | 'submit') {
     setWorkspaceError(null);
     setActiveActionId(id);
@@ -454,6 +481,17 @@ export default function RequisitionsPage() {
                         disabled={isLoadingDraft || isBusy}
                       >
                         Edit Draft
+                      </Button>
+                    ) : null}
+                    {actionState.canEditDraft ? (
+                      <Button
+                        size="sm"
+                        type="button"
+                        className="bg-red-600 text-white hover:bg-red-700"
+                        onClick={() => void deleteRequisition(row)}
+                        disabled={isBusy || isLoadingDraft}
+                      >
+                        {isBusy ? 'Deleting...' : 'Delete'}
                       </Button>
                     ) : null}
                     {actionState.canSubmit ? (

@@ -417,33 +417,58 @@ export async function applyInventoryDelta(
 ) {
   const quantityDelta = toNumber(params.quantityDelta);
   const current = await getBalance(service, params.itemId, params.warehouseId);
+
   const organizationId = await resolveInventoryOrganizationId(service, {
     explicitOrganizationId: params.organizationId,
-    fallbackOrganizationId: current?.organization_id ? String(current.organization_id) : null,
+    fallbackOrganizationId: current?.organization_id
+      ? String(current.organization_id)
+      : null,
     itemId: params.itemId,
     warehouseId: params.warehouseId,
   });
+
   const quantityReserved = toNumber(current?.quantity_reserved);
-  const nextOnHand = toNumber(current?.quantity_on_hand) + quantityDelta;
+
+  const currentOnHand = toNumber(
+    current?.quantity_on_hand ?? current?.quantity
+  );
+
+  const nextOnHand = currentOnHand + quantityDelta;
   const nextAvailable = nextOnHand - quantityReserved;
-  const currentLegacyQuantity = toNumber(current?.quantity ?? current?.quantity_on_hand);
-  const nextLegacyQuantity = currentLegacyQuantity + quantityDelta;
-  const currentAverageCost = toNumber(current?.average_cost ?? current?.avg_cost);
-  const currentTotalValue = toNumber(current?.total_value ?? (toNumber(current?.quantity_on_hand) * currentAverageCost));
-  const resolvedUnitCost = params.unitCost == null ? currentAverageCost : toNumber(params.unitCost);
+
+  // Legacy quantity mirrors authoritative stock.
+  const nextLegacyQuantity = nextOnHand;
+
+  const currentAverageCost = toNumber(
+    current?.average_cost ?? current?.avg_cost
+  );
+
+  const currentTotalValue = toNumber(
+    current?.total_value ?? currentOnHand * currentAverageCost
+  );
+
+  const resolvedUnitCost =
+    params.unitCost == null
+      ? currentAverageCost
+      : toNumber(params.unitCost);
+
   const movementValue =
     params.totalValue == null
       ? Math.abs(quantityDelta) * resolvedUnitCost
       : Math.max(0, toNumber(params.totalValue));
+
   const nextTotalValue =
     quantityDelta >= 0
       ? currentTotalValue + movementValue
       : Math.max(0, currentTotalValue - movementValue);
-  const nextAverageCost = nextOnHand > 0 ? nextTotalValue / nextOnHand : 0;
+
+  const nextAverageCost =
+    nextOnHand > 0
+      ? nextTotalValue / nextOnHand
+      : 0;
 
   ensureNonNegative(nextOnHand, 'stock balance');
   ensureNonNegative(nextAvailable, 'available stock');
-  ensureNonNegative(nextLegacyQuantity, 'legacy stock balance');
 
   if (current) {
     const { data, error } = await service
@@ -465,7 +490,9 @@ export async function applyInventoryDelta(
       .single();
 
     if (error || !data) {
-      throw new Error(error?.message ?? 'Failed to update stock balance.');
+      throw new Error(
+        error?.message ?? 'Failed to update stock balance.'
+      );
     }
 
     return data;
@@ -492,7 +519,9 @@ export async function applyInventoryDelta(
     .single();
 
   if (error || !data) {
-    throw new Error(error?.message ?? 'Failed to create stock balance.');
+    throw new Error(
+      error?.message ?? 'Failed to create stock balance.'
+    );
   }
 
   return data;

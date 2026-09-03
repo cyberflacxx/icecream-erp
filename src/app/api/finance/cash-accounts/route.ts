@@ -1,6 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import { badRequest, can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
+import {
+  badRequest,
+  can,
+  forbidden,
+  getAuthContext,
+  serverError,
+  unauthorized,
+} from '@/lib/api-auth';
 import { ensureFinanceAccountCanBePosted } from '@/lib/finance-foundation-server';
 import {
   financeService,
@@ -11,11 +18,29 @@ import {
 
 export async function GET(request: NextRequest) {
   const ctx = await getAuthContext();
-  if (!ctx) return unauthorized();
-  if (!can(ctx, 'finance.read')) return forbidden();
+
+  if (!ctx) {
+    return unauthorized();
+  }
+
+  // Cash accounts are required by both Finance and Procurement payment flows.
+  // Procurement users must be able to read active cash accounts without being
+  // granted unrestricted Finance access.
+  if (
+    !can(
+      ctx,
+      'finance.read',
+      'procurement.read',
+      'procurement.write',
+      'procurement.payment.post',
+    )
+  ) {
+    return forbidden();
+  }
 
   const service = financeService();
   const { searchParams } = new URL(request.url);
+
   const activeOnly = searchParams.get('activeOnly') === 'true';
   const branchId = searchParams.get('branchId');
 
@@ -25,20 +50,31 @@ export async function GET(request: NextRequest) {
       branchId: branchId ?? undefined,
       routeName: 'finance.cash-accounts',
     });
+
     return NextResponse.json(data);
   } catch (err) {
     logFinanceRouteError('finance.cash-accounts', 'list', err);
-    return serverError('Cash accounts could not be loaded. Please refresh or contact support.');
+
+    return serverError(
+      'Cash accounts could not be loaded. Please refresh or contact support.',
+    );
   }
 }
 
 export async function POST(request: NextRequest) {
   const ctx = await getAuthContext();
-  if (!ctx) return unauthorized();
-  if (!can(ctx, 'finance.write')) return forbidden();
+
+  if (!ctx) {
+    return unauthorized();
+  }
+
+  // Only Finance-authorized users may create cash accounts.
+  if (!can(ctx, 'finance.write')) {
+    return forbidden();
+  }
 
   try {
-    const body = await request.json() as {
+    const body = (await request.json()) as {
       accountId: string;
       accountName: string;
       branchId?: string | null;
@@ -46,14 +82,24 @@ export async function POST(request: NextRequest) {
       isActive?: boolean;
       openingBalance?: number;
     };
+
     if (!body.accountId || !body.accountName || !body.currencyCode) {
-      return badRequest('accountId, accountName, and currencyCode are required');
+      return badRequest(
+        'accountId, accountName, and currencyCode are required',
+      );
     }
 
-    await ensureFinanceAccountCanBePosted(ctx.organizationId, body.accountId);
+    await ensureFinanceAccountCanBePosted(
+      ctx.organizationId,
+      body.accountId,
+    );
 
     const service = financeService();
     const openingBalance = Number(body.openingBalance ?? 0);
+
+    if (!Number.isFinite(openingBalance)) {
+      return badRequest('openingBalance must be a valid number');
+    }
 
     const { data, error } = await service
       .from('cash_accounts')
@@ -71,45 +117,87 @@ export async function POST(request: NextRequest) {
       })
       .select()
       .single();
-    if (error) throw error;
+
+    if (error) {
+      throw error;
+    }
 
     await writeFinanceAuditLog(
       'CASH_ACCOUNT_CREATED',
       data.id,
       ctx.userId,
-      { accountId: body.accountId, accountName: body.accountName },
+      {
+        accountId: body.accountId,
+        accountName: body.accountName,
+      },
       'cash_account',
     );
-    return NextResponse.json((await loadCashAccountsCompatibility(ctx.organizationId, { routeName: 'finance.cash-accounts' }))
-      .find((row) => row.id === String(data.id)) ?? data, { status: 201 });
+
+    const cashAccounts = await loadCashAccountsCompatibility(
+      ctx.organizationId,
+      {
+        routeName: 'finance.cash-accounts',
+      },
+    );
+
+    return NextResponse.json(
+      cashAccounts.find((row) => row.id === String(data.id)) ?? data,
+      { status: 201 },
+    );
   } catch (err) {
-    return serverError(err instanceof Error ? err.message : 'Internal server error');
+    return serverError(
+      err instanceof Error ? err.message : 'Internal server error',
+    );
   }
 }
 
 export async function PATCH(request: NextRequest) {
   const ctx = await getAuthContext();
-  if (!ctx) return unauthorized();
-  if (!can(ctx, 'finance.write')) return forbidden();
+
+  if (!ctx) {
+    return unauthorized();
+  }
+
+  // Only Finance-authorized users may modify cash-account configuration.
+  if (!can(ctx, 'finance.write')) {
+    return forbidden();
+  }
 
   try {
-    const body = await request.json() as {
+    const body = (await request.json()) as {
       accountName?: string;
       branchId?: string | null;
       currencyCode?: string;
       id: string;
       isActive?: boolean;
     };
-    if (!body.id) return badRequest('id is required');
+
+    if (!body.id) {
+      return badRequest('id is required');
+    }
 
     const payload: Record<string, unknown> = {
       updated_at: new Date().toISOString(),
       updated_by: ctx.userId,
     };
-    if (body.accountName !== undefined) payload.account_name = String(body.accountName).trim();
-    if (body.branchId !== undefined) payload.branch_id = body.branchId || null;
-    if (body.currencyCode !== undefined) payload.currency_code = String(body.currencyCode).trim().toUpperCase();
-    if (body.isActive !== undefined) payload.is_active = body.isActive;
+
+    if (body.accountName !== undefined) {
+      payload.account_name = String(body.accountName).trim();
+    }
+
+    if (body.branchId !== undefined) {
+      payload.branch_id = body.branchId || null;
+    }
+
+    if (body.currencyCode !== undefined) {
+      payload.currency_code = String(body.currencyCode)
+        .trim()
+        .toUpperCase();
+    }
+
+    if (body.isActive !== undefined) {
+      payload.is_active = body.isActive;
+    }
 
     const result = await financeService()
       .from('cash_accounts')
@@ -118,12 +206,35 @@ export async function PATCH(request: NextRequest) {
       .eq('id', body.id)
       .select('id')
       .single();
-    if (result.error) throw result.error;
 
-    await writeFinanceAuditLog('CASH_ACCOUNT_UPDATED', body.id, ctx.userId, payload, 'cash_account');
-    return NextResponse.json((await loadCashAccountsCompatibility(ctx.organizationId, { routeName: 'finance.cash-accounts' }))
-      .find((row) => row.id === body.id) ?? { id: body.id, ...payload });
+    if (result.error) {
+      throw result.error;
+    }
+
+    await writeFinanceAuditLog(
+      'CASH_ACCOUNT_UPDATED',
+      body.id,
+      ctx.userId,
+      payload,
+      'cash_account',
+    );
+
+    const cashAccounts = await loadCashAccountsCompatibility(
+      ctx.organizationId,
+      {
+        routeName: 'finance.cash-accounts',
+      },
+    );
+
+    return NextResponse.json(
+      cashAccounts.find((row) => row.id === body.id) ?? {
+        id: body.id,
+        ...payload,
+      },
+    );
   } catch (err) {
-    return serverError(err instanceof Error ? err.message : 'Internal server error');
+    return serverError(
+      err instanceof Error ? err.message : 'Internal server error',
+    );
   }
 }
