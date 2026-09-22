@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
 import { findJournalBySource, financeService, isMissingFinanceColumn, isMissingFinanceTable, loadLedgerLines } from '@/lib/finance-server';
+import { MONEY_EPSILON } from '@/lib/money';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
 type IntegrityIssue = {
@@ -111,7 +112,7 @@ async function checkJournals(organizationId: string) {
     const firstLine = group.lines[0];
     if (!firstLine) continue;
 
-    if (Math.abs(group.debit - group.credit) > 0.01) {
+    if (Math.abs(group.debit - group.credit) > MONEY_EPSILON) {
       issues.push(issue({
         description: `Journal ${firstLine.entryNumber ?? journalId} is unbalanced.`,
         issueType: 'unbalanced_journal',

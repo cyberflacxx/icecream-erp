@@ -358,7 +358,7 @@ export function TransactionShortcuts({
                 <span>Cost / purchase price</span>
                 <input
                   min="0"
-                  step="0.01"
+                  step="0.0001"
                   type="number"
                   value={itemState.unitCost}
                   onChange={(event) => setItemState((current) => ({ ...current, unitCost: event.target.value }))}
@@ -369,7 +369,7 @@ export function TransactionShortcuts({
                 <span>Selling price</span>
                 <input
                   min="0"
-                  step="0.01"
+                  step="0.0001"
                   type="number"
                   value={itemState.sellingPrice}
                   onChange={(event) => setItemState((current) => ({ ...current, sellingPrice: event.target.value }))}
@@ -446,7 +446,7 @@ export function TransactionShortcuts({
                 <span>Credit limit</span>
                 <input
                   min="0"
-                  step="0.01"
+                  step="0.0001"
                   type="number"
                   value={supplierState.creditLimit}
                   onChange={(event) => setSupplierState((current) => ({ ...current, creditLimit: event.target.value }))}

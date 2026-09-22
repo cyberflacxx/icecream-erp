@@ -12,12 +12,8 @@ import { useCustomers } from '@/hooks/sales/useCustomers';
 import { useCreateCustomer } from '@/hooks/sales/useCreateCustomer';
 import { useSalesRequest } from '@/hooks/sales/useSalesRequest';
 import { usePermission } from '@/hooks/usePermission';
+import { formatCurrency } from '@/lib/money';
 import { API_ROUTES } from '@/lib/shared';
-
-const currency = new Intl.NumberFormat('en-US', {
-  currency: 'USD',
-  style: 'currency',
-});
 
 const initialCustomerForm = {
   address: '',
@@ -269,19 +265,19 @@ export default function CustomersPage() {
           {
             key: 'creditLimit',
             header: 'Credit Limit',
-            render: (row) => currency.format(row.creditLimit),
+            render: (row) => formatCurrency(row.creditLimit),
             className: 'px-5 py-4 text-right text-sm text-brown',
           },
           {
             key: 'currentBalance',
             header: 'Outstanding',
-            render: (row) => currency.format(row.currentBalance),
+            render: (row) => formatCurrency(row.currentBalance),
             className: 'px-5 py-4 text-right text-sm text-brown',
           },
           {
             key: 'availableCredit',
             header: 'Available Credit',
-            render: (row) => currency.format(row.availableCredit),
+            render: (row) => formatCurrency(row.availableCredit),
             className: 'px-5 py-4 text-right text-sm text-brown',
           },
           {
@@ -387,7 +383,7 @@ export default function CustomersPage() {
             </label>
             <label className="space-y-2 text-sm text-muted">
               <span>Credit limit</span>
-              <input className="surface-input-soft" min="0" step="0.01" type="number" value={formState.creditLimit} onChange={(event) => setFormState((current) => ({ ...current, creditLimit: event.target.value }))} />
+              <input className="surface-input-soft" min="0" step="0.0001" type="number" value={formState.creditLimit} onChange={(event) => setFormState((current) => ({ ...current, creditLimit: event.target.value }))} />
             </label>
           </div>
 

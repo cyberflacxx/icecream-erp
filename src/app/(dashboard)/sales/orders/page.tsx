@@ -15,12 +15,8 @@ import { useCreateSalesOrder } from '@/hooks/sales/useCreateSalesOrder';
 import { useSalesMeta } from '@/hooks/sales/useSalesMeta';
 import { type SalesOrderListItem, useSalesOrders } from '@/hooks/sales/useSalesOrders';
 import { useSalesRequest } from '@/hooks/sales/useSalesRequest';
+import { formatCurrency } from '@/lib/money';
 import { API_ROUTES } from '@/lib/shared';
-
-const currency = new Intl.NumberFormat('en-US', {
-  currency: 'USD',
-  style: 'currency',
-});
 
 const initialOrderForm = {
   branchId: '',
@@ -177,7 +173,7 @@ export default function SalesOrdersPage() {
           },
           { key: 'requiredDate', header: 'Required Date', render: (row) => row.requiredDate ?? 'Not set' },
           { key: 'itemsCount', header: 'Items' },
-          { key: 'total', header: 'Total', render: (row) => currency.format(row.total), className: 'px-5 py-4 text-sm text-right text-brown' },
+          { key: 'total', header: 'Total', render: (row) => formatCurrency(row.total), className: 'px-5 py-4 text-sm text-right text-brown' },
           { key: 'status', header: 'Status' },
           {
             key: 'actions',
@@ -280,11 +276,11 @@ export default function SalesOrdersPage() {
           <div className="grid gap-5 sm:grid-cols-2">
             <label className="space-y-2 text-sm text-muted">
               <span>Discount amount</span>
-              <input className="surface-input-soft" min="0" step="0.01" type="number" value={formState.discountAmount} onChange={(event) => setFormState((current) => ({ ...current, discountAmount: event.target.value }))} />
+              <input className="surface-input-soft" min="0" step="0.0001" type="number" value={formState.discountAmount} onChange={(event) => setFormState((current) => ({ ...current, discountAmount: event.target.value }))} />
             </label>
             <label className="space-y-2 text-sm text-muted">
               <span>Tax amount</span>
-              <input className="surface-input-soft" min="0" step="0.01" type="number" value={formState.taxAmount} onChange={(event) => setFormState((current) => ({ ...current, taxAmount: event.target.value }))} />
+              <input className="surface-input-soft" min="0" step="0.0001" type="number" value={formState.taxAmount} onChange={(event) => setFormState((current) => ({ ...current, taxAmount: event.target.value }))} />
             </label>
           </div>
           <label className="space-y-2 text-sm text-muted">

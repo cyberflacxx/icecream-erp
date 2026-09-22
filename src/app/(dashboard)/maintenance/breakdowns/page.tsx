@@ -6,6 +6,7 @@ import { AlertTriangle, Wrench } from 'lucide-react';
 import { PageHeader } from '@/components/dashboard/page-header';
 import { useAppAuth } from '@/hooks/useAppAuth';
 import { apiFetch } from '@/lib/api';
+import { formatCurrency } from '@/lib/money';
 import { DataTable, EmptyState, LoadingState, StatusBadge } from '@/components/ui-library';
 
 type MaintenanceBreakdownRow = {
@@ -35,13 +36,6 @@ type MaintenanceBreakdownResponse = {
 function formatDate(value: string | null | undefined) {
   if (!value) return 'N/A';
   return new Date(value).toLocaleDateString();
-}
-
-function formatCurrency(value: number | null | undefined) {
-  return Number(value ?? 0).toLocaleString(undefined, {
-    maximumFractionDigits: 2,
-    minimumFractionDigits: 2,
-  });
 }
 
 export default function MaintenanceBreakdownsPage() {

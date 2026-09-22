@@ -10,6 +10,7 @@ import {
   toNumber,
 } from '@/lib/inventory';
 import { financeService, mapNestedRow } from '@/lib/finance-server';
+import { MONEY_EPSILON } from '@/lib/money';
 
 type BalanceRow = Record<string, unknown>;
 
@@ -129,9 +130,9 @@ export async function GET(request: NextRequest) {
         status = 'MISSING_MAPPING';
       } else if (Math.abs(quantityVariance) > 0.0001) {
         status = 'QUANTITY_VARIANCE';
-      } else if (Math.abs(valueVariance) > 0.01) {
+      } else if (Math.abs(valueVariance) > MONEY_EPSILON) {
         status = 'VALUE_VARIANCE';
-      } else if (Math.abs(glVariance) > 0.01) {
+      } else if (Math.abs(glVariance) > MONEY_EPSILON) {
         status = 'GL_VARIANCE';
       }
 

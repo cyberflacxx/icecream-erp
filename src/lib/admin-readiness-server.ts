@@ -15,6 +15,7 @@ import {
   validateUploadPayload,
 } from '@/lib/admin-readiness';
 import { normalizeCode, normalizeName, toPositiveNumber } from '@/lib/settings';
+import { MONEY_EPSILON } from '@/lib/money';
 
 type Primitive = string | number | boolean | null | undefined;
 type AdminContext = {
@@ -791,7 +792,7 @@ export async function postOpeningBalances(ctx: AdminContext) {
 
   const debitTotal = ((accountRows.data ?? []) as Row[]).reduce((sum, row) => sum + toPositiveNumber(row.debit_amount as Primitive), 0);
   const creditTotal = ((accountRows.data ?? []) as Row[]).reduce((sum, row) => sum + toPositiveNumber(row.credit_amount as Primitive), 0);
-  if (Math.abs(debitTotal - creditTotal) > 0.01) throw new Error('account opening balances must balance before posting.');
+  if (Math.abs(debitTotal - creditTotal) > MONEY_EPSILON) throw new Error('account opening balances must balance before posting.');
 
   if ((accountRows.data ?? []).length > 0) {
     const entryNumber = `OPEN-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}`;
@@ -1011,7 +1012,7 @@ export async function runDataIntegrityCheck(ctx: AdminContext) {
   for (const row of (negativeStock.data ?? []) as Row[]) issues.push(buildIntegrityIssue({ issueType: 'NEGATIVE_STOCK', affectedModule: 'inventory', affectedTable: 'stock_balances', affectedRecord: String(row.id), severity: 'CRITICAL', details: { quantityOnHand: row.quantity_on_hand } }));
   for (const row of ((customers.data ?? []) as Row[]).filter((customer) => Number(customer.current_balance ?? 0) < 0)) issues.push(buildIntegrityIssue({ issueType: 'NEGATIVE_CUSTOMER_BALANCE', affectedModule: 'sales', affectedTable: 'customers', affectedRecord: String(row.id), severity: 'HIGH' }));
   for (const row of ((suppliers.data ?? []) as Row[]).filter((supplier) => Number(supplier.current_balance ?? 0) < 0)) issues.push(buildIntegrityIssue({ issueType: 'NEGATIVE_SUPPLIER_BALANCE', affectedModule: 'procurement', affectedTable: 'suppliers', affectedRecord: String(row.id), severity: 'HIGH' }));
-  for (const row of ((journals.data ?? []) as Row[]).filter((entry) => Math.abs(Number(entry.total_debit ?? 0) - Number(entry.total_credit ?? 0)) > 0.01)) issues.push(buildIntegrityIssue({ issueType: 'UNBALANCED_JOURNAL', affectedModule: 'finance', affectedTable: 'journal_entries', affectedRecord: String(row.id), severity: 'CRITICAL' }));
+  for (const row of ((journals.data ?? []) as Row[]).filter((entry) => Math.abs(Number(entry.total_debit ?? 0) - Number(entry.total_credit ?? 0)) > MONEY_EPSILON)) issues.push(buildIntegrityIssue({ issueType: 'UNBALANCED_JOURNAL', affectedModule: 'finance', affectedTable: 'journal_entries', affectedRecord: String(row.id), severity: 'CRITICAL' }));
   for (const row of (batchesWithoutRecipe.data ?? []) as Row[]) issues.push(buildIntegrityIssue({ issueType: 'BATCH_WITHOUT_RECIPE', affectedModule: 'production', affectedTable: 'production_batches', affectedRecord: String(row.id), severity: 'HIGH' }));
   for (const row of ((usersWithoutRoles.data ?? []) as Row[]).filter((user) => !Array.isArray(user.user_roles) || (user.user_roles as Array<unknown>).length === 0)) issues.push(buildIntegrityIssue({ issueType: 'USER_WITHOUT_ROLE', affectedModule: 'security', affectedTable: 'users', affectedRecord: String(row.id), severity: 'HIGH' }));
   const seenInvoiceNumbers = new Set<string>();

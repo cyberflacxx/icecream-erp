@@ -22,6 +22,7 @@ import {
 } from '@/hooks/inventory';
 import { useInventoryRequest } from '@/hooks/inventory/useInventoryRequest';
 import { usePermission } from '@/hooks/usePermission';
+import { formatMoneyAmount } from '@/lib/money';
 
 const transferStatusOptions = [
   { label: 'Draft', value: 'DRAFT' },
@@ -759,7 +760,7 @@ export default function TransfersPage() {
                 />
                 <input
                   min="0"
-                  step="0.01"
+                  step="0.0001"
                   type="number"
                   value={itemRow.unitCost}
                   onChange={(event) =>
@@ -892,12 +893,12 @@ export default function TransfersPage() {
                   </label>
                   <div className="space-y-2 text-sm text-muted">
                     <span>Unit cost</span>
-                    <div className="surface-input-soft flex h-10 items-center">{line.unitCost.toFixed(2)}</div>
+                    <div className="surface-input-soft flex h-10 items-center">{formatMoneyAmount(line.unitCost)}</div>
                   </div>
                   <div className="space-y-2 text-sm text-muted">
                     <span>Receipt value</span>
                     <div className="surface-input-soft flex h-10 items-center">
-                      {(Math.max(0, Number(line.receiptQuantity) || 0) * line.unitCost).toFixed(2)}
+                      {formatMoneyAmount(Math.max(0, Number(line.receiptQuantity) || 0) * line.unitCost)}
                     </div>
                   </div>
                 </div>

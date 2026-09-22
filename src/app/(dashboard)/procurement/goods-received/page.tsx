@@ -1047,7 +1047,7 @@ export default function GoodsReceivedPage() {
                   />
                   <input
                     min="0"
-                    step="0.01"
+                    step="0.0001"
                     type="number"
                     placeholder="Unit cost"
                     value={item.unitCost}

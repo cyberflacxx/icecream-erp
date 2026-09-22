@@ -7,8 +7,7 @@ import { BranchOperationsNav } from '@/components/branch-operations/branch-opera
 import { PageHeader } from '@/components/dashboard/page-header';
 import { DataTable, EmptyState, LoadingState } from '@/components/ui-library';
 import { useBranchCustomers } from '@/hooks/branch-operations';
-
-const currencyFormatter = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
+import { formatCurrency } from '@/lib/money';
 
 export default function BranchCustomersPage() {
   const params = useParams<{ id: string }>();
@@ -31,8 +30,8 @@ export default function BranchCustomersPage() {
           { key: 'phone_number', header: 'Phone' },
           { key: 'customer_type', header: 'Type' },
           { key: 'credit_allowed', header: 'Credit', render: (row) => (row.credit_allowed ? 'Allowed' : 'Cash Only') },
-          { key: 'credit_limit', header: 'Credit Limit', render: (row) => currencyFormatter.format(Number(row.credit_limit ?? 0)) },
-          { key: 'current_balance', header: 'Balance', render: (row) => currencyFormatter.format(Number(row.current_balance ?? 0)) },
+          { key: 'credit_limit', header: 'Credit Limit', render: (row) => formatCurrency(Number(row.credit_limit ?? 0)) },
+          { key: 'current_balance', header: 'Balance', render: (row) => formatCurrency(Number(row.current_balance ?? 0)) },
         ]}
         data={query.data}
       />

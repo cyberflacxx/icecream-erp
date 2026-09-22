@@ -1,5 +1,6 @@
 import { createServiceRoleClient } from '@/lib/supabase/server';
 import { recordAuditLog } from '@/lib/security-server';
+import { MONEY_EPSILON } from '@/lib/money';
 import {
   blocksSelfApproval,
   buildWorkflowHistoryAction,
@@ -791,7 +792,7 @@ async function validatePostingPreconditions(input: {
     const lines = (data ?? []) as Array<Record<string, unknown>>;
     const debit = lines.reduce((sum, row) => sum + Number(row.debit_amount ?? 0), 0);
     const credit = lines.reduce((sum, row) => sum + Number(row.credit_amount ?? 0), 0);
-    if (lines.length < 2 || Math.abs(debit - credit) > 0.01) {
+    if (lines.length < 2 || Math.abs(debit - credit) > MONEY_EPSILON) {
       throw new Error('Journal entry must be balanced before posting.');
     }
   }

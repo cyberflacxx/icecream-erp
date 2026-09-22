@@ -11,6 +11,7 @@ import { type RecordPaymentResponse, useRecordPayment } from '@/hooks/sales/useR
 import { useSalesMeta } from '@/hooks/sales/useSalesMeta';
 import { useSalesPayments } from '@/hooks/sales/useSalesPayments';
 import { DataTable, EmptyState, FormDrawer, LoadingState } from '@/components/ui-library';
+import { formatCurrency } from '@/lib/money';
 import { buildSalesReceiptPrintUrl } from '@/lib/sales-payments';
 
 const initialPaymentForm = {
@@ -193,7 +194,7 @@ export default function SalesPaymentsPage() {
               <option value="">Select invoice</option>
               {metaQuery.data?.invoices.filter((invoice) => invoice.balanceDue > 0).map((invoice) => (
                 <option key={invoice.id} value={invoice.id}>
-                  {invoice.invoiceNumber} - balance {Number(invoice.balanceDue).toFixed(2)}
+                  {invoice.invoiceNumber} - balance {formatCurrency(invoice.balanceDue)}
                 </option>
               ))}
             </select>
@@ -211,7 +212,7 @@ export default function SalesPaymentsPage() {
                 </div>
                 <div>
                   <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">Outstanding Balance</p>
-                  <p className="mt-1 text-sm font-medium text-brown">{Number(selectedInvoice.balanceDue).toFixed(2)}</p>
+                  <p className="mt-1 text-sm font-medium text-brown">{formatCurrency(selectedInvoice.balanceDue)}</p>
                 </div>
               </div>
             </div>
@@ -234,8 +235,8 @@ export default function SalesPaymentsPage() {
               <span>Amount</span>
               <input
                 className="surface-input-soft"
-                min="0.01"
-                step="0.01"
+                min="0.0001"
+                step="0.0001"
                 type="number"
                 value={formState.amount}
                 onChange={(event) => {

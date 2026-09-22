@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { badRequest, can, forbidden, getAuthContext, notFound, serverError, unauthorized } from '@/lib/api-auth';
+import { formatMoneyAmount, MONEY_EPSILON } from '@/lib/money';
 import { emitOperationalNotifications } from '@/lib/notifications-server';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
@@ -144,7 +145,7 @@ export async function POST(
       documentId: id,
       documentType: 'branch_shift_close',
       eventType: 'BRANCH_SHIFT_CLOSED',
-      message: `Branch shift close was submitted with cash variance ${Number(updated.cash_variance ?? 0).toFixed(2)} and stock variance ${Number(updated.stock_variance ?? 0).toFixed(2)}.`,
+      message: `Branch shift close was submitted with cash variance ${formatMoneyAmount(updated.cash_variance ?? 0)} and stock variance ${formatMoneyAmount(updated.stock_variance ?? 0)}.`,
       metadata: {
         cashVariance: Number(updated.cash_variance ?? 0),
         stockVariance: Number(updated.stock_variance ?? 0),
@@ -152,11 +153,11 @@ export async function POST(
       moduleName: 'branch operations',
       organizationId: ctx.organizationId,
       recipientRoleNames: ['Branch Controller', 'Branch Manager'],
-      severity: Math.abs(Number(updated.cash_variance ?? 0)) > 0.01 || Math.abs(Number(updated.stock_variance ?? 0)) > 0.01 ? 'HIGH' : 'LOW',
+      severity: Math.abs(Number(updated.cash_variance ?? 0)) > MONEY_EPSILON || Math.abs(Number(updated.stock_variance ?? 0)) > MONEY_EPSILON ? 'HIGH' : 'LOW',
       title: 'Branch shift submitted',
     });
 
-    if (Math.abs(Number(updated.cash_variance ?? 0)) > 0.01 || Math.abs(Number(updated.stock_variance ?? 0)) > 0.01) {
+    if (Math.abs(Number(updated.cash_variance ?? 0)) > MONEY_EPSILON || Math.abs(Number(updated.stock_variance ?? 0)) > MONEY_EPSILON) {
       await emitOperationalNotifications({
         actorUserId: ctx.userId,
         branchId,

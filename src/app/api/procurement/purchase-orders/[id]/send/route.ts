@@ -7,6 +7,7 @@ import {
   derivePurchaseOrderStatus,
   formatPurchaseOrderDbStatus,
 } from '@/lib/procurement-purchase-orders';
+import { formatCurrency } from '@/lib/money';
 import { getCompanyProfile } from '@/lib/settings-server';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
@@ -68,7 +69,7 @@ export async function POST(
           <h2 style="margin-bottom:8px;">Purchase Order ${String(order.po_number ?? id)}</h2>
           <p>Hello ${supplierName},</p>
           <p>Please find our purchase order attached via the secure document link below.</p>
-          <p><strong>Total:</strong> USD ${Number(order.total ?? 0).toFixed(2)}</p>
+          <p><strong>Total:</strong> ${formatCurrency(Number(order.total ?? 0))}</p>
           ${order.notes ? `<p><strong>Notes:</strong> ${String(order.notes)}</p>` : ''}
           <p>
             <a href="${documentUrl}" style="display:inline-block;padding:12px 18px;background:#f97316;color:#ffffff;text-decoration:none;border-radius:999px;">

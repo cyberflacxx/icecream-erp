@@ -11,9 +11,8 @@ import { DataTable, EmptyState, LoadingState } from '@/components/ui-library';
 import { useUserContext } from '@/contexts/UserContext';
 import { useFinanceMeta, useFinanceReport } from '@/hooks/finance/useFinanceResources';
 import { downloadFromUrl } from '@/lib/export';
+import { formatCurrency } from '@/lib/money';
 import { API_ROUTES } from '@/lib/shared';
-
-const currency = new Intl.NumberFormat('en-US', { currency: 'USD', style: 'currency' });
 
 interface TrialBalanceResponse {
   rows: Array<{
@@ -71,7 +70,7 @@ interface InventoryReconciliationResponse {
 }
 
 function formatValue(value: unknown) {
-  return currency.format(Number(value ?? 0));
+  return formatCurrency(Number(value ?? 0));
 }
 
 function buildReportPath(path: string, params: Record<string, string>) {

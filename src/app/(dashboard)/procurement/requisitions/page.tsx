@@ -27,6 +27,7 @@ import {
 } from '@/lib/procurement-workflow';
 import { buildRequisitionDraftPayload } from '@/lib/procurement-requisitions';
 import { formatCatDate } from '@/lib/date-time';
+import { formatMoneyAmount } from '@/lib/money';
 import { API_ROUTES, PERMISSIONS } from '@/lib/shared';
 import { usePermission } from '@/hooks/usePermission';
 
@@ -893,7 +894,7 @@ export default function RequisitionsPage() {
                       <span>Estimated Unit Price</span>
                       <input
                         min="0"
-                        step="0.01"
+                        step="0.0001"
                         type="number"
                         value={item.estimatedUnitCost}
                         onChange={(event) =>
@@ -952,8 +953,8 @@ export default function RequisitionsPage() {
                           <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted">Estimated Price</p>
                           <p className="mt-2 text-sm text-foreground">
                             {selectedItem.currentInventoryCost !== null && selectedItem.currentInventoryCost !== undefined
-                              ? selectedItem.currentInventoryCost.toFixed(2)
-                              : (item.estimatedUnitCost || '0')}
+                              ? formatMoneyAmount(selectedItem.currentInventoryCost)
+                              : formatMoneyAmount(item.estimatedUnitCost || 0)}
                           </p>
                         </div>
                         <div className="rounded-2xl border border-border/60 bg-white px-3 py-3">
@@ -980,7 +981,7 @@ export default function RequisitionsPage() {
                         </div>
                         <div className="rounded-2xl border border-border/60 bg-white px-3 py-3 md:col-span-2 xl:col-span-3">
                           <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted">Selling Price</p>
-                          <p className="mt-2 text-sm text-foreground">{selectedItem.sellingPrice?.toFixed(2) ?? 'Not set'}</p>
+                          <p className="mt-2 text-sm text-foreground">{selectedItem.sellingPrice == null ? 'Not set' : formatMoneyAmount(selectedItem.sellingPrice)}</p>
                         </div>
                       </div>
                     ) : (

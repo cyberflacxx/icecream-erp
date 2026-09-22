@@ -4,6 +4,7 @@ import { can, forbidden, getAuthContext, notFound, serverError, unauthorized } f
 import { resolveFinancePostingAccount } from '@/lib/finance-foundation-server';
 import { buildFinanceSourceReference } from '@/lib/finance';
 import { createLinkedFinanceTransaction, financeErrorMessage, isMissingFinanceTable, postFinanceDocument } from '@/lib/finance-server';
+import { formatMoneyAmount } from '@/lib/money';
 import { isSalesTransactionRpcUnavailable, postSalesPaymentTransaction, shouldRequireSalesTransactionRpc } from '@/lib/sales-transactions-server';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
@@ -125,7 +126,7 @@ export async function POST(
   if (body.amount > balanceDue) {
     return NextResponse.json(
       {
-        error: `Payment amount $${body.amount.toFixed(2)} exceeds balance due $${balanceDue.toFixed(2)}. Overpayment not allowed.`,
+        error: `Payment amount $${formatMoneyAmount(body.amount)} exceeds balance due $${formatMoneyAmount(balanceDue)}. Overpayment not allowed.`,
         code: 'OVERPAYMENT',
       },
       { status: 400 },

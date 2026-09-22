@@ -15,12 +15,7 @@ import { useUsers } from '@/hooks/settings/useSettings';
 import { usePermission } from '@/hooks/usePermission';
 import { apiFetch } from '@/lib/api';
 import { Button } from '@/components/ui/button';
-
-const currencyFormatter = new Intl.NumberFormat('en-US', {
-  currency: 'USD',
-  minimumFractionDigits: 2,
-  style: 'currency',
-});
+import { formatCurrency } from '@/lib/money';
 
 const inputClass = 'surface-input';
 
@@ -178,7 +173,7 @@ export default function BranchesPage() {
               <div className="mt-5 grid grid-cols-2 gap-3 rounded-2xl border border-border bg-cream p-3 text-sm">
                 <div>
                   <p className="text-xs uppercase tracking-[0.16em] text-muted">Today Sales</p>
-                  <p className="mt-1 font-semibold text-brown">{currencyFormatter.format(branch.todaySales)}</p>
+                  <p className="mt-1 font-semibold text-brown">{formatCurrency(branch.todaySales)}</p>
                 </div>
                 <div>
                   <p className="text-xs uppercase tracking-[0.16em] text-muted">Stock Status</p>

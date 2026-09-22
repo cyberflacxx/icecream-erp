@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button';
 import { ConfirmDialog, EmptyState, FormDrawer, LoadingState } from '@/components/ui-library';
 import { useAppAuth } from '@/hooks/useAppAuth';
 import { apiFetch } from '@/lib/api';
+import { formatCurrency } from '@/lib/money';
 
 type MaintenanceMachineRow = {
   branchName: string;
@@ -85,12 +86,6 @@ const initialForm = {
   serviceInterval: '30',
   serviceProvider: '',
 };
-
-const currencyFormatter = new Intl.NumberFormat('en-US', {
-  currency: 'USD',
-  minimumFractionDigits: 2,
-  style: 'currency',
-});
 
 function formatDate(value: string | null) {
   if (!value) return 'Not set';
@@ -323,7 +318,7 @@ export default function MachinesPage() {
         </div>
         <div className="surface-card">
           <p className="text-xs uppercase tracking-[0.18em] text-muted">Maintenance Cost</p>
-          <p className="mt-2 text-3xl font-semibold text-brown">{currencyFormatter.format(summary.totalCost)}</p>
+          <p className="mt-2 text-3xl font-semibold text-brown">{formatCurrency(summary.totalCost)}</p>
         </div>
       </div>
 
@@ -364,7 +359,7 @@ export default function MachinesPage() {
                 <div className="rounded-2xl border border-border bg-white/90 px-4 py-3">
                   <p className="text-xs uppercase tracking-[0.16em] text-muted">Last Service</p>
                   <p className="mt-1 text-sm font-semibold text-brown">{formatDate(machine.lastServiceDate)}</p>
-                  <p className="mt-1 text-xs text-muted">Cost: {currencyFormatter.format(machine.lastServiceCost)}</p>
+                  <p className="mt-1 text-xs text-muted">Cost: {formatCurrency(machine.lastServiceCost)}</p>
                 </div>
                 <div className="rounded-2xl border border-border bg-white/90 px-4 py-3">
                   <p className="text-xs uppercase tracking-[0.16em] text-muted">Next Service</p>
@@ -373,7 +368,7 @@ export default function MachinesPage() {
                 </div>
                 <div className="rounded-2xl border border-border bg-white/90 px-4 py-3">
                   <p className="text-xs uppercase tracking-[0.16em] text-muted">Total Maintenance Cost</p>
-                  <p className="mt-1 text-sm font-semibold text-brown">{currencyFormatter.format(machine.totalMaintenanceCost)}</p>
+                  <p className="mt-1 text-sm font-semibold text-brown">{formatCurrency(machine.totalMaintenanceCost)}</p>
                   <p className="mt-1 text-xs text-muted">Breakdowns: {machine.breakdownCount}</p>
                 </div>
               </div>
@@ -392,7 +387,7 @@ export default function MachinesPage() {
                 <div>
                   <dt className="text-xs uppercase tracking-[0.16em]">Purchase</dt>
                   <dd className="mt-1 text-brown">
-                    {formatDate(machine.purchaseDate)} · {currencyFormatter.format(machine.purchaseCost)}
+                    {formatDate(machine.purchaseDate)} · {formatCurrency(machine.purchaseCost)}
                   </dd>
                 </div>
                 <div>
@@ -530,7 +525,7 @@ export default function MachinesPage() {
               <span>Purchase Cost</span>
               <input
                 min="0"
-                step="0.01"
+                step="0.0001"
                 type="number"
                 value={form.purchaseCost}
                 onChange={(event) => setForm((current) => ({ ...current, purchaseCost: event.target.value }))}
@@ -606,7 +601,7 @@ export default function MachinesPage() {
               <span>Last Service Cost</span>
               <input
                 min="0"
-                step="0.01"
+                step="0.0001"
                 type="number"
                 value={form.lastServiceCost}
                 onChange={(event) => setForm((current) => ({ ...current, lastServiceCost: event.target.value }))}

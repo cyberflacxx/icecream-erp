@@ -13,6 +13,7 @@ import { useItemSelectorOptions } from '@/hooks/useItemSelectorOptions';
 import { useSalesReport } from '@/hooks/sales/useSalesReport';
 import { useSalesMeta } from '@/hooks/sales/useSalesMeta';
 import { useSalesRequest } from '@/hooks/sales/useSalesRequest';
+import { formatCurrency } from '@/lib/money';
 import { API_ROUTES } from '@/lib/shared';
 import { DataTable, EmptyState, FormDrawer, LoadingState } from '@/components/ui-library';
 
@@ -251,15 +252,15 @@ export default function SalesQuotationsPage() {
           <div className="grid gap-5 sm:grid-cols-3">
             <label className="space-y-2 text-sm text-muted">
               <span>Discount amount</span>
-              <input className="surface-input-soft" min="0" step="0.01" type="number" value={formState.discountAmount} onChange={(event) => setFormState((current) => ({ ...current, discountAmount: event.target.value }))} />
+              <input className="surface-input-soft" min="0" step="0.0001" type="number" value={formState.discountAmount} onChange={(event) => setFormState((current) => ({ ...current, discountAmount: event.target.value }))} />
             </label>
             <label className="space-y-2 text-sm text-muted">
               <span>Tax amount</span>
-              <input className="surface-input-soft" min="0" step="0.01" type="number" value={formState.taxAmount} onChange={(event) => setFormState((current) => ({ ...current, taxAmount: event.target.value }))} />
+              <input className="surface-input-soft" min="0" step="0.0001" type="number" value={formState.taxAmount} onChange={(event) => setFormState((current) => ({ ...current, taxAmount: event.target.value }))} />
             </label>
             <div className="rounded-2xl border border-border bg-white px-4 py-3 text-sm text-brown">
               <span className="text-muted">Estimated total</span>
-              <p className="mt-1 text-lg font-semibold">{totalDraft(formState.items, formState.discountAmount, formState.taxAmount).toFixed(2)}</p>
+              <p className="mt-1 text-lg font-semibold">{formatCurrency(totalDraft(formState.items, formState.discountAmount, formState.taxAmount))}</p>
             </div>
           </div>
           <label className="space-y-2 text-sm text-muted">

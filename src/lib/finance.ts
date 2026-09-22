@@ -1,4 +1,5 @@
 import { ensureNonNegative, toCsv, toNumber } from './inventory';
+import { formatMoneyAmount, MONEY_EPSILON } from './money';
 
 export function calculateBudgetVariance(budgetedAmount: number, actualAmount: number) {
   const budgeted = ensureNonNegative(budgetedAmount, 'budgetedAmount');
@@ -16,7 +17,7 @@ export function calculateJournalBalance(
   const totalCredit = lines.reduce((sum, line) => sum + ensureNonNegative(Number(line.creditAmount) || 0, 'creditAmount'), 0);
 
   return {
-    isBalanced: Math.abs(totalDebit - totalCredit) <= 0.01,
+    isBalanced: Math.abs(totalDebit - totalCredit) <= MONEY_EPSILON,
     totalCredit,
     totalDebit,
     variance: totalDebit - totalCredit,
@@ -37,7 +38,7 @@ export function validateJournalLines(
   const balance = calculateJournalBalance(lines);
   return balance.isBalanced
     ? null
-    : `Journal entry is not balanced. Debit: ${balance.totalDebit.toFixed(2)}, Credit: ${balance.totalCredit.toFixed(2)}`;
+    : `Journal entry is not balanced. Debit: ${formatMoneyAmount(balance.totalDebit)}, Credit: ${formatMoneyAmount(balance.totalCredit)}`;
 }
 
 export function calculateStraightLineDepreciation(

@@ -17,12 +17,7 @@ import {
 } from '@/hooks/branch-operations';
 import { useUserContext } from '@/contexts/UserContext';
 import { Button } from '@/components/ui/button';
-
-const currencyFormatter = new Intl.NumberFormat('en-US', {
-  currency: 'USD',
-  minimumFractionDigits: 2,
-  style: 'currency'
-});
+import { formatCurrency } from '@/lib/money';
 
 function today() {
   return new Date().toISOString().slice(0, 10);
@@ -86,22 +81,22 @@ export default function BranchDashboardPage() {
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <StatCard
           title="Opening Stock Value"
-          value={currencyFormatter.format(dashboard?.stats.openingStockValue ?? 0)}
+          value={formatCurrency(dashboard?.stats.openingStockValue ?? 0)}
           icon={<Package className="h-4 w-4" />}
         />
         <StatCard
           title="Stock Received Today"
-          value={currencyFormatter.format(dashboard?.stats.stockReceivedToday ?? 0)}
+          value={formatCurrency(dashboard?.stats.stockReceivedToday ?? 0)}
           icon={<ChartColumnIncreasing className="h-4 w-4" />}
         />
         <StatCard
           title="Stock Sold Today"
-          value={currencyFormatter.format(dashboard?.stats.stockSoldToday ?? 0)}
+          value={formatCurrency(dashboard?.stats.stockSoldToday ?? 0)}
           icon={<Coins className="h-4 w-4" />}
         />
         <StatCard
           title="Closing Stock (Estimated)"
-          value={currencyFormatter.format(dashboard?.stats.closingStockEstimated ?? 0)}
+          value={formatCurrency(dashboard?.stats.closingStockEstimated ?? 0)}
           icon={<Wallet className="h-4 w-4" />}
         />
       </div>
@@ -109,22 +104,22 @@ export default function BranchDashboardPage() {
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <StatCard
           title="Cash"
-          value={currencyFormatter.format(dashboard?.payments.cash ?? 0)}
+          value={formatCurrency(dashboard?.payments.cash ?? 0)}
           icon={<DollarSign className="h-4 w-4" />}
         />
         <StatCard
           title="EcoCash"
-          value={currencyFormatter.format(dashboard?.payments.ecocash ?? 0)}
+          value={formatCurrency(dashboard?.payments.ecocash ?? 0)}
           icon={<Wallet className="h-4 w-4" />}
         />
         <StatCard
           title="Card"
-          value={currencyFormatter.format(dashboard?.payments.card ?? 0)}
+          value={formatCurrency(dashboard?.payments.card ?? 0)}
           icon={<CreditCard className="h-4 w-4" />}
         />
         <StatCard
           title="Expenses"
-          value={currencyFormatter.format(dashboard?.payments.expenses ?? 0)}
+          value={formatCurrency(dashboard?.payments.expenses ?? 0)}
           icon={<Coins className="h-4 w-4" />}
         />
       </div>

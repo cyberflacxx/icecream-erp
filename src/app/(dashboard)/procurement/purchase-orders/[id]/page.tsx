@@ -23,6 +23,7 @@ import { API_ROUTES, PERMISSIONS } from '@/lib/shared';
 import {
   buildPurchaseOrderDraftPayload,
 } from '@/lib/procurement-purchase-orders';
+import { formatCurrency } from '@/lib/money';
 import { usePermission } from '@/hooks/usePermission';
 
 interface PurchaseOrderDetailPageProps {
@@ -116,12 +117,6 @@ interface FeedbackState {
   message: string;
   tone: 'error' | 'success';
 }
-
-const currencyFormatter = new Intl.NumberFormat('en-US', {
-  currency: 'USD',
-  minimumFractionDigits: 2,
-  style: 'currency',
-});
 
 function createLineDraft(): EditLine {
   return {
@@ -550,7 +545,7 @@ export default function PurchaseOrderDetailPage({ params }: PurchaseOrderDetailP
               <div className="rounded-3xl border border-border/70 bg-white/80 px-5 py-4 shadow-sm">
                 <p className="text-xs uppercase tracking-[0.2em] text-muted">Total Order Value</p>
                 <p className="mt-3 text-3xl font-semibold text-brown">
-                  {currencyFormatter.format(order.total)}
+                  {formatCurrency(order.total)}
                 </p>
               </div>
             </div>
@@ -618,8 +613,8 @@ export default function PurchaseOrderDetailPage({ params }: PurchaseOrderDetailP
                         <td className="px-5 py-4 text-sm text-brown">{item.quantityOrdered}</td>
                         <td className="px-5 py-4 text-sm text-brown">{item.quantityReceived}</td>
                         <td className="px-5 py-4 text-sm text-brown">{item.unitOfMeasure?.abbreviation ?? '-'}</td>
-                        <td className="px-5 py-4 text-sm text-brown">{currencyFormatter.format(item.unitCost)}</td>
-                        <td className="px-5 py-4 text-sm font-semibold text-brown">{currencyFormatter.format(item.totalCost)}</td>
+                        <td className="px-5 py-4 text-sm text-brown">{formatCurrency(item.unitCost)}</td>
+                        <td className="px-5 py-4 text-sm font-semibold text-brown">{formatCurrency(item.totalCost)}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -777,7 +772,7 @@ export default function PurchaseOrderDetailPage({ params }: PurchaseOrderDetailP
                     <span>Tax Amount</span>
                     <input
                       min="0"
-                      step="0.01"
+                      step="0.0001"
                       type="number"
                       value={formState.taxAmount}
                       onChange={(event) =>
@@ -791,7 +786,7 @@ export default function PurchaseOrderDetailPage({ params }: PurchaseOrderDetailP
                     <span>Discount Amount</span>
                     <input
                       min="0"
-                      step="0.01"
+                      step="0.0001"
                       type="number"
                       value={formState.discountAmount}
                       onChange={(event) =>
@@ -903,13 +898,13 @@ export default function PurchaseOrderDetailPage({ params }: PurchaseOrderDetailP
                               type="button"
                               variant="outline"
                               size="sm"
-                              onClick={() => stepNumericField(item.rowId, 'unitCost', -0.5, 0, 2)}
+                              onClick={() => stepNumericField(item.rowId, 'unitCost', -0.0001, 0, 4)}
                             >
                               <Minus className="h-4 w-4" />
                             </Button>
                             <input
                               min="0"
-                              step="0.01"
+                              step="0.0001"
                               type="number"
                               value={item.unitCost}
                               onChange={(event) => updateLineItem(item.rowId, 'unitCost', event.target.value)}
@@ -919,7 +914,7 @@ export default function PurchaseOrderDetailPage({ params }: PurchaseOrderDetailP
                               type="button"
                               variant="outline"
                               size="sm"
-                              onClick={() => stepNumericField(item.rowId, 'unitCost', 0.5, 0, 2)}
+                              onClick={() => stepNumericField(item.rowId, 'unitCost', 0.0001, 0, 4)}
                             >
                               <Plus className="h-4 w-4" />
                             </Button>
@@ -1007,7 +1002,7 @@ function MoneyCard({ label, value }: { label: string; value: number }) {
   return (
     <div className="rounded-2xl border border-border/70 bg-white/70 px-4 py-3">
       <p className="text-xs uppercase tracking-[0.18em] text-muted">{label}</p>
-      <p className="mt-2 text-lg font-semibold text-brown">{currencyFormatter.format(value)}</p>
+      <p className="mt-2 text-lg font-semibold text-brown">{formatCurrency(value)}</p>
     </div>
   );
 }

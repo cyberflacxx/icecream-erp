@@ -12,13 +12,8 @@ import { DataTable, EmptyState, FilterBar, StatusBadge } from '@/components/ui-l
 import { useUserContext } from '@/contexts/UserContext';
 import { useInventoryMeta, useStockMovements, type StockMovementRow } from '@/hooks/inventory';
 import { downloadFromUrl } from '@/lib/export';
+import { formatCurrency } from '@/lib/money';
 import { API_ROUTES } from '@/lib/shared';
-
-const currencyFormatter = new Intl.NumberFormat('en-US', {
-  currency: 'USD',
-  minimumFractionDigits: 2,
-  style: 'currency',
-});
 
 const quantityFormatter = new Intl.NumberFormat('en-US', {
   maximumFractionDigits: 3,
@@ -161,7 +156,7 @@ export default function StockMovementsPage() {
         </div>
         <div className="rounded-2xl border border-border bg-white px-4 py-3">
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted">Closing Value</p>
-          <p className="mt-2 text-xl font-semibold text-brown">{currencyFormatter.format(summary.runningValue)}</p>
+          <p className="mt-2 text-xl font-semibold text-brown">{formatCurrency(summary.runningValue)}</p>
         </div>
       </div>
 
@@ -285,17 +280,17 @@ export default function StockMovementsPage() {
           {
             key: 'unitCost',
             header: 'Unit Cost',
-            render: (row) => currencyFormatter.format(Number(row.unitCost ?? 0)),
+            render: (row) => formatCurrency(Number(row.unitCost ?? 0)),
           },
           {
             key: 'totalValue',
             header: 'Value',
-            render: (row) => currencyFormatter.format(Number(row.totalValue ?? row.totalCost ?? 0)),
+            render: (row) => formatCurrency(Number(row.totalValue ?? row.totalCost ?? 0)),
           },
           {
             key: 'runningValue',
             header: 'Running Value',
-            render: (row) => currencyFormatter.format(Number(row.runningValue ?? 0)),
+            render: (row) => formatCurrency(Number(row.runningValue ?? 0)),
           },
           {
             key: 'reference',

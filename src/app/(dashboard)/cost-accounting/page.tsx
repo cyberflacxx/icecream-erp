@@ -9,9 +9,10 @@ import { DataTable, EmptyState, FormDrawer, LoadingState, StatCard, StatusBadge 
 import { useBatch, useBatches } from '@/hooks/production/useBatches';
 import { useBatchAction } from '@/hooks/production/useBatchAction';
 import { useProductionMeta } from '@/hooks/production/useProductionMeta';
+import { formatCurrency } from '@/lib/money';
 
 function money(value: number) {
-  return new Intl.NumberFormat('en-US', { currency: 'USD', style: 'currency' }).format(value);
+  return formatCurrency(value);
 }
 
 function numberValue(value: unknown) {

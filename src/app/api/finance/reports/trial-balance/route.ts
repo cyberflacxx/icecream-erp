@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
 import { summarizeDetailedTrialBalance } from '@/lib/finance';
 import { financeErrorMessage, loadLedgerLines } from '@/lib/finance-server';
+import { MONEY_EPSILON } from '@/lib/money';
 
 function previousDate(value: string) {
   const date = new Date(`${value}T00:00:00Z`);
@@ -55,7 +56,7 @@ export async function GET(request: NextRequest) {
         endDate: endDate ?? null,
         startDate: startDate ?? null,
       },
-      isBalanced: Math.abs(summary.totals.closingDebit - summary.totals.closingCredit) <= 0.01,
+      isBalanced: Math.abs(summary.totals.closingDebit - summary.totals.closingCredit) <= MONEY_EPSILON,
     });
   } catch (err) {
     return serverError(financeErrorMessage(err) || 'Internal server error');

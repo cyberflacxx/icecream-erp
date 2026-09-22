@@ -9,9 +9,8 @@ import { FinanceNav } from '@/components/finance/finance-nav';
 import { Button } from '@/components/ui/button';
 import { ConfirmDialog, DataTable, EmptyState, FormDrawer, LoadingState } from '@/components/ui-library';
 import { useBankAccounts, useBankTransactions, useFinanceMeta, useFinanceMutation } from '@/hooks/finance/useFinanceResources';
+import { formatCurrency } from '@/lib/money';
 import { API_ROUTES } from '@/lib/shared';
-
-const currency = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
 
 function today() {
   return new Date().toISOString().slice(0, 10);
@@ -234,7 +233,7 @@ export default function FinanceBankAccountsPage() {
             </label>
             <label className="space-y-2 text-sm text-muted">
               <span>Opening Balance</span>
-              <input min="0" step="0.01" type="number" value={newOpeningBalance} onChange={(event) => setNewOpeningBalance(event.target.value)} className="surface-input-soft" disabled={Boolean(editingAccount)} />
+              <input min="0" step="0.0001" type="number" value={newOpeningBalance} onChange={(event) => setNewOpeningBalance(event.target.value)} className="surface-input-soft" disabled={Boolean(editingAccount)} />
             </label>
           </div>
           <label className="flex items-center gap-3 rounded-2xl border border-border/70 px-4 py-3 text-sm text-muted">
@@ -258,7 +257,7 @@ export default function FinanceBankAccountsPage() {
           { key: 'account_number', header: 'Account Number' },
           { key: 'branch_name', header: 'Branch' },
           { key: 'currency', header: 'Currency' },
-          { key: 'current_balance', header: 'Balance', render: (row) => currency.format(Number(row.current_balance ?? row.currentBalance ?? row.balance ?? 0)) },
+          { key: 'current_balance', header: 'Balance', render: (row) => formatCurrency(Number(row.current_balance ?? row.currentBalance ?? row.balance ?? 0)) },
           { key: 'is_active', header: 'Active', render: (row) => ((row.is_active ?? row.isActive) ? 'Yes' : 'No') },
           {
             key: 'actions',
@@ -306,7 +305,7 @@ export default function FinanceBankAccountsPage() {
             { key: 'transactionType', header: 'Type' },
             { key: 'referenceNumber', header: 'Reference' },
             { key: 'description', header: 'Description' },
-            { key: 'amount', header: 'Amount', render: (row) => currency.format(Number(row.amount ?? 0)) },
+            { key: 'amount', header: 'Amount', render: (row) => formatCurrency(Number(row.amount ?? 0)) },
             { key: 'status', header: 'Status' },
           ]}
           data={transactionsQuery.data ?? []}
@@ -380,8 +379,8 @@ export default function FinanceBankAccountsPage() {
               <span>Amount</span>
               <input
                 required
-                min="0.01"
-                step="0.01"
+                min="0.0001"
+              step="0.0001"
                 type="number"
                 value={amount}
                 onChange={(event) => setAmount(event.target.value)}

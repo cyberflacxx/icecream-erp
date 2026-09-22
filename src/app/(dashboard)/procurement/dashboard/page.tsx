@@ -8,11 +8,7 @@ import { PageHeader } from '@/components/dashboard/page-header';
 import { ProcurementNav } from '@/components/procurement/procurement-nav';
 import { EmptyState } from '@/components/ui-library';
 import { useProcurementDashboard, useProcurementMeta } from '@/hooks/procurement';
-
-const currencyFormatter = new Intl.NumberFormat('en-US', {
-  currency: 'USD',
-  style: 'currency',
-});
+import { formatCurrency } from '@/lib/money';
 
 export default function ProcurementDashboardPage() {
   const query = useProcurementDashboard();
@@ -62,7 +58,7 @@ export default function ProcurementDashboardPage() {
               metrics.topSuppliersByValue.map((row) => (
                 <div key={row.supplierName} className="dashboard-blue-card-soft px-3.5 py-3">
                   <p className="dashboard-blue-value font-medium">{row.supplierName}</p>
-                  <p className="dashboard-blue-copy mt-1 text-sm">{currencyFormatter.format(row.totalValue)}</p>
+                  <p className="dashboard-blue-copy mt-1 text-sm">{formatCurrency(row.totalValue)}</p>
                 </div>
               ))
             ) : (

@@ -8,9 +8,8 @@ import { FinanceNav } from '@/components/finance/finance-nav';
 import { Button } from '@/components/ui/button';
 import { DataTable, EmptyState, FormDrawer, LoadingState } from '@/components/ui-library';
 import { useFinanceMeta, useFinanceMutation, usePettyCashRequests } from '@/hooks/finance/useFinanceResources';
+import { formatCurrency } from '@/lib/money';
 import { API_ROUTES } from '@/lib/shared';
-
-const currency = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
 
 function today() {
   return new Date().toISOString().slice(0, 10);
@@ -74,7 +73,7 @@ export default function FinancePettyCashPage() {
           { key: 'request_number', header: 'Request #' },
           { key: 'request_date', header: 'Date' },
           { key: 'branch_id', header: 'Branch' },
-          { key: 'amount_requested', header: 'Amount', render: (row) => currency.format(Number(row.amount_requested ?? 0)) },
+          { key: 'amount_requested', header: 'Amount', render: (row) => formatCurrency(Number(row.amount_requested ?? 0)) },
           { key: 'purpose', header: 'Purpose' },
           { key: 'status', header: 'Status' },
           {
@@ -122,8 +121,8 @@ export default function FinancePettyCashPage() {
               <span>Amount Requested</span>
               <input
                 required
-                min="0.01"
-                step="0.01"
+                min="0.0001"
+                step="0.0001"
                 type="number"
                 value={amountRequested}
                 onChange={(event) => setAmountRequested(event.target.value)}

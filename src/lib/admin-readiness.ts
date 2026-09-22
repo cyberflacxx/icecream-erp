@@ -1,4 +1,5 @@
 import { normalizeCode, normalizeName, toPositiveNumber, validateImportRows } from './settings';
+import { MONEY_EPSILON } from './money';
 
 type Primitive = string | number | boolean | null | undefined;
 
@@ -95,7 +96,7 @@ export function validateOpeningAccountBalanceRows(rows: Array<Record<string, Pri
   if (invalid) return 'account_code is required.';
   const debit = rows.reduce((sum, row) => sum + toPositiveNumber(row.debit_amount), 0);
   const credit = rows.reduce((sum, row) => sum + toPositiveNumber(row.credit_amount), 0);
-  if (Math.abs(debit - credit) > 0.01) return 'account opening balances must balance before posting.';
+  if (Math.abs(debit - credit) > MONEY_EPSILON) return 'account opening balances must balance before posting.';
   return null;
 }
 

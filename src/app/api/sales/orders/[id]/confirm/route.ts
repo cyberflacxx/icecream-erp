@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { can, forbidden, getAuthContext, notFound, serverError, unauthorized } from '@/lib/api-auth';
+import { formatMoneyAmount } from '@/lib/money';
 import { loadSalesOrderById } from '@/lib/sales-server';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
@@ -57,7 +58,7 @@ export async function POST(
           const available = Math.max(0, creditLimit - currentBalance);
           return NextResponse.json(
             {
-              error: `Credit limit exceeded for ${customer.name}. Credit limit: $${creditLimit.toFixed(2)}. Current balance: $${currentBalance.toFixed(2)}. Available credit: $${available.toFixed(2)}. Order total: $${orderTotal.toFixed(2)}.`,
+              error: `Credit limit exceeded for ${customer.name}. Credit limit: $${formatMoneyAmount(creditLimit)}. Current balance: $${formatMoneyAmount(currentBalance)}. Available credit: $${formatMoneyAmount(available)}. Order total: $${formatMoneyAmount(orderTotal)}.`,
               code: 'CREDIT_LIMIT_EXCEEDED',
             },
             { status: 400 },

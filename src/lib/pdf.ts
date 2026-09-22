@@ -1,6 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
+import { formatCurrency } from './money';
+
 interface PlainTextPdfOptions {
   fontSize?: number;
   lineHeight?: number;
@@ -242,11 +244,7 @@ function formatCellValue(value: unknown, keyHint = '') {
 
   if (typeof value === 'number') {
     if (currencyLike.test(normalizedKey)) {
-      return new Intl.NumberFormat('en-US', {
-        currency: 'USD',
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-      }).format(value);
+      return formatCurrency(value);
     }
 
     if (quantityLike.test(normalizedKey)) {

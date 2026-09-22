@@ -16,12 +16,7 @@ import {
   type WarehouseCard
 } from '@/hooks/inventory';
 import { usePermission } from '@/hooks/usePermission';
-
-const currencyFormatter = new Intl.NumberFormat('en-US', {
-  style: 'currency',
-  currency: 'USD',
-  minimumFractionDigits: 2
-});
+import { formatCurrency } from '@/lib/money';
 
 const warehouseTypes = [
   { label: 'Raw Materials', value: 'RAW_MATERIALS' },
@@ -275,7 +270,7 @@ function WarehouseCardView({ warehouse }: { warehouse: WarehouseCard }) {
         </div>
         <div className="surface-tile">
           <p className="text-xs uppercase tracking-[0.18em] text-muted">Total value</p>
-          <p className="mt-2 text-sm font-medium text-brown">{currencyFormatter.format(warehouse.totalValue)}</p>
+          <p className="mt-2 text-sm font-medium text-brown">{formatCurrency(warehouse.totalValue)}</p>
         </div>
         <div className="surface-tile">
           <p className="text-xs uppercase tracking-[0.18em] text-muted">Status</p>

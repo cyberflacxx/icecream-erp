@@ -15,13 +15,9 @@ import { type InvoiceListItem, useInvoices } from '@/hooks/sales/useInvoices';
 import { type RecordPaymentResponse, useRecordPayment } from '@/hooks/sales/useRecordPayment';
 import { useSalesMeta } from '@/hooks/sales/useSalesMeta';
 import { useSalesRequest } from '@/hooks/sales/useSalesRequest';
+import { formatCurrency } from '@/lib/money';
 import { buildSalesReceiptPrintUrl } from '@/lib/sales-payments';
 import { API_ROUTES } from '@/lib/shared';
-
-const currency = new Intl.NumberFormat('en-US', {
-  currency: 'USD',
-  style: 'currency',
-});
 
 const initialInvoiceForm = {
   branchId: '',
@@ -258,9 +254,9 @@ export default function InvoicesPage() {
       />
       <SalesNav />
       <div className="grid grid-cols-1 gap-5 md:grid-cols-3">
-        <StatCard title="Outstanding" value={currency.format(outstanding)} icon={<WalletCards className="h-5 w-5" />} />
-        <StatCard title="Overdue" value={currency.format(overdue)} icon={<AlertCircle className="h-5 w-5" />} color="warning" />
-        <StatCard title="Collected" value={currency.format(collected)} icon={<ReceiptText className="h-5 w-5" />} color="success" />
+        <StatCard title="Outstanding" value={formatCurrency(outstanding)} icon={<WalletCards className="h-5 w-5" />} />
+        <StatCard title="Overdue" value={formatCurrency(overdue)} icon={<AlertCircle className="h-5 w-5" />} color="warning" />
+        <StatCard title="Collected" value={formatCurrency(collected)} icon={<ReceiptText className="h-5 w-5" />} color="success" />
       </div>
       <DataTable
         columns={[
@@ -272,9 +268,9 @@ export default function InvoicesPage() {
             render: (row) => row.customer?.name ?? 'Unassigned',
           },
           { key: 'itemsCount', header: 'Items' },
-          { key: 'total', header: 'Total', render: (row) => currency.format(row.total), className: 'px-5 py-4 text-sm text-right text-brown' },
-          { key: 'amountPaid', header: 'Paid', render: (row) => currency.format(row.amountPaid), className: 'px-5 py-4 text-sm text-right text-brown' },
-          { key: 'balanceDue', header: 'Balance', render: (row) => currency.format(row.balanceDue), className: 'px-5 py-4 text-sm text-right text-brown' },
+          { key: 'total', header: 'Total', render: (row) => formatCurrency(row.total), className: 'px-5 py-4 text-sm text-right text-brown' },
+          { key: 'amountPaid', header: 'Paid', render: (row) => formatCurrency(row.amountPaid), className: 'px-5 py-4 text-sm text-right text-brown' },
+          { key: 'balanceDue', header: 'Balance', render: (row) => formatCurrency(row.balanceDue), className: 'px-5 py-4 text-sm text-right text-brown' },
           { key: 'dueDate', header: 'Due Date', render: (row) => row.dueDate ?? 'Not set' },
           { key: 'status', header: 'Status' },
           {
@@ -330,7 +326,7 @@ export default function InvoicesPage() {
               <option value="">Direct invoice / no order</option>
               {metaQuery.data?.salesOrders.filter((order) => ['confirmed', 'approved', 'dispatched'].includes(order.status.toLowerCase())).map((order) => (
                 <option key={order.id} value={order.id}>
-                  {order.orderNumber} - {currency.format(order.total)}
+                  {order.orderNumber} - {formatCurrency(order.total)}
                 </option>
               ))}
             </select>
@@ -404,11 +400,11 @@ export default function InvoicesPage() {
           <div className="grid gap-5 sm:grid-cols-2">
             <label className="space-y-2 text-sm text-muted">
               <span>Discount amount</span>
-              <input className="surface-input-soft" min="0" step="0.01" type="number" value={invoiceForm.discountAmount} onChange={(event) => setInvoiceForm((current) => ({ ...current, discountAmount: event.target.value }))} />
+              <input className="surface-input-soft" min="0" step="0.0001" type="number" value={invoiceForm.discountAmount} onChange={(event) => setInvoiceForm((current) => ({ ...current, discountAmount: event.target.value }))} />
             </label>
             <label className="space-y-2 text-sm text-muted">
               <span>Tax amount</span>
-              <input className="surface-input-soft" min="0" step="0.01" type="number" value={invoiceForm.taxAmount} onChange={(event) => setInvoiceForm((current) => ({ ...current, taxAmount: event.target.value }))} />
+              <input className="surface-input-soft" min="0" step="0.0001" type="number" value={invoiceForm.taxAmount} onChange={(event) => setInvoiceForm((current) => ({ ...current, taxAmount: event.target.value }))} />
             </label>
           </div>
           <label className="space-y-2 text-sm text-muted">
@@ -444,7 +440,7 @@ export default function InvoicesPage() {
                 </div>
                 <div>
                   <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">Outstanding Balance</p>
-                  <p className="mt-1 text-sm font-medium text-brown">{currency.format(receiptContext.balanceDue)}</p>
+                  <p className="mt-1 text-sm font-medium text-brown">{formatCurrency(receiptContext.balanceDue)}</p>
                 </div>
               </div>
             </div>
@@ -459,7 +455,7 @@ export default function InvoicesPage() {
             </label>
             <label className="space-y-2 text-sm text-muted">
               <span>Amount</span>
-              <input className="surface-input-soft" min="0.01" step="0.01" type="number" value={receiptForm.amount} onChange={(event) => {
+              <input className="surface-input-soft" min="0.0001" step="0.0001" type="number" value={receiptForm.amount} onChange={(event) => {
                 setFormError(null);
                 setReceiptForm((current) => ({ ...current, amount: event.target.value }));
               }} />

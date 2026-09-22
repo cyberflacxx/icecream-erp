@@ -22,12 +22,7 @@ import {
   type SupplierRow
 } from '@/hooks/procurement';
 import { usePermission } from '@/hooks/usePermission';
-
-const currencyFormatter = new Intl.NumberFormat('en-US', {
-  currency: 'USD',
-  minimumFractionDigits: 2,
-  style: 'currency'
-});
+import { formatCurrency } from '@/lib/money';
 
 const supplierFormSchema = z.object({
   address: z.string().optional(),
@@ -363,7 +358,7 @@ export default function SuppliersPage() {
           {
             key: 'creditLimit',
             header: 'Credit Limit',
-            render: (row) => currencyFormatter.format(row.creditLimit)
+            render: (row) => formatCurrency(row.creditLimit)
           },
           {
             key: 'paymentTerms',
@@ -390,7 +385,7 @@ export default function SuppliersPage() {
           {
             key: 'balance',
             header: 'Balance',
-            render: (row) => currencyFormatter.format(row.currentBalance)
+            render: (row) => formatCurrency(row.currentBalance)
           },
           {
             key: 'status',
@@ -553,7 +548,7 @@ export default function SuppliersPage() {
               <span>Credit Limit</span>
               <input
                 min="0"
-                step="0.01"
+                step="0.0001"
                 type="number"
                 value={formState.creditLimit}
                 onChange={(event) =>

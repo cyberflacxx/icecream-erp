@@ -1942,6 +1942,33 @@ test('production recipe route rejects duplicate recipe items with structured ser
   assert.match(route, /apiServerError/);
 });
 
+test('production transfer UI and APIs support stores to production and production returns to stores', () => {
+  const page = fs.readFileSync('src/app/(dashboard)/production/transfers/page.tsx', 'utf8');
+  const apiRoutes = fs.readFileSync('src/lib/shared/api-routes.ts', 'utf8');
+  const receiveRoute = fs.readFileSync('src/app/api/production/raw-material-transfers/route.ts', 'utf8');
+  const returnRoute = fs.readFileSync('src/app/api/production/returns-to-stores/route.ts', 'utf8');
+
+  assert.match(page, /API_ROUTES\.PRODUCTION\.RAW_MATERIAL_TRANSFERS/);
+  assert.match(page, /API_ROUTES\.PRODUCTION\.RETURNS_TO_STORES/);
+  assert.match(apiRoutes, /RAW_MATERIAL_TRANSFERS: '\/api\/production\/raw-material-transfers'/);
+  assert.match(apiRoutes, /RETURNS_TO_STORES: '\/api\/production\/returns-to-stores'/);
+  assert.match(page, /sourceWarehouseId/);
+  assert.match(page, /destinationWarehouseId/);
+  assert.match(page, /Return To Stores/);
+
+  for (const route of [receiveRoute, returnRoute]) {
+    assert.match(route, /sourceWarehouseId and destinationWarehouseId are required/);
+    assert.match(route, /body\.sourceWarehouseId === body\.destinationWarehouseId/);
+    assert.match(route, /requireWarehouseAccess/);
+    assert.match(route, /recordStockMovement/);
+    assert.match(route, /sourceWarehouseId: body\.sourceWarehouseId/);
+    assert.match(route, /destinationWarehouseId: body\.destinationWarehouseId/);
+  }
+
+  assert.match(receiveRoute, /idempotentReplay/);
+  assert.match(returnRoute, /PRODUCTION_RETURN/);
+});
+
 test('production reports show a controlled zero-output costing notice and use compatibility fallback loading', () => {
   const reportsPage = fs.readFileSync('src/app/(dashboard)/production/reports/page.tsx', 'utf8');
   const productionServer = fs.readFileSync('src/lib/production-server.ts', 'utf8');

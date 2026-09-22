@@ -7,8 +7,7 @@ import { BranchOperationsNav } from '@/components/branch-operations/branch-opera
 import { PageHeader } from '@/components/dashboard/page-header';
 import { DataTable, EmptyState, LoadingState } from '@/components/ui-library';
 import { useBranchPayments } from '@/hooks/branch-operations';
-
-const currencyFormatter = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
+import { formatCurrency } from '@/lib/money';
 
 export default function BranchPaymentsPage() {
   const params = useParams<{ id: string }>();
@@ -28,7 +27,7 @@ export default function BranchPaymentsPage() {
         columns={[
           { key: 'payment_date', header: 'Payment Date' },
           { key: 'payment_method', header: 'Method' },
-          { key: 'amount_paid', header: 'Amount', render: (row) => currencyFormatter.format(Number(row.amount_paid ?? 0)) },
+          { key: 'amount_paid', header: 'Amount', render: (row) => formatCurrency(Number(row.amount_paid ?? 0)) },
           { key: 'reference_number', header: 'Reference' },
           { key: 'status', header: 'Status' },
         ]}

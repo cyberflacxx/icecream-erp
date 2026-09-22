@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 
 import { can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
+import { formatMoneyAmount } from '@/lib/money';
 import { isMissingSalesTable, salesErrorMessage, salesService } from '@/lib/sales-server';
 
 function isMissingColumnError(error: unknown, table: string, columnName: string) {
@@ -214,7 +215,7 @@ export async function GET() {
         overdueInvoices: String(overdueInvoices),
         pendingDispatches: String(pendingDispatches),
         stockAvailableForSale: String(stockAvailableForSale),
-        todaySales: todaySales.toFixed(2),
+        todaySales: formatMoneyAmount(todaySales),
       },
     });
   } catch (err) {

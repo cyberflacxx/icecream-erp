@@ -7,8 +7,8 @@ import { BranchOperationsNav } from '@/components/branch-operations/branch-opera
 import { PageHeader } from '@/components/dashboard/page-header';
 import { DataTable, EmptyState, LoadingState } from '@/components/ui-library';
 import { useBranchStock, useBranchStockLedger } from '@/hooks/branch-operations';
+import { formatCurrency } from '@/lib/money';
 
-const currencyFormatter = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
 function formatDate(value: string | null | undefined) {
   if (!value) return 'No movement yet';
   return new Date(value).toLocaleDateString();
@@ -61,8 +61,8 @@ export default function BranchStockPage() {
             header: 'Last Movement',
             render: (row) => formatDate(row.item.lastMovementDate),
           },
-          { key: 'unitCost', header: 'Unit Cost', render: (row) => currencyFormatter.format(row.unitCost) },
-          { key: 'totalValue', header: 'Stock Value', render: (row) => currencyFormatter.format(row.totalValue) },
+          { key: 'unitCost', header: 'Unit Cost', render: (row) => formatCurrency(row.unitCost) },
+          { key: 'totalValue', header: 'Stock Value', render: (row) => formatCurrency(row.totalValue) },
         ]}
         data={stockQuery.data.data}
         pagination={stockQuery.data.pagination}
@@ -80,7 +80,7 @@ export default function BranchStockPage() {
           { key: 'movement_type', header: 'Movement' },
           { key: 'reference_type', header: 'Reference' },
           { key: 'quantity', header: 'Quantity' },
-          { key: 'total_cost', header: 'Value', render: (row) => currencyFormatter.format(Number(row.total_cost ?? 0)) },
+          { key: 'total_cost', header: 'Value', render: (row) => formatCurrency(Number(row.total_cost ?? 0)) },
         ]}
         data={ledgerQuery.data ?? []}
         emptyState={<EmptyState icon={<AlertCircle className="h-6 w-6" />} title="No stock ledger entries" description="Stock movement entries will appear here after receipts, sales, and adjustments." />}

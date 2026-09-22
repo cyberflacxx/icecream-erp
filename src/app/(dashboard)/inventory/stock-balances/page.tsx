@@ -6,6 +6,7 @@ import { format } from 'date-fns';
 
 import { DataTable, EmptyState, FilterBar, StatusBadge } from '@/components/ui-library';
 import { resolveInventoryValue } from '@/lib/inventory';
+import { formatCurrency } from '@/lib/money';
 
 import { InventoryNav } from '@/components/inventory/inventory-nav';
 import { PaginationControls } from '@/components/inventory/pagination-controls';
@@ -21,12 +22,6 @@ import {
 const quantityFormatter = new Intl.NumberFormat('en-US', {
   minimumFractionDigits: 0,
   maximumFractionDigits: 3
-});
-
-const currencyFormatter = new Intl.NumberFormat('en-US', {
-  style: 'currency',
-  currency: 'USD',
-  minimumFractionDigits: 2,
 });
 
 const itemTypeOptions = [
@@ -183,13 +178,13 @@ export default function StockBalancesPage() {
           {
             key: 'unitCost',
             header: 'Unit Cost',
-            render: (row) => currencyFormatter.format(row.item.unitCost ?? 0)
+            render: (row) => formatCurrency(row.item.unitCost ?? 0)
           },
           {
             key: 'stockValue',
             header: 'Stock Value',
             render: (row) =>
-              currencyFormatter.format(
+              formatCurrency(
                 resolveInventoryValue(row as unknown as Record<string, unknown>, row.stockValue ?? 0),
               )
           },

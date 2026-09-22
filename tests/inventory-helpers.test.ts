@@ -758,6 +758,8 @@ test('currency helpers display monetary values with four decimals', () => {
   assert.equal(formatCurrency(0), '$0.0000');
   assert.equal(formatCurrency(1.5), '$1.5000');
   assert.equal(formatCurrency(1250.7525), '$1,250.7525');
+  assert.equal(formatMoneyAmount(12), '12.0000');
+  assert.equal(formatMoneyAmount(0.0001), '0.0001');
   assert.equal(formatMoneyAmount(12.3456), '12.3456');
   assert.notEqual(formatMoneyAmount(12.3456), '12.346');
   assert.notEqual(formatMoneyAmount(12.3456), '12.35');

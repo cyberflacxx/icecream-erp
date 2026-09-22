@@ -12,9 +12,8 @@ import { Button } from '@/components/ui/button';
 import { DataTable, EmptyState, FormDrawer, StatusBadge } from '@/components/ui-library';
 import { useGRNs, useProcurementMeta, useProcurementRequest, usePurchaseOrder, useSupplierInvoices } from '@/hooks/procurement';
 import { usePermission } from '@/hooks/usePermission';
+import { formatCurrency } from '@/lib/money';
 import { PERMISSIONS } from '@/lib/shared';
-
-const currencyFormatter = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
 
 const initialFormState = {
   dueDate: '',
@@ -261,9 +260,9 @@ export default function ProcurementInvoicesPage() {
           },
           { key: 'invoiceDate', header: 'Invoice Date' },
           { key: 'dueDate', header: 'Due Date' },
-          { key: 'total', header: 'Total', render: (row) => currencyFormatter.format(row.total) },
-          { key: 'paidAmount', header: 'Paid', render: (row) => currencyFormatter.format(row.paidAmount) },
-          { key: 'balance', header: 'Balance', render: (row) => currencyFormatter.format(row.balance) },
+          { key: 'total', header: 'Total', render: (row) => formatCurrency(row.total) },
+          { key: 'paidAmount', header: 'Paid', render: (row) => formatCurrency(row.paidAmount) },
+          { key: 'balance', header: 'Balance', render: (row) => formatCurrency(row.balance) },
           { key: 'status', header: 'Status', render: (row) => <StatusBadge status={row.status} /> },
           {
             key: 'actions',
@@ -519,7 +518,7 @@ export default function ProcurementInvoicesPage() {
                 />
                 <input
                   min="0"
-                  step="0.01"
+                  step="0.0001"
                   type="number"
                   value={item.unitCost}
                   onChange={(event) =>
@@ -534,7 +533,7 @@ export default function ProcurementInvoicesPage() {
                 />
                 <input
                   min="0"
-                  step="0.01"
+                  step="0.0001"
                   type="number"
                   value={item.poUnitCost}
                   onChange={(event) =>
@@ -583,11 +582,11 @@ export default function ProcurementInvoicesPage() {
               </div>
               <div className="rounded-2xl border border-border/60 bg-white px-3 py-2">
                 <p className="text-xs uppercase tracking-[0.16em] text-muted">Subtotal</p>
-                <p className="mt-1 font-semibold text-brown">{currencyFormatter.format(invoiceTotals.subtotal)}</p>
+                <p className="mt-1 font-semibold text-brown">{formatCurrency(invoiceTotals.subtotal)}</p>
               </div>
               <div className="rounded-2xl border border-border/60 bg-white px-3 py-2">
                 <p className="text-xs uppercase tracking-[0.16em] text-muted">Cost Variance</p>
-                <p className="mt-1 font-semibold text-brown">{currencyFormatter.format(invoiceTotals.variance)}</p>
+                <p className="mt-1 font-semibold text-brown">{formatCurrency(invoiceTotals.variance)}</p>
               </div>
             </div>
           </section>

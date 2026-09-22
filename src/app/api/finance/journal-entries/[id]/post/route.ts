@@ -4,6 +4,7 @@ import { badRequest, can, forbidden, getAuthContext, notFound, serverError, unau
 import { canFinanceAccountReceivePosting, normalizeFinanceAccountRecord } from '@/lib/finance-foundation';
 import { emitOperationalNotifications } from '@/lib/notifications-server';
 import { financeService, isMissingFinanceColumn } from '@/lib/finance-server';
+import { formatMoneyAmount, MONEY_EPSILON } from '@/lib/money';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
 export async function POST(
@@ -66,8 +67,8 @@ export async function POST(
 
     const totalDebit = lines.reduce((s, l) => s + Number(l.debit_amount ?? 0), 0);
     const totalCredit = lines.reduce((s, l) => s + Number(l.credit_amount ?? 0), 0);
-    if (Math.abs(totalDebit - totalCredit) > 0.01) {
-      return badRequest(`Journal entry is not balanced. Debit: ${totalDebit.toFixed(2)}, Credit: ${totalCredit.toFixed(2)}`);
+    if (Math.abs(totalDebit - totalCredit) > MONEY_EPSILON) {
+      return badRequest(`Journal entry is not balanced. Debit: ${formatMoneyAmount(totalDebit)}, Credit: ${formatMoneyAmount(totalCredit)}`);
     }
 
     const accountIds = [...new Set(lines.map((line) => String(line.account_id ?? '')).filter(Boolean))];

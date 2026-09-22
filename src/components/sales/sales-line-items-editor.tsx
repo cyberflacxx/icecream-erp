@@ -105,7 +105,7 @@ export function SalesLineItemsEditor({
                 className="surface-input-soft"
                 min="0"
                 readOnly
-                step="0.01"
+                step="0.0001"
                 type="number"
                 value={line.unitPrice}
                 onChange={() => undefined}

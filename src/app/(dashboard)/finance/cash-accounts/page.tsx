@@ -9,9 +9,8 @@ import { FinanceNav } from '@/components/finance/finance-nav';
 import { Button } from '@/components/ui/button';
 import { ConfirmDialog, DataTable, EmptyState, FormDrawer, LoadingState } from '@/components/ui-library';
 import { useCashAccounts, useCashTransactions, useFinanceMeta, useFinanceMutation } from '@/hooks/finance/useFinanceResources';
+import { formatCurrency } from '@/lib/money';
 import { API_ROUTES } from '@/lib/shared';
-
-const currency = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
 
 function today() {
   return new Date().toISOString().slice(0, 10);
@@ -241,7 +240,7 @@ export default function FinanceCashAccountsPage() {
               <input
                 disabled={Boolean(editingAccount)}
                 min="0"
-                step="0.01"
+                step="0.0001"
                 type="number"
                 value={newOpeningBalance}
                 onChange={(event) => setNewOpeningBalance(event.target.value)}
@@ -286,7 +285,7 @@ export default function FinanceCashAccountsPage() {
         columns={[
           { key: 'name', header: 'Cash Account' },
           { key: 'branchName', header: 'Branch', render: (row) => String(row.branchName ?? row.branch_id ?? 'Unassigned') },
-          { key: 'balance', header: 'Balance', render: (row) => currency.format(Number(row.balance ?? row.currentBalance ?? 0)) },
+          { key: 'balance', header: 'Balance', render: (row) => formatCurrency(Number(row.balance ?? row.currentBalance ?? 0)) },
           { key: 'isActive', header: 'Active', render: (row) => ((row.isActive ?? row.is_active) ? 'Yes' : 'No') },
           {
             key: 'actions',
@@ -334,7 +333,7 @@ export default function FinanceCashAccountsPage() {
             { key: 'source', header: 'Source' },
             { key: 'reference', header: 'Reference' },
             { key: 'counterparty', header: 'Counterparty' },
-            { key: 'amount', header: 'Amount', render: (row) => currency.format(Number(row.amount ?? 0)) },
+            { key: 'amount', header: 'Amount', render: (row) => formatCurrency(Number(row.amount ?? 0)) },
             { key: 'status', header: 'Status' },
           ]}
           data={transactionsQuery.data ?? []}
@@ -407,8 +406,8 @@ export default function FinanceCashAccountsPage() {
               <span>Amount</span>
               <input
                 required
-                min="0.01"
-                step="0.01"
+                min="0.0001"
+                step="0.0001"
                 type="number"
                 value={amount}
                 onChange={(event) => setAmount(event.target.value)}

@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button';
 import { DataTable, FormDrawer, LoadingState } from '@/components/ui-library';
 import { useFinanceMeta, useFinanceMutation, useOpeningBalances } from '@/hooks/finance/useFinanceResources';
 import { usePermission } from '@/hooks/usePermission';
+import { formatCurrency } from '@/lib/money';
 import { API_ROUTES } from '@/lib/shared';
 
 type OpeningBalanceFormState = {
@@ -35,12 +36,6 @@ const DEFAULT_FORM_STATE: OpeningBalanceFormState = {
   notes: '',
   reference: '',
 };
-
-const currencyFormatter = new Intl.NumberFormat('en-US', {
-  currency: 'USD',
-  maximumFractionDigits: 2,
-  style: 'currency',
-});
 
 export default function FinanceOpeningBalancesPage() {
   const canWrite = usePermission(['finance.write', 'finance.gl.post']);
@@ -155,10 +150,10 @@ export default function FinanceOpeningBalancesPage() {
           />
         </label>
         <div className="rounded-lg border border-[color:var(--app-border)] px-4 py-3 text-sm text-[color:var(--app-text)]">
-          Draft Debit: <strong>{currencyFormatter.format(draftTotals.debit)}</strong>
+          Draft Debit: <strong>{formatCurrency(draftTotals.debit)}</strong>
         </div>
         <div className="rounded-lg border border-[color:var(--app-border)] px-4 py-3 text-sm text-[color:var(--app-text)]">
-          Draft Credit: <strong>{currencyFormatter.format(draftTotals.credit)}</strong>
+          Draft Credit: <strong>{formatCurrency(draftTotals.credit)}</strong>
         </div>
       </section>
 
@@ -173,8 +168,8 @@ export default function FinanceOpeningBalancesPage() {
           { key: 'effectiveDate', header: 'Effective Date' },
           { key: 'accountCode', header: 'Code' },
           { key: 'accountName', header: 'Account' },
-          { key: 'debitAmount', header: 'Debit', render: (row) => currencyFormatter.format(Number(row.debitAmount ?? 0)) },
-          { key: 'creditAmount', header: 'Credit', render: (row) => currencyFormatter.format(Number(row.creditAmount ?? 0)) },
+          { key: 'debitAmount', header: 'Debit', render: (row) => formatCurrency(Number(row.debitAmount ?? 0)) },
+          { key: 'creditAmount', header: 'Credit', render: (row) => formatCurrency(Number(row.creditAmount ?? 0)) },
           { key: 'currencyCode', header: 'Currency' },
           { key: 'costCenterCode', header: 'Cost Centre' },
           { key: 'postingStatus', header: 'Status' },
@@ -228,7 +223,7 @@ export default function FinanceOpeningBalancesPage() {
               <span>Debit Amount</span>
               <input
                 min="0"
-                step="0.01"
+                step="0.0001"
                 type="number"
                 value={formState.debitAmount}
                 onChange={(event) =>
@@ -245,7 +240,7 @@ export default function FinanceOpeningBalancesPage() {
               <span>Credit Amount</span>
               <input
                 min="0"
-                step="0.01"
+                step="0.0001"
                 type="number"
                 value={formState.creditAmount}
                 onChange={(event) =>

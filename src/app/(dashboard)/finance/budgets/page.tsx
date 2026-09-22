@@ -6,8 +6,7 @@ import { PageHeader } from '@/components/dashboard/page-header';
 import { FinanceNav } from '@/components/finance/finance-nav';
 import { DataTable, EmptyState, LoadingState } from '@/components/ui-library';
 import { useBudgets } from '@/hooks/finance/useFinanceResources';
-
-const currency = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
+import { formatCurrency } from '@/lib/money';
 
 export default function FinanceBudgetsPage() {
   const query = useBudgets();
@@ -28,7 +27,7 @@ export default function FinanceBudgetsPage() {
           { key: 'budget_type', header: 'Type' },
           { key: 'branch_id', header: 'Branch' },
           { key: 'status', header: 'Status' },
-          { key: 'total_budgeted', header: 'Total', render: (row) => currency.format(Number(row.total_budgeted ?? 0)) },
+          { key: 'total_budgeted', header: 'Total', render: (row) => formatCurrency(Number(row.total_budgeted ?? 0)) },
         ]}
         data={query.data}
       />

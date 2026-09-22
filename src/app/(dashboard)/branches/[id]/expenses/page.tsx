@@ -10,8 +10,7 @@ import { Button } from '@/components/ui/button';
 import { DataTable, EmptyState, FormDrawer, LoadingState } from '@/components/ui-library';
 import { useSalesMeta } from '@/hooks/sales/useSalesMeta';
 import { useBranchExpenses, useCreateBranchExpense } from '@/hooks/branch-operations';
-
-const currencyFormatter = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
+import { formatCurrency } from '@/lib/money';
 
 function today() {
   return new Date().toISOString().slice(0, 10);
@@ -93,7 +92,7 @@ export default function BranchExpensesPage() {
           { key: 'expenseDate', header: 'Expense Date' },
           { key: 'category', header: 'Category' },
           { key: 'description', header: 'Description' },
-          { key: 'amount', header: 'Amount', render: (row) => currencyFormatter.format(row.amount) },
+          { key: 'amount', header: 'Amount', render: (row) => formatCurrency(row.amount) },
           { key: 'paymentMethod', header: 'Method' },
           { key: 'status', header: 'Status', render: (row) => row.status ?? 'POSTED' },
         ]}
@@ -124,8 +123,8 @@ export default function BranchExpensesPage() {
               <span>Amount</span>
               <input
                 required
-                min="0.01"
-                step="0.01"
+                min="0.0001"
+                step="0.0001"
                 type="number"
                 value={amount}
                 onChange={(event) => setAmount(event.target.value)}

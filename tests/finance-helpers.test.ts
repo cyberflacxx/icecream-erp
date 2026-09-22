@@ -64,6 +64,7 @@ import {
   resolveInventoryPostingMappingKey,
   resolveProductionCostCentrePriority,
 } from '../src/lib/finance-integration';
+import { MONEY_EPSILON } from '../src/lib/money';
 
 test('budget and costing helpers derive expected finance metrics', () => {
   const budget = calculateBudgetVariance(1000, 1200);
@@ -254,6 +255,18 @@ test('cash account helpers fall back across compatible balance columns safely', 
   assert.equal(resolveCashAccountBalance({ opening_balance: 45 }), 45);
   assert.equal(resolveCashAccountBalance({ amount: 12 }), 12);
   assert.equal(resolveCashAccountBalance({}), 0);
+});
+
+test('journal balancing uses four-decimal money tolerance', () => {
+  assert.equal(MONEY_EPSILON, 0.0001);
+  assert.equal(calculateJournalBalance([
+    { creditAmount: 0, debitAmount: 12.3456 },
+    { creditAmount: 12.3455, debitAmount: 0 },
+  ]).isBalanced, true);
+  assert.equal(calculateJournalBalance([
+    { creditAmount: 0, debitAmount: 12.3456 },
+    { creditAmount: 12.3454, debitAmount: 0 },
+  ]).isBalanced, false);
 });
 
 test('outgoing cash validation blocks unconfigured negative balances without blocking receipts', () => {

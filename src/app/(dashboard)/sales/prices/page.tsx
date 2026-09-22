@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button';
 import { useSalesPrices } from '@/hooks/sales/useSalesPrices';
 import { useSalesMeta } from '@/hooks/sales/useSalesMeta';
 import { useSalesRequest } from '@/hooks/sales/useSalesRequest';
+import { formatMoneyAmount } from '@/lib/money';
 import { API_ROUTES } from '@/lib/shared';
 import { DataTable, EmptyState, FormDrawer, LoadingState } from '@/components/ui-library';
 
@@ -95,7 +96,7 @@ export default function SalesPricesPage() {
             },
           },
           { key: 'price_list_code', header: 'Price List' },
-          { key: 'selling_price', header: 'Selling Price', render: (row) => Number((row as { selling_price?: number }).selling_price ?? 0).toFixed(2) },
+          { key: 'selling_price', header: 'Selling Price', render: (row) => formatMoneyAmount((row as { selling_price?: number }).selling_price ?? 0) },
           { key: 'effective_date', header: 'Effective Date' },
           { key: 'expiry_date', header: 'Expiry Date' },
           { key: 'is_active', header: 'Active', render: (row) => ((row as { is_active?: boolean }).is_active === false ? 'No' : 'Yes') },
@@ -128,7 +129,7 @@ export default function SalesPricesPage() {
             </label>
             <label className="space-y-2 text-sm text-muted">
               <span>Selling price</span>
-              <input className="surface-input-soft" min="0" step="0.01" type="number" value={formState.sellingPrice} onChange={(event) => setFormState((current) => ({ ...current, sellingPrice: event.target.value }))} />
+              <input className="surface-input-soft" min="0" step="0.0001" type="number" value={formState.sellingPrice} onChange={(event) => setFormState((current) => ({ ...current, sellingPrice: event.target.value }))} />
             </label>
             <label className="space-y-2 text-sm text-muted">
               <span>Effective date</span>

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import fs from 'node:fs';
 
 import {
   calculateEfficiencyPercentage,
@@ -106,4 +107,45 @@ test('employee import validation reports duplicate codes and bad departments', (
   assert.equal(result.errors.length, 5);
   assert.equal(result.errors.some((error) => error.field === 'employee_code' && error.message.includes('Duplicate')), true);
   assert.equal(result.errors.some((error) => error.field === 'department' && error.message.includes('Unknown department')), true);
+});
+
+test('employee transfer workflow updates assignment without creating duplicate employees', () => {
+  const route = fs.readFileSync('src/app/api/hr/employee-transfers/route.ts', 'utf8');
+  const approveRoute = fs.readFileSync('src/app/api/hr/employee-transfers/[id]/approve/route.ts', 'utf8');
+  const completeRoute = fs.readFileSync('src/app/api/hr/employee-transfers/[id]/complete/route.ts', 'utf8');
+  const page = fs.readFileSync('src/app/(dashboard)/hr/transfers/page.tsx', 'utf8');
+  const hrPage = fs.readFileSync('src/app/(dashboard)/hr/page.tsx', 'utf8');
+  const migration = fs.readFileSync('migrations/060_hr_employee_transfers.sql', 'utf8');
+
+  assert.match(route, /from\('hr_employee_transfers'\)/);
+  assert.match(route, /\.from\('employees'\)\s*[\s\S]*\.update\(updates\)/);
+  assert.doesNotMatch(route, /\.from\('employees'\)\s*\r?\n\s*\.insert/);
+  assert.match(route, /Employee already has a pending transfer/);
+  assert.match(route, /Destination assignment must differ from the current assignment/);
+  assert.match(route, /HR_EMPLOYEE_TRANSFER_CREATED/);
+  assert.match(route, /can\(ctx, 'hr\.employee\.transfer', 'hr\.write'\)/);
+  assert.match(route, /body\.completeNow === true \? 'COMPLETED' : 'PENDING'/);
+
+  assert.match(approveRoute, /HR_EMPLOYEE_TRANSFER_APPROVED/);
+  assert.match(approveRoute, /Only pending employee transfers can be approved/);
+  assert.match(approveRoute, /\.eq\('status', 'PENDING'\)/);
+  assert.match(completeRoute, /HR_EMPLOYEE_TRANSFER_COMPLETED/);
+  assert.match(completeRoute, /\.from\('employees'\)\s*[\s\S]*\.update\(updates\)/);
+  assert.doesNotMatch(completeRoute, /\.from\('employees'\)\s*\r?\n\s*\.insert/);
+  assert.match(completeRoute, /\.in\('status', \['PENDING', 'APPROVED'\]\)/);
+
+  assert.match(page, /\/api\/hr\/employee-transfers/);
+  assert.match(page, /\/api\/hr\/employee-transfers\/\$\{transferId\}\/\$\{action\}/);
+  assert.match(page, /Current assignment/);
+  assert.match(page, /Approve/);
+  assert.match(page, /Complete/);
+  assert.match(page, /Destination Branch/);
+  assert.match(page, /Destination Warehouse/);
+  assert.match(page, /Effective Date/);
+  assert.match(hrPage, /\/hr\/transfers/);
+
+  assert.match(migration, /create table if not exists icecream_erp\.hr_employee_transfers/i);
+  assert.match(migration, /hr_employee_transfers_one_pending_uq/i);
+  assert.match(migration, /where status in \('PENDING', 'APPROVED'\)/i);
+  assert.doesNotMatch(migration, /create table if not exists public\./i);
 });

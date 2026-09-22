@@ -21,12 +21,7 @@ import {
   useCreateBranchExpense,
   useCreateBranchSale
 } from '@/hooks/branch-operations';
-
-const currencyFormatter = new Intl.NumberFormat('en-US', {
-  currency: 'USD',
-  minimumFractionDigits: 2,
-  style: 'currency'
-});
+import { formatCurrency } from '@/lib/money';
 
 interface SaleLineItem {
   itemId: string;
@@ -348,7 +343,7 @@ export default function BranchSalesPage() {
           {
             key: 'totalAmount',
             header: 'Total',
-            render: (row) => currencyFormatter.format(row.totalAmount)
+            render: (row) => formatCurrency(row.totalAmount)
           },
           { key: 'paymentMethod', header: 'Payment Method' },
           { key: 'servedBy', header: 'Served By' },
@@ -418,12 +413,12 @@ export default function BranchSalesPage() {
             {
               key: 'sellingPrice',
               header: 'Price',
-              render: (row) => currencyFormatter.format(row.sellingPrice)
+              render: (row) => formatCurrency(row.sellingPrice)
             },
             {
               key: 'totalValue',
               header: 'Total Value',
-              render: (row) => currencyFormatter.format(row.totalValue)
+              render: (row) => formatCurrency(row.totalValue)
             }
           ]}
           emptyState={
@@ -525,7 +520,7 @@ export default function BranchSalesPage() {
                 {customers.map((customer) => (
                   <option key={customer.id} value={customer.id}>
                     {customer.name}
-                    {customer.creditAllowed ? ` | Credit ${currencyFormatter.format(customer.creditLimit)}` : ''}
+                    {customer.creditAllowed ? ` | Credit ${formatCurrency(customer.creditLimit)}` : ''}
                   </option>
                 ))}
               </select>
@@ -611,7 +606,7 @@ export default function BranchSalesPage() {
                 />
                 <input
                   min="0"
-                  step="0.01"
+                  step="0.0001"
                   type="number"
                   value={line.unitPrice}
                   onChange={(event) =>
@@ -633,7 +628,7 @@ export default function BranchSalesPage() {
                   ) : null}
                   Line Total:{' '}
                   <span className="font-semibold text-brown">
-                    {currencyFormatter.format((Number(line.quantity) || 0) * (Number(line.unitPrice) || 0))}
+                    {formatCurrency((Number(line.quantity) || 0) * (Number(line.unitPrice) || 0))}
                   </span>
                 </div>
                 {line.itemId && Number(line.quantity || 0) > Number(stockOptionByItemId.get(line.itemId)?.quantityAvailable ?? 0) ? (
@@ -659,7 +654,7 @@ export default function BranchSalesPage() {
           </div>
 
           <div className="surface-tile text-sm text-muted">
-            Grand Total: <span className="font-semibold text-brown">{currencyFormatter.format(grandTotal)}</span>
+            Grand Total: <span className="font-semibold text-brown">{formatCurrency(grandTotal)}</span>
           </div>
 
           <div className="flex justify-end gap-3">
@@ -709,7 +704,7 @@ export default function BranchSalesPage() {
               <span>Amount</span>
               <input
                 min="0"
-                step="0.01"
+                step="0.0001"
                 type="number"
                 value={expenseAmount}
                 onChange={(event) => setExpenseAmount(event.target.value)}

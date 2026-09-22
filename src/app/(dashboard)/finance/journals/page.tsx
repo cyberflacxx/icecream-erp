@@ -10,6 +10,7 @@ import { FinanceNav } from '@/components/finance/finance-nav';
 import { Button } from '@/components/ui/button';
 import { DataTable, FormDrawer, LoadingState } from '@/components/ui-library';
 import { useFinanceMeta, useFinanceMutation, useJournalEntries } from '@/hooks/finance/useFinanceResources';
+import { formatCurrency, MONEY_EPSILON } from '@/lib/money';
 import { API_ROUTES } from '@/lib/shared';
 
 interface JournalLine {
@@ -31,8 +32,6 @@ function emptyLine(): JournalLine {
     description: '',
   };
 }
-
-const currency = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
 
 function getReferenceHref(row: Record<string, unknown>) {
   const referenceId = String(row.referenceId ?? '');
@@ -87,7 +86,7 @@ export default function FinanceJournalsPage() {
       return;
     }
 
-    if (Math.abs(totals.variance) > 0.01) {
+    if (Math.abs(totals.variance) > MONEY_EPSILON) {
       setFormError('Debit and credit totals must balance before posting.');
       return;
     }
@@ -160,8 +159,8 @@ export default function FinanceJournalsPage() {
             },
           },
           { key: 'status', header: 'Status' },
-          { key: 'totalDebit', header: 'Debit', render: (row) => currency.format(Number(row.totalDebit ?? 0)) },
-          { key: 'totalCredit', header: 'Credit', render: (row) => currency.format(Number(row.totalCredit ?? 0)) },
+          { key: 'totalDebit', header: 'Debit', render: (row) => formatCurrency(Number(row.totalDebit ?? 0)) },
+          { key: 'totalCredit', header: 'Credit', render: (row) => formatCurrency(Number(row.totalCredit ?? 0)) },
           {
             key: 'actions',
             header: 'Actions',
@@ -273,7 +272,7 @@ export default function FinanceJournalsPage() {
                 </select>
                 <input
                   min="0"
-                  step="0.01"
+                  step="0.0001"
                   type="number"
                   value={line.debitAmount}
                   onChange={(event) =>
@@ -288,7 +287,7 @@ export default function FinanceJournalsPage() {
                 />
                 <input
                   min="0"
-                  step="0.01"
+                  step="0.0001"
                   type="number"
                   value={line.creditAmount}
                   onChange={(event) =>
@@ -327,9 +326,9 @@ export default function FinanceJournalsPage() {
           </div>
 
           <div className="surface-tile grid gap-2 text-sm text-muted sm:grid-cols-3">
-            <span>Debit: <strong className="text-brown">{currency.format(totals.totalDebit)}</strong></span>
-            <span>Credit: <strong className="text-brown">{currency.format(totals.totalCredit)}</strong></span>
-            <span>Variance: <strong className={Math.abs(totals.variance) <= 0.01 ? 'text-success' : 'text-error'}>{currency.format(totals.variance)}</strong></span>
+            <span>Debit: <strong className="text-brown">{formatCurrency(totals.totalDebit)}</strong></span>
+            <span>Credit: <strong className="text-brown">{formatCurrency(totals.totalCredit)}</strong></span>
+            <span>Variance: <strong className={Math.abs(totals.variance) <= MONEY_EPSILON ? 'text-success' : 'text-error'}>{formatCurrency(totals.variance)}</strong></span>
           </div>
 
           <div className="flex justify-end gap-3">

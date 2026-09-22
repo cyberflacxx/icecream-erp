@@ -1,4 +1,5 @@
 import { ensureNonNegative, toNumber } from './inventory';
+import { MONEY_EPSILON } from './money';
 
 export const FINANCE_ACCOUNT_TYPES = [
   'ASSET',
@@ -404,7 +405,7 @@ export function validateOpeningBalanceDraftLines(lines: OpeningBalanceDraftLine[
 
   const totalDebit = normalizedLines.reduce((sum, line) => sum + ensureNonNegative(line.debitAmount, 'debitAmount'), 0);
   const totalCredit = normalizedLines.reduce((sum, line) => sum + ensureNonNegative(line.creditAmount, 'creditAmount'), 0);
-  if (Math.abs(totalDebit - totalCredit) > 0.01) {
+  if (Math.abs(totalDebit - totalCredit) > MONEY_EPSILON) {
     return 'Opening balances must balance before posting.';
   }
 

@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
 import { summarizeBalanceSheetFromLedger } from '@/lib/finance';
 import { financeErrorMessage, loadLedgerLines } from '@/lib/finance-server';
+import { MONEY_EPSILON } from '@/lib/money';
 
 export async function GET(request: NextRequest) {
   const ctx = await getAuthContext();
@@ -27,7 +28,7 @@ export async function GET(request: NextRequest) {
         branchId: branchId ?? null,
         costCenterCode: costCenterCode ?? null,
       },
-      isBalanced: Math.abs(totals.assets - (totals.liabilities + totals.equity)) <= 0.01,
+      isBalanced: Math.abs(totals.assets - (totals.liabilities + totals.equity)) <= MONEY_EPSILON,
     });
   } catch (err) {
     return serverError(financeErrorMessage(err) || 'Internal server error');

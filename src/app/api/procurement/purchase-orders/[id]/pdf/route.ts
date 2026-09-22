@@ -1,11 +1,10 @@
 import { NextResponse } from 'next/server';
 
 import { can, forbidden, getAuthContext, notFound, serverError, unauthorized } from '@/lib/api-auth';
+import { formatCurrency } from '@/lib/money';
 import { createPurchaseOrderPdfDocument } from '@/lib/pdf';
 import { getCompanyProfile } from '@/lib/settings-server';
 import { createServiceRoleClient } from '@/lib/supabase/server';
-
-const currencyFormatter = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
 
 function formatDate(value: unknown, fallback = '-') {
   if (!value) return fallback;
@@ -157,8 +156,8 @@ export async function GET(
         description: item.description,
         qty: String(item.qty),
         tax: `${item.tax_rate.toFixed(2)}%`,
-        totalExVat: currencyFormatter.format(item.line_total),
-        unitPrice: currencyFormatter.format(item.unit_price),
+        totalExVat: formatCurrency(item.line_total),
+        unitPrice: formatCurrency(item.unit_price),
         uom: item.uom || '-',
       })),
       metadata: [
@@ -175,10 +174,10 @@ export async function GET(
       },
       title: 'PURCHASE ORDER',
       totals: [
-        { label: 'Total Net Price', value: currencyFormatter.format(Number(orderRes.data.subtotal ?? 0)) },
-        { label: 'Discount', value: currencyFormatter.format(Number(orderRes.data.discount_amount ?? 0)) },
-        { label: 'Tax', value: currencyFormatter.format(Number(orderRes.data.tax_amount ?? 0)) },
-        { label: 'TOTAL', value: currencyFormatter.format(Number(orderRes.data.total ?? 0)) },
+        { label: 'Total Net Price', value: formatCurrency(Number(orderRes.data.subtotal ?? 0)) },
+        { label: 'Discount', value: formatCurrency(Number(orderRes.data.discount_amount ?? 0)) },
+        { label: 'Tax', value: formatCurrency(Number(orderRes.data.tax_amount ?? 0)) },
+        { label: 'TOTAL', value: formatCurrency(Number(orderRes.data.total ?? 0)) },
       ],
     }));
     const fileName = `purchase-order-${sanitizeFileToken(String(orderRes.data.po_number ?? id), 'purchase-order')}.pdf`;

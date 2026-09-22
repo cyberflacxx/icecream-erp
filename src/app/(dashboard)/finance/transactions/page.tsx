@@ -9,8 +9,7 @@ import { FinanceNav } from '@/components/finance/finance-nav';
 import { Button } from '@/components/ui/button';
 import { DataTable, EmptyState, LoadingState } from '@/components/ui-library';
 import { useFinanceTransactions } from '@/hooks/finance/useFinanceResources';
-
-const currency = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
+import { formatCurrency } from '@/lib/money';
 
 export default function FinanceTransactionsPage() {
   const query = useFinanceTransactions();
@@ -45,7 +44,7 @@ export default function FinanceTransactionsPage() {
           { key: 'method', header: 'Method' },
           { key: 'counterparty', header: 'Account / Party' },
           { key: 'description', header: 'Description' },
-          { key: 'amount', header: 'Amount', render: (row) => currency.format(Number(row.amount ?? 0)) },
+          { key: 'amount', header: 'Amount', render: (row) => formatCurrency(Number(row.amount ?? 0)) },
           { key: 'status', header: 'Status' },
           {
             key: 'actions',

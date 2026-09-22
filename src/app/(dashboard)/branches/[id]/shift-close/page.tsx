@@ -19,12 +19,7 @@ import {
   useSubmitShiftClose
 } from '@/hooks/branch-operations';
 import { useUserContext } from '@/contexts/UserContext';
-
-const currencyFormatter = new Intl.NumberFormat('en-US', {
-  currency: 'USD',
-  minimumFractionDigits: 2,
-  style: 'currency'
-});
+import { formatCurrency } from '@/lib/money';
 
 function today() {
   return new Date().toISOString().slice(0, 10);
@@ -169,7 +164,7 @@ export default function BranchShiftClosePage() {
                     <span>Damaged Stock Value</span>
                     <input
                       min="0"
-                      step="0.01"
+                      step="0.0001"
                       type="number"
                       value={damagedStockValue}
                       onChange={(event) => setDamagedStockValue(event.target.value)}
@@ -181,7 +176,7 @@ export default function BranchShiftClosePage() {
                     <span>Actual Closing Stock</span>
                     <input
                       min="0"
-                      step="0.01"
+                      step="0.0001"
                       type="number"
                       value={actualClosingStock}
                       onChange={(event) => setActualClosingStock(event.target.value)}
@@ -206,7 +201,7 @@ export default function BranchShiftClosePage() {
                   <label className="space-y-1 rounded-2xl bg-white p-3 text-sm text-muted">
                     <span>Actual Cash</span>
                     <input
-                      step="0.01"
+                      step="0.0001"
                       type="number"
                       value={actualCash}
                       onChange={(event) => setActualCash(event.target.value)}
@@ -237,16 +232,16 @@ export default function BranchShiftClosePage() {
           ) : (
             <div className="space-y-3 rounded-2xl border border-border bg-cream/35 p-4 text-sm text-muted">
               <p>
-                Opening Stock: <strong className="text-brown">{currencyFormatter.format(shiftCloseDetail?.openingStockValue ?? 0)}</strong>
+                Opening Stock: <strong className="text-brown">{formatCurrency(shiftCloseDetail?.openingStockValue ?? 0)}</strong>
               </p>
               <p>
-                Expected Cash: <strong className="text-brown">{currencyFormatter.format(shiftCloseDetail?.expectedCash ?? 0)}</strong>
+                Expected Cash: <strong className="text-brown">{formatCurrency(shiftCloseDetail?.expectedCash ?? 0)}</strong>
               </p>
               <p>
-                Cash Variance: <strong className="text-brown">{currencyFormatter.format(shiftCloseDetail?.cashVariance ?? 0)}</strong>
+                Cash Variance: <strong className="text-brown">{formatCurrency(shiftCloseDetail?.cashVariance ?? 0)}</strong>
               </p>
               <p>
-                Stock Variance: <strong className="text-brown">{currencyFormatter.format(shiftCloseDetail?.stockVariance ?? 0)}</strong>
+                Stock Variance: <strong className="text-brown">{formatCurrency(shiftCloseDetail?.stockVariance ?? 0)}</strong>
               </p>
               {shiftClose.status === 'SUBMITTED' ? (
                 <div className="mt-4 flex items-center justify-between">
@@ -284,7 +279,7 @@ function Metric({ label, value, highlight = false }: { label: string; value: num
     >
       <p className="text-muted">{label}</p>
       <p className={highlight ? 'mt-1 font-semibold text-error' : 'mt-1 font-semibold text-brown'}>
-        {currencyFormatter.format(value)}
+        {formatCurrency(value)}
       </p>
     </div>
   );

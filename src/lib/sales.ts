@@ -1,4 +1,5 @@
 import { ensureNonNegative, ensurePositiveQuantity, toCsv, toNumber } from './inventory';
+import { MONEY_EPSILON } from './money';
 
 export type SalesLineInput = {
   discountPercent?: number | null;
@@ -253,7 +254,7 @@ export function validateSalesTenderSplit(totalAmount: number, tenders: SalesTend
     return sum + amount;
   }, 0);
 
-  return Math.abs(tenderTotal - normalizedTotal) <= 0.01 ? null : 'Tender totals must equal payment amount.';
+  return Math.abs(tenderTotal - normalizedTotal) <= MONEY_EPSILON ? null : 'Tender totals must equal payment amount.';
 }
 
 export function buildSalesInvoicePostingLines(input: {

@@ -5,6 +5,7 @@ import {
   isMissingTableError,
 } from '@/lib/postgrest-compat';
 import { createServiceRoleClient } from '@/lib/supabase/server';
+import { MONEY_EPSILON } from '@/lib/money';
 import {
   collectTemplatePlaceholders,
   isSeverityAtLeast,
@@ -1257,7 +1258,7 @@ export async function getNotificationAlertDashboard(ctx: NotificationContext) {
     });
     const overdueInvoices = invoices.filter((row) => String((row as NotificationRecord).due_date ?? '').slice(0, 10) < today);
     const qcFailures = inspections.filter((row) => ['FAILED', 'REJECTED'].includes(String((row as NotificationRecord).qc_status ?? '').toUpperCase()));
-    const branchVariances = shifts.filter((row) => Math.abs(Number((row as NotificationRecord).cash_variance ?? 0)) > 0.01 || Math.abs(Number((row as NotificationRecord).stock_variance ?? 0)) > 0.01);
+    const branchVariances = shifts.filter((row) => Math.abs(Number((row as NotificationRecord).cash_variance ?? 0)) > MONEY_EPSILON || Math.abs(Number((row as NotificationRecord).stock_variance ?? 0)) > MONEY_EPSILON);
     const criticalNotifications = await listNotifications({
       ctx,
       filters: {

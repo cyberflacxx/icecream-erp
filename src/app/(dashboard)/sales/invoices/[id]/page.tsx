@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button';
 import { LoadingState } from '@/components/ui-library';
 import { useAppAuth } from '@/hooks/useAppAuth';
 import { apiFetch } from '@/lib/api';
+import { formatCurrency } from '@/lib/money';
 
 type InvoiceDetail = {
   amount_paid?: number;
@@ -68,11 +69,6 @@ type InvoiceDetail = {
   total?: number | null;
   total_amount?: number | null;
 };
-
-const currencyFormatter = new Intl.NumberFormat('en-US', {
-  currency: 'USD',
-  style: 'currency',
-});
 
 export default function SalesInvoicePreviewPage({ params }: { params: { id: string } }) {
   const { getToken, isLoaded, isSignedIn } = useAppAuth();
@@ -210,9 +206,9 @@ export default function SalesInvoicePreviewPage({ params }: { params: { id: stri
                       <p className="text-xs text-slate-500">{line.items?.code ?? '-'}</p>
                     </td>
                     <td className="px-4 py-3 text-right">{Number(line.quantity ?? 0).toFixed(3)}</td>
-                    <td className="px-4 py-3 text-right">{currencyFormatter.format(Number(line.unit_price ?? 0))}</td>
-                    <td className="px-4 py-3 text-right">{currencyFormatter.format(0)}</td>
-                    <td className="px-4 py-3 text-right">{currencyFormatter.format(Number(line.total_price ?? 0))}</td>
+                    <td className="px-4 py-3 text-right">{formatCurrency(Number(line.unit_price ?? 0))}</td>
+                    <td className="px-4 py-3 text-right">{formatCurrency(0)}</td>
+                    <td className="px-4 py-3 text-right">{formatCurrency(Number(line.total_price ?? 0))}</td>
                   </tr>
                 ))}
               </tbody>
@@ -232,27 +228,27 @@ export default function SalesInvoicePreviewPage({ params }: { params: { id: stri
               <div className="space-y-3 text-sm">
                 <div className="flex items-center justify-between">
                   <span className="text-muted">Subtotal</span>
-                  <span>{currencyFormatter.format(totals.subtotal)}</span>
+                  <span>{formatCurrency(totals.subtotal)}</span>
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="text-muted">Discount</span>
-                  <span>{currencyFormatter.format(totals.discount)}</span>
+                  <span>{formatCurrency(totals.discount)}</span>
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="text-muted">Tax / VAT</span>
-                  <span>{currencyFormatter.format(totals.tax)}</span>
+                  <span>{formatCurrency(totals.tax)}</span>
                 </div>
                 <div className="flex items-center justify-between border-t border-[#b7d7bd] pt-3 text-base font-bold">
                   <span>Total</span>
-                  <span>{currencyFormatter.format(totals.grandTotal)}</span>
+                  <span>{formatCurrency(totals.grandTotal)}</span>
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="text-muted">Amount Paid</span>
-                  <span>{currencyFormatter.format(totals.amountPaid)}</span>
+                  <span>{formatCurrency(totals.amountPaid)}</span>
                 </div>
                 <div className="flex items-center justify-between border-t border-border/70 pt-3 text-base font-semibold">
                   <span>Balance Due</span>
-                  <span>{currencyFormatter.format(totals.balanceDue)}</span>
+                  <span>{formatCurrency(totals.balanceDue)}</span>
                 </div>
               </div>
             </div>

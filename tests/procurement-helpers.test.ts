@@ -3014,3 +3014,22 @@ test('workflow hardening migration widens money precision without targeting quan
   assert.doesNotMatch(migration, /public\./);
   assert.match(migration, /notify pgrst, 'reload schema'/i);
 });
+
+test('procurement payment UI exposes saved cash and bank accounts with useful empty states', () => {
+  const paymentsPage = fs.readFileSync('src/app/(dashboard)/procurement/payments/page.tsx', 'utf8');
+  const supplierPaymentsRoute = fs.readFileSync('src/app/api/procurement/supplier-payments/route.ts', 'utf8');
+
+  assert.match(paymentsPage, /\/api\/finance\/bank-accounts\?activeOnly=true/);
+  assert.match(paymentsPage, /\/api\/finance\/cash-accounts\?activeOnly=true/);
+  assert.match(paymentsPage, /value=\{formState\.bankAccountId\}/);
+  assert.match(paymentsPage, /value=\{formState\.cashAccountId\}/);
+  assert.match(paymentsPage, /account\.id/);
+  assert.match(paymentsPage, /Select bank account/);
+  assert.match(paymentsPage, /Select cash account/);
+
+  assert.match(supplierPaymentsRoute, /bank_account_id: bankAccountId/);
+  assert.match(supplierPaymentsRoute, /cash_account_id: cashAccountId/);
+  assert.match(supplierPaymentsRoute, /selectedAccountId: paymentSourceType === 'BANK' \? bankAccountId/);
+  assert.match(supplierPaymentsRoute, /id: String\(bankAccountResult\.data\.account_id\)/);
+  assert.match(supplierPaymentsRoute, /id: String\(cashAccountResult\.data\.account_id\)/);
+});

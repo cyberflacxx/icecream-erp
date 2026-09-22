@@ -27,6 +27,7 @@ import {
   type FinanceAccountType,
   FINANCE_ACCOUNT_TYPES,
 } from '@/lib/finance-foundation';
+import { formatCurrency } from '@/lib/money';
 import { API_ROUTES } from '@/lib/shared';
 
 type ChartAccountRow = Record<string, unknown>;
@@ -52,12 +53,6 @@ const DEFAULT_FORM_STATE: AccountFormState = {
   isActive: true,
   parentAccountId: null,
 };
-
-const currencyFormatter = new Intl.NumberFormat('en-US', {
-  currency: 'USD',
-  maximumFractionDigits: 2,
-  style: 'currency',
-});
 
 function mapRowToFormState(row: ChartAccountRow): AccountFormState {
   const accountType = String(row.account_type ?? row.type ?? 'ASSET').toUpperCase() as FinanceAccountType;
@@ -273,7 +268,7 @@ export default function ChartOfAccountsPage() {
                   </div>
                   <div className="text-sm text-[color:var(--app-muted)]">{row.accountType.replace(/_/g, ' ')}</div>
                   <div className="text-sm text-[color:var(--app-muted)]">{row.isActive ? 'Active' : 'Inactive'}</div>
-                  <div className="text-sm text-[color:var(--app-muted)]">{currencyFormatter.format(row.currentBalance)}</div>
+                  <div className="text-sm text-[color:var(--app-muted)]">{formatCurrency(row.currentBalance)}</div>
                   <div className="flex flex-wrap gap-2">
                     <Button asChild type="button" size="sm" variant="outline">
                       <Link href={`/finance/transactions?accountId=${row.id}`}>
@@ -309,7 +304,7 @@ export default function ChartOfAccountsPage() {
           { key: 'parentAccountCode', header: 'Parent' },
           { key: 'allowPosting', header: 'Posting', render: (row) => (row.allowPosting ? 'Posting' : 'Header') },
           { key: 'isActive', header: 'Status', render: (row) => (row.isActive ? 'Active' : 'Inactive') },
-          { key: 'currentBalance', header: 'Balance', render: (row) => currencyFormatter.format(Number(row.currentBalance ?? 0)) },
+          { key: 'currentBalance', header: 'Balance', render: (row) => formatCurrency(Number(row.currentBalance ?? 0)) },
         ]}
         data={filteredAccounts}
         emptyState={

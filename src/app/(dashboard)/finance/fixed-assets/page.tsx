@@ -8,8 +8,7 @@ import { FinanceNav } from '@/components/finance/finance-nav';
 import { Button } from '@/components/ui/button';
 import { ConfirmDialog, DataTable, EmptyState, FormDrawer, LoadingState } from '@/components/ui-library';
 import { useFinanceMutation, useFixedAssets } from '@/hooks/finance/useFinanceResources';
-
-const currency = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
+import { formatCurrency } from '@/lib/money';
 
 export default function FinanceFixedAssetsPage() {
   const query = useFixedAssets();
@@ -86,9 +85,9 @@ export default function FinanceFixedAssetsPage() {
           { key: 'name', header: 'Name' },
           { key: 'category', header: 'Category' },
           { key: 'purchase_date', header: 'Purchase Date' },
-          { key: 'purchase_cost', header: 'Cost', render: (row) => currency.format(Number(row.purchase_cost ?? 0)) },
-          { key: 'accumulated_dep', header: 'Accumulated Dep.', render: (row) => currency.format(Number(row.accumulated_dep ?? 0)) },
-          { key: 'current_value', header: 'Current Value', render: (row) => currency.format(Number(row.current_value ?? 0)) },
+          { key: 'purchase_cost', header: 'Cost', render: (row) => formatCurrency(Number(row.purchase_cost ?? 0)) },
+          { key: 'accumulated_dep', header: 'Accumulated Dep.', render: (row) => formatCurrency(Number(row.accumulated_dep ?? 0)) },
+          { key: 'current_value', header: 'Current Value', render: (row) => formatCurrency(Number(row.current_value ?? 0)) },
           { key: 'status', header: 'Status', render: (row) => String(row.status ?? 'ACTIVE') },
           {
             key: 'actions',
@@ -132,11 +131,11 @@ export default function FinanceFixedAssetsPage() {
           <div className="grid gap-4 sm:grid-cols-2">
             <label className="space-y-2 text-sm text-muted">
               <span>Current Value</span>
-              <input min="0" step="0.01" type="number" value={assetForm.currentValue} onChange={(event) => setAssetForm((current) => ({ ...current, currentValue: event.target.value }))} className="surface-input-soft" />
+              <input min="0" step="0.0001" type="number" value={assetForm.currentValue} onChange={(event) => setAssetForm((current) => ({ ...current, currentValue: event.target.value }))} className="surface-input-soft" />
             </label>
             <label className="space-y-2 text-sm text-muted">
               <span>Residual Value</span>
-              <input min="0" step="0.01" type="number" value={assetForm.residualValue} onChange={(event) => setAssetForm((current) => ({ ...current, residualValue: event.target.value }))} className="surface-input-soft" />
+              <input min="0" step="0.0001" type="number" value={assetForm.residualValue} onChange={(event) => setAssetForm((current) => ({ ...current, residualValue: event.target.value }))} className="surface-input-soft" />
             </label>
           </div>
           <label className="space-y-2 text-sm text-muted">

@@ -2,12 +2,13 @@
 
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
-import { AlertCircle, ArrowRight, Calendar, Clock, DollarSign, Loader2, Target, Users } from 'lucide-react';
+import { AlertCircle, ArrowRight, Calendar, Clock, DollarSign, Loader2, Repeat2, Target, Users } from 'lucide-react';
 
 import { PageHeader } from '@/components/dashboard/page-header';
 
 const quickLinks = [
   { href: '/hr/employees', label: 'Employees', desc: 'Employee master data', icon: Users },
+  { href: '/hr/transfers', label: 'Employee Transfers', desc: 'Move staff between assignments with audit history', icon: Repeat2 },
   { href: '/hr/attendance', label: 'Attendance', desc: 'Shift attendance and approvals', icon: Calendar },
   { href: '/hr/shifts', label: 'Shifts', desc: 'Shift definitions and schedules', icon: Clock },
   { href: '/hr/productivity', label: 'Productivity', desc: 'Output per operator and shift', icon: Target },

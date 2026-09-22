@@ -3,14 +3,15 @@ import { NextRequest, NextResponse } from 'next/server';
 import { badRequest, can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
 import { canFinanceAccountReceivePosting, normalizeFinanceAccountRecord } from '@/lib/finance-foundation';
 import { financeErrorMessage, isMissingFinanceColumn, isMissingFinanceTable, loadLedgerLines } from '@/lib/finance-server';
+import { formatMoneyAmount, MONEY_EPSILON } from '@/lib/money';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
 function validateBalance(lines: Array<{ debitAmount: number; creditAmount: number }>) {
   if (lines.length < 2) return 'Journal entry must have at least 2 lines';
   const totalDebit = lines.reduce((s, l) => s + (Number(l.debitAmount) || 0), 0);
   const totalCredit = lines.reduce((s, l) => s + (Number(l.creditAmount) || 0), 0);
-  if (Math.abs(totalDebit - totalCredit) > 0.01)
-    return `Journal entry is not balanced. Debit: ${totalDebit.toFixed(2)}, Credit: ${totalCredit.toFixed(2)}`;
+  if (Math.abs(totalDebit - totalCredit) > MONEY_EPSILON)
+    return `Journal entry is not balanced. Debit: ${formatMoneyAmount(totalDebit)}, Credit: ${formatMoneyAmount(totalCredit)}`;
   for (const l of lines) {
     if (l.debitAmount > 0 && l.creditAmount > 0) return 'A line cannot have both debit and credit amounts';
     if (!(l.debitAmount > 0) && !(l.creditAmount > 0)) return 'Each line must have either a debit or credit amount > 0';

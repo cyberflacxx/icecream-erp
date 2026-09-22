@@ -214,8 +214,8 @@ export default function FinanceExpensesPage() {
           />
           <input
             className="surface-input-soft"
-            min="0.01"
-            step="0.01"
+            min="0.0001"
+            step="0.0001"
             type="number"
             placeholder="Amount"
             value={form.amount}
