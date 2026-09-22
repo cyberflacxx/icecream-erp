@@ -23,6 +23,7 @@ import { useBatch, useBatches } from '@/hooks/production/useBatches';
 import { useBatchAction } from '@/hooks/production/useBatchAction';
 import { type ProductionMetaRecipe, useProductionMeta } from '@/hooks/production/useProductionMeta';
 import { useProductionRequest } from '@/hooks/production/useProductionRequest';
+import { formatCurrency } from '@/lib/money';
 import { buildProductionCostSummary, summarizeProductionMaterialCosts } from '@/lib/red-module-costing';
 
 const today = new Date().toISOString().slice(0, 10);
@@ -65,14 +66,6 @@ function asRows(value: unknown) {
 
 function formatNumber(value: unknown) {
   return Number(value ?? 0).toLocaleString(undefined, { maximumFractionDigits: 3 });
-}
-
-function formatCurrency(value: unknown) {
-  return Number(value ?? 0).toLocaleString(undefined, {
-    currency: 'USD',
-    minimumFractionDigits: 2,
-    style: 'currency',
-  });
 }
 
 function formatStatus(status: unknown) {

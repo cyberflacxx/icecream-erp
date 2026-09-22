@@ -2,7 +2,15 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { badRequest, can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
 import { workIdToEmail } from '@/lib/auth-roles';
-import { assignUserRole, generateAvailableWorkId, getPrimaryOrganizationId, resolveRegistrationRole, syncUserBranchAssignment, toStoredUserRole } from '@/lib/registration';
+import {
+  assignUserRole,
+  buildRegistrationUserAccountRecord,
+  generateAvailableWorkId,
+  getPrimaryOrganizationId,
+  resolveRegistrationRole,
+  syncUserBranchAssignment,
+  toStoredUserRole,
+} from '@/lib/registration';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 import { parseUserPhoneValue, serializeUserPhoneValue } from '@/lib/user-access-profile';
 
@@ -90,6 +98,8 @@ export async function POST(request: NextRequest) {
 
   const service = createServiceRoleClient();
   const schemaService = service.schema('icecream_erp');
+  let authUserId: string | null = null;
+  let profileId: string | null = null;
 
   try {
     const body = (await request.json().catch(() => ({}))) as {
@@ -139,6 +149,7 @@ export async function POST(request: NextRequest) {
       generateAvailableWorkId(schemaService),
       getPrimaryOrganizationId(schemaService),
     ]);
+    if (!organizationId) return serverError('Organization context is missing.');
     const syntheticEmail = workIdToEmail(workId);
 
     // Derive initial password from ID number (no dashes/spaces, lowercase)
@@ -155,6 +166,7 @@ export async function POST(request: NextRequest) {
     if (authError || !authData.user) {
       return serverError(authError?.message ?? 'Failed to create authentication account.');
     }
+    authUserId = authData.user.id;
 
     // Insert user profile
     const fullName = `${firstName.trim()} ${lastName.trim()}`;
@@ -178,22 +190,54 @@ export async function POST(request: NextRequest) {
       .single();
 
     if (profileError) {
-      await service.auth.admin.deleteUser(authData.user.id);
+      await service.auth.admin.deleteUser(authUserId);
       return serverError(profileError.message);
+    }
+    profileId = String(profile.id);
+
+    const { error: userAccountError } = await schemaService
+      .from('user_accounts')
+      .insert(buildRegistrationUserAccountRecord({
+        email: normalizedEmail,
+        firstName: firstName.trim(),
+        idNumber: idNumber.trim().toUpperCase(),
+        lastName: lastName.trim(),
+        organizationId,
+        roleId: role.id,
+        userProfileId: profileId,
+        workId,
+      }));
+
+    if (userAccountError) {
+      await schemaService.from('users').delete().eq('id', profileId);
+      await service.auth.admin.deleteUser(authUserId);
+      return serverError(userAccountError.message);
+    }
+
+    const { error: linkError } = await schemaService
+      .from('users')
+      .update({ user_account_id: profileId })
+      .eq('id', profileId);
+
+    if (linkError) {
+      await schemaService.from('user_accounts').delete().eq('id', profileId);
+      await schemaService.from('users').delete().eq('id', profileId);
+      await service.auth.admin.deleteUser(authUserId);
+      return serverError(linkError.message);
     }
 
     await assignUserRole({
       assignedBy: ctx.userId,
       roleId: role.id,
       service: schemaService,
-      userProfileId: String(profile.id),
+      userProfileId: profileId,
     });
     await syncUserBranchAssignment({
       assignedBy: ctx.userId,
       branchId: branchId ?? null,
       roleName: role.name,
       service: schemaService,
-      userProfileId: String(profile.id),
+      userProfileId: profileId,
     });
 
     try {
@@ -215,6 +259,17 @@ export async function POST(request: NextRequest) {
       branch: branchId ? await resolveBranchSummary(schemaService, branchId) : null,
     }, { status: 201 });
   } catch (err) {
+    if (profileId) {
+      await Promise.allSettled([
+        schemaService.from('user_branch_assignments').delete().eq('user_profile_id', profileId),
+        schemaService.from('user_roles').delete().eq('user_profile_id', profileId),
+        schemaService.from('user_accounts').delete().eq('id', profileId),
+        schemaService.from('users').delete().eq('id', profileId),
+      ]);
+    }
+    if (authUserId) {
+      await service.auth.admin.deleteUser(authUserId).catch(() => undefined);
+    }
     const message = err instanceof Error ? err.message : 'Internal server error';
     return serverError(message);
   }

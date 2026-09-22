@@ -47,12 +47,7 @@ import {
   useSupplierOptions,
 } from '@/hooks/procurement';
 import { usePermission } from '@/hooks/usePermission';
-
-const currencyFormatter = new Intl.NumberFormat('en-US', {
-  currency: 'USD',
-  minimumFractionDigits: 2,
-  style: 'currency'
-});
+import { formatCurrency } from '@/lib/money';
 const purchasableItemTypes = new Set([
   'RAW',
   'RAW_MATERIAL',
@@ -688,7 +683,7 @@ export default function PurchaseOrdersPage() {
                     <div className="rounded-2xl border border-border/80 bg-white/80 px-4 py-3 text-right shadow-sm">
                       <p className="text-xs uppercase tracking-[0.2em] text-muted">Order Total</p>
                       <p className="mt-2 text-2xl font-semibold text-brown">
-                        {currencyFormatter.format(row.total)}
+                        {formatCurrency(row.total)}
                       </p>
                     </div>
                   </div>
@@ -1153,19 +1148,19 @@ export default function PurchaseOrdersPage() {
             <div className="mt-4 grid gap-3 rounded-2xl border border-border/70 bg-[color:var(--app-bg-subtle)] p-4 sm:grid-cols-2 xl:grid-cols-4">
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted">Subtotal</p>
-                <p className="mt-1 text-base font-semibold text-[color:var(--app-text)]">{currencyFormatter.format(draftTotals.subtotal)}</p>
+                <p className="mt-1 text-base font-semibold text-[color:var(--app-text)]">{formatCurrency(draftTotals.subtotal)}</p>
               </div>
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted">Tax</p>
-                <p className="mt-1 text-base font-semibold text-[color:var(--app-text)]">{currencyFormatter.format(draftTotals.taxAmount)}</p>
+                <p className="mt-1 text-base font-semibold text-[color:var(--app-text)]">{formatCurrency(draftTotals.taxAmount)}</p>
               </div>
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted">Discount</p>
-                <p className="mt-1 text-base font-semibold text-[color:var(--app-text)]">{currencyFormatter.format(draftTotals.discountAmount)}</p>
+                <p className="mt-1 text-base font-semibold text-[color:var(--app-text)]">{formatCurrency(draftTotals.discountAmount)}</p>
               </div>
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted">Draft Total</p>
-                <p className="mt-1 text-base font-semibold text-[color:var(--app-accent-strong)]">{currencyFormatter.format(draftTotals.total)}</p>
+                <p className="mt-1 text-base font-semibold text-[color:var(--app-accent-strong)]">{formatCurrency(draftTotals.total)}</p>
               </div>
             </div>
           </section>

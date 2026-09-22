@@ -7,14 +7,9 @@ import { isMissingColumnError } from '@/lib/postgrest-compat';
 import { buildBranchSaleReceiptNumber, formatPaymentMethodLabel } from '@/lib/sales-payments';
 import { getCompanyProfile } from '@/lib/settings-server';
 import { createServiceRoleClient } from '@/lib/supabase/server';
+import { formatCurrency } from '@/lib/money';
 
 import { PrintOnLoad, PrintReceiptButton } from './print-on-load';
-
-const currencyFormatter = new Intl.NumberFormat('en-US', {
-  currency: 'USD',
-  minimumFractionDigits: 2,
-  style: 'currency',
-});
 
 function readParam(value: string | string[] | undefined, fallback = '') {
   if (Array.isArray(value)) return value[0] ?? fallback;
@@ -353,8 +348,8 @@ export default async function SalesPaymentReceiptPage({
                   <tr key={`${line.name}-${index}`} className="border-t border-border/60">
                     <td className="px-4 py-3">{line.name}</td>
                     <td className="px-4 py-3">{line.quantity.toFixed(3)}</td>
-                    <td className="px-4 py-3">{currencyFormatter.format(line.unitPrice)}</td>
-                    <td className="px-4 py-3">{currencyFormatter.format(line.lineTotal)}</td>
+                    <td className="px-4 py-3">{formatCurrency(line.unitPrice)}</td>
+                    <td className="px-4 py-3">{formatCurrency(line.lineTotal)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -393,7 +388,7 @@ function SummaryRow({ emphasized = false, label, value }: { emphasized?: boolean
   return (
     <div className={`flex items-center justify-between py-2 ${emphasized ? 'text-base font-semibold text-brown' : 'text-sm text-muted'}`}>
       <span>{label}</span>
-      <span>{currencyFormatter.format(Number.isFinite(value) ? value : 0)}</span>
+      <span>{formatCurrency(Number.isFinite(value) ? value : 0)}</span>
     </div>
   );
 }

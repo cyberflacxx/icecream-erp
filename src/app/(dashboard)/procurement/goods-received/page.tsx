@@ -8,6 +8,7 @@ import { useQueryClient } from '@tanstack/react-query';
 
 import { DataTable, EmptyState, FilterBar, FormDrawer, StatusBadge } from '@/components/ui-library';
 import { calculateAcceptedQuantity, resolveInventoryValue } from '@/lib/inventory';
+import { formatCurrency } from '@/lib/money';
 import { buildGoodsReceivedDraftPayload } from '@/lib/procurement-goods-received';
 import { PERMISSIONS } from '@/lib/shared';
 
@@ -71,11 +72,6 @@ interface FeedbackState {
   tone: 'error' | 'success';
 }
 
-const currencyFormatter = new Intl.NumberFormat('en-US', {
-  style: 'currency',
-  currency: 'USD',
-  minimumFractionDigits: 2,
-});
 const grnItemTypes = [
   'RAW',
   'RAW_MATERIAL',
@@ -282,10 +278,6 @@ export default function GoodsReceivedPage() {
     },
     { accepted: 0, damaged: 0, expected: 0, received: 0, rejected: 0, value: 0 },
   );
-
-  function formatCurrency(value: unknown) {
-    return currencyFormatter.format(Number(value ?? 0));
-  }
 
   function getSelectedItemMeta(itemId: string) {
     return itemOptions.find((candidate) => candidate.id === itemId) ?? null;

@@ -35,12 +35,7 @@ import { ChartCard, DataTable, EmptyState, LoadingState, StatCard } from '@/comp
 import { useFinanceDashboard } from '@/hooks/finance/useFinance';
 import { useAppAuth } from '@/hooks/useAppAuth';
 import { usePermission } from '@/hooks/usePermission';
-
-function formatCurrency(value: number) {
-  return value.toLocaleString(undefined, {
-    maximumFractionDigits: 2,
-  });
-}
+import { formatCurrency } from '@/lib/money';
 
 export default function FinancePage() {
   const { isLoaded, isSignedIn } = useAppAuth();

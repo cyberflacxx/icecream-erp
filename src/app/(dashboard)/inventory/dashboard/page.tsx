@@ -8,11 +8,7 @@ import { PageHeader } from '@/components/dashboard/page-header';
 import { InventoryNav } from '@/components/inventory/inventory-nav';
 import { EmptyState, StatusBadge } from '@/components/ui-library';
 import { useInventoryDashboard } from '@/hooks/inventory';
-
-const currencyFormatter = new Intl.NumberFormat('en-US', {
-  currency: 'USD',
-  style: 'currency',
-});
+import { formatCurrency } from '@/lib/money';
 
 export default function InventoryDashboardPage() {
   const dashboardQuery = useInventoryDashboard();
@@ -32,7 +28,7 @@ export default function InventoryDashboardPage() {
         <MetricCard
           icon={<Wallet className="h-5 w-5" />}
           label="Total stock value"
-          value={dashboardQuery.isLoading ? 'Loading...' : currencyFormatter.format(metrics?.totalStockValue ?? 0)}
+          value={dashboardQuery.isLoading ? 'Loading...' : formatCurrency(metrics?.totalStockValue ?? 0)}
           helper={dashboardQuery.isError ? dashboardError ?? 'Unable to load valuation' : 'Live balance valuation'}
         />
         <MetricCard
@@ -248,7 +244,7 @@ function ValueTile({ label, value }: { label: string; value: number }) {
   return (
     <div className="dashboard-blue-card-soft px-3.5 py-3">
       <p className="dashboard-blue-copy text-sm">{label}</p>
-      <p className="dashboard-blue-value mt-2 text-lg font-semibold">{currencyFormatter.format(value)}</p>
+      <p className="dashboard-blue-value mt-2 text-lg font-semibold">{formatCurrency(value)}</p>
     </div>
   );
 }

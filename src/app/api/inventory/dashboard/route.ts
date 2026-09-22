@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { type AuthContext, can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
 import {
+  calculateTotalStockValue,
   deriveSupplierShortages,
   isPendingInventoryApprovalStatus,
   normalizeStockMovementType,
@@ -70,14 +71,13 @@ function hasGlobalInventoryScope(ctx: AuthContext) {
 }
 
 function isInventoryApprovalRow(row: Record<string, unknown>) {
-  const entityType = String(row.entity_type ?? '').toLowerCase();
+  const entityType = String(row.entity_type ?? '').toLowerCase().replace(/^inventory\./, '');
   const moduleName = String(row.module_name ?? '').toLowerCase();
-  const documentType = String(row.document_type ?? '').toLowerCase();
+  const documentType = String(row.document_type ?? '').toLowerCase().replace(/^inventory\./, '');
 
   return (
     moduleName === 'inventory' ||
     INVENTORY_APPROVAL_ENTITY_TYPES.includes(entityType) ||
-    INVENTORY_APPROVAL_ENTITY_TYPES.includes(entityType.replace(/^inventory\./, '')) ||
     INVENTORY_APPROVAL_ENTITY_TYPES.includes(documentType)
   );
 }
@@ -233,7 +233,10 @@ export async function GET(request: NextRequest) {
       const warehouse = Array.isArray(relatedWarehouses) ? relatedWarehouses[0] : relatedWarehouses;
       return warehouse?.is_active !== false;
     });
-    const stockValueSummary = summarizeInventoryByType(activeBalances);
+    const stockValueSummary = {
+      ...summarizeInventoryByType(activeBalances),
+      totalStockValue: calculateTotalStockValue(activeBalances),
+    };
     const pendingInventoryApprovals = ((approvalsResult.data ?? []) as Array<Record<string, unknown>>)
       .filter(isInventoryApprovalRow)
       .filter((row) => isPendingInventoryApprovalStatus(row.status))

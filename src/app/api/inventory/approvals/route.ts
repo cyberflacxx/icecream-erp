@@ -55,7 +55,7 @@ function hasGlobalInventoryScope(ctx: AuthContext) {
 
 function isInventoryApproval(row: Row) {
   const moduleName = normalizeCode(row.module_name);
-  const documentType = normalizeCode(row.document_type);
+  const documentType = normalizeCode(row.document_type).replace(/^inventory\./, '');
   const entityType = normalizeCode(row.entity_type).replace(/^inventory\./, '');
 
   return moduleName === 'inventory' || INVENTORY_DOCUMENT_TYPES.has(documentType) || INVENTORY_DOCUMENT_TYPES.has(entityType);

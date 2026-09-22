@@ -15,6 +15,7 @@ import { usePermission } from '@/hooks/usePermission';
 import { useProductionMeta } from '@/hooks/production/useProductionMeta';
 import { useProductionOrderProducts } from '@/hooks/production/useProductionOrders';
 import { useProductionRequest } from '@/hooks/production/useProductionRequest';
+import { formatCurrency } from '@/lib/money';
 import { calculateRequiredMaterials, type MaterialRequirementInput } from '@/lib/production';
 import { API_ROUTES } from '@/lib/shared';
 
@@ -87,10 +88,6 @@ function buildInitialValues(order: Record<string, unknown> | null | undefined, b
 
 function formatNumber(value: number) {
   return value.toLocaleString(undefined, { maximumFractionDigits: 3 });
-}
-
-function formatMoney(value: number) {
-  return value.toLocaleString(undefined, { style: 'currency', currency: 'USD' });
 }
 
 export function ProductionOrderPlanningForm({
@@ -456,7 +453,7 @@ export function ProductionOrderPlanningForm({
             <SummaryRow label="BOM Code" value={String(selectedBom?.code ?? '')} />
             <SummaryRow label="BOM Version" value={String(selectedBom?.version ?? '')} />
             <SummaryRow label="Expected Output" value={selectedRecipe ? formatNumber(Number(selectedRecipe.expectedOutputQuantity ?? 0)) : ''} />
-            <SummaryRow label="Estimated Total Cost" value={formatMoney(estimatedTotalCost)} />
+            <SummaryRow label="Estimated Total Cost" value={formatCurrency(estimatedTotalCost)} />
             <SummaryRow label="Total Material Requirement" value={formatNumber(totalRequiredQuantity)} />
             <SummaryRow label="Total Shortage" value={formatNumber(totalShortageQuantity)} />
           </div>
@@ -496,7 +493,7 @@ export function ProductionOrderPlanningForm({
                     <td className={`py-3 pr-4 ${Number(row.shortageQuantity ?? 0) > 0 ? 'text-error' : 'text-success'}`}>
                       {formatNumber(Number(row.shortageQuantity ?? 0))}
                     </td>
-                    <td className="py-3">{formatMoney(Number(row.estimatedMaterialCost ?? 0))}</td>
+                    <td className="py-3">{formatCurrency(Number(row.estimatedMaterialCost ?? 0))}</td>
                   </tr>
                 ))}
               </tbody>

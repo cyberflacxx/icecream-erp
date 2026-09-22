@@ -8,6 +8,7 @@ import { ProductionNav } from '@/components/production/production-nav';
 import { Button } from '@/components/ui/button';
 import { useProductionReport } from '@/hooks/production/useProductionReport';
 import { downloadFromUrl } from '@/lib/export';
+import { formatCurrency } from '@/lib/money';
 import { API_ROUTES } from '@/lib/shared';
 import { DataTable, EmptyState, LoadingState } from '@/components/ui-library';
 
@@ -19,11 +20,6 @@ function formatNumber(value: unknown, digits = 3) {
   const amount = Number(value ?? 0);
   if (Number.isNaN(amount)) return '0';
   return amount.toFixed(digits);
-}
-
-function formatCurrency(value: unknown) {
-  const amount = Number(value ?? 0);
-  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(Number.isNaN(amount) ? 0 : amount);
 }
 
 export default function ProductionReportsPage() {

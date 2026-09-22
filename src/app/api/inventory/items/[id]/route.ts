@@ -11,6 +11,36 @@ import {
 } from '@/lib/api-auth';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
+function asSingleRow(value: unknown) {
+  return Array.isArray(value) ? value[0] : value;
+}
+
+async function enrichInventoryItem(
+  service: ReturnType<typeof createServiceRoleClient>,
+  row: Record<string, unknown>,
+) {
+  const categoryId = row.category_id ? String(row.category_id) : '';
+  const unitId = row.unit_of_measure_id ? String(row.unit_of_measure_id) : '';
+
+  const [categoryResult, unitResult] = await Promise.all([
+    categoryId
+      ? service.from('item_categories').select('id, name').eq('id', categoryId).maybeSingle()
+      : Promise.resolve({ data: null, error: null }),
+    unitId
+      ? service.from('units_of_measure').select('id, name, abbreviation').eq('id', unitId).maybeSingle()
+      : Promise.resolve({ data: null, error: null }),
+  ]);
+
+  if (categoryResult.error) throw categoryResult.error;
+  if (unitResult.error) throw unitResult.error;
+
+  return {
+    ...row,
+    item_categories: asSingleRow(categoryResult.data),
+    units_of_measure: asSingleRow(unitResult.data),
+  };
+}
+
 export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
@@ -73,14 +103,16 @@ export async function PATCH(
     .update(updateData)
     .eq('id', id)
     .select(
-      `id, code, name, description, item_type, is_active, reorder_level, reorder_quantity,
-       selling_price, track_expiry, unit_cost, created_at,
-       item_categories!category_id(id, name),
-       units_of_measure!unit_of_measure_id(id, name, abbreviation)`,
+      `id, code, name, description, category_id, unit_of_measure_id, item_type, is_active, reorder_level, reorder_quantity,
+       selling_price, track_expiry, unit_cost, created_at`,
     )
     .single();
 
   if (error) return serverError(error.message);
 
-  return NextResponse.json(data);
+  try {
+    return NextResponse.json(await enrichInventoryItem(service, data as Record<string, unknown>));
+  } catch (enrichmentError) {
+    return serverError(enrichmentError instanceof Error ? enrichmentError.message : 'Inventory item updated, but lookup enrichment failed.');
+  }
 }

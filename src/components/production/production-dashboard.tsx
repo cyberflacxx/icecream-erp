@@ -9,13 +9,10 @@ import { ProductionNav } from '@/components/production/production-nav';
 import { useProductionDashboard } from '@/hooks/production/useProduction';
 import { Button } from '@/components/ui/button';
 import { DataTable, EmptyState, LoadingState, StatCard, StatusBadge } from '@/components/ui-library';
+import { formatCurrency } from '@/lib/money';
 
 function formatNumber(value: number) {
   return value.toLocaleString(undefined, { maximumFractionDigits: 2 });
-}
-
-function formatMoney(value: number) {
-  return value.toLocaleString(undefined, { style: 'currency', currency: 'USD' });
 }
 
 export function ProductionDashboard() {
@@ -85,9 +82,9 @@ export function ProductionDashboard() {
         <StatCard title="Orders Requiring Materials" value={formatNumber(stats.ordersRequiringMaterials)} icon={<Boxes className="h-5 w-5" />} color="warning" />
         <StatCard title="Outstanding Material Qty" value={formatNumber(stats.outstandingMaterialQuantity)} icon={<Boxes className="h-5 w-5" />} color="brown" />
         <StatCard title="Outstanding Receipt Qty" value={formatNumber(stats.outstandingFinishedGoodsReceiptQuantity)} icon={<PackageCheck className="h-5 w-5" />} color="brown" />
-        <StatCard title="Planned Cost" value={formatMoney(stats.plannedCost)} icon={<TrendingUp className="h-5 w-5" />} />
-        <StatCard title="Actual Cost" value={formatMoney(stats.actualCost)} icon={<TrendingUp className="h-5 w-5" />} color="warning" />
-        <StatCard title="Cost Variance" value={formatMoney(stats.costVariance)} icon={<TrendingUp className="h-5 w-5" />} color={stats.costVariance > 0 ? 'warning' : 'success'} />
+        <StatCard title="Planned Cost" value={formatCurrency(stats.plannedCost)} icon={<TrendingUp className="h-5 w-5" />} />
+        <StatCard title="Actual Cost" value={formatCurrency(stats.actualCost)} icon={<TrendingUp className="h-5 w-5" />} color="warning" />
+        <StatCard title="Cost Variance" value={formatCurrency(stats.costVariance)} icon={<TrendingUp className="h-5 w-5" />} color={stats.costVariance > 0 ? 'warning' : 'success'} />
       </div>
 
       <div className="grid gap-6 xl:grid-cols-3">

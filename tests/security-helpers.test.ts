@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import test from 'node:test';
 
 import {
@@ -299,6 +300,16 @@ test('registration user account payload matches live icecream_erp.user_accounts 
     work_id: 'AQI-20260001',
   });
   assert.equal('user_profile_id' in record, false);
+});
+
+test('settings user creation route creates and links user_accounts with cleanup guards', () => {
+  const route = fs.readFileSync('src/app/api/settings/users/route.ts', 'utf8');
+
+  assert.match(route, /buildRegistrationUserAccountRecord/);
+  assert.match(route, /\.from\('user_accounts'\)\s*\.\s*insert/);
+  assert.match(route, /user_account_id:\s*profileId/);
+  assert.match(route, /Promise\.allSettled\(\[/);
+  assert.match(route, /service\.auth\.admin\.deleteUser\(authUserId\)/);
 });
 
 test('registration error helpers keep server logs structured and frontend messages safe', () => {

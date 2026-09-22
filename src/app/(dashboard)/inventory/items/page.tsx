@@ -16,12 +16,7 @@ import { Button } from '@/components/ui/button';
 import { useCreateItem, useInventoryMeta, useItems, type InventoryItemRow } from '@/hooks/inventory';
 import { useInventoryRequest } from '@/hooks/inventory/useInventoryRequest';
 import { usePermission } from '@/hooks/usePermission';
-
-const currencyFormatter = new Intl.NumberFormat('en-US', {
-  style: 'currency',
-  currency: 'USD',
-  minimumFractionDigits: 2
-});
+import { formatCurrency } from '@/lib/money';
 
 const numberFormatter = new Intl.NumberFormat('en-US', {
   minimumFractionDigits: 0,
@@ -303,7 +298,7 @@ export default function InventoryItemsPage() {
           {
             key: 'unitCost',
             header: 'Unit Cost',
-            render: (row) => currencyFormatter.format(Number(row.unitCost ?? 0))
+            render: (row) => formatCurrency(row.unitCost ?? 0)
           },
           {
             key: 'reorderLevel',
@@ -513,7 +508,7 @@ export default function InventoryItemsPage() {
               <input
                 required
                 min="0"
-                step="0.01"
+                step="0.001"
                 type="number"
                 value={formState.unitCost}
                 onChange={(event) =>
@@ -527,7 +522,7 @@ export default function InventoryItemsPage() {
               <input
                 required
                 min="0"
-                step="0.01"
+                step="0.001"
                 type="number"
                 value={formState.sellingPrice}
                 onChange={(event) =>

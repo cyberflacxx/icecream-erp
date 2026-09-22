@@ -27,6 +27,7 @@ import {
   resolveWarehouseStorageType,
   summarizeInventoryByType,
 } from '../src/lib/inventory';
+import { formatCurrency, formatMoneyAmount } from '../src/lib/money';
 import {
   applyInventoryDelta,
   buildInventoryAdjustmentFailureResponse,
@@ -751,6 +752,13 @@ test('transfer page collects receipt lines before calling the atomic completion 
   assert.match(page, /Dispatch & Receive/);
   assert.match(page, /Receive Remaining/);
   assert.match(page, /\/api\/inventory\/transfers\/\$\{receiptState\.transferId\}\/complete/);
+});
+
+test('currency helpers display monetary values with three decimals', () => {
+  assert.equal(formatCurrency(0), '$0.000');
+  assert.equal(formatCurrency(1.5), '$1.500');
+  assert.equal(formatCurrency(1250.75), '$1,250.750');
+  assert.equal(formatMoneyAmount(25.125), '25.125');
 });
 
 test('stock transfer receipt semantics migration preserves explicit zero sent and received quantities', () => {

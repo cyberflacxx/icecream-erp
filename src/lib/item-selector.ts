@@ -52,8 +52,8 @@ export function buildItemSelectorLabel(option: Pick<
   const stockLabel = option.hasStockRecord
     ? `On Hand ${(option.quantityOnHand ?? 0).toFixed(3)} | Reserved ${(option.quantityReserved ?? 0).toFixed(3)} | Available ${(option.quantityAvailable ?? 0).toFixed(3)}`
     : 'No stock record';
-  const costLabel = option.currentInventoryCost === null ? 'Cost not configured' : `Cost ${option.currentInventoryCost.toFixed(2)}`;
-  const priceLabel = option.sellingPrice === null ? 'Price n/a' : `Price ${option.sellingPrice.toFixed(2)}`;
+  const costLabel = option.currentInventoryCost === null ? 'Cost not configured' : `Cost ${formatMoneyAmount(option.currentInventoryCost)}`;
+  const priceLabel = option.sellingPrice === null ? 'Price n/a' : `Price ${formatMoneyAmount(option.sellingPrice)}`;
   const typeLabel = option.itemType ? option.itemType.split('_').join(' ') : 'ITEM';
   const warehouseLabel = option.warehouseName ? `Warehouse ${option.warehouseName}` : 'Warehouse not assigned';
 
@@ -167,3 +167,4 @@ export function buildItemSelectorOptions(input: {
     return option;
   });
 }
+import { formatMoneyAmount } from './money';

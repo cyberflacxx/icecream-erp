@@ -9,12 +9,7 @@ import { FinanceNav } from '@/components/finance/finance-nav';
 import { Button } from '@/components/ui/button';
 import { FormDrawer, LoadingState } from '@/components/ui-library';
 import { useFinanceExpenses, useFinanceMeta, useFinanceMutation } from '@/hooks/finance/useFinanceResources';
-
-const currencyFormatter = new Intl.NumberFormat('en-US', {
-  currency: 'USD',
-  minimumFractionDigits: 2,
-  style: 'currency',
-});
+import { formatCurrency } from '@/lib/money';
 
 type ExpenseFormState = {
   accountId: string;
@@ -162,7 +157,7 @@ export default function FinanceExpensesPage() {
                     <td className="px-4 py-3">{text(row, 'expense_date')}</td>
                     <td className="px-4 py-3">{text(row, 'category')}</td>
                     <td className="px-4 py-3">{text(row, 'description')}</td>
-                    <td className="px-4 py-3">{currencyFormatter.format(Number(row.amount ?? 0))}</td>
+                    <td className="px-4 py-3">{formatCurrency(row.amount ?? 0)}</td>
                     <td className="px-4 py-3">{text(row, 'payment_method')}</td>
                     <td className="px-4 py-3">{status}</td>
                     <td className="px-4 py-3">
