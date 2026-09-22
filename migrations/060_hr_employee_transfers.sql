@@ -5,25 +5,25 @@ set search_path = icecream_erp, public;
 
 create table if not exists icecream_erp.hr_employee_transfers (
   id uuid primary key default gen_random_uuid(),
-  organization_id uuid not null,
+  organization_id uuid not null references icecream_erp.organizations(id),
   employee_id uuid not null references icecream_erp.employees(id),
-  from_branch_id uuid null,
-  to_branch_id uuid null,
-  from_warehouse_id uuid null,
-  to_warehouse_id uuid null,
+  from_branch_id uuid null references icecream_erp.branches(id),
+  to_branch_id uuid null references icecream_erp.branches(id),
+  from_warehouse_id uuid null references icecream_erp.warehouses(id),
+  to_warehouse_id uuid null references icecream_erp.warehouses(id),
   from_department text null,
   to_department text null,
   effective_date date not null,
   reason text null,
   notes text null,
   status text not null default 'PENDING',
-  requested_by uuid null,
+  requested_by uuid null references icecream_erp.users(id),
   requested_at timestamptz not null default now(),
-  approved_by uuid null,
+  approved_by uuid null references icecream_erp.users(id),
   approved_at timestamptz null,
-  completed_by uuid null,
+  completed_by uuid null references icecream_erp.users(id),
   completed_at timestamptz null,
-  cancelled_by uuid null,
+  cancelled_by uuid null references icecream_erp.users(id),
   cancelled_at timestamptz null,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
@@ -40,3 +40,4 @@ comment on table icecream_erp.hr_employee_transfers is
   'State-aware employee assignment transfers. Completion updates the existing employee assignment; it never creates duplicate employees.';
 
 notify pgrst, 'reload schema';
+notify pgrst, 'reload config';

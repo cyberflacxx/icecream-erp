@@ -3007,12 +3007,18 @@ test('supplier payment posting is idempotent and keeps saved cash or bank accoun
 test('workflow hardening migration widens money precision without targeting quantities', () => {
   const migration = fs.readFileSync('migrations/059_workflow_idempotency_and_money_precision.sql', 'utf8');
 
-  assert.match(migration, /table_schema = 'icecream_erp'/);
   assert.match(migration, /numeric\(24,4\)/);
-  assert.match(migration, /column_name ~\*\s*'\(amount\|cost\|price/);
-  assert.match(migration, /column_name !~\*\s*'\(quantity\|qty\|percent/);
+  assert.match(migration, /alter table if exists icecream_erp\.purchase_orders alter column total_amount type numeric\(24,4\)/i);
+  assert.match(migration, /alter table if exists icecream_erp\.supplier_payments alter column amount_paid type numeric\(24,4\)/i);
+  assert.match(migration, /alter table if exists icecream_erp\.stock_movements alter column unit_cost type numeric\(24,4\)/i);
+  assert.doesNotMatch(migration, /information_schema\.columns/i);
+  assert.doesNotMatch(migration, /column_name ~\*/i);
+  assert.doesNotMatch(migration, /alter column quantity type numeric\(24,4\)/i);
+  assert.doesNotMatch(migration, /alter column tax_rate type numeric\(24,4\)/i);
+  assert.doesNotMatch(migration, /alter column exchange_rate type numeric\(24,4\)/i);
   assert.doesNotMatch(migration, /public\./);
   assert.match(migration, /notify pgrst, 'reload schema'/i);
+  assert.match(migration, /notify pgrst, 'reload config'/i);
 });
 
 test('procurement payment UI exposes saved cash and bank accounts with useful empty states', () => {

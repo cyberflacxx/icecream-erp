@@ -145,6 +145,10 @@ test('employee transfer workflow updates assignment without creating duplicate e
   assert.match(hrPage, /\/hr\/transfers/);
 
   assert.match(migration, /create table if not exists icecream_erp\.hr_employee_transfers/i);
+  assert.match(migration, /organization_id uuid not null references icecream_erp\.organizations\(id\)/i);
+  assert.match(migration, /to_branch_id uuid null references icecream_erp\.branches\(id\)/i);
+  assert.match(migration, /to_warehouse_id uuid null references icecream_erp\.warehouses\(id\)/i);
+  assert.match(migration, /requested_by uuid null references icecream_erp\.users\(id\)/i);
   assert.match(migration, /hr_employee_transfers_one_pending_uq/i);
   assert.match(migration, /where status in \('PENDING', 'APPROVED'\)/i);
   assert.doesNotMatch(migration, /create table if not exists public\./i);
