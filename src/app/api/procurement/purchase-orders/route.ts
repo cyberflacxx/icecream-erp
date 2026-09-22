@@ -21,6 +21,7 @@ import {
   resolvePurchaseOrderItemUnitPrice,
 } from '@/lib/procurement-purchase-orders';
 import { isMissingColumnError } from '@/lib/postgrest-compat';
+import { recordAuditLog } from '@/lib/security-server';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
 const LEGACY_PURCHASE_ORDER_ITEM_COLUMNS = [
@@ -84,6 +85,7 @@ function stripMissingOptionalHeaderColumn<T extends Record<string, unknown>>(pay
     'approval_notes',
     'currency',
     'delivery_address',
+    'idempotency_key',
     'supplier_quote',
   ] as const) {
     if (isMissingColumnError(error, 'purchase_orders', column)) {
@@ -137,6 +139,47 @@ function poCreateFailure(
       operation: details.operation,
     },
   }, { status });
+}
+
+async function loadPurchaseOrderByIdempotencyKey(
+  service: ReturnType<typeof createServiceRoleClient>,
+  organizationId: string,
+  idempotencyKey: string,
+) {
+  if (!idempotencyKey) return { data: null, error: null };
+
+  const result = await service
+    .from('purchase_orders')
+    .select('id, po_number, requisition_id')
+    .eq('organization_id', organizationId)
+    .eq('idempotency_key', idempotencyKey)
+    .maybeSingle();
+
+  if (result.error && isMissingColumnError(result.error, 'purchase_orders', 'idempotency_key')) {
+    return { data: null, error: null };
+  }
+
+  return result;
+}
+
+function purchaseOrderReplayResponse(row: Record<string, unknown>, requisitionId: string | null) {
+  const orderId = String(row.id);
+  const poNumber = String(row.po_number ?? '');
+  const linkedRequisitionId = row.requisition_id ? String(row.requisition_id) : requisitionId;
+
+  return NextResponse.json({
+    success: true,
+    idempotentReplay: true,
+    data: {
+      id: orderId,
+      purchase_order_id: orderId,
+      purchaseOrderId: orderId,
+      po_number: poNumber,
+      poNumber,
+      requisition_id: linkedRequisitionId,
+      requisitionId: linkedRequisitionId,
+    },
+  });
 }
 
 async function rollbackCreatedPurchaseOrder(
@@ -420,6 +463,7 @@ export async function POST(request: NextRequest) {
     approverEmail?: string | null;
     approverUserId?: string | null;
     approvalNotes?: string | null;
+    idempotencyKey?: string | null;
     items: Array<{
       itemId?: string;
       item_id?: string;
@@ -466,6 +510,7 @@ export async function POST(request: NextRequest) {
   const deliveryAddress = firstString(body.delivery_address, body.deliveryAddress, body.warehouse_id, body.warehouseId) || null;
   const supplierQuote = firstString(body.supplier_quote, body.supplierQuote, body.quote_reference, body.quoteReference) || null;
   const currency = firstString(body.currency) || 'USD';
+  const idempotencyKey = firstString(body.idempotencyKey, request.headers.get('idempotency-key')) || crypto.randomUUID();
   const normalizedItems = (body.items ?? []).map((item) => ({
       itemId: normalizePurchaseOrderItemId(item),
       quantityOrdered: normalizePurchaseOrderQuantity(item),
@@ -496,6 +541,22 @@ export async function POST(request: NextRequest) {
   }
 
   try {
+    const replay = await loadPurchaseOrderByIdempotencyKey(service, ctx.organizationId, idempotencyKey);
+    if (replay.error) return serverError(replay.error.message);
+    if (replay.data) {
+      void recordAuditLog({
+        action: 'PURCHASE_ORDER_IDEMPOTENT_REPLAY',
+        entityId: String(replay.data.id),
+        entityType: 'purchase_order',
+        newValues: { idempotencyKey },
+        organizationId: ctx.organizationId,
+        userAgent: request.headers.get('user-agent'),
+        userProfileId: ctx.userAccountId ?? ctx.userId,
+      }).catch(() => undefined);
+
+      return purchaseOrderReplayResponse(replay.data as Record<string, unknown>, requisitionId || null);
+    }
+
     // Validate supplier
     let { data: supplier, error: supErr } = await service
       .from('suppliers')
@@ -780,6 +841,7 @@ export async function POST(request: NextRequest) {
       subtotal,
       tax_amount: taxAmount,
       discount_amount: discountAmount,
+      idempotency_key: idempotencyKey,
       total,
       approved_at: null,
       approved_by: null,
@@ -795,6 +857,13 @@ export async function POST(request: NextRequest) {
     }
 
     if (orderInsert.error) {
+      if (orderInsert.error.code === '23505') {
+        const replay = await loadPurchaseOrderByIdempotencyKey(service, ctx.organizationId, idempotencyKey);
+        if (replay.data) {
+          return purchaseOrderReplayResponse(replay.data as Record<string, unknown>, requisitionId || null);
+        }
+      }
+
       logPurchaseOrderFailure('purchase_orders.insert', {
         firstLine: resolvedItems[0] ?? null,
         header: {
@@ -879,6 +948,22 @@ export async function POST(request: NextRequest) {
       .select('*, purchase_order_items(*), suppliers(id, name)')
       .eq('id', orderId)
       .single();
+
+    void recordAuditLog({
+      action: 'PURCHASE_ORDER_CREATED',
+      entityId: orderId,
+      entityType: 'purchase_order',
+      newValues: {
+        idempotencyKey,
+        lineCount: resolvedItems.length,
+        requisitionId: requisitionId || null,
+        supplierId,
+        total,
+      },
+      organizationId: ctx.organizationId,
+      userAgent: request.headers.get('user-agent'),
+      userProfileId: ctx.userAccountId ?? ctx.userId,
+    }).catch(() => undefined);
 
     return NextResponse.json({
       success: true,

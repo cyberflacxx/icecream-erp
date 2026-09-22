@@ -74,11 +74,11 @@ export async function POST(request: NextRequest) {
     goods_received_note_id?: string | null;
     grn_id?: string | null;
     grnId?: string | null;
+    idempotencyKey?: string | null;
     paymentDate?: string;
     paymentMethod?: string;
     paymentSourceType?: string;
     payment_source_type?: string;
-    paymentMethod?: string;
     pettyCashRequestId?: string | null;
     petty_cash_request_id?: string | null;
     purchaseOrderId?: string | null;
@@ -89,7 +89,6 @@ export async function POST(request: NextRequest) {
     supplierId?: string;
     supplierInvoiceId?: string;
     supplier_invoice_id?: string;
-    supplierInvoiceId?: string;
   };
 
   const supplierId = normalizeStringValue(body.supplier_id, body.supplierId);
@@ -107,6 +106,7 @@ export async function POST(request: NextRequest) {
   const pettyCashRequestId = normalizeStringValue(body.petty_cash_request_id, body.pettyCashRequestId) || null;
   const approvalNotes = typeof body.approvalNotes === 'string' ? body.approvalNotes.trim() || null : null;
   const amountPaid = Number(body.amountPaid ?? body.amount ?? 0);
+  const idempotencyKey = normalizeStringValue(body.idempotencyKey, request.headers.get('idempotency-key')) || crypto.randomUUID();
 
   if (!supplierId || !supplierInvoiceId || !paymentSourceType || !amountPaid) {
     return badRequest('supplierId, supplierInvoiceId, paymentMethod, and amountPaid are required.');
@@ -129,6 +129,30 @@ export async function POST(request: NextRequest) {
   if (tableCheck.error?.message.includes("Could not find the table 'icecream_erp.supplier_payments'")) {
     return serverError('Supplier payments table is not deployed in Supabase yet.');
   }
+
+  const replayPayment = await service
+    .from('supplier_payments')
+    .select('id, supplier_invoice_id, amount_paid, payment_method, payment_source_type, reference_number, status')
+    .eq('organization_id', ctx.organizationId)
+    .eq('idempotency_key', idempotencyKey)
+    .maybeSingle();
+  if (replayPayment.error && !replayPayment.error.message.includes('idempotency_key')) {
+    return serverError(replayPayment.error.message);
+  }
+  if (replayPayment.data) {
+    void recordAuditLog({
+      action: 'SUPPLIER_PAYMENT_IDEMPOTENT_REPLAY',
+      entityId: String(replayPayment.data.id),
+      entityType: 'supplier_payment',
+      newValues: { idempotencyKey, supplierInvoiceId },
+      organizationId: ctx.organizationId,
+      userAgent: request.headers.get('user-agent'),
+      userProfileId: ctx.userAccountId ?? ctx.userId,
+    }).catch(() => undefined);
+
+    return NextResponse.json({ ...replayPayment.data, idempotentReplay: true });
+  }
+
   const [invoiceResult, paymentsResult] = await Promise.all([
     service
       .from('supplier_invoices')
@@ -191,33 +215,56 @@ export async function POST(request: NextRequest) {
     (invoiceResult.data.grn_id ? String(invoiceResult.data.grn_id) : '') ||
     null;
 
-  const { data, error } = await service
+  const paymentPayload: Record<string, unknown> = {
+    amount_paid: amountPaid,
+    approval_notes: approvalNotes,
+    approved_at: new Date().toISOString(),
+    approved_by: ctx.userId,
+    bank_account_id: bankAccountId,
+    cash_account_id: cashAccountId,
+    created_by: ctx.userId,
+    goods_received_note_id: linkedGrnId,
+    grn_id: linkedGrnId,
+    idempotency_key: idempotencyKey,
+    organization_id: ctx.organizationId,
+    payment_source_type: paymentSourceType,
+    payment_date: body.paymentDate ?? new Date().toISOString().slice(0, 10),
+    payment_method: paymentSourceType,
+    petty_cash_request_id: pettyCashRequestId,
+    purchase_order_id: linkedPurchaseOrderId,
+    reference_number: body.referenceNumber ?? null,
+    remarks: body.remarks ?? null,
+    status: 'POSTED',
+    supplier_id: supplierId,
+    supplier_invoice_id: supplierInvoiceId,
+  };
+
+  let insertResult = await service
     .from('supplier_payments')
-    .insert({
-      amount_paid: amountPaid,
-      approval_notes: approvalNotes,
-      approved_at: new Date().toISOString(),
-      approved_by: ctx.userId,
-      bank_account_id: bankAccountId,
-      cash_account_id: cashAccountId,
-      created_by: ctx.userId,
-      goods_received_note_id: linkedGrnId,
-      grn_id: linkedGrnId,
-      organization_id: ctx.organizationId,
-      payment_source_type: paymentSourceType,
-      payment_date: body.paymentDate ?? new Date().toISOString().slice(0, 10),
-      payment_method: paymentSourceType,
-      petty_cash_request_id: pettyCashRequestId,
-      purchase_order_id: linkedPurchaseOrderId,
-      reference_number: body.referenceNumber ?? null,
-      remarks: body.remarks ?? null,
-      status: 'POSTED',
-      supplier_id: supplierId,
-      supplier_invoice_id: supplierInvoiceId,
-    })
+    .insert(paymentPayload)
     .select()
     .single();
 
+  if (insertResult.error && insertResult.error.message.includes('idempotency_key')) {
+    const { idempotency_key: _idempotencyKey, ...legacyPayload } = paymentPayload;
+    insertResult = await service
+      .from('supplier_payments')
+      .insert(legacyPayload)
+      .select()
+      .single();
+  }
+
+  if (insertResult.error?.code === '23505') {
+    const replay = await service
+      .from('supplier_payments')
+      .select('id, supplier_invoice_id, amount_paid, payment_method, payment_source_type, reference_number, status')
+      .eq('organization_id', ctx.organizationId)
+      .eq('idempotency_key', idempotencyKey)
+      .maybeSingle();
+    if (replay.data) return NextResponse.json({ ...replay.data, idempotentReplay: true });
+  }
+
+  const { data, error } = insertResult;
   if (error) return serverError(error.message);
   const sourceReference = buildFinanceSourceReference('procurement', 'supplier_payment', String(data.id));
 
@@ -291,6 +338,7 @@ export async function POST(request: NextRequest) {
     newValues: {
       amount: amountPaid,
       goodsReceivedNoteId: linkedGrnId,
+      idempotencyKey,
       paymentSourceType,
       purchaseOrderId: linkedPurchaseOrderId,
       supplierId,

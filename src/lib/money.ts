@@ -1,4 +1,4 @@
-export const MONEY_DECIMAL_PLACES = 3;
+export const MONEY_DECIMAL_PLACES = 4;
 
 export const defaultCurrencyCode = 'USD';
 

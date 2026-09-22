@@ -12,9 +12,8 @@ import { Button } from '@/components/ui/button';
 import { DataTable, EmptyState, FormDrawer, StatusBadge } from '@/components/ui-library';
 import { useProcurementRequest, useSupplierInvoices, useSupplierPayments } from '@/hooks/procurement';
 import { usePermission } from '@/hooks/usePermission';
+import { formatCurrency, formatMoneyAmount } from '@/lib/money';
 import { PERMISSIONS } from '@/lib/shared';
-
-const currencyFormatter = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
 
 const paymentSources = [
   { label: 'Bank', value: 'BANK' },
@@ -55,6 +54,12 @@ export default function ProcurementPaymentsPage() {
   const [formState, setFormState] = useState(initialFormState);
   const [formError, setFormError] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<FeedbackState | null>(null);
+  const [isSubmittingPayment, setIsSubmittingPayment] = useState(false);
+  const [paymentIdempotencyKey, setPaymentIdempotencyKey] = useState(() =>
+    typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : `supplier-payment-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+  );
 
   const payableInvoices = useMemo(
     () => (invoicesQuery.data ?? []).filter((invoice) => invoice.balance > 0),
@@ -94,7 +99,7 @@ export default function ProcurementPaymentsPage() {
 
     setFormState((current) => ({
       ...current,
-      amountPaid: current.amountPaid || requestedInvoice.balance.toFixed(2),
+      amountPaid: current.amountPaid || formatMoneyAmount(requestedInvoice.balance),
       supplierInvoiceId: requestedInvoice.id,
     }));
     setIsDrawerOpen(true);
@@ -103,6 +108,7 @@ export default function ProcurementPaymentsPage() {
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (isSubmittingPayment) return;
     setFeedback(null);
 
     if (!selectedInvoice) {
@@ -112,10 +118,11 @@ export default function ProcurementPaymentsPage() {
 
     const amountPaid = Number(formState.amountPaid);
     if (!Number.isFinite(amountPaid) || amountPaid <= 0 || amountPaid > selectedInvoice.balance) {
-      setFormError(`Amount must be greater than zero and not more than ${currencyFormatter.format(selectedInvoice.balance)}.`);
+      setFormError(`Amount must be greater than zero and not more than ${formatCurrency(selectedInvoice.balance)}.`);
       return;
     }
 
+    setIsSubmittingPayment(true);
     try {
       await request('/api/procurement/supplier-payments', {
         body: JSON.stringify({
@@ -123,6 +130,7 @@ export default function ProcurementPaymentsPage() {
           bankAccountId: formState.paymentMethod === 'BANK' ? formState.bankAccountId || null : null,
           cashAccountId: formState.paymentMethod === 'CASH' ? formState.cashAccountId || null : null,
           goodsReceivedNoteId: selectedInvoice.goodsReceivedNoteId,
+          idempotencyKey: paymentIdempotencyKey,
           paymentDate: formState.paymentDate || undefined,
           paymentMethod: formState.paymentMethod,
           pettyCashRequestId: formState.paymentMethod === 'PETTY_CASH' ? formState.pettyCashRequestId || null : null,
@@ -137,6 +145,11 @@ export default function ProcurementPaymentsPage() {
 
       setFormError(null);
       setFormState(initialFormState);
+      setPaymentIdempotencyKey(
+        typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+          ? crypto.randomUUID()
+          : `supplier-payment-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+      );
       setIsDrawerOpen(false);
       setFeedback({ message: 'Supplier payment posted successfully.', tone: 'success' });
       await queryClient.invalidateQueries({ queryKey: ['procurement'] });
@@ -144,6 +157,8 @@ export default function ProcurementPaymentsPage() {
       const message = error instanceof Error ? error.message : 'Failed to enter supplier payment.';
       setFormError(message);
       setFeedback({ message, tone: 'error' });
+    } finally {
+      setIsSubmittingPayment(false);
     }
   }
 
@@ -194,7 +209,7 @@ export default function ProcurementPaymentsPage() {
             <div className="grid gap-3 text-sm text-sky-900 sm:grid-cols-3">
               <div className="rounded-2xl border border-sky-200 bg-white/80 px-4 py-3">
                 <p className="text-xs uppercase tracking-[0.16em] text-sky-700">Balance</p>
-                <p className="mt-2 font-semibold">{currencyFormatter.format(selectedInvoice.balance)}</p>
+                <p className="mt-2 font-semibold">{formatCurrency(selectedInvoice.balance)}</p>
               </div>
               <div className="rounded-2xl border border-sky-200 bg-white/80 px-4 py-3">
                 <p className="text-xs uppercase tracking-[0.16em] text-sky-700">PO Link</p>
@@ -216,7 +231,7 @@ export default function ProcurementPaymentsPage() {
           { key: 'paymentDate', header: 'Payment Date' },
           { key: 'supplierName', header: 'Supplier' },
           { key: 'invoiceNumber', header: 'Invoice #' },
-          { key: 'amountPaid', header: 'Amount', render: (row) => currencyFormatter.format(row.amountPaid) },
+          { key: 'amountPaid', header: 'Amount', render: (row) => formatCurrency(row.amountPaid) },
           { key: 'method', header: 'Source', render: (row) => paymentSourceLabel(row.method) },
           { key: 'reference', header: 'Reference' },
           { key: 'status', header: 'Status', render: (row) => <StatusBadge status={row.status} /> },
@@ -264,7 +279,7 @@ export default function ProcurementPaymentsPage() {
                 const invoice = payableInvoices.find((row) => row.id === supplierInvoiceId) ?? null;
                 setFormState((current) => ({
                   ...current,
-                  amountPaid: invoice ? invoice.balance.toFixed(2) : current.amountPaid,
+                  amountPaid: invoice ? formatMoneyAmount(invoice.balance) : current.amountPaid,
                   supplierInvoiceId,
                 }));
               }}
@@ -273,7 +288,7 @@ export default function ProcurementPaymentsPage() {
               <option value="">Select unpaid invoice</option>
               {payableInvoices.map((invoice) => (
                 <option key={invoice.id} value={invoice.id}>
-                  {invoice.invoiceNumber} - {invoice.supplierName} - Balance {currencyFormatter.format(invoice.balance)}
+                  {invoice.invoiceNumber} - {invoice.supplierName} - Balance {formatCurrency(invoice.balance)}
                 </option>
               ))}
             </select>
@@ -287,7 +302,7 @@ export default function ProcurementPaymentsPage() {
               </div>
               <div className="rounded-2xl border border-border bg-white px-4 py-3 text-sm text-muted">
                 <p className="text-xs font-semibold uppercase tracking-[0.18em] text-orange">Outstanding</p>
-                <p className="mt-2 text-brown">{currencyFormatter.format(selectedInvoice.balance)}</p>
+                <p className="mt-2 text-brown">{formatCurrency(selectedInvoice.balance)}</p>
               </div>
               <div className="rounded-2xl border border-border bg-white px-4 py-3 text-sm text-muted">
                 <p className="text-xs font-semibold uppercase tracking-[0.18em] text-orange">Purchase Order</p>
@@ -305,8 +320,8 @@ export default function ProcurementPaymentsPage() {
               <span>Amount Paid</span>
               <input
                 required
-                min="0.01"
-                step="0.01"
+                min="0.0001"
+                step="0.0001"
                 type="number"
                 value={formState.amountPaid}
                 onChange={(event) => setFormState((current) => ({ ...current, amountPaid: event.target.value }))}
@@ -423,7 +438,9 @@ export default function ProcurementPaymentsPage() {
             <Button type="button" variant="outline" onClick={() => setIsDrawerOpen(false)}>
               Cancel
             </Button>
-            <Button type="submit">Enter Payment</Button>
+            <Button type="submit" disabled={isSubmittingPayment}>
+              {isSubmittingPayment ? 'Posting Payment...' : 'Enter Payment'}
+            </Button>
           </div>
         </form>
       </FormDrawer>

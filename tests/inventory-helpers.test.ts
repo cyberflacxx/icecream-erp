@@ -754,11 +754,13 @@ test('transfer page collects receipt lines before calling the atomic completion 
   assert.match(page, /\/api\/inventory\/transfers\/\$\{receiptState\.transferId\}\/complete/);
 });
 
-test('currency helpers display monetary values with three decimals', () => {
-  assert.equal(formatCurrency(0), '$0.000');
-  assert.equal(formatCurrency(1.5), '$1.500');
-  assert.equal(formatCurrency(1250.75), '$1,250.750');
-  assert.equal(formatMoneyAmount(25.125), '25.125');
+test('currency helpers display monetary values with four decimals', () => {
+  assert.equal(formatCurrency(0), '$0.0000');
+  assert.equal(formatCurrency(1.5), '$1.5000');
+  assert.equal(formatCurrency(1250.7525), '$1,250.7525');
+  assert.equal(formatMoneyAmount(12.3456), '12.3456');
+  assert.notEqual(formatMoneyAmount(12.3456), '12.346');
+  assert.notEqual(formatMoneyAmount(12.3456), '12.35');
 });
 
 test('stock transfer receipt semantics migration preserves explicit zero sent and received quantities', () => {

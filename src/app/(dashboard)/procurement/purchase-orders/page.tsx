@@ -202,6 +202,11 @@ export default function PurchaseOrdersPage() {
   const [requisitionLoadError, setRequisitionLoadError] = useState<string | null>(null);
   const [isLoadingRequisition, setIsLoadingRequisition] = useState(false);
   const [pendingAction, setPendingAction] = useState<string | null>(null);
+  const [purchaseOrderIdempotencyKey, setPurchaseOrderIdempotencyKey] = useState(() =>
+    typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : `purchase-order-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+  );
 
   const router = useRouter();
   const queryClient = useQueryClient();
@@ -371,6 +376,7 @@ export default function PurchaseOrdersPage() {
 
   async function handleCreate(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (pendingAction === 'create') return;
     const items = formState.items
       .filter((item) => item.itemId)
       .map((item) => ({
@@ -406,6 +412,7 @@ export default function PurchaseOrdersPage() {
       return;
     }
 
+    setPendingAction('create');
     try {
       const response = await request<{
         data?: {
@@ -422,6 +429,7 @@ export default function PurchaseOrdersPage() {
           approverName: formState.approverName || null,
           discountAmount: Number(formState.discountAmount),
           expectedDeliveryDate: formState.expectedDeliveryDate || null,
+          idempotencyKey: purchaseOrderIdempotencyKey,
           items,
           notes: formState.notes || null,
           orderDate: formState.orderDate || null,
@@ -439,6 +447,11 @@ export default function PurchaseOrdersPage() {
       setFeedback({ message: 'Purchase order created successfully.', tone: 'success' });
       setFormError(null);
       setFormState(createInitialFormState());
+      setPurchaseOrderIdempotencyKey(
+        typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+          ? crypto.randomUUID()
+          : `purchase-order-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+      );
       setIsDrawerOpen(false);
       await refresh();
       if (createdOrderId) {
@@ -446,6 +459,8 @@ export default function PurchaseOrdersPage() {
       }
     } catch (error) {
       setFormError(error instanceof Error ? error.message : 'Failed to create purchase order.');
+    } finally {
+      setPendingAction(null);
     }
   }
 
@@ -979,7 +994,7 @@ export default function PurchaseOrdersPage() {
                 <span>Tax Amount</span>
                 <input
                   min="0"
-                  step="0.01"
+                  step="0.0001"
                   type="number"
                   value={formState.taxAmount}
                   onChange={(event) => setFormState((current) => ({ ...current, taxAmount: event.target.value }))}
@@ -991,7 +1006,7 @@ export default function PurchaseOrdersPage() {
                 <span>Discount Amount</span>
                 <input
                   min="0"
-                  step="0.01"
+                  step="0.0001"
                   type="number"
                   value={formState.discountAmount}
                   onChange={(event) =>
@@ -1101,7 +1116,7 @@ export default function PurchaseOrdersPage() {
                       </label>
                       <input
                         min="0"
-                        step="0.01"
+                        step="0.0001"
                         type="number"
                         value={item.unitCost}
                         onChange={(event) => updateLineItem(item.rowId, 'unitCost', event.target.value)}
@@ -1176,7 +1191,9 @@ export default function PurchaseOrdersPage() {
             <Button type="button" variant="outline" onClick={() => setIsDrawerOpen(false)}>
               Cancel
             </Button>
-            <Button type="submit">Create Purchase Order</Button>
+            <Button type="submit" disabled={pendingAction === 'create'}>
+              {pendingAction === 'create' ? 'Creating Purchase Order...' : 'Create Purchase Order'}
+            </Button>
           </div>
         </form>
       </FormDrawer>

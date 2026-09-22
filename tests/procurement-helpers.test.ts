@@ -2959,3 +2959,58 @@ test('supplier payments post journals to the selected cash or bank account ledge
   assert.match(supplierPaymentsRoute, /id: String\(cashAccountResult\.data\.account_id\)/);
   assert.match(supplierPaymentsRoute, /selectedAccountId: paymentSourceType === 'BANK' \? bankAccountId/);
 });
+
+test('purchase order creation is guarded against duplicate submission on client and server', () => {
+  const purchaseOrdersPage = fs.readFileSync('src/app/(dashboard)/procurement/purchase-orders/page.tsx', 'utf8');
+  const purchaseOrdersRoute = fs.readFileSync('src/app/api/procurement/purchase-orders/route.ts', 'utf8');
+  const migration = fs.readFileSync('migrations/059_workflow_idempotency_and_money_precision.sql', 'utf8');
+
+  assert.match(purchaseOrdersPage, /purchaseOrderIdempotencyKey/);
+  assert.match(purchaseOrdersPage, /pendingAction === 'create'/);
+  assert.match(purchaseOrdersPage, /Creating Purchase Order\.\.\./);
+  assert.match(purchaseOrdersPage, /idempotencyKey: purchaseOrderIdempotencyKey/);
+  assert.match(purchaseOrdersPage, /step="0\.0001"/);
+
+  assert.match(purchaseOrdersRoute, /loadPurchaseOrderByIdempotencyKey/);
+  assert.match(purchaseOrdersRoute, /idempotentReplay/);
+  assert.match(purchaseOrdersRoute, /idempotency_key: idempotencyKey/);
+  assert.match(purchaseOrdersRoute, /PURCHASE_ORDER_IDEMPOTENT_REPLAY/);
+  assert.match(purchaseOrdersRoute, /PURCHASE_ORDER_CREATED/);
+
+  assert.match(migration, /alter table if exists icecream_erp\.purchase_orders/i);
+  assert.match(migration, /purchase_orders_org_idempotency_key_uq/i);
+  assert.match(migration, /where idempotency_key is not null/i);
+});
+
+test('supplier payment posting is idempotent and keeps saved cash or bank account selectors', () => {
+  const paymentsPage = fs.readFileSync('src/app/(dashboard)/procurement/payments/page.tsx', 'utf8');
+  const supplierPaymentsRoute = fs.readFileSync('src/app/api/procurement/supplier-payments/route.ts', 'utf8');
+  const migration = fs.readFileSync('migrations/059_workflow_idempotency_and_money_precision.sql', 'utf8');
+
+  assert.match(paymentsPage, /paymentIdempotencyKey/);
+  assert.match(paymentsPage, /isSubmittingPayment/);
+  assert.match(paymentsPage, /Posting Payment\.\.\./);
+  assert.match(paymentsPage, /idempotencyKey: paymentIdempotencyKey/);
+  assert.match(paymentsPage, /\/api\/finance\/bank-accounts\?activeOnly=true/);
+  assert.match(paymentsPage, /\/api\/finance\/cash-accounts\?activeOnly=true/);
+  assert.match(paymentsPage, /step="0\.0001"/);
+
+  assert.match(supplierPaymentsRoute, /idempotency_key: idempotencyKey/);
+  assert.match(supplierPaymentsRoute, /SUPPLIER_PAYMENT_IDEMPOTENT_REPLAY/);
+  assert.match(supplierPaymentsRoute, /idempotentReplay/);
+  assert.match(supplierPaymentsRoute, /selectedAccountId: paymentSourceType === 'BANK' \? bankAccountId/);
+
+  assert.match(migration, /alter table if exists icecream_erp\.supplier_payments/i);
+  assert.match(migration, /supplier_payments_org_idempotency_key_uq/i);
+});
+
+test('workflow hardening migration widens money precision without targeting quantities', () => {
+  const migration = fs.readFileSync('migrations/059_workflow_idempotency_and_money_precision.sql', 'utf8');
+
+  assert.match(migration, /table_schema = 'icecream_erp'/);
+  assert.match(migration, /numeric\(24,4\)/);
+  assert.match(migration, /column_name ~\*\s*'\(amount\|cost\|price/);
+  assert.match(migration, /column_name !~\*\s*'\(quantity\|qty\|percent/);
+  assert.doesNotMatch(migration, /public\./);
+  assert.match(migration, /notify pgrst, 'reload schema'/i);
+});
