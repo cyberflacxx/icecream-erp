@@ -1,6 +1,8 @@
 -- Production-reviewed workflow hardening.
 -- Scope: icecream_erp only. Monetary precision changes are explicit and reviewed.
 
+begin;
+
 set search_path = icecream_erp, public;
 
 alter table if exists icecream_erp.purchase_orders
@@ -25,6 +27,11 @@ comment on column icecream_erp.supplier_payments.idempotency_key is
 
 -- Explicit monetary columns reviewed from the live icecream_erp schema.
 -- Excludes quantities, percentages, non-money measurements, counts, ids, and exchange rates.
+-- These production reporting views depend on monetary columns altered below.
+-- Drop only the reviewed views, without CASCADE, then recreate them after all ALTERs succeed.
+drop view if exists icecream_erp.production_order_cost_summary;
+drop view if exists icecream_erp.production_order_relationship_map;
+
 alter table if exists icecream_erp.accounts alter column balance type numeric(24,4) using balance::numeric(24,4);
 alter table if exists icecream_erp.approval_workflow_steps alter column maximum_amount type numeric(24,4) using maximum_amount::numeric(24,4);
 alter table if exists icecream_erp.approval_workflow_steps alter column minimum_amount type numeric(24,4) using minimum_amount::numeric(24,4);
@@ -275,5 +282,172 @@ alter table if exists icecream_erp.suppliers alter column current_balance type n
 alter table if exists icecream_erp.wastage_records alter column total_cost type numeric(24,4) using total_cost::numeric(24,4);
 alter table if exists icecream_erp.wastage_records alter column unit_cost type numeric(24,4) using unit_cost::numeric(24,4);
 
+create or replace view icecream_erp.production_order_relationship_map as
+with normalized_links as (
+  select
+    l.id as link_id,
+    l.organization_id,
+    l.production_order_id,
+    case
+      when l.from_document_type = 'production_order'
+        and l.from_document_id = l.production_order_id
+        then l.from_document_type
+      else l.to_document_type
+    end as source_document_type,
+    case
+      when l.from_document_type = 'production_order'
+        and l.from_document_id = l.production_order_id
+        then l.from_document_id
+      else l.to_document_id
+    end as source_document_id,
+    case
+      when l.from_document_type = 'production_order'
+        and l.from_document_id = l.production_order_id
+        then l.to_document_type
+      else l.from_document_type
+    end as related_document_type,
+    case
+      when l.from_document_type = 'production_order'
+        and l.from_document_id = l.production_order_id
+        then l.to_document_id
+      else l.from_document_id
+    end as related_document_id,
+    l.relationship_type,
+    l.created_by,
+    l.created_at,
+    row_number() over (
+      partition by
+        l.organization_id,
+        l.production_order_id,
+        case
+          when l.from_document_type = 'production_order'
+            and l.from_document_id = l.production_order_id
+            then l.to_document_type
+          else l.from_document_type
+        end,
+        case
+          when l.from_document_type = 'production_order'
+            and l.from_document_id = l.production_order_id
+            then l.to_document_id
+          else l.from_document_id
+        end
+      order by l.created_at desc, l.id desc
+    ) as rn
+  from icecream_erp.production_document_links l
+  where (
+    l.from_document_type = 'production_order'
+    and l.from_document_id = l.production_order_id
+  ) or (
+    l.to_document_type = 'production_order'
+    and l.to_document_id = l.production_order_id
+  )
+),
+dedup_links as (
+  select *
+  from normalized_links
+  where rn = 1
+)
+select
+  po.organization_id,
+  po.id as production_order_id,
+  'production_order'::text as document_type,
+  po.id as document_id,
+  po.production_order_number as document_number,
+  po.created_at::date as document_date,
+  po.status,
+  po.planned_quantity as quantity,
+  po.planned_cost as value,
+  po.created_by,
+  null::uuid as related_document_id,
+  null::text as relationship_type,
+  0 as sort_order,
+  po.status as document_status,
+  null::text as posting_status,
+  'production_order'::text as source_document_type,
+  po.id as source_document_id,
+  null::text as related_document_type
+from icecream_erp.production_orders po
+union all
+select
+  pi.organization_id,
+  dl.production_order_id,
+  'production_issue'::text,
+  pi.id,
+  pi.issue_number,
+  pi.issue_date,
+  pi.posting_status,
+  pi.total_quantity,
+  pi.total_cost,
+  pi.issued_by,
+  dl.related_document_id,
+  dl.relationship_type,
+  10,
+  null::text as document_status,
+  pi.posting_status,
+  dl.source_document_type,
+  dl.source_document_id,
+  dl.related_document_type
+from dedup_links dl
+join icecream_erp.production_issues pi
+  on pi.organization_id = dl.organization_id
+ and pi.production_order_id = dl.production_order_id
+ and pi.id = dl.related_document_id
+where dl.related_document_type = 'production_issue'
+union all
+select
+  pr.organization_id,
+  dl.production_order_id,
+  'production_receipt'::text,
+  pr.id,
+  pr.receipt_number,
+  pr.receipt_date,
+  pr.posting_status,
+  pr.total_completed_quantity,
+  pr.total_cost,
+  pr.received_by,
+  dl.related_document_id,
+  dl.relationship_type,
+  20,
+  null::text as document_status,
+  pr.posting_status,
+  dl.source_document_type,
+  dl.source_document_id,
+  dl.related_document_type
+from dedup_links dl
+join icecream_erp.production_receipts pr
+  on pr.organization_id = dl.organization_id
+ and pr.production_order_id = dl.production_order_id
+ and pr.id = dl.related_document_id
+where dl.related_document_type = 'production_receipt';
+
+create or replace view icecream_erp.production_order_cost_summary as
+select
+  po.organization_id,
+  po.id as production_order_id,
+  po.production_order_number,
+  po.product_number,
+  po.product_description_snapshot,
+  po.status,
+  po.planned_quantity,
+  po.released_quantity,
+  po.completed_quantity,
+  po.rejected_quantity,
+  po.wastage_quantity,
+  po.remaining_quantity,
+  po.planned_cost,
+  coalesce(sum(pil.line_cost) filter (where pi.posting_status = 'POSTED'::text), 0::numeric) as posted_material_cost,
+  po.actual_cost,
+  po.cost_per_unit,
+  po.actual_cost - po.planned_cost as cost_variance
+from icecream_erp.production_orders po
+left join icecream_erp.production_issues pi on pi.production_order_id = po.id
+left join icecream_erp.production_issue_lines pil on pil.production_issue_id = pi.id
+group by po.id;
+
+grant select on icecream_erp.production_order_relationship_map to service_role;
+grant select on icecream_erp.production_order_cost_summary to service_role;
+
 notify pgrst, 'reload schema';
 notify pgrst, 'reload config';
+
+commit;

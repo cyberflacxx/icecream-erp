@@ -3006,17 +3006,45 @@ test('supplier payment posting is idempotent and keeps saved cash or bank accoun
 
 test('workflow hardening migration widens money precision without targeting quantities', () => {
   const migration = fs.readFileSync('migrations/059_workflow_idempotency_and_money_precision.sql', 'utf8');
+  const lowerMigration = migration.toLowerCase();
 
+  assert.match(migration, /^\s*begin;\s*$/im);
+  assert.match(migration, /^\s*commit;\s*$/im);
   assert.match(migration, /numeric\(24,4\)/);
+  assert.match(migration, /add column if not exists idempotency_key text/i);
+  assert.match(migration, /create unique index if not exists purchase_orders_org_idempotency_key_uq/i);
+  assert.match(migration, /create unique index if not exists supplier_payments_org_idempotency_key_uq/i);
   assert.match(migration, /alter table if exists icecream_erp\.purchase_orders alter column total_amount type numeric\(24,4\)/i);
   assert.match(migration, /alter table if exists icecream_erp\.supplier_payments alter column amount_paid type numeric\(24,4\)/i);
   assert.match(migration, /alter table if exists icecream_erp\.stock_movements alter column unit_cost type numeric\(24,4\)/i);
+  assert.match(migration, /drop view if exists icecream_erp\.production_order_cost_summary;/i);
+  assert.match(migration, /drop view if exists icecream_erp\.production_order_relationship_map;/i);
+  assert.match(migration, /create or replace view icecream_erp\.production_order_cost_summary as/i);
+  assert.match(migration, /create or replace view icecream_erp\.production_order_relationship_map as/i);
+  assert.match(migration, /from icecream_erp\.production_document_links l/i);
+  assert.match(migration, /coalesce\(sum\(pil\.line_cost\) filter \(where pi\.posting_status = 'POSTED'::text\), 0::numeric\) as posted_material_cost/i);
+  assert.match(migration, /grant select on icecream_erp\.production_order_relationship_map to service_role/i);
+  assert.match(migration, /grant select on icecream_erp\.production_order_cost_summary to service_role/i);
   assert.doesNotMatch(migration, /information_schema\.columns/i);
   assert.doesNotMatch(migration, /column_name ~\*/i);
+  assert.doesNotMatch(migration, /drop\s+view[^;]+cascade/i);
+  assert.doesNotMatch(migration, /concurrently/i);
   assert.doesNotMatch(migration, /alter column quantity type numeric\(24,4\)/i);
   assert.doesNotMatch(migration, /alter column tax_rate type numeric\(24,4\)/i);
   assert.doesNotMatch(migration, /alter column exchange_rate type numeric\(24,4\)/i);
   assert.doesNotMatch(migration, /public\./);
+  assert.ok(
+    lowerMigration.indexOf('drop view if exists icecream_erp.production_order_cost_summary') <
+      lowerMigration.indexOf('alter table if exists icecream_erp.production_issue_lines alter column line_cost'),
+  );
+  assert.ok(
+    lowerMigration.indexOf('drop view if exists icecream_erp.production_order_relationship_map') <
+      lowerMigration.indexOf('alter table if exists icecream_erp.production_issues alter column total_cost'),
+  );
+  assert.ok(
+    lowerMigration.indexOf('create or replace view icecream_erp.production_order_cost_summary') >
+      lowerMigration.indexOf('alter table if exists icecream_erp.wastage_records alter column unit_cost'),
+  );
   assert.match(migration, /notify pgrst, 'reload schema'/i);
   assert.match(migration, /notify pgrst, 'reload config'/i);
 });
