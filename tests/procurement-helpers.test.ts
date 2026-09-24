@@ -2999,9 +2999,27 @@ test('supplier payment posting is idempotent and keeps saved cash or bank accoun
   assert.match(supplierPaymentsRoute, /SUPPLIER_PAYMENT_IDEMPOTENT_REPLAY/);
   assert.match(supplierPaymentsRoute, /idempotentReplay/);
   assert.match(supplierPaymentsRoute, /selectedAccountId: paymentSourceType === 'BANK' \? bankAccountId/);
+  assert.match(supplierPaymentsRoute, /completeSupplierPaymentPosting/);
+  assert.match(supplierPaymentsRoute, /status: 'PENDING'/);
+  assert.match(supplierPaymentsRoute, /\.update\(\{ status: 'POSTED'/);
 
   assert.match(migration, /alter table if exists icecream_erp\.supplier_payments/i);
   assert.match(migration, /supplier_payments_org_idempotency_key_uq/i);
+});
+
+test('supplier cash payments cannot be falsely completed when finance posting fails', () => {
+  const supplierPaymentsRoute = fs.readFileSync('src/app/api/procurement/supplier-payments/route.ts', 'utf8');
+  const financeServer = fs.readFileSync('src/lib/finance-server.ts', 'utf8');
+
+  assert.match(supplierPaymentsRoute, /status: 'PENDING'/);
+  assert.match(supplierPaymentsRoute, /markSupplierPaymentFailed/);
+  assert.match(supplierPaymentsRoute, /Insufficient cash balance in the selected cash account/);
+  assert.match(supplierPaymentsRoute, /\.select\(SUPPLIER_PAYMENT_SELECT\)/);
+  assert.match(supplierPaymentsRoute, /\.eq\('status', 'POSTED'\)/);
+  assert.match(supplierPaymentsRoute, /syncSupplierInvoiceBalance/);
+  assert.match(supplierPaymentsRoute, /paymentSourceType === 'CASH' \? cashAccountId/);
+  assert.match(supplierPaymentsRoute, /service\.from\('cash_accounts'\)\.select\('id, account_id, is_active'\)/);
+  assert.match(financeServer, /if \(existing\) \{\s*return \{/);
 });
 
 test('workflow hardening migration widens money precision without targeting quantities', () => {

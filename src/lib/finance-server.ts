@@ -615,9 +615,14 @@ export async function postFinanceDocument(input: FinancePostingInput) {
     input.sourceDocumentId,
   );
   if (existing) {
-    throw new Error(
-      `A journal for ${input.sourceDocumentType} ${input.sourceDocumentId} already exists (${existing.entryNumber}).`,
-    );
+    return {
+      entryDate: existing.entryDate,
+      entryNumber: existing.entryNumber,
+      id: existing.id,
+      sourceReference: existing.sourceReference,
+      totalCredit: input.lines.reduce((sum, line) => sum + Number(line.creditAmount ?? 0), 0),
+      totalDebit: input.lines.reduce((sum, line) => sum + Number(line.debitAmount ?? 0), 0),
+    };
   }
 
   const service = financeService();

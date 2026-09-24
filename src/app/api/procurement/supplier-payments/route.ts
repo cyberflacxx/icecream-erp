@@ -9,6 +9,29 @@ import { recordAuditLog } from '@/lib/security-server';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
 const PAYMENT_SOURCES = new Set(['BANK', 'CASH', 'PETTY_CASH']);
+const SUPPLIER_PAYMENT_SELECT = [
+  'id',
+  'organization_id',
+  'supplier_id',
+  'supplier_invoice_id',
+  'purchase_order_id',
+  'goods_received_note_id',
+  'grn_id',
+  'payment_date',
+  'payment_method',
+  'payment_source_type',
+  'reference_number',
+  'amount_paid',
+  'status',
+  'bank_account_id',
+  'cash_account_id',
+  'petty_cash_request_id',
+  'idempotency_key',
+].join(', ');
+
+type AuthContext = NonNullable<Awaited<ReturnType<typeof getAuthContext>>>;
+type ServiceClient = ReturnType<typeof createServiceRoleClient>;
+type SupplierPaymentRow = Record<string, any>;
 
 function normalizeStringValue(...values: unknown[]) {
   for (const value of values) {
@@ -16,6 +39,215 @@ function normalizeStringValue(...values: unknown[]) {
     if (normalized) return normalized;
   }
   return '';
+}
+
+function isInsufficientCashError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error ?? '');
+  return message.toLowerCase().includes('insufficient cash balance');
+}
+
+async function markSupplierPaymentFailed(service: ServiceClient, paymentId: string) {
+  await service
+    .from('supplier_payments')
+    .update({ status: 'FAILED', updated_at: new Date().toISOString() })
+    .eq('id', paymentId)
+    .neq('status', 'POSTED');
+}
+
+async function syncSupplierInvoiceBalance(
+  service: ServiceClient,
+  payment: SupplierPaymentRow,
+) {
+  const supplierInvoiceId = String(payment.supplier_invoice_id ?? '');
+  const paymentId = String(payment.id ?? '');
+  const amountPaid = Number(payment.amount_paid ?? 0);
+
+  const [invoiceResult, paymentsResult] = await Promise.all([
+    service
+      .from('supplier_invoices')
+      .select('id, invoice_total')
+      .eq('id', supplierInvoiceId)
+      .single(),
+    service
+      .from('supplier_payments')
+      .select('id, amount_paid, status')
+      .eq('supplier_invoice_id', supplierInvoiceId)
+      .is('deleted_at', null),
+  ]);
+
+  if (invoiceResult.error || !invoiceResult.data) {
+    throw invoiceResult.error ?? new Error('Supplier invoice not found while finalizing payment.');
+  }
+  if (paymentsResult.error) throw paymentsResult.error;
+
+  const previouslyPosted = (paymentsResult.data ?? [])
+    .filter((row) => String(row.id) !== paymentId)
+    .filter((row) => String(row.status ?? '').toUpperCase() === 'POSTED')
+    .reduce((sum, row) => sum + Number(row.amount_paid ?? 0), 0);
+  const totalPaid = previouslyPosted + amountPaid;
+  const invoiceTotal = Number(invoiceResult.data.invoice_total ?? 0);
+  const outstanding = Math.max(0, invoiceTotal - totalPaid);
+
+  const updateResult = await service
+    .from('supplier_invoices')
+    .update({
+      outstanding_amount: outstanding,
+      status: outstanding <= 0 ? 'PAID' : 'PARTIAL_PAID',
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', supplierInvoiceId);
+
+  if (updateResult.error) throw updateResult.error;
+}
+
+async function completeSupplierPaymentPosting(input: {
+  ctx: AuthContext;
+  idempotencyKey: string;
+  idempotentReplay?: boolean;
+  payment: SupplierPaymentRow;
+  request: NextRequest;
+  service: ServiceClient;
+}) {
+  const { ctx, idempotencyKey, idempotentReplay = false, payment, request, service } = input;
+  const paymentId = String(payment.id);
+  const amountPaid = Number(payment.amount_paid ?? 0);
+  const paymentSourceType = normalizeStringValue(payment.payment_source_type, payment.payment_method).toUpperCase();
+  const bankAccountId = normalizeStringValue(payment.bank_account_id) || null;
+  const cashAccountId = normalizeStringValue(payment.cash_account_id) || null;
+  const pettyCashRequestId = normalizeStringValue(payment.petty_cash_request_id) || null;
+  const supplierInvoiceId = String(payment.supplier_invoice_id ?? '');
+
+  const [bankAccountResult, cashAccountResult, pettyCashResult] = await Promise.all([
+    bankAccountId
+      ? service.from('bank_accounts').select('id, account_id, is_active').eq('id', bankAccountId).eq('organization_id', ctx.organizationId).maybeSingle()
+      : Promise.resolve({ data: null, error: null }),
+    cashAccountId
+      ? service.from('cash_accounts').select('id, account_id, is_active').eq('id', cashAccountId).eq('organization_id', ctx.organizationId).maybeSingle()
+      : Promise.resolve({ data: null, error: null }),
+    pettyCashRequestId ? service.from('petty_cash_requests').select('id').eq('id', pettyCashRequestId).maybeSingle() : Promise.resolve({ data: null, error: null }),
+  ]);
+
+  if (paymentSourceType === 'BANK' && !bankAccountId) return badRequest('Please select a bank account for this payment.');
+  if (paymentSourceType === 'CASH' && !cashAccountId) return badRequest('Please select a cash account for this payment.');
+  if (paymentSourceType === 'PETTY_CASH' && !pettyCashRequestId) return badRequest('Please select a petty cash request for this payment.');
+  if (bankAccountId && (bankAccountResult.error || !bankAccountResult.data)) {
+    return badRequest('Selected bank account is no longer available. Please refresh and try again.');
+  }
+  if (cashAccountId && (cashAccountResult.error || !cashAccountResult.data)) {
+    return badRequest('Selected cash account is no longer available. Please refresh and try again.');
+  }
+  if (bankAccountResult.data && bankAccountResult.data.is_active === false) {
+    return badRequest('Selected bank account is inactive. Please choose an active bank account.');
+  }
+  if (cashAccountResult.data && cashAccountResult.data.is_active === false) {
+    return badRequest('Selected cash account is inactive. Please choose an active cash account.');
+  }
+  if (bankAccountResult.data && !bankAccountResult.data.account_id) {
+    return badRequest('Selected bank account is missing its linked ledger account.');
+  }
+  if (cashAccountResult.data && !cashAccountResult.data.account_id) {
+    return badRequest('Selected cash account is missing its linked ledger account.');
+  }
+  if (pettyCashRequestId && (pettyCashResult.error || !pettyCashResult.data)) {
+    return badRequest('Selected petty cash request is no longer available. Please refresh and try again.');
+  }
+
+  const sourceReference = buildFinanceSourceReference('procurement', 'supplier_payment', paymentId);
+
+  try {
+    const payableAccount = await resolveFinancePostingAccount(ctx.organizationId, 'SUPPLIER_PAYABLES', { fallbackAccountCode: '2110' });
+    const tenderAccount =
+      paymentSourceType === 'BANK' && bankAccountResult.data?.account_id
+        ? { id: String(bankAccountResult.data.account_id) }
+        : paymentSourceType === 'CASH' && cashAccountResult.data?.account_id
+          ? { id: String(cashAccountResult.data.account_id) }
+          : paymentSourceType === 'PETTY_CASH'
+            ? await resolveFinancePostingAccount(ctx.organizationId, 'PETTY_CASH_ACCOUNT', { fallbackAccountCode: '1130' })
+            : paymentSourceType === 'BANK'
+              ? await resolveFinancePostingAccount(ctx.organizationId, 'BANK_ACCOUNT', { fallbackAccountCode: '1120' })
+              : await resolveFinancePostingAccount(ctx.organizationId, 'CASH_ACCOUNT', { fallbackAccountCode: '1110' });
+
+    const journal = await postFinanceDocument({
+      createdBy: ctx.userId,
+      description: `Supplier payment ${payment.reference_number ?? paymentId}`,
+      journalDate: String(payment.payment_date ?? new Date().toISOString().slice(0, 10)),
+      lines: [
+        {
+          accountId: payableAccount.id,
+          creditAmount: 0,
+          debitAmount: amountPaid,
+          description: `Reduce accounts payable for supplier invoice ${supplierInvoiceId}`,
+        },
+        {
+          accountId: tenderAccount.id,
+          creditAmount: amountPaid,
+          debitAmount: 0,
+          description: `Supplier payment via ${paymentSourceType}`,
+        },
+      ],
+      organizationId: ctx.organizationId,
+      sourceDocumentId: paymentId,
+      sourceDocumentType: 'supplier_payment',
+      sourceModule: 'procurement',
+    });
+
+    const linkedTransaction = await createLinkedFinanceTransaction({
+      amount: amountPaid,
+      createdBy: ctx.userId,
+      description: `Supplier payment ${payment.reference_number ?? paymentId}`,
+      direction: 'OUT',
+      organizationId: ctx.organizationId,
+      paymentMethod: paymentSourceType as 'BANK' | 'CASH' | 'PETTY_CASH',
+      selectedAccountId: paymentSourceType === 'BANK' ? bankAccountId : paymentSourceType === 'CASH' ? cashAccountId : cashAccountId,
+      referenceNumber: payment.reference_number ?? null,
+      sourceDocument: sourceReference,
+      transactionDate: String(payment.payment_date ?? new Date().toISOString().slice(0, 10)),
+    });
+
+    await syncSupplierInvoiceBalance(service, payment);
+
+    const finalized = await service
+      .from('supplier_payments')
+      .update({ status: 'POSTED', updated_at: new Date().toISOString(), updated_by: ctx.userId })
+      .eq('id', paymentId)
+      .select(SUPPLIER_PAYMENT_SELECT)
+      .single();
+
+    if (finalized.error || !finalized.data) {
+      throw finalized.error ?? new Error('Supplier payment could not be finalized after finance posting.');
+    }
+
+    await recordAuditLog({
+      action: idempotentReplay ? 'SUPPLIER_PAYMENT_IDEMPOTENT_REPLAY' : 'SUPPLIER_PAYMENT_CREATED',
+      entityId: paymentId,
+      entityType: 'supplier_payment',
+      newValues: {
+        amount: amountPaid,
+        idempotencyKey,
+        paymentSourceType,
+        supplierId: payment.supplier_id,
+        supplierInvoiceId,
+      },
+      organizationId: ctx.organizationId,
+      userAgent: request.headers.get('user-agent'),
+      userProfileId: ctx.userAccountId ?? ctx.userId,
+    });
+
+    return NextResponse.json(
+      { ...finalized.data, idempotentReplay, journal, linkedTransaction },
+      { status: idempotentReplay ? 200 : 201 },
+    );
+  } catch (postingError) {
+    await markSupplierPaymentFailed(service, paymentId).catch(() => undefined);
+    if (isInsufficientCashError(postingError)) {
+      return badRequest('Insufficient cash balance in the selected cash account. Supplier payment was not posted.');
+    }
+    return serverError(
+      postingError instanceof Error
+        ? `Failed to post supplier payment to finance: ${postingError.message}`
+        : 'Failed to post supplier payment to finance.',
+    );
+  }
 }
 
 export async function GET(_request: NextRequest) {
@@ -132,7 +364,7 @@ export async function POST(request: NextRequest) {
 
   const replayPayment = await service
     .from('supplier_payments')
-    .select('id, supplier_invoice_id, amount_paid, payment_method, payment_source_type, reference_number, status')
+    .select(SUPPLIER_PAYMENT_SELECT)
     .eq('organization_id', ctx.organizationId)
     .eq('idempotency_key', idempotencyKey)
     .maybeSingle();
@@ -140,17 +372,14 @@ export async function POST(request: NextRequest) {
     return serverError(replayPayment.error.message);
   }
   if (replayPayment.data) {
-    void recordAuditLog({
-      action: 'SUPPLIER_PAYMENT_IDEMPOTENT_REPLAY',
-      entityId: String(replayPayment.data.id),
-      entityType: 'supplier_payment',
-      newValues: { idempotencyKey, supplierInvoiceId },
-      organizationId: ctx.organizationId,
-      userAgent: request.headers.get('user-agent'),
-      userProfileId: ctx.userAccountId ?? ctx.userId,
-    }).catch(() => undefined);
-
-    return NextResponse.json({ ...replayPayment.data, idempotentReplay: true });
+    return completeSupplierPaymentPosting({
+      ctx,
+      idempotencyKey,
+      idempotentReplay: true,
+      payment: replayPayment.data,
+      request,
+      service,
+    });
   }
 
   const [invoiceResult, paymentsResult] = await Promise.all([
@@ -159,7 +388,7 @@ export async function POST(request: NextRequest) {
       .select('id, invoice_total, outstanding_amount, status, supplier_id, purchase_order_id, goods_received_note_id, grn_id')
       .eq('id', supplierInvoiceId)
       .single(),
-    service.from('supplier_payments').select('amount_paid').eq('supplier_invoice_id', supplierInvoiceId),
+    service.from('supplier_payments').select('amount_paid').eq('supplier_invoice_id', supplierInvoiceId).eq('status', 'POSTED'),
   ]);
 
   if (invoiceResult.error || !invoiceResult.data) return badRequest('Supplier invoice not found.');
@@ -234,7 +463,7 @@ export async function POST(request: NextRequest) {
     purchase_order_id: linkedPurchaseOrderId,
     reference_number: body.referenceNumber ?? null,
     remarks: body.remarks ?? null,
-    status: 'POSTED',
+    status: 'PENDING',
     supplier_id: supplierId,
     supplier_invoice_id: supplierInvoiceId,
   };
@@ -257,97 +486,29 @@ export async function POST(request: NextRequest) {
   if (insertResult.error?.code === '23505') {
     const replay = await service
       .from('supplier_payments')
-      .select('id, supplier_invoice_id, amount_paid, payment_method, payment_source_type, reference_number, status')
+      .select(SUPPLIER_PAYMENT_SELECT)
       .eq('organization_id', ctx.organizationId)
       .eq('idempotency_key', idempotencyKey)
       .maybeSingle();
-    if (replay.data) return NextResponse.json({ ...replay.data, idempotentReplay: true });
+    if (replay.data) {
+      return completeSupplierPaymentPosting({
+        ctx,
+        idempotencyKey,
+        idempotentReplay: true,
+        payment: replay.data,
+        request,
+        service,
+      });
+    }
   }
 
   const { data, error } = insertResult;
   if (error) return serverError(error.message);
-  const sourceReference = buildFinanceSourceReference('procurement', 'supplier_payment', String(data.id));
-
-  let journal: { entryNumber: string; id: string } | null = null;
-  let linkedTransaction: { id: string; table: string } | null = null;
-  try {
-    const payableAccount = await resolveFinancePostingAccount(ctx.organizationId, 'SUPPLIER_PAYABLES', { fallbackAccountCode: '2110' });
-    const tenderAccount =
-      paymentSourceType === 'BANK' && bankAccountResult.data?.account_id
-        ? { id: String(bankAccountResult.data.account_id) }
-        : paymentSourceType === 'CASH' && cashAccountResult.data?.account_id
-          ? { id: String(cashAccountResult.data.account_id) }
-          : paymentSourceType === 'PETTY_CASH'
-            ? await resolveFinancePostingAccount(ctx.organizationId, 'PETTY_CASH_ACCOUNT', { fallbackAccountCode: '1130' })
-            : paymentSourceType === 'BANK'
-              ? await resolveFinancePostingAccount(ctx.organizationId, 'BANK_ACCOUNT', { fallbackAccountCode: '1120' })
-              : await resolveFinancePostingAccount(ctx.organizationId, 'CASH_ACCOUNT', { fallbackAccountCode: '1110' });
-
-    journal = await postFinanceDocument({
-      createdBy: ctx.userId,
-      description: `Supplier payment ${data.reference_number ?? data.id}`,
-      journalDate: String(data.payment_date ?? body.paymentDate ?? new Date().toISOString().slice(0, 10)),
-      lines: [
-        {
-          accountId: payableAccount.id,
-          creditAmount: 0,
-          debitAmount: amountPaid,
-          description: `Reduce accounts payable for supplier invoice ${supplierInvoiceId}`,
-        },
-        {
-          accountId: tenderAccount.id,
-          creditAmount: amountPaid,
-          debitAmount: 0,
-          description: `Supplier payment via ${paymentSourceType}`,
-        },
-      ],
-      organizationId: ctx.organizationId,
-      sourceDocumentId: String(data.id),
-      sourceDocumentType: 'supplier_payment',
-      sourceModule: 'procurement',
-    });
-
-    linkedTransaction = await createLinkedFinanceTransaction({
-      amount: amountPaid,
-      createdBy: ctx.userId,
-      description: `Supplier payment ${data.reference_number ?? data.id}`,
-      direction: 'OUT',
-      organizationId: ctx.organizationId,
-      paymentMethod: paymentSourceType as 'BANK' | 'CASH' | 'PETTY_CASH',
-      selectedAccountId: paymentSourceType === 'BANK' ? bankAccountId : paymentSourceType === 'CASH' ? cashAccountId : cashAccountId,
-      referenceNumber: body.referenceNumber ?? null,
-      sourceDocument: sourceReference,
-      transactionDate: String(data.payment_date ?? body.paymentDate ?? new Date().toISOString().slice(0, 10)),
-    });
-  } catch (postingError) {
-    return serverError(postingError instanceof Error ? postingError.message : 'Failed to post supplier payment to finance.');
-  }
-
-  await service
-    .from('supplier_invoices')
-    .update({
-      outstanding_amount: Math.max(0, balance - amountPaid),
-      status: amountPaid >= balance ? 'PAID' : 'PARTIAL_PAID',
-    })
-    .eq('id', supplierInvoiceId);
-
-  await recordAuditLog({
-    action: 'SUPPLIER_PAYMENT_CREATED',
-    entityId: String(data.id),
-    entityType: 'supplier_payment',
-    newValues: {
-      amount: amountPaid,
-      goodsReceivedNoteId: linkedGrnId,
-      idempotencyKey,
-      paymentSourceType,
-      purchaseOrderId: linkedPurchaseOrderId,
-      supplierId,
-      supplierInvoiceId,
-    },
-    organizationId: ctx.organizationId,
-    userAgent: request.headers.get('user-agent'),
-    userProfileId: ctx.userAccountId ?? ctx.userId,
+  return completeSupplierPaymentPosting({
+    ctx,
+    idempotencyKey,
+    payment: data,
+    request,
+    service,
   });
-
-  return NextResponse.json({ ...data, journal, linkedTransaction }, { status: 201 });
 }
