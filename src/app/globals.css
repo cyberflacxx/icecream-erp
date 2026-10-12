@@ -860,6 +860,11 @@
     margin: 2mm;
   }
 
+  @page receipt-a4 {
+    size: A4;
+    margin: 12mm;
+  }
+
   html,
   body {
     background: #ffffff !important;
@@ -890,6 +895,11 @@
     page: receipt-58;
   }
 
+  .receipt-print-shell[data-receipt-paper='a4'] {
+    max-width: none !important;
+    page: receipt-a4;
+  }
+
   .receipt-print-card {
     border: 0 !important;
     border-radius: 0 !important;
@@ -900,6 +910,11 @@
 
   .receipt-print-card :is(section, div) {
     break-inside: avoid;
+  }
+
+  .receipt-print-card :is(table, thead, tfoot, tr, .receipt-totals, .receipt-summary, .receipt-signature) {
+    break-inside: avoid;
+    page-break-inside: avoid;
   }
 
   .receipt-print-card :is(h1, h2, h3, p, span, td, th) {

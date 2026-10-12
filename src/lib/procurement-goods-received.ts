@@ -1,4 +1,5 @@
 import { normalizeStockMovementType } from './inventory';
+import { normalizeCommercialQuantityToBase, type UomConversionLike } from './uom';
 
 export function normalizeGoodsReceivedPurchaseOrderId(input: {
   purchase_order_id?: unknown;
@@ -225,6 +226,10 @@ export interface GrnStockPostingFailureDetails {
 
 export interface NormalizedPostableGrnLine {
   batchNumber: string | null;
+  baseQuantity: number;
+  baseUnitCost: number;
+  baseUnitId: string | null;
+  conversionFactor: number;
   hasAcceptedQuantity: boolean;
   itemId: string;
   lineId: string | null;
@@ -233,6 +238,8 @@ export interface NormalizedPostableGrnLine {
   quantity: number;
   rawLine: Record<string, unknown>;
   receivedValue: number;
+  transactionQuantity: number;
+  transactionUnitId: string | null;
   unitCost: number;
   warehouseId: string;
 }
@@ -446,6 +453,7 @@ export function findMatchingGrnReceiveLine(
 }
 
 export function normalizePostableGrnLines(input: {
+  conversions?: UomConversionLike[];
   fallbackOrganizationId?: string | null;
   grn: Record<string, unknown>;
   itemMastersById: Map<string, Record<string, unknown>>;
@@ -477,10 +485,39 @@ export function normalizePostableGrnLines(input: {
     }
 
     const itemMaster = input.itemMastersById.get(itemId) ?? null;
+    const transactionUnitId = normalizeGoodsReceivedUnitOfMeasureId({
+      unit_of_measure_id: rawLine.unit_of_measure_id ?? purchaseOrderItem?.unit_of_measure_id,
+      unitOfMeasureId: rawLine.unitOfMeasureId ?? purchaseOrderItem?.unitOfMeasureId,
+      uom_id: rawLine.uom_id ?? purchaseOrderItem?.uom_id,
+      uomId: rawLine.uomId ?? purchaseOrderItem?.uomId,
+    }) || null;
+    const baseUnitId = String(itemMaster?.unit_of_measure_id ?? itemMaster?.unit_id ?? '').trim() || transactionUnitId;
     const unitCost = resolveLineUnitCost(rawLine, purchaseOrderItem, itemMaster);
     const receivedValue = toNumber(rawLine.line_total ?? rawLine.total_value) || (quantity * unitCost);
+    const normalizedQuantity = baseUnitId && transactionUnitId
+      ? normalizeCommercialQuantityToBase({
+          baseUnitId,
+          conversions: input.conversions ?? [],
+          itemId,
+          quantity,
+          totalCost: receivedValue,
+          transactionUnitId,
+        })
+      : {
+          baseQuantity: quantity,
+          baseUnitCost: unitCost,
+          baseUnitId,
+          conversionFactor: 1,
+          transactionQuantity: quantity,
+          transactionUnitCost: unitCost,
+          transactionUnitId: transactionUnitId ?? baseUnitId ?? '',
+        };
     const normalizedLine: NormalizedPostableGrnLine = {
       batchNumber: rawLine.batch_number ? String(rawLine.batch_number) : null,
+      baseQuantity: normalizedQuantity.baseQuantity,
+      baseUnitCost: normalizedQuantity.baseUnitCost || unitCost,
+      baseUnitId: normalizedQuantity.baseUnitId || null,
+      conversionFactor: normalizedQuantity.conversionFactor,
       hasAcceptedQuantity: quantity > 0 && (
         rawLine.accepted_quantity !== undefined ||
         rawLine.acceptedQuantity !== undefined ||
@@ -499,10 +536,12 @@ export function normalizePostableGrnLines(input: {
         purchaseOrderItem,
       }),
       purchaseOrderItemId,
-      quantity,
+      quantity: normalizedQuantity.baseQuantity,
       rawLine,
       receivedValue,
-      unitCost,
+      transactionQuantity: normalizedQuantity.transactionQuantity,
+      transactionUnitId: normalizedQuantity.transactionUnitId || null,
+      unitCost: normalizedQuantity.baseUnitCost || unitCost,
       warehouseId,
     };
 
@@ -721,6 +760,33 @@ async function loadCompatibleItemMasters(
       .map((row) => [String(row.id ?? '').trim(), row] as const)
       .filter(([id]) => id),
   );
+}
+
+async function loadCompatibleItemUomConversions(
+  service: {
+    from: (table: string) => any;
+  },
+  input: {
+    itemIds: string[];
+    organizationId: string;
+  },
+) {
+  if (!input.itemIds.length) return [] as UomConversionLike[];
+
+  try {
+    const result = await service
+      .from('item_uom_conversions')
+      .select('item_id, from_uom_id, to_uom_id, conversion_factor, is_active')
+      .eq('organization_id', input.organizationId)
+      .in('item_id', input.itemIds);
+
+    if (!result.error) return (result.data ?? []) as UomConversionLike[];
+    if (getErrorMessage(result.error).includes('item_uom_conversions')) return [] as UomConversionLike[];
+    throw result.error;
+  } catch (error) {
+    if (getErrorMessage(error).includes('item_uom_conversions')) return [] as UomConversionLike[];
+    throw error;
+  }
 }
 
 async function loadCompatibleStockBalance(
@@ -1030,6 +1096,9 @@ async function insertCompatibleStockMovement(
   },
   input: {
     batchNumber?: string | null;
+    baseQuantity?: number | null;
+    baseUomId?: string | null;
+    conversionFactor?: number | null;
     grnId: string;
     grnNumber?: string | null;
     itemId: string;
@@ -1037,6 +1106,8 @@ async function insertCompatibleStockMovement(
     organizationId: string;
     quantity: number;
     runningBalance: number;
+    transactionQuantity?: number | null;
+    transactionUomId?: string | null;
     unitCost: number;
     userId: string;
     warehouseId: string;
@@ -1058,6 +1129,11 @@ async function insertCompatibleStockMovement(
     source_document_type: 'GRN',
     total_cost: input.quantity * input.unitCost,
     total_value: input.quantity * input.unitCost,
+    transaction_quantity: input.transactionQuantity ?? null,
+    transaction_uom_id: input.transactionUomId ?? null,
+    base_quantity: input.baseQuantity ?? input.quantity,
+    base_uom_id: input.baseUomId ?? null,
+    uom_conversion_factor: input.conversionFactor ?? null,
     unit_cost: input.unitCost,
     warehouse_id: input.warehouseId,
   };
@@ -1509,7 +1585,12 @@ export async function postGoodsReceivedNoteToInventory(
     fallbackOrganizationId: input.organizationId,
     grn,
   });
+  const uomConversions = await loadCompatibleItemUomConversions(service, {
+    itemIds: resolvedItemIds,
+    organizationId: headerOrganizationId || input.organizationId,
+  });
   const normalizedLines = normalizePostableGrnLines({
+    conversions: uomConversions,
     fallbackOrganizationId: headerOrganizationId || input.organizationId,
     grn,
     itemMastersById: itemsById,
@@ -1585,6 +1666,9 @@ export async function postGoodsReceivedNoteToInventory(
 
     await insertCompatibleStockMovement(service, {
       batchNumber: normalizedLine.batchNumber,
+      baseQuantity: normalizedLine.baseQuantity,
+      baseUomId: normalizedLine.baseUnitId,
+      conversionFactor: normalizedLine.conversionFactor,
       grnId: input.grnId,
       grnNumber,
       itemId: normalizedLine.itemId,
@@ -1592,6 +1676,8 @@ export async function postGoodsReceivedNoteToInventory(
       organizationId: normalizedLine.organizationId,
       quantity: normalizedLine.quantity,
       runningBalance: toNumber(updatedBalance.quantity_on_hand ?? updatedBalance.quantity),
+      transactionQuantity: normalizedLine.transactionQuantity,
+      transactionUomId: normalizedLine.transactionUnitId,
       unitCost: normalizedLine.unitCost,
       userId: input.userId,
       warehouseId: normalizedLine.warehouseId,
@@ -1609,12 +1695,12 @@ export async function postGoodsReceivedNoteToInventory(
           service,
           'purchase_order_items',
           {
-            quantity_received: currentReceived + normalizedLine.quantity,
-            received_qty: currentReceived + normalizedLine.quantity,
+            quantity_received: currentReceived + normalizedLine.transactionQuantity,
+            received_qty: currentReceived + normalizedLine.transactionQuantity,
           },
           (query) => query.eq('id', normalizedLine.purchaseOrderItemId),
         );
-        poItemResult.data.quantity_received = currentReceived + normalizedLine.quantity;
+        poItemResult.data.quantity_received = currentReceived + normalizedLine.transactionQuantity;
       }
     }
   }

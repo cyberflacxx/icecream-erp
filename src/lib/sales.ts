@@ -52,6 +52,14 @@ export type SalesPostingLine = {
   description: string;
 };
 
+export type SalesJournalReversalLine = {
+  accountId?: string | null;
+  accountCode?: string | null;
+  creditAmount: number;
+  debitAmount: number;
+  description?: string | null;
+};
+
 export type SalesPostingRole =
   | 'ACCOUNTS_RECEIVABLE'
   | 'SALES_REVENUE'
@@ -337,6 +345,33 @@ export function buildSalesPaymentPostingLines(input: {
       description: `Reduce accounts receivable for ${invoiceNumber}`,
     },
   ];
+}
+
+export function buildSalesJournalReversalLines(lines: SalesJournalReversalLine[]) {
+  return lines.map((line) => ({
+    ...line,
+    creditAmount: ensureNonNegative(line.debitAmount, 'debitAmount'),
+    debitAmount: ensureNonNegative(line.creditAmount, 'creditAmount'),
+    description: `Reversal: ${line.description ?? 'sales posting'}`,
+  }));
+}
+
+export function calculateSalesStockReversal(input: {
+  issueQuantity: number;
+  issueTotalCost: number;
+  quantityOnHandAfterIssue: number;
+  totalValueAfterIssue: number;
+}) {
+  const issueQuantity = ensurePositiveQuantity(input.issueQuantity, 'issueQuantity');
+  const issueTotalCost = ensureNonNegative(input.issueTotalCost, 'issueTotalCost');
+  return {
+    quantityOnHand: ensureNonNegative(input.quantityOnHandAfterIssue, 'quantityOnHandAfterIssue') + issueQuantity,
+    totalValue: ensureNonNegative(input.totalValueAfterIssue, 'totalValueAfterIssue') + issueTotalCost,
+  };
+}
+
+export function calculateCustomerReceivableAfterCancellation(currentBalance: number, invoiceBalanceDue: number) {
+  return Math.max(0, ensureNonNegative(currentBalance, 'currentBalance') - ensureNonNegative(invoiceBalanceDue, 'invoiceBalanceDue'));
 }
 
 export function buildSalesReportCsv(rows: Array<Record<string, unknown>>) {

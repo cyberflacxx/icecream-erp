@@ -11,10 +11,10 @@ import { PageHeader } from '@/components/dashboard/page-header';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
 const budgetStats = [
-  { label: 'Total Budget (Month)', value: '$48,200', sub: 'All departments', icon: DollarSign, color: 'text-orange-200 border-orange-200/20 bg-orange-200/10' },
-  { label: 'Total Actual', value: '$41,380', sub: '86% utilised', icon: BarChart3, color: 'text-orange border-orange/20 bg-orange/10' },
-  { label: 'Favourable Variance', value: '$6,820', sub: 'Under budget', icon: TrendingDown, color: 'text-emerald-400 border-emerald-400/20 bg-emerald-400/10' },
-  { label: 'Over Budget Depts', value: '1', sub: 'Maintenance', icon: TrendingUp, color: 'text-red-400 border-red-400/20 bg-red-400/10' },
+  { label: 'Total Budget (Month)', value: '$48,200', sub: 'All departments', icon: DollarSign, color: 'border-orange-200 bg-orange-50 text-orange-700 dark:border-orange-200/20 dark:bg-orange-200/10 dark:text-orange-200' },
+  { label: 'Total Actual', value: '$41,380', sub: '86% utilised', icon: BarChart3, color: 'border-orange/25 bg-orange/10 text-orange-700 dark:border-orange/20 dark:bg-orange/10 dark:text-orange' },
+  { label: 'Favourable Variance', value: '$6,820', sub: 'Under budget', icon: TrendingDown, color: 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-400/20 dark:bg-emerald-400/10 dark:text-emerald-400' },
+  { label: 'Over Budget Depts', value: '1', sub: 'Maintenance', icon: TrendingUp, color: 'border-red-200 bg-red-50 text-red-700 dark:border-red-400/20 dark:bg-red-400/10 dark:text-red-400' },
 ];
 
 const departments = [
@@ -48,12 +48,12 @@ export default function BudgetPage() {
         {budgetStats.map((stat) => {
           const Icon = stat.icon;
           return (
-            <div key={stat.label} className={`rounded-2xl border p-5 ${stat.color}`}>
+            <div key={stat.label} className={`rounded-2xl border p-5 shadow-sm shadow-slate-900/5 dark:shadow-none ${stat.color}`}>
               <div className="flex items-start justify-between">
                 <div>
-                  <p className="text-xs font-medium text-white/50">{stat.label}</p>
-                  <p className="mt-1.5 font-display text-2xl font-bold text-white">{stat.value}</p>
-                  <p className="mt-1 text-xs text-white/40">{stat.sub}</p>
+                  <p className="text-xs font-medium text-slate-700 dark:text-white/50">{stat.label}</p>
+                  <p className="mt-1.5 font-display text-2xl font-bold text-slate-950 dark:text-white">{stat.value}</p>
+                  <p className="mt-1 text-xs text-slate-600 dark:text-white/40">{stat.sub}</p>
                 </div>
                 <div className="rounded-xl border border-current/20 bg-current/10 p-2">
                   <Icon className="h-5 w-5" />
@@ -65,16 +65,16 @@ export default function BudgetPage() {
       </div>
 
       {/* Chart */}
-      <div className="rounded-2xl border border-white/8 bg-white/5 p-5">
-        <h3 className="mb-4 font-display font-semibold text-white">Budget vs Actual — By Department</h3>
+      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm shadow-slate-900/5 dark:border-white/8 dark:bg-white/5 dark:shadow-none [--budget-axis:#475569] [--budget-bar:#cbd5e1] [--budget-grid:rgba(15,23,42,0.08)] [--budget-tooltip-bg:#ffffff] [--budget-tooltip-border:rgba(249,115,22,0.28)] [--budget-tooltip-fg:#0f172a] dark:[--budget-axis:rgba(255,255,255,0.3)] dark:[--budget-bar:rgba(255,255,255,0.08)] dark:[--budget-grid:rgba(255,255,255,0.06)] dark:[--budget-tooltip-bg:#1a0700] dark:[--budget-tooltip-border:rgba(249,115,22,0.2)] dark:[--budget-tooltip-fg:#ffffff]">
+        <h3 className="mb-4 font-display font-semibold text-slate-950 dark:text-white">Budget vs Actual — By Department</h3>
         <div className="h-72">
           <ResponsiveContainer width="100%" height="100%" initialDimension={{ width: 1, height: 1 }}>
             <BarChart data={chartData} barGap={4}>
-              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
-              <XAxis dataKey="name" stroke="rgba(255,255,255,0.3)" fontSize={11} />
-              <YAxis stroke="rgba(255,255,255,0.3)" fontSize={11} tickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`} />
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--budget-grid)" />
+              <XAxis dataKey="name" stroke="var(--budget-axis)" fontSize={11} />
+              <YAxis stroke="var(--budget-axis)" fontSize={11} tickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`} />
               <Tooltip
-                contentStyle={{ background: '#1a0700', border: '1px solid rgba(249,115,22,0.2)', borderRadius: '12px', color: '#fff' }}
+                contentStyle={{ background: 'var(--budget-tooltip-bg)', border: '1px solid var(--budget-tooltip-border)', borderRadius: '12px', color: 'var(--budget-tooltip-fg)' }}
                 formatter={(value: number | string | readonly (number | string)[] | undefined) => {
                   const rawValue = Array.isArray(value) ? value[0] : value;
                   const numericValue = Number(rawValue);
@@ -82,26 +82,26 @@ export default function BudgetPage() {
                   return [`$${displayValue}`, ''];
                 }}
               />
-              <Bar dataKey="budget" fill="rgba(255,255,255,0.08)" radius={[4, 4, 0, 0]} name="Budget" />
+              <Bar dataKey="budget" fill="var(--budget-bar)" radius={[4, 4, 0, 0]} name="Budget" />
               <Bar dataKey="actual" fill="#f97316" radius={[4, 4, 0, 0]} name="Actual" />
             </BarChart>
           </ResponsiveContainer>
         </div>
-        <div className="mt-3 flex items-center gap-4 text-xs text-white/40">
+        <div className="mt-3 flex items-center gap-4 text-xs text-slate-600 dark:text-white/40">
           <span className="flex items-center gap-1.5"><span className="h-2 w-4 rounded bg-orange" />Actual</span>
-          <span className="flex items-center gap-1.5"><span className="h-2 w-4 rounded bg-white/10" />Budget</span>
+          <span className="flex items-center gap-1.5"><span className="h-2 w-4 rounded bg-slate-300 dark:bg-white/10" />Budget</span>
         </div>
       </div>
 
       {/* Dept table */}
-      <div className="rounded-2xl border border-white/8 bg-white/5">
-        <div className="border-b border-white/8 px-5 py-4">
-          <h3 className="font-display font-semibold text-white">Departmental Budget Summary — June 2026</h3>
+      <div className="rounded-2xl border border-slate-200 bg-white shadow-sm shadow-slate-900/5 dark:border-white/8 dark:bg-white/5 dark:shadow-none">
+        <div className="border-b border-slate-200 px-5 py-4 dark:border-white/8">
+          <h3 className="font-display font-semibold text-slate-950 dark:text-white">Departmental Budget Summary — June 2026</h3>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-white/5 text-left text-xs text-white/30">
+              <tr className="border-b border-slate-200 text-left text-xs text-slate-500 dark:border-white/5 dark:text-white/30">
                 <th className="px-5 py-3 font-medium">Department</th>
                 <th className="px-5 py-3 font-medium text-right">Budget</th>
                 <th className="px-5 py-3 font-medium text-right">Actual</th>
@@ -109,21 +109,21 @@ export default function BudgetPage() {
                 <th className="px-5 py-3 font-medium text-right">Utilisation</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-white/5">
+            <tbody className="divide-y divide-slate-100 dark:divide-white/5">
               {departments.map((dept) => {
                 const variance = dept.budget - dept.actual;
                 const utilisation = Math.round((dept.actual / dept.budget) * 100);
                 const isOver = variance < 0;
                 return (
-                  <tr key={dept.name} className="transition hover:bg-white/5">
+                  <tr key={dept.name} className="transition hover:bg-slate-50 dark:hover:bg-white/5">
                     <td className="px-5 py-4">
                       <div className="flex items-center gap-2">
                         <span className="h-2 w-2 rounded-full" style={{ backgroundColor: dept.color }} />
-                        <span className="font-semibold text-white">{dept.name}</span>
+                        <span className="font-semibold text-slate-950 dark:text-white">{dept.name}</span>
                       </div>
                     </td>
-                    <td className="px-5 py-4 text-right text-white">${dept.budget.toLocaleString()}</td>
-                    <td className="px-5 py-4 text-right text-white">${dept.actual.toLocaleString()}</td>
+                    <td className="px-5 py-4 text-right text-slate-800 dark:text-white">${dept.budget.toLocaleString()}</td>
+                    <td className="px-5 py-4 text-right text-slate-800 dark:text-white">${dept.actual.toLocaleString()}</td>
                     <td className={`px-5 py-4 text-right font-semibold ${isOver ? 'text-red-400' : 'text-emerald-400'}`}>
                       <span className="flex items-center justify-end gap-1">
                         {isOver ? <TrendingUp className="h-3.5 w-3.5" /> : <TrendingDown className="h-3.5 w-3.5" />}
@@ -132,13 +132,13 @@ export default function BudgetPage() {
                     </td>
                     <td className="px-5 py-4 text-right">
                       <div className="flex items-center justify-end gap-2">
-                        <div className="h-1.5 w-16 overflow-hidden rounded-full bg-white/10">
+                        <div className="h-1.5 w-16 overflow-hidden rounded-full bg-slate-200 dark:bg-white/10">
                           <div
                             className={`h-full rounded-full ${isOver ? 'bg-red-400' : 'bg-emerald-400'}`}
                             style={{ width: `${Math.min(utilisation, 100)}%` }}
                           />
                         </div>
-                        <span className={`text-xs ${isOver ? 'text-red-400' : 'text-white/50'}`}>{utilisation}%</span>
+                        <span className={`text-xs ${isOver ? 'text-red-500 dark:text-red-400' : 'text-slate-600 dark:text-white/50'}`}>{utilisation}%</span>
                       </div>
                     </td>
                   </tr>
@@ -151,18 +151,18 @@ export default function BudgetPage() {
 
       {/* Summary */}
       <div className="grid gap-4 sm:grid-cols-2">
-        <div className="flex items-start gap-4 rounded-2xl border border-emerald-500/20 bg-emerald-500/10 p-5">
+        <div className="flex items-start gap-4 rounded-2xl border border-emerald-200 bg-emerald-50 p-5 dark:border-emerald-500/20 dark:bg-emerald-500/10">
           <CheckCircle2 className="mt-0.5 h-5 w-5 flex-shrink-0 text-emerald-400" />
           <div>
-            <p className="font-semibold text-emerald-300">6 Departments Under Budget</p>
-            <p className="mt-1 text-sm text-emerald-400/70">Production, Procurement, Stores, Sales, Admin, and Finance are all tracking below their monthly budget allocations.</p>
+            <p className="font-semibold text-emerald-800 dark:text-emerald-300">6 Departments Under Budget</p>
+            <p className="mt-1 text-sm text-emerald-700 dark:text-emerald-400/70">Production, Procurement, Stores, Sales, Admin, and Finance are all tracking below their monthly budget allocations.</p>
           </div>
         </div>
-        <div className="flex items-start gap-4 rounded-2xl border border-red-500/20 bg-red-500/10 p-5">
+        <div className="flex items-start gap-4 rounded-2xl border border-red-200 bg-red-50 p-5 dark:border-red-500/20 dark:bg-red-500/10">
           <TrendingUp className="mt-0.5 h-5 w-5 flex-shrink-0 text-red-400" />
           <div>
-            <p className="font-semibold text-red-300">Maintenance Exceeds Budget by $340</p>
-            <p className="mt-1 text-sm text-red-400/70">Unplanned repair cost for Chocolate Coating Unit breakdown contributed to the overspend. MD approval required for budget amendment.</p>
+            <p className="font-semibold text-red-800 dark:text-red-300">Maintenance Exceeds Budget by $340</p>
+            <p className="mt-1 text-sm text-red-700 dark:text-red-400/70">Unplanned repair cost for Chocolate Coating Unit breakdown contributed to the overspend. MD approval required for budget amendment.</p>
           </div>
         </div>
       </div>

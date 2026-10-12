@@ -6,9 +6,12 @@ import {
   SUPPLIER_IMPORT_TEMPLATE_HEADERS,
   buildCostVarianceRows,
   buildInvoiceAgeingRows,
+  calculateSupplierInvoiceBalance,
   buildSupplierShortageRows,
   buildSupplierImportTemplateCsv,
   canPayInvoice,
+  isSupplierPaymentPostingMethod,
+  normalizeSupplierPaymentMethod,
   validateSupplierImportRows,
   validateSupplierCodeUniqueness,
 } from '../src/lib/procurement';
@@ -135,6 +138,17 @@ test('canPayInvoice blocks overpayment', () => {
   assert.equal(canPayInvoice(100, 50), true);
   assert.equal(canPayInvoice(100, 150), false);
   assert.equal(canPayInvoice(100, 0), false);
+});
+
+test('supplier payment helpers normalize methods and keep credit non-posting', () => {
+  assert.equal(normalizeSupplierPaymentMethod('bank transfer'), 'BANK');
+  assert.equal(normalizeSupplierPaymentMethod('MOBILE_MONEY'), 'MOBILE_MONEY');
+  assert.equal(normalizeSupplierPaymentMethod('credit'), 'CREDIT');
+  assert.equal(isSupplierPaymentPostingMethod('BANK_TRANSFER'), true);
+  assert.equal(isSupplierPaymentPostingMethod('MOBILE_MONEY'), true);
+  assert.equal(isSupplierPaymentPostingMethod('CREDIT'), false);
+  assert.equal(calculateSupplierInvoiceBalance(1000, [300, 200]), 500);
+  assert.equal(canPayInvoice(calculateSupplierInvoiceBalance(1000, [300, 200]), 600), false);
 });
 
 test('supplier import template csv includes the required headers', () => {

@@ -18,6 +18,7 @@ function readParam(value: string | string[] | undefined, fallback = '') {
 
 function resolveReceiptPaper(value: string) {
   const normalized = value.trim().toLowerCase();
+  if (normalized === 'a4') return 'a4';
   return normalized === '58' || normalized === '58mm' ? '58mm' : '80mm';
 }
 

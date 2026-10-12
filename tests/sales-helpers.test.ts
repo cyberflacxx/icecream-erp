@@ -6,8 +6,11 @@ import { join } from 'node:path';
 import {
   buildCreditLimitRows,
   buildSalesInvoicePostingLines,
+  buildSalesJournalReversalLines,
   buildSalesPaymentPostingLines,
+  calculateCustomerReceivableAfterCancellation,
   calculateInvoiceTotals,
+  calculateSalesStockReversal,
   canRecordPayment,
   checkStockAvailability,
   evaluateCreditLimit,
@@ -260,4 +263,73 @@ test('sales pricing and receipt printing routes use organization-scoped prices a
   assert.doesNotMatch(receiptPage, /buildMetaRow\('Warehouse'/);
   assert.match(paymentsHelper, /paymentId\?: string/);
   assert.match(paymentsHelper, /searchParams\.set\('paymentId', payload\.paymentId\)/);
+});
+
+test('sales invoice cancellation reversal math restores stock, receivable, and balanced journals', () => {
+  const restoredStock = calculateSalesStockReversal({
+    issueQuantity: 10,
+    issueTotalCost: 300,
+    quantityOnHandAfterIssue: 90,
+    totalValueAfterIssue: 2700,
+  });
+  assert.deepEqual(restoredStock, { quantityOnHand: 100, totalValue: 3000 });
+  assert.equal(calculateCustomerReceivableAfterCancellation(500, 500), 0);
+
+  const reversal = buildSalesJournalReversalLines([
+    { accountCode: 'ACCOUNTS_RECEIVABLE', creditAmount: 0, debitAmount: 500, description: 'AR' },
+    { accountCode: 'SALES_REVENUE', creditAmount: 500, debitAmount: 0, description: 'Sales' },
+    { accountCode: 'COST_OF_GOODS_SOLD', creditAmount: 0, debitAmount: 300, description: 'COGS' },
+    { accountCode: 'FINISHED_GOODS_INVENTORY', creditAmount: 300, debitAmount: 0, description: 'Inventory' },
+  ]);
+
+  assert.deepEqual(reversal.map((line) => [line.accountCode, line.debitAmount, line.creditAmount]), [
+    ['ACCOUNTS_RECEIVABLE', 0, 500],
+    ['SALES_REVENUE', 500, 0],
+    ['COST_OF_GOODS_SOLD', 0, 300],
+    ['FINISHED_GOODS_INVENTORY', 300, 0],
+  ]);
+  assert.equal(reversal.reduce((sum, line) => sum + line.debitAmount, 0), 800);
+  assert.equal(reversal.reduce((sum, line) => sum + line.creditAmount, 0), 800);
+});
+
+test('sales invoice cancellation routes delegate posted reversals to one atomic RPC', () => {
+  const invoiceCancelRoute = readFileSync(join('src', 'app', 'api', 'sales', 'invoices', '[id]', 'cancel', 'route.ts'), 'utf8');
+  const dispatchCancelRoute = readFileSync(join('src', 'app', 'api', 'sales', 'dispatches', '[id]', 'cancel', 'route.ts'), 'utf8');
+  const transactionServer = readFileSync(join('src', 'lib', 'sales-transactions-server.ts'), 'utf8');
+  const migration = readFileSync(join('migrations', '063_sales_invoice_dispatch_reversal.sql'), 'utf8');
+
+  assert.match(transactionServer, /cancelSalesInvoiceTransaction/);
+  assert.match(transactionServer, /\.rpc\('cancel_sales_invoice_transaction'/);
+  assert.match(invoiceCancelRoute, /cancelSalesInvoiceTransaction/);
+  assert.match(dispatchCancelRoute, /cancelSalesInvoiceTransaction/);
+  assert.match(dispatchCancelRoute, /invoiceId/);
+
+  assert.match(migration, /create or replace function icecream_erp\.cancel_sales_invoice_transaction/);
+  assert.match(migration, /for update/i);
+  assert.match(migration, /This invoice has posted payments\. Reverse or unallocate the payments before cancelling the invoice\./);
+  assert.match(migration, /movement_type = 'SALES_ISSUE'/);
+  assert.match(migration, /'RETURN_IN'/);
+  assert.match(migration, /reversal_of_movement_id/);
+  assert.match(migration, /reference_type = 'sales_invoice_cancellation'/);
+  assert.match(migration, /coalesce\(v_line\.credit_amount, 0\)/);
+  assert.match(migration, /coalesce\(v_line\.debit_amount, 0\)/);
+  assert.match(migration, /status = 'CANCELLED'/);
+  assert.match(migration, /INVOICE_CANCELLED/);
+  assert.match(migration, /DISPATCH_REVERSED/);
+  assert.match(migration, /STOCK_REVERSAL_CREATED/);
+  assert.match(migration, /JOURNAL_REVERSED/);
+});
+
+test('sales invoice cancellation migration blocks duplicate reversals and partial failure hazards', () => {
+  const migration = readFileSync(join('migrations', '063_sales_invoice_dispatch_reversal.sql'), 'utf8');
+
+  assert.match(migration, /Stock reversal already exists for this invoice\./);
+  assert.match(migration, /Journal reversal already exists for this invoice\./);
+  assert.match(migration, /Original invoice journal was not found\./);
+  assert.match(migration, /Posted dispatch is missing linked stock movement and cannot be cancelled safely\./);
+  assert.match(migration, /Posted dispatch is missing linked journal and cannot be cancelled safely\./);
+  assert.match(migration, /raise exception 'Reversal journal is not balanced\.'/);
+  assert.match(migration, /returns jsonb[\s\S]*language plpgsql[\s\S]*security definer/);
+  assert.doesNotMatch(migration, /^\s*delete\s+from/im);
+  assert.doesNotMatch(migration, /^\s*truncate\s+/im);
 });

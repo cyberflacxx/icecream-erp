@@ -5,12 +5,17 @@ import { ensurePositiveQuantity, toNumber } from '@/lib/inventory';
 import { getBalance, recordStockMovement, requireItem } from '@/lib/inventory-server';
 import { firstRelation } from '@/lib/supabase-relations';
 import { createServiceRoleClient } from '@/lib/supabase/server';
+import { normalizeCommercialQuantityToBase, type UomConversionLike } from '@/lib/uom';
 
 type Requirement = {
+  baseUnitId: string | null;
+  conversionFactor: number;
   isPackaging: boolean;
   itemId: string;
   materialType: 'RAW_MATERIAL' | 'PACKAGING' | 'MIXED';
   quantityRequired: number;
+  transactionQuantity: number;
+  transactionUnitId: string | null;
   unitCost: number;
   unitId: string | null;
 };
@@ -188,6 +193,8 @@ export async function POST(
       }
 
       await recordStockMovement(service.schema('icecream_erp'), {
+        baseQuantity: requirement.quantityRequired,
+        baseUomId: requirement.baseUnitId,
         createdBy: ctx.userId,
         itemId: requirement.itemId,
         movementType: 'PRODUCTION_ISSUE',
@@ -196,6 +203,9 @@ export async function POST(
         quantity: requirement.quantityRequired,
         referenceId: id,
         referenceType: 'production_batch',
+        transactionQuantity: requirement.transactionQuantity,
+        transactionUomId: requirement.transactionUnitId,
+        uomConversionFactor: requirement.conversionFactor,
         warehouseId: String(batchDetail.warehouse_id),
       });
     }
@@ -261,23 +271,54 @@ async function buildBatchRequirements(
   const standardOutput = ensurePositiveQuantity(recipe.expected_output_quantity ?? 1, 'standard BOM output');
   const scale = plannedQuantity / standardOutput;
   const requirementsByItem = new Map<string, Requirement>();
+  const itemIds = [
+    ...new Set([
+      ...(ingredientResult.data ?? []).map((line) => String((line as Record<string, unknown>).item_id ?? '')).filter(Boolean),
+      ...(packagingResult.data ?? []).map((line) => String((line as Record<string, unknown>).item_id ?? '')).filter(Boolean),
+    ]),
+  ];
+  const conversions = await loadBatchItemUomConversions(service, itemIds);
 
   async function addRequirement(line: Record<string, unknown>, materialType: 'RAW_MATERIAL' | 'PACKAGING') {
     const itemId = String(line.item_id ?? '');
     if (!itemId) return;
 
     const item = await requireItem(service.schema('icecream_erp'), itemId);
-    const baseQuantity = ensurePositiveQuantity(line.quantity_required, 'BOM quantity');
+    const bomQuantity = ensurePositiveQuantity(line.quantity_required, 'BOM quantity');
     const wastagePercent = Math.max(0, Number(line.wastage_allowance_percent ?? 0));
-    const quantityRequired = (baseQuantity * scale) + ((baseQuantity * scale * wastagePercent) / 100);
+    const transactionQuantity = (bomQuantity * scale) + ((bomQuantity * scale * wastagePercent) / 100);
+    const transactionUnitId = line.unit_id ? String(line.unit_id) : null;
+    const baseUnitId = String(item.unit_of_measure_id ?? item.uom_id ?? '').trim() || transactionUnitId;
+    const normalizedQuantity = baseUnitId && transactionUnitId
+      ? normalizeCommercialQuantityToBase({
+          baseUnitId,
+          conversions,
+          itemId,
+          quantity: transactionQuantity,
+          transactionUnitId,
+        })
+      : {
+          baseQuantity: transactionQuantity,
+          baseUnitCost: Number(item.unit_cost ?? 0),
+          baseUnitId,
+          conversionFactor: 1,
+          transactionQuantity,
+          transactionUnitCost: Number(item.unit_cost ?? 0),
+          transactionUnitId: transactionUnitId ?? baseUnitId ?? '',
+        };
+    const quantityRequired = normalizedQuantity.baseQuantity;
     const current = requirementsByItem.get(itemId);
     const nextMaterialType = current && current.materialType !== materialType ? 'MIXED' : materialType;
 
     requirementsByItem.set(itemId, {
+      baseUnitId: normalizedQuantity.baseUnitId || null,
+      conversionFactor: normalizedQuantity.conversionFactor,
       isPackaging: nextMaterialType === 'PACKAGING',
       itemId,
       materialType: nextMaterialType,
       quantityRequired: (current?.quantityRequired ?? 0) + quantityRequired,
+      transactionQuantity: (current?.transactionQuantity ?? 0) + normalizedQuantity.transactionQuantity,
+      transactionUnitId: current?.transactionUnitId ?? (normalizedQuantity.transactionUnitId || null),
       unitCost: Number(item.unit_cost ?? current?.unitCost ?? 0),
       unitId: current?.unitId ?? (line.unit_id ? String(line.unit_id) : null),
     });
@@ -292,4 +333,21 @@ async function buildBatchRequirements(
   }
 
   return Array.from(requirementsByItem.values());
+}
+
+async function loadBatchItemUomConversions(
+  service: ReturnType<typeof createServiceRoleClient>,
+  itemIds: string[],
+) {
+  if (!itemIds.length) return [] as UomConversionLike[];
+
+  const result = await service
+    .schema('icecream_erp')
+    .from('item_uom_conversions')
+    .select('item_id, from_uom_id, to_uom_id, conversion_factor, is_active')
+    .in('item_id', itemIds);
+
+  if (!result.error) return (result.data ?? []) as UomConversionLike[];
+  if (String(result.error.message ?? '').includes('item_uom_conversions')) return [] as UomConversionLike[];
+  throw result.error;
 }

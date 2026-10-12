@@ -23,6 +23,7 @@ import {
 import { isMissingColumnError } from '@/lib/postgrest-compat';
 import { recordAuditLog } from '@/lib/security-server';
 import { createServiceRoleClient } from '@/lib/supabase/server';
+import { normalizeCommercialQuantityToBase, type UomConversionLike } from '@/lib/uom';
 
 const LEGACY_PURCHASE_ORDER_ITEM_COLUMNS = [
   'description',
@@ -38,6 +39,11 @@ const LEGACY_PURCHASE_ORDER_ITEM_COLUMNS = [
   'tax_rate',
   'total_cost',
   'total_ex_vat',
+  'transaction_quantity',
+  'transaction_uom_id',
+  'base_quantity',
+  'base_uom_id',
+  'uom_conversion_factor',
   'unit_of_measure_id',
   'unit_price',
 ] as const;
@@ -195,6 +201,29 @@ async function rollbackCreatedPurchaseOrder(
     .from('purchase_orders')
     .delete()
     .eq('id', orderId);
+}
+
+async function loadItemUomConversions(
+  service: ReturnType<typeof createServiceRoleClient>,
+  organizationId: string,
+  itemIds: string[],
+) {
+  if (!itemIds.length) return [] as UomConversionLike[];
+
+  try {
+    const result = await service
+      .from('item_uom_conversions')
+      .select('item_id, from_uom_id, to_uom_id, conversion_factor, is_active')
+      .eq('organization_id', organizationId)
+      .in('item_id', itemIds);
+
+    if (!result.error) return (result.data ?? []) as UomConversionLike[];
+    if (String(result.error.message ?? '').includes('item_uom_conversions')) return [] as UomConversionLike[];
+    throw result.error;
+  } catch (error) {
+    if (String(error instanceof Error ? error.message : error).includes('item_uom_conversions')) return [] as UomConversionLike[];
+    throw error;
+  }
 }
 
 async function loadReceivablePurchaseOrderPickerRows(
@@ -791,13 +820,42 @@ export async function POST(request: NextRequest) {
     const itemsById = new Map(
       (itemsCheck.data ?? []).map((row) => [String(row.id), row as Record<string, unknown>]),
     );
+    const uomConversions = await loadItemUomConversions(service, ctx.organizationId, itemIds);
 
     const resolvedItems = normalizedItems.map((item) => {
       const itemRow = itemsById.get(item.itemId);
       const resolvedUnitCost =
         item.unitCost > 0 || !itemRow ? item.unitCost : resolvePurchaseOrderItemUnitPrice(itemRow);
       const resolvedUnitId = item.unitOfMeasureId || resolvePurchaseOrderItemUnitOfMeasureId(itemRow) || null;
+      const baseUnitId = String(itemRow?.unit_of_measure_id ?? itemRow?.uom_id ?? '').trim() || resolvedUnitId;
+      let baseUom = {
+        baseQuantity: item.quantityOrdered,
+        baseUnitCost: resolvedUnitCost,
+        baseUnitId,
+        conversionFactor: 1,
+        transactionQuantity: item.quantityOrdered,
+        transactionUnitCost: resolvedUnitCost,
+        transactionUnitId: resolvedUnitId ?? baseUnitId ?? '',
+      };
+      if (baseUnitId && resolvedUnitId) {
+        try {
+          baseUom = normalizeCommercialQuantityToBase({
+            baseUnitId,
+            conversions: uomConversions,
+            itemId: item.itemId,
+            quantity: item.quantityOrdered,
+            totalCost: item.requestedLineTotal ?? (item.quantityOrdered * resolvedUnitCost),
+            transactionUnitId: resolvedUnitId,
+          });
+        } catch (conversionError) {
+          throw new Error(`Configure an active UOM conversion for item ${item.itemId}: ${conversionError instanceof Error ? conversionError.message : 'conversion failed'}`);
+        }
+      }
       return {
+        baseQuantity: baseUom.baseQuantity,
+        baseUnitCost: baseUom.baseUnitCost || resolvedUnitCost,
+        baseUnitId: baseUom.baseUnitId || null,
+        conversionFactor: baseUom.conversionFactor,
         description: resolvePurchaseOrderItemDescription(item.raw as Record<string, unknown>) || resolvePurchaseOrderItemDescription(itemRow),
         itemId: item.itemId,
         lineTotal: item.requestedLineTotal ?? (item.quantityOrdered * resolvedUnitCost),
@@ -897,6 +955,11 @@ export async function POST(request: NextRequest) {
       quantity_ordered: item.quantityOrdered,
       received_qty: 0,
       quantity_received: 0,
+      transaction_quantity: item.quantityOrdered,
+      transaction_uom_id: item.unitOfMeasureId || null,
+      base_quantity: item.baseQuantity,
+      base_uom_id: item.baseUnitId,
+      uom_conversion_factor: item.conversionFactor,
       unit_price: item.unitCost,
       unit_cost: item.unitCost,
       tax_rate: item.taxRate,
@@ -1004,6 +1067,10 @@ export async function POST(request: NextRequest) {
           orderId: createdOrderId,
         });
       }
+    }
+
+    if (err instanceof Error && err.message.startsWith('Configure an active UOM conversion')) {
+      return badRequest(err.message);
     }
 
     return serverError((err as Error).message);

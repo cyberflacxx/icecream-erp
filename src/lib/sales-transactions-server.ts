@@ -50,3 +50,15 @@ export async function postSalesPaymentTransaction(input: Record<string, unknown>
   if (error) throw error;
   return data as SalesTransactionRpcResult;
 }
+
+export async function cancelSalesInvoiceTransaction(input: { invoiceId: string; reason: string }, ctx: AuthContext) {
+  const service = salesService();
+  const { data, error } = await service.rpc('cancel_sales_invoice_transaction', {
+    p_actor_user_profile_id: ctx.userId,
+    p_invoice_id: input.invoiceId,
+    p_organization_id: ctx.organizationId,
+    p_reason: input.reason,
+  });
+  if (error) throw error;
+  return data as SalesTransactionRpcResult;
+}

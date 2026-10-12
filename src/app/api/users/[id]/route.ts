@@ -3,6 +3,39 @@ import { NextRequest, NextResponse } from 'next/server';
 import { recordProtectedActionAudit, requireAdminDeleteKey } from '@/lib/admin-delete-server';
 import { createClient, createServiceRoleClient } from '@/lib/supabase/server';
 
+type CountableQuery = {
+  eq: (column: string, value: string) => Promise<{ count: number | null; error: { message?: string } | null }>;
+  select: (columns: string, options: { count: 'exact'; head: true }) => CountableQuery;
+};
+
+async function countUserHistory(schemaService: { from: (table: string) => CountableQuery }, userId: string) {
+  const referenceChecks = [
+    ['audit_logs', 'user_profile_id'],
+    ['audit_logs', 'user_id'],
+    ['journal_entries', 'created_by'],
+    ['journal_entries', 'posted_by'],
+    ['stock_movements', 'created_by'],
+    ['production_issues', 'issued_by'],
+    ['production_issues', 'posted_by'],
+    ['production_receipts', 'received_by'],
+    ['production_worker_assignments', 'created_by'],
+    ['hr_labour_cost_allocations', 'created_by'],
+    ['branch_expenses', 'created_by'],
+    ['branch_expenses', 'posted_by'],
+    ['invoices', 'created_by'],
+    ['payments', 'created_by'],
+  ] as const;
+
+  let total = 0;
+  for (const [table, column] of referenceChecks) {
+    try {
+      const { count, error } = await schemaService.from(table).select('id', { count: 'exact', head: true }).eq(column, userId);
+      if (!error) total += count ?? 0;
+    } catch {}
+  }
+  return total;
+}
+
 export async function PATCH(request: NextRequest, { params }: { params: { id: string } }) {
   const supabase = await createClient();
   const {
@@ -60,11 +93,23 @@ export async function DELETE(request: NextRequest, { params }: { params: { id: s
 
   const body = (await request.json().catch(() => ({}))) as { adminKey?: string | null };
 
-  // Get auth_id so we can delete from Supabase Auth too
   const { data: target } = await schemaService.from('users').select('id, auth_id, role, status').eq('id', params.id).single();
 
   if (!target) {
     return NextResponse.json({ error: 'User not found' }, { status: 404 });
+  }
+
+  if (String(target.role ?? '').toLowerCase() === 'super_admin' && String(target.status ?? 'active').toLowerCase() === 'active') {
+    const { count, error: adminCountError } = await schemaService
+      .from('users')
+      .select('id', { count: 'exact', head: true })
+      .eq('role', 'super_admin')
+      .eq('status', 'active')
+      .neq('id', params.id);
+    if (adminCountError) return NextResponse.json({ error: adminCountError.message }, { status: 500 });
+    if ((count ?? 0) < 1) {
+      return NextResponse.json({ error: 'Cannot disable the last active Super Admin.' }, { status: 409 });
+    }
   }
 
   const adminKeyError = await requireAdminDeleteKey({
@@ -90,19 +135,23 @@ export async function DELETE(request: NextRequest, { params }: { params: { id: s
   });
   if (adminKeyError) return adminKeyError;
 
-  const { error } = await schemaService.from('users').delete().eq('id', params.id);
+  const historyCount = await countUserHistory(schemaService, params.id);
+  const { error } = await schemaService
+    .from('users')
+    .update({ status: 'inactive', updated_at: new Date().toISOString() })
+    .eq('id', params.id);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
   if (target?.auth_id) {
-    await service.auth.admin.deleteUser(String(target.auth_id));
+    await service.auth.admin.updateUserById(String(target.auth_id), { ban_duration: '876000h' }).catch(() => null);
   }
 
   await recordProtectedActionAudit({
-    action: 'USER_DELETED',
+    action: 'USER_DISABLED',
     entityId: params.id,
     entityType: 'user',
     oldValues: target as Record<string, unknown>,
-    newValues: { deleted: true },
+    newValues: { hardDeleted: false, historyCount, status: 'inactive' },
     ctx: {
       branchAssignments: [],
       branchId: null,
@@ -120,5 +169,5 @@ export async function DELETE(request: NextRequest, { params }: { params: { id: s
     request,
   });
 
-  return NextResponse.json({ success: true });
+  return NextResponse.json({ success: true, deactivated: true, hardDeleted: false, historyCount });
 }

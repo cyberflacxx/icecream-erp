@@ -16,9 +16,11 @@ import { formatCurrency, formatMoneyAmount } from '@/lib/money';
 import { PERMISSIONS } from '@/lib/shared';
 
 const paymentSources = [
-  { label: 'Bank', value: 'BANK' },
+  { label: 'Bank Transfer', value: 'BANK_TRANSFER' },
   { label: 'Cash', value: 'CASH' },
+  { label: 'Mobile Money', value: 'MOBILE_MONEY' },
   { label: 'Petty Cash', value: 'PETTY_CASH' },
+  { label: 'Credit Terms', value: 'CREDIT' },
 ];
 
 const initialFormState = {
@@ -26,7 +28,7 @@ const initialFormState = {
   bankAccountId: '',
   cashAccountId: '',
   paymentDate: '',
-  paymentMethod: 'BANK',
+    paymentMethod: 'BANK_TRANSFER',
   pettyCashRequestId: '',
   referenceNumber: '',
   remarks: '',
@@ -127,8 +129,8 @@ export default function ProcurementPaymentsPage() {
       await request('/api/procurement/supplier-payments', {
         body: JSON.stringify({
           amountPaid,
-          bankAccountId: formState.paymentMethod === 'BANK' ? formState.bankAccountId || null : null,
-          cashAccountId: formState.paymentMethod === 'CASH' ? formState.cashAccountId || null : null,
+          bankAccountId: formState.paymentMethod === 'BANK_TRANSFER' ? formState.bankAccountId || null : null,
+          cashAccountId: formState.paymentMethod === 'CASH' || formState.paymentMethod === 'MOBILE_MONEY' ? formState.cashAccountId || null : null,
           goodsReceivedNoteId: selectedInvoice.goodsReceivedNoteId,
           idempotencyKey: paymentIdempotencyKey,
           paymentDate: formState.paymentDate || undefined,
@@ -239,13 +241,16 @@ export default function ProcurementPaymentsPage() {
             key: 'actions',
             header: 'Actions',
             render: (row) =>
-              row.invoiceId ? (
+              <div className="flex flex-wrap gap-2">
                 <Button asChild size="sm" variant="outline">
-                  <Link href={`/procurement/payments?invoiceId=${row.invoiceId}`}>Pay Again</Link>
+                  <Link href={`/procurement/payments/receipt?paymentId=${row.id}`}>Reprint Receipt</Link>
                 </Button>
-              ) : (
-                <span className="text-xs text-muted">No invoice link</span>
-              ),
+                {row.invoiceId ? (
+                  <Button asChild size="sm" variant="outline">
+                    <Link href={`/procurement/payments?invoiceId=${row.invoiceId}`}>Pay Again</Link>
+                  </Button>
+                ) : null}
+              </div>,
           },
         ]}
         emptyState={
@@ -351,7 +356,7 @@ export default function ProcurementPaymentsPage() {
                 ))}
               </select>
             </label>
-            {formState.paymentMethod === 'BANK' ? (
+            {formState.paymentMethod === 'BANK_TRANSFER' ? (
               <label className="space-y-2 text-sm text-muted">
                 <span>Bank Account</span>
                 <select
@@ -369,9 +374,9 @@ export default function ProcurementPaymentsPage() {
                 </select>
               </label>
             ) : null}
-            {formState.paymentMethod === 'CASH' ? (
+            {formState.paymentMethod === 'CASH' || formState.paymentMethod === 'MOBILE_MONEY' ? (
               <label className="space-y-2 text-sm text-muted">
-                <span>Cash Account</span>
+                <span>{formState.paymentMethod === 'MOBILE_MONEY' ? 'Mobile Money / Cash Account' : 'Cash Account'}</span>
                 <select
                   required
                   value={formState.cashAccountId}
@@ -386,6 +391,11 @@ export default function ProcurementPaymentsPage() {
                   ))}
                 </select>
               </label>
+            ) : null}
+            {formState.paymentMethod === 'CREDIT' ? (
+              <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 sm:col-span-2">
+                Credit keeps the invoice outstanding under supplier credit terms. It does not post a cash or bank payment.
+              </div>
             ) : null}
             {formState.paymentMethod === 'PETTY_CASH' ? (
               <label className="space-y-2 text-sm text-muted">
@@ -438,7 +448,7 @@ export default function ProcurementPaymentsPage() {
             <Button type="button" variant="outline" onClick={() => setIsDrawerOpen(false)}>
               Cancel
             </Button>
-            <Button type="submit" disabled={isSubmittingPayment}>
+            <Button type="submit" disabled={isSubmittingPayment || formState.paymentMethod === 'CREDIT'}>
               {isSubmittingPayment ? 'Posting Payment...' : 'Enter Payment'}
             </Button>
           </div>

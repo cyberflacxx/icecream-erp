@@ -5,6 +5,23 @@ import { hrService, writeHrAuditLog } from '@/lib/hr-server';
 
 type RouteContext = { params: Promise<{ id: string }> };
 
+type CountableQuery = {
+  eq: (column: string, value: string) => CountableQuery | Promise<{ count: number | null; error: { message?: string } | null }>;
+  select: (columns: string, options: { count: 'exact'; head: true }) => CountableQuery;
+};
+
+async function countOptionalReferences(service: { from: (table: string) => CountableQuery }, checks: Array<{ column: string; table: string; value: string }>) {
+  let total = 0;
+  for (const check of checks) {
+    try {
+      const query = service.from(check.table).select('id', { count: 'exact', head: true }).eq(check.column, check.value);
+      const result = await Promise.resolve(query as Promise<{ count: number | null; error: { message?: string } | null }>);
+      if (!result.error) total += result.count ?? 0;
+    } catch {}
+  }
+  return total;
+}
+
 export async function PATCH(request: NextRequest, { params }: RouteContext) {
   const ctx = await getAuthContext();
   if (!ctx) return unauthorized();
@@ -59,7 +76,7 @@ export async function DELETE(_request: NextRequest, { params }: RouteContext) {
     const service = hrService();
     const { data: existing, error: fetchError } = await service
       .from('production_worker_assignments')
-      .select('id, batch_id, employee_id')
+      .select('id, batch_id, employee_id, hours_worked, output_quantity')
       .eq('id', id)
       .maybeSingle();
     if (fetchError) throw fetchError;
@@ -72,6 +89,22 @@ export async function DELETE(_request: NextRequest, { params }: RouteContext) {
     if (batchError) throw batchError;
     if (batch && ['COMPLETED', 'CANCELLED'].includes(String(batch.status ?? '').toUpperCase())) {
       return badRequest('Workers cannot be unassigned from completed or cancelled production batches.');
+    }
+
+    const activityCount = await countOptionalReferences(service, [
+      { table: 'hr_labour_cost_allocations', column: 'batch_id', value: batchId },
+      { table: 'hr_production_worker_outputs', column: 'batch_id', value: batchId },
+    ]);
+    const hasRecordedWork = Number(existing.hours_worked ?? 0) > 0 || Number(existing.output_quantity ?? 0) > 0;
+    if (activityCount > 0 || hasRecordedWork) {
+      await writeHrAuditLog(
+        'WORKER_ASSIGNMENT_DELETE_BLOCKED',
+        id,
+        ctx.userId,
+        { activityCount, batchId, employeeId: existing.employee_id, hasRecordedWork },
+        'production_worker_assignment',
+      );
+      return badRequest('Cannot delete this worker assignment because production activity or labour costing already exists.');
     }
 
     const { error } = await service
@@ -88,7 +121,7 @@ export async function DELETE(_request: NextRequest, { params }: RouteContext) {
     }
 
     await writeHrAuditLog(
-      'HR_WORKER_UNASSIGNED_FROM_BATCH',
+      'WORKER_ASSIGNMENT_REMOVED',
       id,
       ctx.userId,
       { batchId, employeeId: existing.employee_id },

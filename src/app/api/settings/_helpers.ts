@@ -215,6 +215,7 @@ export async function createUnitConversionResponse(input: {
     conversionFactor: number;
     fromUnitId: string;
     isActive?: boolean;
+    itemId?: string | null;
     notes?: string;
     toUnitId: string;
   };
@@ -225,18 +226,31 @@ export async function createUnitConversionResponse(input: {
   const conversionError = validateUnitConversionFactor(input.body.conversionFactor);
   if (conversionError) return badRequest(conversionError);
 
+  const table = input.body.itemId ? 'item_uom_conversions' : 'unit_conversions';
+  const payload = input.body.itemId
+    ? {
+        conversion_factor: Number(input.body.conversionFactor),
+        from_uom_id: input.body.fromUnitId,
+        is_active: input.body.isActive ?? true,
+        item_id: input.body.itemId,
+        notes: input.body.notes ?? null,
+        organization_id: input.organizationId,
+        to_uom_id: input.body.toUnitId,
+      }
+    : {
+        conversion_factor: Number(input.body.conversionFactor),
+        from_unit_id: input.body.fromUnitId,
+        is_active: input.body.isActive ?? true,
+        notes: input.body.notes ?? null,
+        organization_id: input.organizationId,
+        to_unit_id: input.body.toUnitId,
+      };
+
   return createTableRecord({
     action: 'UNIT_CONVERSION_CREATED',
-    entityType: 'unit_conversion',
-    payload: {
-      conversion_factor: Number(input.body.conversionFactor),
-      from_unit_id: input.body.fromUnitId,
-      is_active: input.body.isActive ?? true,
-      notes: input.body.notes ?? null,
-      organization_id: input.organizationId,
-      to_unit_id: input.body.toUnitId,
-    },
-    table: 'unit_conversions',
+    entityType: input.body.itemId ? 'item_uom_conversion' : 'unit_conversion',
+    payload,
+    table,
     userId: input.userId,
   });
 }

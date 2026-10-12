@@ -180,6 +180,26 @@ export function canPayInvoice(balance: number, attemptedPayment: number) {
   return attemptedPayment > 0 && attemptedPayment <= balance;
 }
 
+export function normalizeSupplierPaymentMethod(value: unknown) {
+  const normalized = String(value ?? '').trim().toUpperCase().replace(/[\s-]+/g, '_');
+  if (normalized === 'BANK_TRANSFER' || normalized === 'BANK') return 'BANK';
+  if (normalized === 'MOBILE_MONEY' || normalized === 'ECOCASH') return 'MOBILE_MONEY';
+  if (normalized === 'CASH') return 'CASH';
+  if (normalized === 'PETTY_CASH') return 'PETTY_CASH';
+  if (normalized === 'CREDIT') return 'CREDIT';
+  return normalized;
+}
+
+export function isSupplierPaymentPostingMethod(value: unknown) {
+  return ['BANK', 'CASH', 'MOBILE_MONEY', 'PETTY_CASH'].includes(normalizeSupplierPaymentMethod(value));
+}
+
+export function calculateSupplierInvoiceBalance(invoiceTotal: number, postedPayments: number[]) {
+  const total = toNumber(invoiceTotal);
+  const paid = postedPayments.reduce((sum, amount) => sum + toNumber(amount), 0);
+  return Math.max(0, total - paid);
+}
+
 export function buildSupplierImportTemplateCsv() {
   const sampleRow = [
     'SUP-00001',

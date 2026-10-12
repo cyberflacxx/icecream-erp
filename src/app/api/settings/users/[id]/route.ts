@@ -7,6 +7,39 @@ import { recordAuditLog } from '@/lib/security-server';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 import { parseUserPhoneValue, serializeUserPhoneValue } from '@/lib/user-access-profile';
 
+type CountableQuery = {
+  eq: (column: string, value: string) => Promise<{ count: number | null; error: { message?: string } | null }>;
+  select: (columns: string, options: { count: 'exact'; head: true }) => CountableQuery;
+};
+
+async function countUserHistory(schemaService: { from: (table: string) => CountableQuery }, userId: string) {
+  const referenceChecks = [
+    ['audit_logs', 'user_profile_id'],
+    ['audit_logs', 'user_id'],
+    ['journal_entries', 'created_by'],
+    ['journal_entries', 'posted_by'],
+    ['stock_movements', 'created_by'],
+    ['production_issues', 'issued_by'],
+    ['production_issues', 'posted_by'],
+    ['production_receipts', 'received_by'],
+    ['production_worker_assignments', 'created_by'],
+    ['hr_labour_cost_allocations', 'created_by'],
+    ['branch_expenses', 'created_by'],
+    ['branch_expenses', 'posted_by'],
+    ['invoices', 'created_by'],
+    ['payments', 'created_by'],
+  ] as const;
+
+  let total = 0;
+  for (const [table, column] of referenceChecks) {
+    try {
+      const { count, error } = await schemaService.from(table).select('id', { count: 'exact', head: true }).eq(column, userId);
+      if (!error) total += count ?? 0;
+    } catch {}
+  }
+  return total;
+}
+
 export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
@@ -207,12 +240,27 @@ export async function DELETE(
     const body = (await request.json().catch(() => ({}))) as { adminKey?: string | null };
     const { data: existingUser, error: existingError } = await schemaService
       .from('users')
-      .select('id, auth_id, full_name, deleted_at')
+      .select('id, auth_id, full_name, role, status, deleted_at')
       .eq('id', id)
       .maybeSingle();
 
     if (existingError || !existingUser || existingUser.deleted_at) {
       return notFound('User not found.');
+    }
+
+    if (id === ctx.userId) {
+      return badRequest('Cannot disable your own active account.');
+    }
+
+    if (String(existingUser.role ?? '').toLowerCase() === 'super_admin' && String(existingUser.status ?? 'active').toLowerCase() === 'active') {
+      const { count, error: adminCountError } = await schemaService
+        .from('users')
+        .select('id', { count: 'exact', head: true })
+        .eq('role', 'super_admin')
+        .eq('status', 'active')
+        .neq('id', id);
+      if (adminCountError) throw adminCountError;
+      if ((count ?? 0) < 1) return badRequest('Cannot disable the last active Super Admin.');
     }
 
     const adminKeyError = await requireAdminDeleteKey({
@@ -226,6 +274,7 @@ export async function DELETE(
     if (adminKeyError) return adminKeyError;
 
     const deletedAt = new Date().toISOString();
+    const historyCount = await countUserHistory(schemaService, id);
 
     const { error: deleteError } = await schemaService
       .from('users')
@@ -243,20 +292,20 @@ export async function DELETE(
     });
 
     if (existingUser.auth_id) {
-      await service.auth.admin.deleteUser(String(existingUser.auth_id)).catch(() => null);
+      await service.auth.admin.updateUserById(String(existingUser.auth_id), { ban_duration: '876000h' }).catch(() => null);
     }
 
     await recordProtectedActionAudit({
-      action: 'USER_DELETED',
+      action: 'USER_DISABLED',
       entityId: id,
       entityType: 'user',
-      newValues: { deleted_at: deletedAt, status: 'inactive' },
+      newValues: { deleted_at: deletedAt, hardDeleted: false, historyCount, status: 'inactive' },
       oldValues: existingUser as Record<string, unknown>,
       ctx,
       request,
     });
 
-    return NextResponse.json({ success: true });
+    return NextResponse.json({ success: true, deactivated: true, hardDeleted: false, historyCount });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Internal server error';
     return serverError(message);

@@ -1981,3 +1981,105 @@ test('production reports show a controlled zero-output costing notice and use co
   assert.match(productionServer, /from\('production_batch_outputs'\)/);
   assert.match(productionServer, /from\('production_worker_assignments'\)/);
 });
+
+test('modern production issue RPC normalizes transaction UOM into base quantity before stock and costing', () => {
+  const migration = fs.readFileSync('migrations/062_production_uom_rpc_support.sql', 'utf8');
+
+  assert.match(migration, /create or replace function icecream_erp\.resolve_item_uom_base_quantity/i);
+  assert.match(migration, /create or replace function icecream_erp\.post_production_issue/i);
+  assert.match(migration, /item_uom_conversions/i);
+  assert.match(migration, /v_transaction_quantity/i);
+  assert.match(migration, /v_base_quantity/i);
+  assert.match(migration, /v_conversion_factor/i);
+  assert.match(migration, /quantity_on_hand = quantity_on_hand - v_base_quantity/i);
+  assert.match(migration, /quantity_available = quantity_available - v_base_quantity/i);
+  assert.match(migration, /transaction_quantity, transaction_uom_id, base_quantity, base_uom_id, uom_conversion_factor/i);
+  assert.match(migration, /v_line_cost := round\(\(v_base_quantity \* v_unit_cost\)::numeric, 4\)/i);
+});
+
+test('modern production costing uses base quantity and inventory base unit cost', () => {
+  const inventoryQuantity = 200;
+  const inventoryValue = 500;
+  const baseUnitCost = inventoryValue / inventoryQuantity;
+
+  const litreIssueQuantity = 35;
+  const litreIssueCost = litreIssueQuantity * baseUnitCost;
+  assert.equal(baseUnitCost, 2.5);
+  assert.equal(litreIssueCost, 87.5);
+  assert.equal(inventoryQuantity - litreIssueQuantity, 165);
+  assert.equal(inventoryValue - litreIssueCost, 412.5);
+
+  const bucketFactor = 20;
+  const bucketIssueBaseQuantity = 1 * bucketFactor;
+  assert.equal(bucketIssueBaseQuantity, 20);
+  assert.equal(bucketIssueBaseQuantity * baseUnitCost, 50);
+});
+
+test('modern production issue migration rejects incompatible or missing UOM conversion', () => {
+  const migration = fs.readFileSync('migrations/062_production_uom_rpc_support.sql', 'utf8');
+
+  assert.match(migration, /No active UOM conversion exists for this production issue line\./);
+  assert.match(migration, /Issue quantity must be greater than zero\./);
+  assert.match(migration, /Insufficient available stock for component/);
+  assert.match(migration, /p_transaction_uom_id = p_base_uom_id/);
+  assert.match(migration, /conversion_factor > 0/i);
+});
+
+test('high-risk user and worker delete paths use lifecycle protection instead of destructive history loss', () => {
+  const userRoute = fs.readFileSync('src/app/api/users/[id]/route.ts', 'utf8');
+  const settingsUserRoute = fs.readFileSync('src/app/api/settings/users/[id]/route.ts', 'utf8');
+  const workerRoute = fs.readFileSync('src/app/api/hr/production-worker-assignments/[id]/route.ts', 'utf8');
+
+  for (const route of [userRoute, settingsUserRoute]) {
+    assert.match(route, /USER_DISABLED/);
+    assert.match(route, /Cannot disable the last active Super Admin/);
+    assert.match(route, /ban_duration/);
+    assert.match(route, /hardDeleted:\s*false/);
+    assert.doesNotMatch(route, /\.delete\(\)\.eq\('id',\s*(params\.id|id)\)/);
+  }
+
+  assert.match(workerRoute, /Cannot delete this worker assignment because production activity or labour costing already exists\./);
+  assert.match(workerRoute, /WORKER_ASSIGNMENT_REMOVED/);
+  assert.match(workerRoute, /WORKER_ASSIGNMENT_DELETE_BLOCKED/);
+});
+
+test('posted branch expense void route creates balanced reversal journal and blocks duplicates', () => {
+  const route = fs.readFileSync('src/app/api/branches/[id]/expenses/[expenseId]/void/route.ts', 'utf8');
+
+  assert.match(route, /Only posted branch expenses can be voided/);
+  assert.match(route, /Branch expense reversal already exists/);
+  assert.match(route, /sourceDocumentType:\s*'branch_expense_void'/);
+  assert.match(route, /creditAmount:\s*Number\(line\.debit_amount/);
+  assert.match(route, /debitAmount:\s*Number\(line\.credit_amount/);
+  assert.match(route, /EXPENSE_VOIDED/);
+  assert.match(route, /JOURNAL_REVERSED/);
+});
+
+test('posted sales cancellation routes use atomic invoice and dispatch reversal', () => {
+  const invoiceRoute = fs.readFileSync('src/app/api/sales/invoices/[id]/cancel/route.ts', 'utf8');
+  const dispatchRoute = fs.readFileSync('src/app/api/sales/dispatches/[id]/cancel/route.ts', 'utf8');
+  const transactionServer = fs.readFileSync('src/lib/sales-transactions-server.ts', 'utf8');
+  const migration = fs.readFileSync('migrations/063_sales_invoice_dispatch_reversal.sql', 'utf8');
+
+  assert.match(invoiceRoute, /cancelSalesInvoiceTransaction/);
+  assert.match(invoiceRoute, /already been cancelled/);
+  assert.match(invoiceRoute, /posted payments/);
+  assert.match(invoiceRoute, /already exists/);
+  assert.match(dispatchRoute, /invoice_id/);
+  assert.match(dispatchRoute, /cancelSalesInvoiceTransaction/);
+  assert.match(transactionServer, /cancel_sales_invoice_transaction/);
+
+  assert.match(migration, /create or replace function icecream_erp\.cancel_sales_invoice_transaction/);
+  assert.match(migration, /for update/);
+  assert.match(migration, /posted payments/);
+  assert.match(migration, /sales_invoice_cancellation/);
+  assert.match(migration, /RETURN_IN/);
+  assert.match(migration, /reversal_of_movement_id/);
+  assert.match(migration, /coalesce\(v_line\.credit_amount, 0\)/);
+  assert.match(migration, /coalesce\(v_line\.debit_amount, 0\)/);
+  assert.match(migration, /INVOICE_CANCELLED/);
+  assert.match(migration, /DISPATCH_REVERSED/);
+  assert.match(migration, /JOURNAL_REVERSED/);
+  assert.doesNotMatch(migration, /\bdelete\s+from\b/i);
+  assert.doesNotMatch(migration, /\btruncate\b/i);
+});

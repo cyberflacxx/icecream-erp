@@ -36,6 +36,11 @@ const OPTIONAL_STOCK_MOVEMENT_COLUMNS = new Set([
   'source_module',
   'source_warehouse_id',
   'total_value',
+  'transaction_quantity',
+  'transaction_uom_id',
+  'base_quantity',
+  'base_uom_id',
+  'uom_conversion_factor',
 ]);
 
 const STOCK_MOVEMENT_LIST_COLUMNS = [
@@ -125,12 +130,29 @@ export async function requireItem(
   service: ServiceClient,
   itemId: string,
 ) {
-  const primary = await service
+  const selectWithUnits = 'id, code, name, item_type, unit_cost, reorder_level, unit_of_measure_id, uom_id, deleted_at, organization_id';
+  const selectWithoutUnits = 'id, code, name, item_type, unit_cost, reorder_level, deleted_at, organization_id';
+  let primary = await service
     .from('items')
-    .select('id, code, name, item_type, unit_cost, reorder_level, deleted_at, organization_id')
+    .select(selectWithUnits)
     .eq('id', itemId)
     .is('deleted_at', null)
     .maybeSingle();
+
+  if (
+    primary.error &&
+    (
+      primary.error.message?.includes('column items.unit_of_measure_id does not exist') ||
+      primary.error.message?.includes('column items.uom_id does not exist')
+    )
+  ) {
+    primary = await service
+      .from('items')
+      .select(selectWithoutUnits)
+      .eq('id', itemId)
+      .is('deleted_at', null)
+      .maybeSingle();
+  }
 
   if (!primary.error && primary.data) {
     return primary.data;
@@ -141,11 +163,25 @@ export async function requireItem(
     throw new Error(primary.error?.message ?? 'Inventory item not found.');
   }
 
-  const fallback = await service
+  let fallback = await service
     .from('items')
-    .select('id, code, name, item_type, unit_cost, reorder_level, organization_id')
+    .select('id, code, name, item_type, unit_cost, reorder_level, unit_of_measure_id, uom_id, organization_id')
     .eq('id', itemId)
     .maybeSingle();
+
+  if (
+    fallback.error &&
+    (
+      fallback.error.message?.includes('column items.unit_of_measure_id does not exist') ||
+      fallback.error.message?.includes('column items.uom_id does not exist')
+    )
+  ) {
+    fallback = await service
+      .from('items')
+      .select('id, code, name, item_type, unit_cost, reorder_level, organization_id')
+      .eq('id', itemId)
+      .maybeSingle();
+  }
 
   if (fallback.error || !fallback.data) {
     throw new Error(fallback.error?.message ?? 'Inventory item not found.');
@@ -545,6 +581,11 @@ export async function recordStockMovement(
     stockValue?: number | null;
     totalCost?: number | null;
     totalValue?: number | null;
+    transactionQuantity?: number | null;
+    transactionUomId?: string | null;
+    baseQuantity?: number | null;
+    baseUomId?: string | null;
+    uomConversionFactor?: number | null;
     unitCost?: number | null;
     value?: number | null;
     warehouseId: string;
@@ -594,6 +635,11 @@ export async function recordStockMovement(
     unit_cost: unitCost,
     total_cost: totalCost,
     total_value: totalValue,
+    transaction_quantity: params.transactionQuantity ?? null,
+    transaction_uom_id: params.transactionUomId ?? null,
+    base_quantity: params.baseQuantity ?? null,
+    base_uom_id: params.baseUomId ?? null,
+    uom_conversion_factor: params.uomConversionFactor ?? null,
     reference_id: params.referenceId ?? null,
     reference_type: params.referenceType ?? null,
     source_document_id: params.referenceId ?? null,
