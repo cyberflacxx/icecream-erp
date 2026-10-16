@@ -6,6 +6,8 @@ import { createPurchaseOrderPdfDocument } from '@/lib/pdf';
 import { getCompanyProfile } from '@/lib/settings-server';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
+export const runtime = 'nodejs';
+
 function formatDate(value: unknown, fallback = '-') {
   if (!value) return fallback;
   return new Date(String(value)).toLocaleDateString();
@@ -29,7 +31,7 @@ export async function GET(
   if (!can(ctx, 'procurement.read')) return forbidden();
 
   const { id } = await params;
-  const service = createServiceRoleClient();
+  const service = createServiceRoleClient().schema('icecream_erp');
 
   try {
     const [company, orderPrimary] = await Promise.all([
@@ -186,6 +188,7 @@ export async function GET(
       headers: {
         'Content-Disposition': `attachment; filename="${fileName}"`,
         'Content-Type': 'application/pdf',
+        'Cache-Control': 'no-store',
       },
     });
   } catch (error) {
