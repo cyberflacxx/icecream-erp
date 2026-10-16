@@ -323,18 +323,18 @@ export default function PurchaseOrderDetailPage({ params }: PurchaseOrderDetailP
     }
   }
 
-  async function downloadPurchaseOrderDocument() {
+  async function downloadPurchaseOrderDocument(format: 'pdf' | 'docx') {
     setIsDownloadingDocument(true);
     setFeedback(null);
 
     try {
-      await downloadFromUrl(`/api/procurement/purchase-orders/${params.id}/pdf`, {
-        filename: `purchase-order-${order?.poNumber ?? params.id}.pdf`,
+      await downloadFromUrl(`/api/procurement/purchase-orders/${params.id}/${format}`, {
+        filename: `purchase-order-${order?.poNumber ?? params.id}.${format}`,
       });
-      setFeedback({ message: 'Purchase order PDF downloaded.', tone: 'success' });
+      setFeedback({ message: `Purchase order ${format.toUpperCase()} downloaded.`, tone: 'success' });
     } catch (error) {
       setFeedback({
-        message: error instanceof Error ? error.message : 'Failed to download purchase order PDF.',
+        message: error instanceof Error ? error.message : `Failed to download purchase order ${format.toUpperCase()}.`,
         tone: 'error',
       });
     } finally {
@@ -500,10 +500,26 @@ export default function PurchaseOrderDetailPage({ params }: PurchaseOrderDetailP
             ) : null}
 
             {order ? (
-              <Button size="sm" variant="outline" disabled={isDownloadingDocument} onClick={downloadPurchaseOrderDocument}>
-                <Download className="mr-2 h-4 w-4" />
-                {isDownloadingDocument ? 'Downloading PO...' : 'Print / Save PO'}
-              </Button>
+              <>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={isDownloadingDocument}
+                  onClick={() => downloadPurchaseOrderDocument('pdf')}
+                >
+                  <Download className="mr-2 h-4 w-4" />
+                  {isDownloadingDocument ? 'Preparing...' : 'Download PDF'}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={isDownloadingDocument}
+                  onClick={() => downloadPurchaseOrderDocument('docx')}
+                >
+                  <Download className="mr-2 h-4 w-4" />
+                  {isDownloadingDocument ? 'Preparing...' : 'Download DOCX'}
+                </Button>
+              </>
             ) : null}
           </div>
         }
