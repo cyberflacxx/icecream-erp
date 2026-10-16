@@ -1,14 +1,15 @@
 'use client';
 
 import Image from 'next/image';
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { ArrowLeft, Printer } from 'lucide-react';
+import { ArrowLeft, Download, Printer } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { LoadingState } from '@/components/ui-library';
 import { useAppAuth } from '@/hooks/useAppAuth';
 import { apiFetch } from '@/lib/api';
+import { downloadFromUrl } from '@/lib/export';
 import { formatCurrency } from '@/lib/money';
 
 type InvoiceDetail = {
@@ -83,6 +84,22 @@ export default function SalesInvoicePreviewPage({ params }: { params: { id: stri
   });
 
   const invoice = query.data;
+  const [isDownloading, setIsDownloading] = useState<'pdf' | 'docx' | null>(null);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
+
+  async function downloadInvoice(format: 'pdf' | 'docx') {
+    setIsDownloading(format);
+    setDownloadError(null);
+    try {
+      await downloadFromUrl(`/api/sales/invoices/${params.id}/${format}`, {
+        filename: `invoice-${invoice?.invoice_number ?? params.id}.${format}`,
+      });
+    } catch (error) {
+      setDownloadError(error instanceof Error ? error.message : `Failed to download invoice ${format.toUpperCase()}.`);
+    } finally {
+      setIsDownloading(null);
+    }
+  }
   const lines = useMemo(() => invoice?.invoice_items ?? [], [invoice?.invoice_items]);
   const totals = useMemo(() => {
     const subtotal = lines.reduce((sum, line) => {
@@ -124,11 +141,27 @@ export default function SalesInvoicePreviewPage({ params }: { params: { id: stri
             <ArrowLeft className="mr-2 h-4 w-4" />
             Back
           </Button>
-          <Button type="button" onClick={() => window.print()}>
-            <Printer className="mr-2 h-4 w-4" />
-            Download/Print
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button type="button" variant="outline" disabled={Boolean(isDownloading)} onClick={() => downloadInvoice('pdf')}>
+              <Download className="mr-2 h-4 w-4" />
+              {isDownloading === 'pdf' ? 'Preparing PDF...' : 'Download PDF'}
+            </Button>
+            <Button type="button" variant="outline" disabled={Boolean(isDownloading)} onClick={() => downloadInvoice('docx')}>
+              <Download className="mr-2 h-4 w-4" />
+              {isDownloading === 'docx' ? 'Preparing DOCX...' : 'Download DOCX'}
+            </Button>
+            <Button type="button" onClick={() => window.print()}>
+              <Printer className="mr-2 h-4 w-4" />
+              Print
+            </Button>
+          </div>
         </div>
+
+        {downloadError ? (
+          <div className="mx-6 mt-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 print:hidden">
+            {downloadError}
+          </div>
+        ) : null}
 
         <section className="space-y-8 px-6 py-6 print:px-8 print:py-8">
           <div className="grid gap-6 md:grid-cols-[1.2fr_0.8fr]">
