@@ -28,6 +28,11 @@ const initialInvoiceForm = {
   items: [createSalesLineDraft()],
   notes: '',
   salesOrderId: '',
+  settlementType: 'CREDIT' as 'CREDIT' | 'PAY_NOW',
+  paymentMethod: 'CASH' as 'CASH' | 'BANK' | 'PETTY_CASH',
+  bankAccountId: '',
+  cashAccountId: '',
+  paymentReference: '',
   taxAmount: '0',
   warehouseId: '',
 };
@@ -93,6 +98,16 @@ export default function InvoicesPage() {
         })),
     [metaQuery.data?.cashAccounts, receiptBranchId],
   );
+  const invoiceCashAccountOptions = useMemo(
+    () =>
+      (metaQuery.data?.cashAccounts ?? [])
+        .filter((account) => !invoiceForm.branchId || !account.branchId || String(account.branchId) === String(invoiceForm.branchId))
+        .map((account) => ({
+          id: String(account.id ?? ''),
+          label: String(account.name ?? 'Cash account'),
+        })),
+    [invoiceForm.branchId, metaQuery.data?.cashAccounts],
+  );
 
   useEffect(() => {
     if (branchOptions.length !== 1) return;
@@ -126,6 +141,16 @@ export default function InvoicesPage() {
       setFormError('Direct invoices require a warehouse and at least one item.');
       return;
     }
+    if (invoiceForm.settlementType === 'PAY_NOW') {
+      if (invoiceForm.paymentMethod === 'BANK' && !invoiceForm.bankAccountId) {
+        setFormError('Select the bank account receiving this sale payment.');
+        return;
+      }
+      if ((invoiceForm.paymentMethod === 'CASH' || invoiceForm.paymentMethod === 'PETTY_CASH') && !invoiceForm.cashAccountId) {
+        setFormError('Select the cash account receiving this sale payment.');
+        return;
+      }
+    }
     if (!invoiceForm.salesOrderId) {
       const overdrawnLine = lines.find((line) => {
         const selectedOption = itemOptionsQuery.data?.find((item) => item.id === line.itemId);
@@ -149,6 +174,16 @@ export default function InvoicesPage() {
           invoiceDate: invoiceForm.invoiceDate || null,
           items: invoiceForm.salesOrderId ? undefined : lines,
           notes: invoiceForm.notes || null,
+          payment: invoiceForm.settlementType === 'PAY_NOW'
+            ? {
+                bankAccountId: invoiceForm.paymentMethod === 'BANK' ? invoiceForm.bankAccountId : undefined,
+                cashAccountId: invoiceForm.paymentMethod === 'BANK' ? undefined : invoiceForm.cashAccountId,
+                paymentDate: invoiceForm.invoiceDate || new Date().toISOString().slice(0, 10),
+                paymentMethod: invoiceForm.paymentMethod,
+                referenceNumber: invoiceForm.paymentReference || undefined,
+                settleInFull: true,
+              }
+            : undefined,
           postInventory: true,
           salesOrderId: invoiceForm.salesOrderId || undefined,
           taxAmount: Number(invoiceForm.taxAmount || 0),
@@ -407,6 +442,97 @@ export default function InvoicesPage() {
               <input className="surface-input-soft" min="0" step="0.0001" type="number" value={invoiceForm.taxAmount} onChange={(event) => setInvoiceForm((current) => ({ ...current, taxAmount: event.target.value }))} />
             </label>
           </div>
+          <section className="space-y-4 rounded-2xl border border-border/70 bg-white/80 p-4">
+            <div>
+              <p className="text-sm font-semibold uppercase tracking-[0.18em] text-orange">Settlement</p>
+              <p className="mt-1 text-xs text-muted">Credit leaves the invoice outstanding. Pay now records the customer receipt immediately.</p>
+            </div>
+            <div className="grid gap-5 sm:grid-cols-2">
+              <label className="space-y-2 text-sm text-muted">
+                <span>Sale Type</span>
+                <select
+                  className="surface-input-soft"
+                  value={invoiceForm.settlementType}
+                  onChange={(event) =>
+                    setInvoiceForm((current) => ({
+                      ...current,
+                      settlementType: event.target.value as typeof current.settlementType,
+                      bankAccountId: '',
+                      cashAccountId: '',
+                    }))
+                  }
+                >
+                  <option value="CREDIT">Credit / Pay Later</option>
+                  <option value="PAY_NOW">Cash / Immediate Payment</option>
+                </select>
+              </label>
+              {invoiceForm.settlementType === 'PAY_NOW' ? (
+                <label className="space-y-2 text-sm text-muted">
+                  <span>Payment Method</span>
+                  <select
+                    className="surface-input-soft"
+                    value={invoiceForm.paymentMethod}
+                    onChange={(event) =>
+                      setInvoiceForm((current) => ({
+                        ...current,
+                        paymentMethod: event.target.value as typeof current.paymentMethod,
+                        bankAccountId: '',
+                        cashAccountId: '',
+                      }))
+                    }
+                  >
+                    <option value="CASH">Cash</option>
+                    <option value="BANK">Bank</option>
+                    <option value="PETTY_CASH">Petty Cash</option>
+                  </select>
+                </label>
+              ) : null}
+              {invoiceForm.settlementType === 'PAY_NOW' && invoiceForm.paymentMethod === 'BANK' ? (
+                <label className="space-y-2 text-sm text-muted">
+                  <span>Bank Account</span>
+                  <select
+                    required
+                    className="surface-input-soft"
+                    value={invoiceForm.bankAccountId}
+                    onChange={(event) => setInvoiceForm((current) => ({ ...current, bankAccountId: event.target.value }))}
+                  >
+                    <option value="">Select bank account</option>
+                    {bankAccountOptions.map((account) => (
+                      <option key={account.id} value={account.id}>{account.label}</option>
+                    ))}
+                  </select>
+                </label>
+              ) : null}
+              {invoiceForm.settlementType === 'PAY_NOW' && invoiceForm.paymentMethod !== 'BANK' ? (
+                <label className="space-y-2 text-sm text-muted">
+                  <span>Cash Account</span>
+                  <select
+                    required
+                    className="surface-input-soft"
+                    value={invoiceForm.cashAccountId}
+                    onChange={(event) => setInvoiceForm((current) => ({ ...current, cashAccountId: event.target.value }))}
+                  >
+                    <option value="">Select cash account</option>
+                    {invoiceCashAccountOptions.map((account) => (
+                      <option key={account.id} value={account.id}>{account.label}</option>
+                    ))}
+                  </select>
+                </label>
+              ) : null}
+              {invoiceForm.settlementType === 'PAY_NOW' ? (
+                <label className="space-y-2 text-sm text-muted">
+                  <span>Payment Reference</span>
+                  <input
+                    className="surface-input-soft"
+                    value={invoiceForm.paymentReference}
+                    onChange={(event) => setInvoiceForm((current) => ({ ...current, paymentReference: event.target.value }))}
+                    placeholder="Receipt, transfer, POS or cash reference"
+                  />
+                </label>
+              ) : null}
+            </div>
+          </section>
+
           <label className="space-y-2 text-sm text-muted">
             <span>Notes</span>
             <textarea className="surface-textarea-soft" rows={3} value={invoiceForm.notes} onChange={(event) => setInvoiceForm((current) => ({ ...current, notes: event.target.value }))} />
