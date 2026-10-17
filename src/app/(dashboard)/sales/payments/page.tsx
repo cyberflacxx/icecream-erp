@@ -14,6 +14,12 @@ import { DataTable, EmptyState, FormDrawer, LoadingState } from '@/components/ui
 import { formatCurrency } from '@/lib/money';
 import { buildSalesReceiptPrintUrl } from '@/lib/sales-payments';
 
+function createPaymentIdempotencyKey() {
+  return typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+    ? `sales-payment-${crypto.randomUUID()}`
+    : `sales-payment-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
 const initialPaymentForm = {
   amount: '0',
   bankAccountId: '',
@@ -34,6 +40,7 @@ export default function SalesPaymentsPage() {
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [formState, setFormState] = useState(initialPaymentForm);
   const [formError, setFormError] = useState<string | null>(null);
+  const [paymentIdempotencyKey, setPaymentIdempotencyKey] = useState(createPaymentIdempotencyKey);
   const [submitMode, setSubmitMode] = useState<'save' | 'print'>('save');
   const selectedInvoice = useMemo(
     () => metaQuery.data?.invoices.find((row) => row.id === formState.invoiceId) ?? null,
@@ -86,6 +93,7 @@ export default function SalesPaymentsPage() {
         amount: Number(formState.amount),
         customerId: formState.customerId,
         invoiceId: formState.invoiceId,
+        idempotencyKey: paymentIdempotencyKey,
         notes: formState.notes || undefined,
         paymentDate: formState.paymentDate,
         paymentMethod: formState.paymentMethod,
@@ -96,6 +104,7 @@ export default function SalesPaymentsPage() {
 
       await maybePrintReceipt(response);
       setFormState(initialPaymentForm);
+      setPaymentIdempotencyKey(createPaymentIdempotencyKey());
       setFormError(null);
       setIsDrawerOpen(false);
       await queryClient.invalidateQueries({ queryKey: ['sales'] });
@@ -126,6 +135,7 @@ export default function SalesPaymentsPage() {
           <Button type="button" size="sm" onClick={() => {
             setFormError(null);
             setFormState(initialPaymentForm);
+            setPaymentIdempotencyKey(createPaymentIdempotencyKey());
             setIsDrawerOpen(true);
           }}>
             <Plus className="mr-2 h-4 w-4" />
