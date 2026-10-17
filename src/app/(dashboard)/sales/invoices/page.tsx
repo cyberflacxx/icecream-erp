@@ -49,6 +49,12 @@ const initialReceiptForm = {
   referenceNumber: '',
 };
 
+function createInvoiceIdempotencyKey() {
+  return typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+    ? `sales-invoice-${crypto.randomUUID()}`
+    : `sales-invoice-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
 export default function InvoicesPage() {
   const query = useInvoices();
   const metaQuery = useSalesMeta();
@@ -61,6 +67,7 @@ export default function InvoicesPage() {
   const [invoiceForm, setInvoiceForm] = useState(initialInvoiceForm);
   const [receiptForm, setReceiptForm] = useState(initialReceiptForm);
   const [formError, setFormError] = useState<string | null>(null);
+  const [invoiceIdempotencyKey, setInvoiceIdempotencyKey] = useState(createInvoiceIdempotencyKey);
   const [receiptSubmitMode, setReceiptSubmitMode] = useState<'save' | 'print'>('save');
   const [receiptContext, setReceiptContext] = useState<InvoiceListItem | null>(null);
   const itemOptionsQuery = useItemSelectorOptions({
@@ -172,6 +179,7 @@ export default function InvoicesPage() {
           discountAmount: Number(invoiceForm.discountAmount || 0),
           dueDate: invoiceForm.dueDate || null,
           invoiceDate: invoiceForm.invoiceDate || null,
+          idempotencyKey: invoiceIdempotencyKey,
           items: invoiceForm.salesOrderId ? undefined : lines,
           notes: invoiceForm.notes || null,
           payment: invoiceForm.settlementType === 'PAY_NOW'
@@ -192,6 +200,7 @@ export default function InvoicesPage() {
         method: 'POST',
       });
       setInvoiceForm(initialInvoiceForm);
+      setInvoiceIdempotencyKey(createInvoiceIdempotencyKey());
       setFormError(null);
       setIsInvoiceDrawerOpen(false);
       await refresh();
@@ -280,7 +289,10 @@ export default function InvoicesPage() {
         title="Invoices"
         description="Track billing, collections, due dates, and invoice settlement status."
         actions={
-          <Button type="button" size="sm" onClick={() => setIsInvoiceDrawerOpen(true)}>
+          <Button type="button" size="sm" onClick={() => {
+            setInvoiceIdempotencyKey(createInvoiceIdempotencyKey());
+            setIsInvoiceDrawerOpen(true);
+          }}>
             <Plus className="mr-2 h-4 w-4" />
             New Invoice
           </Button>
