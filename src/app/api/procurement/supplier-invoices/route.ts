@@ -47,7 +47,7 @@ export async function GET(_request: NextRequest) {
       .eq('organization_id', ctx.organizationId)
       .is('deleted_at', null)
       .order('invoice_date', { ascending: false }),
-    service.from('supplier_payments').select('supplier_invoice_id, amount_paid').eq('organization_id', ctx.organizationId).is('deleted_at', null),
+    service.from('supplier_payments').select('supplier_invoice_id, amount_paid, status').eq('organization_id', ctx.organizationId).eq('status', 'POSTED').is('deleted_at', null),
   ]);
 
   if (invoices.error) {

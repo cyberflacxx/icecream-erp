@@ -154,7 +154,81 @@ export async function POST(
       },
       ctx,
     );
-    return NextResponse.json(transaction);
+
+    const transactionRow = transaction as Record<string, unknown>;
+    const paymentId = String(
+      transactionRow.paymentId ??
+      (transactionRow.payment as Record<string, unknown> | undefined)?.id ??
+      transactionRow.id ??
+      '',
+    );
+
+    let linkedTransaction: { id: string; table: string } | null = null;
+    if (paymentId && ['BANK', 'CASH', 'PETTY_CASH'].includes(paymentMethod)) {
+      const sourceReference =
+        String(transactionRow.sourceReference ?? '').trim() ||
+        buildFinanceSourceReference('sales', 'invoice_payment', paymentId);
+
+      try {
+        linkedTransaction = await createLinkedFinanceTransaction({
+          amount: Number(body.amount),
+          createdBy: ctx.userId,
+          description: `Customer payment for invoice ${String(inv.invoice_number ?? params.id)}`,
+          direction: 'IN',
+          organizationId: ctx.organizationId,
+          paymentMethod: paymentMethod as 'BANK' | 'CASH' | 'PETTY_CASH',
+          selectedAccountId: paymentMethod === 'BANK' ? body.bankAccountId ?? null : body.cashAccountId ?? null,
+          referenceNumber: body.referenceNumber ?? null,
+          sourceDocument: sourceReference,
+          transactionDate: body.paymentDate,
+        });
+      } catch (linkedTransactionError) {
+        return serverError(
+          financeErrorMessage(linkedTransactionError) ||
+          'Customer payment was recorded, but the selected cash or bank account could not be updated.',
+        );
+      }
+    }
+
+    const [paymentResult, updatedInvoiceResult] = await Promise.all([
+      paymentId
+        ? service
+            .schema('icecream_erp')
+            .from('payments')
+            .select('id, payment_number, customer_id, invoice_id, payment_date, amount, payment_method, reference_number, status')
+            .eq('organization_id', ctx.organizationId)
+            .eq('id', paymentId)
+            .maybeSingle()
+        : Promise.resolve({ data: null, error: null }),
+      service
+        .schema('icecream_erp')
+        .from('invoices')
+        .select('*')
+        .eq('organization_id', ctx.organizationId)
+        .eq('id', params.id)
+        .maybeSingle(),
+    ]);
+
+    if (paymentResult.error) {
+      return serverError(financeErrorMessage(paymentResult.error) || 'Payment was posted but could not be reloaded.');
+    }
+    if (updatedInvoiceResult.error) {
+      return serverError(financeErrorMessage(updatedInvoiceResult.error) || 'Invoice was updated but could not be reloaded.');
+    }
+
+    return NextResponse.json({
+      ...transactionRow,
+      invoice: updatedInvoiceResult.data ?? null,
+      linkedTransaction,
+      payment: paymentResult.data ?? {
+        amount: Number(body.amount),
+        id: paymentId,
+        invoice_id: params.id,
+        payment_date: body.paymentDate,
+        payment_method: paymentMethod,
+        reference_number: body.referenceNumber ?? null,
+      },
+    });
   } catch (transactionError) {
     if (shouldRequireSalesTransactionRpc() || !isSalesTransactionRpcUnavailable(transactionError)) {
       return serverError(financeErrorMessage(transactionError) || 'Failed to post invoice payment transaction.');

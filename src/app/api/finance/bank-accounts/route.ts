@@ -13,7 +13,19 @@ import {
 export async function GET(request: NextRequest) {
   const ctx = await getAuthContext();
   if (!ctx) return unauthorized();
-  if (!can(ctx, 'finance.read')) return forbidden();
+  // Bank accounts are required by Finance, Sales receipt, and Procurement payment flows.
+  // Allow operational users to read active account options without granting finance write access.
+  if (
+    !can(
+      ctx,
+      'finance.read',
+      'sales.read',
+      'sales.write',
+      'procurement.read',
+      'procurement.write',
+      'procurement.payment.post',
+    )
+  ) return forbidden();
 
   const { searchParams } = new URL(request.url);
   const activeOnly = searchParams.get('activeOnly') === 'true';
