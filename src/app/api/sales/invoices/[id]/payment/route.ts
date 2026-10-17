@@ -154,7 +154,43 @@ export async function POST(
       },
       ctx,
     );
-    return NextResponse.json(transaction);
+
+    const transactionRow = transaction as Record<string, unknown>;
+    const paymentId = String(
+      transactionRow.paymentId ??
+      (transactionRow.payment as Record<string, unknown> | undefined)?.id ??
+      transactionRow.id ??
+      '',
+    );
+
+    let linkedTransaction: { id: string; table: string } | null = null;
+    if (paymentId && ['BANK', 'CASH', 'PETTY_CASH'].includes(paymentMethod)) {
+      const sourceReference =
+        String(transactionRow.sourceReference ?? '').trim() ||
+        buildFinanceSourceReference('sales', 'invoice_payment', paymentId);
+
+      try {
+        linkedTransaction = await createLinkedFinanceTransaction({
+          amount: Number(body.amount),
+          createdBy: ctx.userId,
+          description: `Customer payment for invoice ${String(inv.invoice_number ?? params.id)}`,
+          direction: 'IN',
+          organizationId: ctx.organizationId,
+          paymentMethod: paymentMethod as 'BANK' | 'CASH' | 'PETTY_CASH',
+          selectedAccountId: paymentMethod === 'BANK' ? body.bankAccountId ?? null : body.cashAccountId ?? null,
+          referenceNumber: body.referenceNumber ?? null,
+          sourceDocument: sourceReference,
+          transactionDate: body.paymentDate,
+        });
+      } catch (linkedTransactionError) {
+        return serverError(
+          financeErrorMessage(linkedTransactionError) ||
+          'Customer payment was recorded, but the selected cash or bank account could not be updated.',
+        );
+      }
+    }
+
+    return NextResponse.json({ ...transactionRow, linkedTransaction });
   } catch (transactionError) {
     if (shouldRequireSalesTransactionRpc() || !isSalesTransactionRpcUnavailable(transactionError)) {
       return serverError(financeErrorMessage(transactionError) || 'Failed to post invoice payment transaction.');
