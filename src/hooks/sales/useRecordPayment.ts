@@ -12,6 +12,7 @@ interface RecordPaymentPayload {
   cashAccountId?: string;
   customerId: string;
   invoiceId: string;
+  idempotencyKey?: string;
   notes?: string;
   paymentDate: string;
   paymentMethod: 'CASH' | 'BANK' | 'BANK_TRANSFER' | 'PETTY_CASH';

@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { apiServerError, can, forbidden, getAuthContext, unauthorized } from '@/lib/api-auth';
+import { buildFinanceSourceReference } from '@/lib/finance';
+import { createLinkedFinanceTransaction, financeErrorMessage } from '@/lib/finance-server';
 import { isWarehouseAvailableToContext, resolveRequestedBranchId } from '@/lib/branch-access';
 import { loadResolvedSalesItemPricing, loadSalesCustomerPricingContext, NO_ACTIVE_SELLING_PRICE_MESSAGE } from '@/lib/sales-pricing';
 import { isCustomerInactiveStatus } from '@/lib/sales-customers';
@@ -247,11 +249,14 @@ export async function POST(request: NextRequest) {
     notes?: string;
     payment?: {
       amount?: number;
+      bankAccountId?: string;
+      cashAccountId?: string;
       idempotencyKey?: string;
       notes?: string;
       paymentDate?: string;
       paymentMethod?: string;
       referenceNumber?: string;
+      settleInFull?: boolean;
       tenders?: Array<{
         amount: number;
         paymentMethod: string;
@@ -506,6 +511,22 @@ export async function POST(request: NextRequest) {
   const allowCreditOverride =
     body.allowCreditOverride === true && can(ctx, 'sales.credit.override', 'sales.approve', 'finance.approve');
 
+  const normalizedPaymentMethod = String(body.payment?.paymentMethod ?? '').trim().toUpperCase() === 'BANK_TRANSFER'
+    ? 'BANK'
+    : String(body.payment?.paymentMethod ?? '').trim().toUpperCase();
+  const requestedPaymentAmount = body.payment
+    ? (body.payment.settleInFull ? total : Number(body.payment.amount ?? 0))
+    : 0;
+
+  if (body.payment && requestedPaymentAmount > 0) {
+    if (normalizedPaymentMethod === 'BANK' && !String(body.payment.bankAccountId ?? '').trim()) {
+      return NextResponse.json({ error: 'bankAccountId is required for bank receipts.' }, { status: 400 });
+    }
+    if ((normalizedPaymentMethod === 'CASH' || normalizedPaymentMethod === 'PETTY_CASH') && !String(body.payment.cashAccountId ?? '').trim()) {
+      return NextResponse.json({ error: 'cashAccountId is required for cash receipts.' }, { status: 400 });
+    }
+  }
+
   try {
     const transaction = await postSalesInvoiceTransaction(
       {
@@ -522,9 +543,11 @@ export async function POST(request: NextRequest) {
         invoiceDate,
         items: pricedItems,
         notes: body.notes ?? null,
-        payment: body.payment
+        payment: body.payment && requestedPaymentAmount > 0
           ? {
               ...body.payment,
+              amount: requestedPaymentAmount,
+              paymentMethod: normalizedPaymentMethod || 'CASH',
               idempotencyKey: String(body.payment.idempotencyKey ?? '').trim() || `${idempotencyKey}:payment`,
             }
           : null,
@@ -535,7 +558,42 @@ export async function POST(request: NextRequest) {
       },
       ctx,
     );
-    return NextResponse.json(transaction, { status: 201 });
+    const transactionRow = transaction as Record<string, unknown>;
+    const paymentId = String(transactionRow.paymentId ?? '');
+    let linkedTransaction: { id: string; table: string } | null = null;
+
+    if (paymentId && requestedPaymentAmount > 0 && ['BANK', 'CASH', 'PETTY_CASH'].includes(normalizedPaymentMethod)) {
+      const sourceReference = buildFinanceSourceReference('sales', 'invoice_payment', paymentId);
+      try {
+        linkedTransaction = await createLinkedFinanceTransaction({
+          amount: requestedPaymentAmount,
+          createdBy: ctx.userId,
+          description: `Customer receipt for invoice ${String(transactionRow.invoiceNumber ?? transactionRow.invoiceId ?? '')}`,
+          direction: 'IN',
+          organizationId: ctx.organizationId,
+          paymentMethod: normalizedPaymentMethod as 'BANK' | 'CASH' | 'PETTY_CASH',
+          selectedAccountId: normalizedPaymentMethod === 'BANK'
+            ? body.payment?.bankAccountId ?? null
+            : body.payment?.cashAccountId ?? null,
+          referenceNumber: body.payment?.referenceNumber ?? null,
+          sourceDocument: sourceReference,
+          transactionDate: body.payment?.paymentDate ?? invoiceDate,
+        });
+      } catch (linkedTransactionError) {
+        return apiServerError({
+          branchId,
+          ctx,
+          error: linkedTransactionError,
+          message: financeErrorMessage(linkedTransactionError) || 'Invoice was created, but the selected cash or bank account could not be updated.',
+          module: 'sales.invoices',
+          path: request.nextUrl.pathname,
+          status: 500,
+          transactionReference: idempotencyKey,
+        });
+      }
+    }
+
+    return NextResponse.json({ ...transactionRow, linkedTransaction }, { status: 201 });
   } catch (error) {
     const rpcUnavailable = isSalesTransactionRpcUnavailable(error);
     return apiServerError({

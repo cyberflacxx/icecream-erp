@@ -13,7 +13,15 @@ import {
 export async function GET(_request: NextRequest) {
   const ctx = await getAuthContext();
   if (!ctx) return unauthorized();
-  if (!can(ctx, 'finance.read')) return forbidden();
+  if (
+    !can(
+      ctx,
+      'finance.read',
+      'procurement.read',
+      'procurement.write',
+      'procurement.payment.post',
+    )
+  ) return forbidden();
 
   try {
     const data = await loadPettyCashRequestsCompatibility(ctx.organizationId, { routeName: 'finance.petty-cash' });
