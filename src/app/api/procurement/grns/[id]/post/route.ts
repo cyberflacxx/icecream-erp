@@ -17,7 +17,7 @@ import {
 import { collapseFinancePostingLines, resolveInventoryPostingMappingKey, toDateOnly } from '@/lib/finance-integration';
 import { isWarehouseAvailableToContext } from '@/lib/branch-access';
 import { buildInventoryPostingIdempotencyKey, invokeInventoryPostingRpc } from '@/lib/inventory-posting-server';
-import { fetchGoodsReceivedNoteDetail, isGrnStockPostingError } from '@/lib/procurement-goods-received';
+import { fetchGoodsReceivedNoteDetail, isGrnStockPostingError, normalizeGoodsReceivedWarehouseId } from '@/lib/procurement-goods-received';
 import { recordAuditLog } from '@/lib/security-server';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
@@ -59,10 +59,22 @@ export async function POST(
       return badRequest('Goods received note not found.');
     }
 
+    const grnDetail = await fetchGoodsReceivedNoteDetail(service, {
+      grnId: id,
+      organizationId: ctx.organizationId,
+    });
+    const warehouseId = normalizeGoodsReceivedWarehouseId({
+      destination_warehouse_id: grnDetail.destination_warehouse_id,
+      receiving_warehouse_id: grnDetail.receiving_warehouse_id,
+      warehouse_id: existing.warehouse_id ?? grnDetail.warehouse_id,
+    });
+    if (!warehouseId) {
+      return badRequest(`GRN ${String(existing.grn_number ?? id)} cannot be posted because warehouse_id is missing.`);
+    }
     const { data: warehouse, error: warehouseError } = await service
       .from('warehouses')
       .select('id, organization_id, branch_id, is_active, name')
-      .eq('id', String(existing.warehouse_id ?? ''))
+      .eq('id', warehouseId)
       .maybeSingle();
     if (warehouseError) return serverError(warehouseError.message);
     if (
@@ -89,10 +101,6 @@ export async function POST(
       return badRequest('Goods Received Note must be approved before posting.');
     }
 
-    const grnDetail = await fetchGoodsReceivedNoteDetail(service, {
-      grnId: id,
-      organizationId: ctx.organizationId,
-    });
     const postingDate = toDateOnly(
       String(
         existing.received_date ??
@@ -269,7 +277,9 @@ export async function POST(
     });
     return NextResponse.json({
       success: false,
-      message: 'Goods received note could not update inventory. Please check warehouse and item details.',
+      message: details?.stage
+        ? `GRN ${id} could not be posted at ${details.stage}: ${message}`
+        : `GRN ${id} could not be posted: ${message}`,
       code: 'GRN_STOCK_POST_FAILED',
       details,
     }, { status: 500 });

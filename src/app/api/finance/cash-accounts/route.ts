@@ -30,6 +30,10 @@ export async function GET(request: NextRequest) {
     !can(
       ctx,
       'finance.read',
+      'finance.expense.view',
+      'finance.expense.create',
+      'finance.expense.approve',
+      'finance.expense.post',
       'procurement.read',
       'procurement.write',
       'procurement.payment.post',

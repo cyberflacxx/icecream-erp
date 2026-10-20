@@ -8,7 +8,7 @@ import { FinanceEmptyState } from '@/components/finance/finance-empty-state';
 import { FinanceNav } from '@/components/finance/finance-nav';
 import { Button } from '@/components/ui/button';
 import { FormDrawer, LoadingState } from '@/components/ui-library';
-import { useFinanceExpenses, useFinanceMeta, useFinanceMutation } from '@/hooks/finance/useFinanceResources';
+import { useBankAccounts, useCashAccounts, useFinanceExpenses, useFinanceMeta, useFinanceMutation } from '@/hooks/finance/useFinanceResources';
 import { formatCurrency } from '@/lib/money';
 
 type ExpenseFormState = {
@@ -49,9 +49,15 @@ function text(row: Record<string, unknown>, key: string, fallback = '') {
 export default function FinanceExpensesPage() {
   const query = useFinanceExpenses();
   const metaQuery = useFinanceMeta();
+  const cashAccountsQuery = useCashAccounts();
+  const bankAccountsQuery = useBankAccounts();
   const createExpense = useFinanceMutation('/api/finance/expenses', { invalidateKey: 'expenses' });
   const postExpense = useFinanceMutation(
-    (variables: { id: string }) => `/api/finance/expenses/${variables.id}/post`,
+    (variables: { id: string; idempotencyKey: string }) => `/api/finance/expenses/${variables.id}/post`,
+    { invalidateKey: 'expenses' },
+  );
+  const approveExpense = useFinanceMutation(
+    (variables: { id: string }) => `/api/finance/expenses/${variables.id}/approve`,
     { invalidateKey: 'expenses' },
   );
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
@@ -78,6 +84,14 @@ export default function FinanceExpensesPage() {
   });
   const accountOptions = expenseAccounts.length > 0 ? expenseAccounts : accounts;
   const paymentRequiresCash = form.paymentMethod === 'CASH' || form.paymentMethod === 'PETTY_CASH';
+  const cashAccounts = (cashAccountsQuery.data ?? []).filter((account) => {
+    const isActive = account.isActive ?? account.is_active;
+    if (isActive === false) return false;
+    const accountBranchId = String(account.branchId ?? account.branch_id ?? '').trim();
+    // Branch expenses may use their branch account or an explicitly shared HQ account.
+    return form.branchId ? !accountBranchId || accountBranchId === form.branchId : !accountBranchId;
+  });
+  const bankAccounts = bankAccountsQuery.data ?? [];
 
   async function submitExpense(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -163,15 +177,25 @@ export default function FinanceExpensesPage() {
                     <td className="px-4 py-3">
                       {status === 'POSTED' ? (
                         <span className="text-xs text-muted">Posted</span>
-                      ) : (
+                      ) : status === 'APPROVED' ? (
                         <Button
                           type="button"
                           size="sm"
                           variant="outline"
                           disabled={postExpense.isPending}
-                          onClick={() => void postExpense.mutateAsync({ id })}
+                          onClick={() => void postExpense.mutateAsync({ id, idempotencyKey: crypto.randomUUID() })}
                         >
-                          Post
+                          Pay / Post
+                        </Button>
+                      ) : (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          disabled={approveExpense.isPending}
+                          onClick={() => void approveExpense.mutateAsync({ id })}
+                        >
+                          Approve
                         </Button>
                       )}
                     </td>
@@ -255,18 +279,24 @@ export default function FinanceExpensesPage() {
             <option value="PETTY_CASH">Petty Cash</option>
           </select>
           {paymentRequiresCash ? (
-            <select
-              className="surface-input-soft"
-              value={form.cashAccountId}
-              onChange={(event) => setForm((current) => ({ ...current, cashAccountId: event.target.value }))}
-            >
-              <option value="">Cash account</option>
-              {(metaQuery.data?.cashAccounts ?? []).map((account) => (
-                <option key={String(account.id)} value={String(account.id)}>
-                  {String(account.name ?? account.accountName ?? account.account_name ?? account.id)}
-                </option>
-              ))}
-            </select>
+            <>
+              <select
+                className="surface-input-soft"
+                value={form.cashAccountId}
+                onChange={(event) => setForm((current) => ({ ...current, cashAccountId: event.target.value }))}
+                disabled={cashAccountsQuery.isLoading || cashAccounts.length === 0}
+              >
+                <option value="">Cash account</option>
+                {cashAccounts.map((account) => (
+                  <option key={String(account.id)} value={String(account.id)}>
+                    {String(account.name ?? account.accountName ?? account.account_name ?? account.id)}
+                  </option>
+                ))}
+              </select>
+              {!cashAccountsQuery.isLoading && cashAccounts.length === 0 ? (
+                <p className="text-sm text-amber-700">No active cash account is configured for this branch/head office.</p>
+              ) : null}
+            </>
           ) : (
             <select
               className="surface-input-soft"
@@ -274,7 +304,7 @@ export default function FinanceExpensesPage() {
               onChange={(event) => setForm((current) => ({ ...current, bankAccountId: event.target.value }))}
             >
               <option value="">Bank account</option>
-              {(metaQuery.data?.bankAccounts ?? []).map((account) => (
+              {bankAccounts.map((account) => (
                 <option key={String(account.id)} value={String(account.id)}>
                   {String(account.accountName ?? account.account_name ?? account.bankName ?? account.bank_name ?? account.id)}
                 </option>
