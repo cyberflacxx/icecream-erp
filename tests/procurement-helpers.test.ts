@@ -3099,3 +3099,24 @@ test('procurement payment UI exposes saved cash and bank accounts with useful em
   assert.match(supplierPaymentsRoute, /id: String\(bankAccountResult\.data\.account_id\)/);
   assert.match(supplierPaymentsRoute, /id: String\(cashAccountResult\.data\.account_id\)/);
 });
+
+test('supplier payments delegate financial state changes to one atomic database transaction', () => {
+  const route = fs.readFileSync('src/app/api/procurement/supplier-payments/route.ts', 'utf8');
+  const transactionServer = fs.readFileSync('src/lib/procurement-transactions-server.ts', 'utf8');
+  const migration = fs.readFileSync('migrations/065_atomic_receipts_and_supplier_payments.sql', 'utf8');
+
+  assert.match(route, /postSupplierPaymentTransaction/);
+  assert.match(route, /The database RPC owns all financial state changes/);
+  assert.match(transactionServer, /post_supplier_payment_transaction/);
+  assert.match(migration, /create or replace function icecream_erp\.post_supplier_payment_transaction/);
+  assert.match(migration, /for update/);
+  assert.match(migration, /Idempotency key was already used with a different supplier payment payload/);
+  assert.match(migration, /Insufficient cash balance in the selected cash account/);
+  assert.match(migration, /SUPPLIER_PAYMENT_TRANSACTION_POSTED/);
+  assert.match(migration, /PAYMENT_OUT/);
+  assert.match(migration, /Supplier payment amount exceeds the invoice balance/);
+  assert.match(migration, /cash_transaction_id = v_cash_transaction_id/);
+  assert.match(migration, /bank_transaction_id = v_bank_transaction_id/);
+  assert.doesNotMatch(migration, /^\s*delete\s+from/im);
+  assert.doesNotMatch(migration, /^\s*truncate\s+/im);
+});

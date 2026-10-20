@@ -333,3 +333,40 @@ test('sales invoice cancellation migration blocks duplicate reversals and partia
   assert.doesNotMatch(migration, /^\s*delete\s+from/im);
   assert.doesNotMatch(migration, /^\s*truncate\s+/im);
 });
+
+test('atomic receipt migration links the selected tender account, cash or bank transaction, and balance rebuild', () => {
+  const migration = readFileSync(join('migrations', '065_atomic_receipts_and_supplier_payments.sql'), 'utf8');
+  const transactionServer = readFileSync(join('src', 'lib', 'sales-transactions-server.ts'), 'utf8');
+
+  assert.match(transactionServer, /post_sales_payment_transaction_v2/);
+  assert.match(migration, /create or replace function icecream_erp\.post_sales_payment_transaction_v2/);
+  assert.match(migration, /cashAccountId is required for cash receipts/);
+  assert.match(migration, /bankAccountId is required for bank receipts/);
+  assert.match(migration, /recalculate_cash_account_balance/);
+  assert.match(migration, /recalculate_bank_account_balance/);
+  assert.match(migration, /SALES_RECEIPT_CASH_BANK_POSTED/);
+  assert.match(migration, /source_document_type, source_document_id/);
+  assert.match(migration, /journal_entry_id/);
+  assert.match(migration, /Selected cash account is unavailable, inactive, or missing its linked ledger account/);
+  assert.doesNotMatch(migration, /^\s*delete\s+from/im);
+  assert.doesNotMatch(migration, /^\s*truncate\s+/im);
+});
+
+test('posted receipts are voided through a controlled reversal instead of deletion', () => {
+  const migration = readFileSync(join('migrations', '065_atomic_receipts_and_supplier_payments.sql'), 'utf8');
+  const route = readFileSync(join('src', 'app', 'api', 'sales', 'payments', '[id]', 'void', 'route.ts'), 'utf8');
+  const transactionServer = readFileSync(join('src', 'lib', 'sales-transactions-server.ts'), 'utf8');
+
+  assert.match(route, /voidSalesPaymentTransaction/);
+  assert.match(route, /receipt void reason is required/i);
+  assert.match(transactionServer, /void_sales_payment_transaction/);
+  assert.match(migration, /create or replace function icecream_erp\.void_sales_payment_transaction/);
+  assert.match(migration, /A reason is required to void a posted receipt/);
+  assert.match(migration, /invoice_payment_void/);
+  assert.match(migration, /SALES_RECEIPT_VOIDED/);
+  assert.match(migration, /sales_payment_allocations[\s\S]*voided_at/);
+  assert.match(migration, /recalculate_cash_account_balance/);
+  assert.match(migration, /recalculate_bank_account_balance/);
+  assert.doesNotMatch(migration, /^\s*delete\s+from/im);
+  assert.doesNotMatch(migration, /^\s*truncate\s+/im);
+});

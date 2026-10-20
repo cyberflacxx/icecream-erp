@@ -5,6 +5,7 @@ import { resolveFinancePostingAccount } from '@/lib/finance-foundation-server';
 import { buildFinanceSourceReference } from '@/lib/finance';
 import { createLinkedFinanceTransaction, postFinanceDocument } from '@/lib/finance-server';
 import { canPayInvoice } from '@/lib/procurement';
+import { postSupplierPaymentTransaction } from '@/lib/procurement-transactions-server';
 import { recordAuditLog } from '@/lib/security-server';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
@@ -370,6 +371,28 @@ export async function POST(request: NextRequest) {
   }
   if (paymentSourceType === 'PETTY_CASH' && !pettyCashRequestId) {
     return badRequest('Please select a petty cash request for this payment.');
+  }
+
+  // The database RPC owns all financial state changes. Do not create a payment
+  // row in the API and then attempt journal/cash posting as separate writes.
+  try {
+    const transaction = await postSupplierPaymentTransaction({
+      ...body,
+      amountPaid,
+      bankAccountId,
+      cashAccountId,
+      goodsReceivedNoteId,
+      idempotencyKey,
+      paymentMethod: paymentSourceType,
+      paymentSourceType,
+      pettyCashRequestId,
+      purchaseOrderId,
+      supplierId,
+      supplierInvoiceId,
+    }, ctx);
+    return NextResponse.json(transaction, { status: transaction.idempotentReplay ? 200 : 201 });
+  } catch (error) {
+    return serverError(error instanceof Error ? error.message : 'Failed to post supplier payment transaction.');
   }
 
   const service = createServiceRoleClient();
