@@ -27,8 +27,8 @@ order by table_name, column_name;
 
 select grn.id, grn.grn_number, grn.status, grn.stock_posted, grn.warehouse_id
 from icecream_erp.goods_received_notes grn
-where (coalesce(grn.stock_posted, false) and upper(coalesce(grn.status, '')) <> 'POSTED')
-   or (not coalesce(grn.stock_posted, false) and upper(coalesce(grn.status, '')) = 'POSTED');
+where (coalesce(grn.stock_posted, false) and upper(coalesce(grn.status::text, '')) <> 'POSTED')
+   or (not coalesce(grn.stock_posted, false) and upper(coalesce(grn.status::text, '')) = 'POSTED');
 
 select account.id, account.account_name, account.current_balance,
   coalesce(account.opening_balance, 0) + coalesce(sum(case
@@ -42,3 +42,4 @@ having account.current_balance is distinct from coalesce(account.opening_balance
   when upper(coalesce(tx.status, 'POSTED')) in ('VOID', 'VOIDED', 'CANCELLED', 'REVERSED', 'FAILED') then 0
   when upper(coalesce(tx.transaction_type, '')) like '%OUT%' or upper(coalesce(tx.transaction_type, '')) like '%PAYMENT%' then -coalesce(tx.amount, 0)
   else coalesce(tx.amount, 0) end), 0);
+
