@@ -26,6 +26,12 @@ import { useProductionOrder } from '@/hooks/production/useProductionOrders';
 import { useProductionRequest } from '@/hooks/production/useProductionRequest';
 import { usePermission } from '@/hooks/usePermission';
 import { isProductionDocumentDateInFuture } from '@/lib/production';
+import {
+  calculatePurchaseEquivalent,
+  calculateTheoreticalOutputFromBase,
+  isProductionRawMaterialCategory,
+  type ProductionRawMaterialConversion,
+} from '@/lib/production-raw-material-conversions';
 import { API_ROUTES } from '@/lib/shared';
 import { cn } from '@/lib/utils';
 
@@ -526,6 +532,10 @@ export default function ProductionOrderDetailPage() {
                     <span>Unit {money(component.unit_cost_snapshot)}</span>
                     <span>Remaining {qty(remaining)}</span>
                     <input className="surface-input-soft" min="0" max={remaining} step="0.001" type="number" value={issueQuantities[String(component.id)] ?? String(remaining)} onChange={(event) => setIssueQuantities((current) => ({ ...current, [String(component.id)]: event.target.value }))} />
+                    <ProductionIssueConversionPreview
+                      component={component}
+                      issueQuantity={issueQuantities[String(component.id)] ?? String(remaining)}
+                    />
                   </div>
                 ))}
               </div>
@@ -754,6 +764,86 @@ export default function ProductionOrderDetailPage() {
           onChange={(event) => setCorrectionReason(event.target.value)}
         />
       </ConfirmDialog>
+    </div>
+  );
+}
+
+
+function ProductionIssueConversionPreview({
+  component,
+  issueQuantity,
+}: {
+  component: Record<string, unknown>;
+  issueQuantity: string;
+}) {
+  if (!isProductionRawMaterialCategory(component.categoryCode)) return null;
+
+  const conversion = asRecord(component.productionConversion);
+  if (!conversion) return null;
+
+  const purchaseUom = asRecord(conversion.purchaseUom);
+  const conversionUom = asRecord(conversion.conversionUom);
+  const outputUom = asRecord(conversion.productionOutputUom);
+  if (!purchaseUom || !conversionUom || !outputUom) return null;
+
+  const profile: ProductionRawMaterialConversion = {
+    conversionQuantity: Number(conversion.conversionQuantity ?? 0),
+    conversionUomId: String(conversionUom.id ?? ''),
+    id: String(conversion.id ?? ''),
+    productionOutputQuantity: Number(conversion.productionOutputQuantity ?? 0),
+    productionOutputUomId: String(outputUom.id ?? ''),
+    purchaseQuantity: Number(conversion.purchaseQuantity ?? 0),
+    purchaseUomId: String(purchaseUom.id ?? ''),
+  };
+
+  const baseQuantity = Math.max(Number(issueQuantity || 0), 0);
+  let purchaseEquivalent = 0;
+  let theoreticalOutput = 0;
+  let availableEquivalent: number | null = null;
+  let availablePotential: number | null = null;
+
+  try {
+    purchaseEquivalent = calculatePurchaseEquivalent(profile, baseQuantity);
+    theoreticalOutput = calculateTheoreticalOutputFromBase(profile, baseQuantity);
+
+    const availableStock = asRecord(component.availableBaseStock);
+    if (availableStock) {
+      const availableQuantity = Math.max(Number(availableStock.quantity ?? 0), 0);
+      availableEquivalent = calculatePurchaseEquivalent(profile, availableQuantity);
+      availablePotential = calculateTheoreticalOutputFromBase(profile, availableQuantity);
+    }
+  } catch {
+    return null;
+  }
+
+  const availableStock = asRecord(component.availableBaseStock);
+  const availableQuantity = availableStock ? Math.max(Number(availableStock.quantity ?? 0), 0) : null;
+  const baseUom = asRecord(availableStock?.uom) ?? conversionUom;
+
+  const uomLabel = (uom: Record<string, unknown> | null) =>
+    String(uom?.abbreviation ?? uom?.name ?? '').trim();
+
+  const baseLabel = uomLabel(baseUom);
+  const purchaseLabel = uomLabel(purchaseUom);
+  const outputLabel = uomLabel(outputUom);
+  const insufficient = availableQuantity !== null && baseQuantity > availableQuantity;
+
+  return (
+    <div className="md:col-span-5 rounded-md border border-[color:var(--app-border)] bg-[color:var(--app-surface)] p-3 text-xs">
+      <p className="font-semibold text-[color:var(--app-accent-strong)]">Production Conversion</p>
+      <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+        {availableQuantity !== null ? <span>Available: {qty(availableQuantity)} {baseLabel}</span> : null}
+        {availableEquivalent !== null ? <span>Available Equivalent: {qty(availableEquivalent)} {purchaseLabel}</span> : null}
+        {availablePotential !== null ? <span>Available Potential: {qty(availablePotential)} {outputLabel}</span> : null}
+        <span>Issue: {qty(baseQuantity)} {baseLabel}</span>
+        <span>Purchase Equivalent: {qty(purchaseEquivalent)} {purchaseLabel}</span>
+        <span>Theoretical Output: {qty(theoreticalOutput)} {outputLabel}</span>
+      </div>
+      {insufficient ? (
+        <p className="mt-2 text-error">
+          Insufficient stock: {qty(baseQuantity)} {baseLabel} required, {qty(availableQuantity)} {baseLabel} available.
+        </p>
+      ) : null}
     </div>
   );
 }
