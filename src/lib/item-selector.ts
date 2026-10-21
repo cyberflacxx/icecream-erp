@@ -1,5 +1,6 @@
 export interface ItemSelectorRow {
   categoryId: string | null;
+  categoryCode?: string | null;
   categoryName: string | null;
   code: string;
   currentInventoryCost: number | null;
@@ -12,6 +13,7 @@ export interface ItemSelectorRow {
   unitAbbreviation: string | null;
   unitId: string | null;
   unitName: string | null;
+  productionConversion?: unknown | null;
 }
 
 export interface ItemSelectorStockRow {

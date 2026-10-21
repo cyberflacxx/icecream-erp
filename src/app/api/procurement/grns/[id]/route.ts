@@ -12,6 +12,48 @@ import {
 import { fetchGoodsReceivedNoteDetail, isGrnStockPostingError } from '@/lib/procurement-goods-received';
 import { loadInventoryReversalSnapshots } from '@/lib/inventory-reversal-server';
 import { createServiceRoleClient } from '@/lib/supabase/server';
+import { calculateTheoreticalOutputFromBase } from '@/lib/production-raw-material-conversions';
+
+async function enrichProductionConversionLines(service: ReturnType<typeof createServiceRoleClient>, data: Record<string, unknown>) {
+  const lines = Array.isArray(data.items) ? data.items as Array<Record<string, unknown>> : [];
+  const itemIds = [...new Set(lines.map((line) => String(line.item_id ?? line.itemId ?? '')).filter(Boolean))];
+  if (!itemIds.length) return data;
+  const [itemsResult, profilesResult] = await Promise.all([
+    service.from('items').select('id, category_id, unit_id, unit_of_measure_id').in('id', itemIds),
+    service.from('production_raw_material_conversions').select('*').in('item_id', itemIds).eq('is_active', true),
+  ]);
+  if (itemsResult.error || profilesResult.error) throw itemsResult.error ?? profilesResult.error;
+  const categoryIds = [...new Set((itemsResult.data ?? []).map((item) => String(item.category_id ?? '')).filter(Boolean))];
+  const categoriesResult = categoryIds.length ? await service.from('item_categories').select('id, code').in('id', categoryIds) : { data: [], error: null };
+  if (categoriesResult.error) throw categoriesResult.error;
+  const items = new Map((itemsResult.data ?? []).map((item) => [String(item.id), item as Record<string, unknown>]));
+  const categories = new Map((categoriesResult.data ?? []).map((category) => [String(category.id), String(category.code ?? '')]));
+  const profiles = new Map((profilesResult.data ?? []).map((profile) => [String(profile.item_id), profile as Record<string, unknown>]));
+  const uomIds = [...new Set([...(profilesResult.data ?? []).flatMap((profile) => [profile.purchase_uom_id, profile.conversion_uom_id, profile.production_output_uom_id]), ...(itemsResult.data ?? []).flatMap((item) => [item.unit_of_measure_id, item.unit_id])].map(String).filter(Boolean))];
+  const uomsResult = uomIds.length ? await service.from('units_of_measure').select('id, code, name, abbreviation').in('id', uomIds) : { data: [], error: null };
+  if (uomsResult.error) throw uomsResult.error;
+  const uoms = new Map((uomsResult.data ?? []).map((uom) => [String(uom.id), uom as Record<string, unknown>]));
+  const posted = data.stockPosted === true || String(data.status ?? '').toUpperCase() === 'POSTED';
+  const unit = (id: unknown) => { const uom = uoms.get(String(id)); return uom ? { id: String(uom.id), code: String(uom.code ?? uom.abbreviation ?? ''), name: String(uom.name ?? '') } : null; };
+  const enriched = lines.map((line) => {
+    const itemId = String(line.item_id ?? line.itemId ?? '');
+    const item = items.get(itemId);
+    const categoryCode = item ? categories.get(String(item.category_id ?? '')) ?? '' : '';
+    if (categoryCode !== 'RAW_MATERIAL_PRODUCTION') return { ...line, categoryCode, productionConversionSummary: null };
+    const baseQuantity = Number(line.base_quantity ?? line.baseQuantity ?? line.quantity ?? line.quantity_received ?? line.receivedQuantity ?? 0);
+    const snapshotComplete = line.production_profile_id && line.production_output_uom_id && line.production_output_quantity_per_profile && line.production_profile_purchase_quantity && line.production_profile_conversion_quantity;
+    if (posted && !snapshotComplete) return { ...line, categoryCode, productionConversionSnapshotIncomplete: true, productionConversionSummary: null };
+    const profile = posted ? {
+      conversion_quantity: line.production_profile_conversion_quantity, conversion_uom_id: item?.unit_of_measure_id ?? item?.unit_id,
+      production_output_quantity: line.production_output_quantity_per_profile, production_output_uom_id: line.production_output_uom_id,
+      purchase_quantity: line.production_profile_purchase_quantity, purchase_uom_id: line.transaction_uom_id ?? line.transactionUomId ?? line.unit_of_measure_id,
+    } : profiles.get(itemId);
+    if (!profile) return { ...line, categoryCode, productionConversionSummary: null };
+    const summary = { purchaseQuantity: Number(profile.purchase_quantity), purchaseUom: unit(profile.purchase_uom_id), conversionQuantity: Number(profile.conversion_quantity), conversionUom: unit(profile.conversion_uom_id), productionOutputQuantity: Number(profile.production_output_quantity), productionOutputUom: unit(profile.production_output_uom_id), baseQuantity, potentialOutput: calculateTheoreticalOutputFromBase({ conversionQuantity: Number(profile.conversion_quantity), conversionUomId: String(profile.conversion_uom_id), productionOutputQuantity: Number(profile.production_output_quantity), productionOutputUomId: String(profile.production_output_uom_id), purchaseQuantity: Number(profile.purchase_quantity), purchaseUomId: String(profile.purchase_uom_id) }, baseQuantity), source: posted ? 'SNAPSHOT' : 'CURRENT_PROFILE' };
+    return { ...line, categoryCode, productionConversionSummary: summary };
+  });
+  return { ...data, items: enriched, line_items: enriched, lineItems: enriched };
+}
 
 export async function GET(
   _request: NextRequest,
@@ -24,10 +66,11 @@ export async function GET(
   const { id } = await params;
   const service = createServiceRoleClient();
   try {
-    const data = await fetchGoodsReceivedNoteDetail(service, {
+    const detail = await fetchGoodsReceivedNoteDetail(service, {
       grnId: id,
       organizationId: ctx.organizationId,
     });
+    const data = await enrichProductionConversionLines(service, detail as Record<string, unknown>);
     const reversalSnapshot = (await loadInventoryReversalSnapshots(service, 'goods_received_note', [id])).get(id)?.[0] ?? null;
     const reversal = reversalSnapshot
       ? {

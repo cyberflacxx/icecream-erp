@@ -141,6 +141,10 @@ export default function GoodsReceivedPage() {
   const [lineItems, setLineItems] = useState<GrnLineItem[]>([]);
   const [formError, setFormError] = useState<string | null>(null);
   const [pendingAction, setPendingAction] = useState<string | null>(null);
+  const [detailDrawerOpen, setDetailDrawerOpen] = useState(false);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState<string | null>(null);
+  const [grnDetail, setGrnDetail] = useState<Record<string, unknown> | null>(null);
 
   const queryClient = useQueryClient();
   const request = useProcurementRequest();
@@ -173,6 +177,21 @@ export default function GoodsReceivedPage() {
     role: currentUser?.profile.role ?? null,
     roleNames: currentUser?.roles.map((role) => role.name) ?? [],
   };
+
+  async function openGrnDetail(id: string) {
+    setDetailDrawerOpen(true);
+    setDetailLoading(true);
+    setDetailError(null);
+    setGrnDetail(null);
+    try {
+      const response = await request<{ data?: Record<string, unknown> }>(`/api/procurement/grns/${id}`);
+      setGrnDetail(response.data ?? response);
+    } catch (error) {
+      setDetailError(error instanceof Error ? error.message : 'Unable to load GRN detail.');
+    } finally {
+      setDetailLoading(false);
+    }
+  }
 
   useEffect(() => {
     if (!purchaseOrderIdParam) {
@@ -607,9 +626,11 @@ export default function GoodsReceivedPage() {
             render: (row) => {
               const actionState = getGoodsReceivedActionState(row, workflowAccess);
 
+              const viewButton = <Button size="sm" variant="outline" onClick={() => void openGrnDetail(row.id)}>View</Button>;
+
               if (actionState.canApprove || actionState.canReject || actionState.canOpenPurchaseOrder) {
                 return (
-                  <div className="flex flex-wrap gap-2">
+                  <div className="flex flex-wrap gap-2">{viewButton}
                     {actionState.canApprove ? (
                       <>
                         <Button
@@ -651,7 +672,7 @@ export default function GoodsReceivedPage() {
 
               if (actionState.canPost || actionState.canOpenPurchaseOrder || (canReverse && row.stockPosted && row.status !== 'REVERSED')) {
                 return (
-                  <div className="flex flex-wrap gap-2">
+                  <div className="flex flex-wrap gap-2">{viewButton}
                     {actionState.canPost ? (
                       <Button
                         size="sm"
@@ -709,6 +730,8 @@ export default function GoodsReceivedPage() {
                   </div>
                 );
               }
+
+              return viewButton;
 
               return <span className="text-sm text-muted">{getGoodsReceivedWorkflowCopy(row)}</span>;
             }
@@ -1173,6 +1196,11 @@ export default function GoodsReceivedPage() {
             </Button>
           </div>
         </form>
+      </FormDrawer>
+      <FormDrawer open={detailDrawerOpen} title="GRN Detail" onClose={() => setDetailDrawerOpen(false)}>
+        {detailLoading ? <p className="text-sm text-muted">Loading GRN detail...</p> : null}
+        {detailError ? <p className="text-sm text-error">{detailError}</p> : null}
+        {grnDetail ? <div className="space-y-4 text-sm"><div className="grid gap-2 sm:grid-cols-2"><p><span className="text-muted">GRN:</span> {String(grnDetail.grnNumber ?? grnDetail.grn_number ?? '')}</p><p><span className="text-muted">Status:</span> {String(grnDetail.status ?? '')}</p></div>{(Array.isArray(grnDetail.items) ? grnDetail.items as Array<Record<string, unknown>> : []).map((line, index) => { const summary = line.productionConversionSummary as Record<string, unknown> | null; const purchaseUom = summary?.purchaseUom as Record<string, unknown> | null; const conversionUom = summary?.conversionUom as Record<string, unknown> | null; const outputUom = summary?.productionOutputUom as Record<string, unknown> | null; return <div key={String(line.id ?? index)} className="rounded-xl border border-border/60 p-3"><p className="font-medium text-brown">{String(line.item_name ?? line.itemName ?? line.item_id ?? 'Item')}</p><p className="mt-1 text-muted">Received: {String(line.receivedQuantity ?? line.quantity_received ?? line.quantity ?? '0')}</p>{summary ? <div className="mt-2 rounded-lg bg-orange/5 p-2 text-xs text-muted"><p>Base equivalent: {String(summary.baseQuantity)} {String(conversionUom?.abbreviation ?? conversionUom?.name ?? '')}</p><p>Configured yield: {String(summary.purchaseQuantity)} {String(purchaseUom?.abbreviation ?? purchaseUom?.name ?? '')} = {String(summary.productionOutputQuantity)} {String(outputUom?.abbreviation ?? outputUom?.name ?? '')}</p><p>Potential output: {String(summary.potentialOutput)} {String(outputUom?.abbreviation ?? outputUom?.name ?? '')} <span className="text-muted">({String(summary.source)})</span></p></div> : line.productionConversionSnapshotIncomplete ? <p className="mt-2 text-xs text-muted">Historical production conversion snapshot unavailable.</p> : null}</div>; })}</div> : null}
       </FormDrawer>
     </div>
   );

@@ -48,6 +48,7 @@ import {
 } from '@/hooks/procurement';
 import { usePermission } from '@/hooks/usePermission';
 import { formatCurrency } from '@/lib/money';
+import { calculateBaseFromPurchase } from '@/lib/production-raw-material-conversions';
 const purchasableItemTypes = new Set([
   'RAW',
   'RAW_MATERIAL',
@@ -527,7 +528,7 @@ export default function PurchaseOrdersPage() {
             itemId: value,
             itemName: matchedItem?.name ?? '',
             unitCost: String(derivedUnitCost),
-            unitOfMeasureId: matchedItem?.unitId || row.unitOfMeasureId || '',
+            unitOfMeasureId: matchedItem?.productionConversion?.purchaseUom?.id || matchedItem?.unitId || row.unitOfMeasureId || '',
             unitOfMeasureName: matchedItem?.unitName ?? '',
           };
         }
@@ -1067,6 +1068,10 @@ export default function PurchaseOrdersPage() {
             <div className="mt-3 space-y-3">
               {formState.items.map((item) => {
                 const selectedMetaItem = purchaseOrderItems.find((candidate) => candidate.id === item.itemId) ?? null;
+                const productionConversion = selectedMetaItem?.categoryCode === 'RAW_MATERIAL_PRODUCTION' ? selectedMetaItem.productionConversion : null;
+                const baseEquivalent = productionConversion && Number(item.quantityOrdered) >= 0
+                  ? calculateBaseFromPurchase({ conversionQuantity: Number(productionConversion.conversionQuantity), conversionUomId: productionConversion.conversionUom.id, productionOutputQuantity: Number(productionConversion.productionOutputQuantity), productionOutputUomId: productionConversion.productionOutputUom.id, purchaseQuantity: Number(productionConversion.purchaseQuantity), purchaseUomId: productionConversion.purchaseUom.id }, Number(item.quantityOrdered))
+                  : null;
 
                 return (
                 <div
@@ -1143,6 +1148,12 @@ export default function PurchaseOrdersPage() {
                     </div>
 
                   </div>
+
+                  {productionConversion && baseEquivalent !== null ? (
+                    <div className="mt-3 rounded-2xl border border-orange/20 bg-orange/5 px-3 py-2 text-xs text-muted">
+                      Purchase conversion: {productionConversion.purchaseQuantity} {productionConversion.purchaseUom.abbreviation} = {productionConversion.conversionQuantity} {productionConversion.conversionUom.abbreviation}. Inventory equivalent: {item.quantityOrdered || '0'} {productionConversion.purchaseUom.abbreviation} = {baseEquivalent} {productionConversion.conversionUom.abbreviation}.
+                    </div>
+                  ) : null}
 
                   <div className="mt-2 flex justify-end">
                     <div className="w-full sm:w-[140px]">

@@ -23,7 +23,7 @@ export async function GET(request: NextRequest) {
   ] = await Promise.all([
     service
       .from('item_categories')
-      .select('id, name, description')
+      .select('id, name, code, description')
       .order('name', { ascending: true }),
 
     service

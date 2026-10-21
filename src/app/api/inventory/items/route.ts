@@ -12,6 +12,7 @@ import {
 import { resolveRequestedBranchId } from '@/lib/branch-access';
 import { buildItemSelectorOptions } from '@/lib/item-selector';
 import { loadResolvedSalesItemPricing, loadSalesCustomerPricingContext } from '@/lib/sales-pricing';
+import { isProductionRawMaterialCategory, mapProductionConversion, normalizeProductionRawMaterialConversion, productionConversionFactor, type ProductionConversionPayload } from '@/lib/production-raw-material-conversions';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
 const ITEM_SELECTOR_SELECT_COLUMNS = [
@@ -35,6 +36,7 @@ function normalizeItem(
   row: Record<string, unknown>,
   categories = new Map<string, Record<string, unknown>>(),
   units = new Map<string, Record<string, unknown>>(),
+  productionConversion: Record<string, unknown> | null = null,
 ) {
   const categoryId = String(row.category_id ?? '');
   const unitId = String(row.unit_of_measure_id ?? row.unit_id ?? '');
@@ -49,9 +51,11 @@ function normalizeItem(
   return {
     code: String(row.code ?? ''),
     category: {
+      code: String(category?.code ?? ''),
       id: categoryId,
       name: String(category?.name ?? 'Uncategorized'),
     },
+    productionConversion: productionConversion ? mapProductionConversion(productionConversion, units) : null,
     description: row.description ? String(row.description) : null,
     id: String(row.id ?? ''),
     isActive: row.is_active !== false,
@@ -69,6 +73,43 @@ function normalizeItem(
       name: String(unit?.name ?? 'Unit'),
     },
   };
+}
+
+export async function saveProductionConversion(input: {
+  categoryCode: unknown;
+  itemId: string;
+  organizationId: string;
+  payload: ProductionConversionPayload;
+  service: ReturnType<typeof createServiceRoleClient>;
+  baseUomId: string;
+}) {
+  if (!input.payload) return;
+  if (!isProductionRawMaterialCategory(input.categoryCode)) {
+    throw new Error('Production conversion is only allowed for RAW_MATERIAL_PRODUCTION items.');
+  }
+  const profile = normalizeProductionRawMaterialConversion(input.payload);
+  if (profile.conversionUomId !== input.baseUomId) throw new Error('Conversion UOM must match the item base inventory UOM.');
+  const unitIds = [profile.purchaseUomId, profile.conversionUomId, profile.productionOutputUomId];
+  const units = await input.service.from('units_of_measure').select('id').in('id', unitIds);
+  if (units.error || (units.data ?? []).length !== new Set(unitIds).size) throw new Error('One or more production conversion UOMs do not exist.');
+  const factor = productionConversionFactor(profile);
+  if (profile.purchaseUomId !== profile.conversionUomId) {
+    const existing = await input.service.from('item_uom_conversions').select('id, conversion_factor').eq('organization_id', input.organizationId).eq('item_id', input.itemId).eq('from_uom_id', profile.purchaseUomId).eq('to_uom_id', profile.conversionUomId).eq('is_active', true).maybeSingle();
+    if (existing.error) throw existing.error;
+    if (existing.data && Number(existing.data.conversion_factor) !== factor) {
+      throw new Error(`Production conversion conflicts with the configured item UOM conversion: ${existing.data.conversion_factor} is configured, but the production profile specifies ${factor}.`);
+    }
+    if (!existing.data) {
+      const created = await input.service.from('item_uom_conversions').insert({ organization_id: input.organizationId, item_id: input.itemId, from_uom_id: profile.purchaseUomId, to_uom_id: profile.conversionUomId, conversion_factor: factor, is_active: true });
+      if (created.error) throw created.error;
+    }
+  }
+  const current = await input.service.from('production_raw_material_conversions').select('id').eq('organization_id', input.organizationId).eq('item_id', input.itemId).eq('is_active', true).maybeSingle();
+  if (current.error) throw current.error;
+  const values = { organization_id: input.organizationId, item_id: input.itemId, purchase_uom_id: profile.purchaseUomId, purchase_quantity: profile.purchaseQuantity, conversion_uom_id: profile.conversionUomId, conversion_quantity: profile.conversionQuantity, production_output_uom_id: profile.productionOutputUomId, production_output_quantity: profile.productionOutputQuantity, is_active: true };
+  const write = current.data ? input.service.from('production_raw_material_conversions').update(values).eq('id', current.data.id) : input.service.from('production_raw_material_conversions').insert(values);
+  const result = await write;
+  if (result.error) throw result.error;
 }
 
 function matchesRequestedItemTypes(row: Record<string, unknown>, requestedTypes: string[]) {
@@ -606,7 +647,7 @@ export async function GET(request: NextRequest) {
 
     const [categoriesResult, unitsResult, stockResult] = await Promise.all([
       categoryIds.length
-        ? service.from('item_categories').select('id, name').in('id', categoryIds)
+      ? service.from('item_categories').select('id, name, code').in('id', categoryIds)
         : Promise.resolve({ data: [], error: null }),
       unitIds.length
         ? service.from('units_of_measure').select('id, name, abbreviation').in('id', unitIds)
@@ -712,9 +753,7 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    const categoryById = new Map(
-      (categoriesResult.data ?? []).map((row) => [String(row.id), String(row.name ?? '')]),
-    );
+    const categoryById = new Map((categoriesResult.data ?? []).map((row) => [String(row.id), row as Record<string, unknown>]));
     const unitById = new Map(
       (unitsResult.data ?? []).map((row) => [
         String(row.id),
@@ -748,10 +787,24 @@ export async function GET(request: NextRequest) {
       warehouseId: authorizedWarehouseId,
     });
 
+    const selectorItemIds = limitedSelectorRows.map((row) => String(row.id));
+    const profilesResult = selectorItemIds.length
+      ? await service.from('production_raw_material_conversions').select('*').eq('organization_id', ctx.organizationId).in('item_id', selectorItemIds).eq('is_active', true)
+      : { data: [], error: null };
+    if (profilesResult.error) return buildSelectorDbErrorResponse({ ctx, error: profilesResult.error, itemTypes: typeFilters, pageSize: selectorPageSize, request, requestId, search, warehouseId: authorizedWarehouseId });
+    const profileRows = (profilesResult.data ?? []) as Array<Record<string, unknown>>;
+    const profileUomIds = [...new Set(profileRows.flatMap((profile) => [profile.purchase_uom_id, profile.conversion_uom_id, profile.production_output_uom_id]).map(String))];
+    if (profileUomIds.length) {
+      const profileUnits = await service.from('units_of_measure').select('id, name, abbreviation').in('id', profileUomIds);
+      if (profileUnits.error) return buildSelectorDbErrorResponse({ ctx, error: profileUnits.error, itemTypes: typeFilters, pageSize: selectorPageSize, request, requestId, search, warehouseId: authorizedWarehouseId });
+      for (const unit of profileUnits.data ?? []) unitById.set(String(unit.id), unit as Record<string, unknown>);
+    }
+    const profilesByItemId = new Map(profileRows.map((profile) => [String(profile.item_id), profile]));
     const options = buildItemSelectorOptions({
       branchId: effectiveBranchId,
       items: limitedSelectorRows.map((row) => {
-        const categoryName = categoryById.get(String(row.category_id ?? '')) ?? null;
+        const category = categoryById.get(String(row.category_id ?? '')) ?? null;
+        const categoryName = category ? String(category.name ?? '') : null;
         const unit = unitById.get(String(row.unit_id ?? row.unit_of_measure_id ?? '')) ?? null;
         const resolved = resolvedPricing.get(String(row.id));
         const rawCost = includeCost
@@ -761,12 +814,14 @@ export async function GET(request: NextRequest) {
 
         return {
           categoryId: row.category_id ? String(row.category_id) : null,
+          categoryCode: category ? String(category.code ?? '') : null,
           categoryName,
           code: String(row.code ?? ''),
           currentInventoryCost: rawCost !== null && Number.isFinite(rawCost) ? rawCost : null,
           id: String(row.id),
           isActive: row.is_active !== false,
           itemType: String(row.item_type ?? row.type ?? ''),
+          productionConversion: (() => { const profile = profilesByItemId.get(String(row.id)); return profile ? mapProductionConversion(profile, unitById) : null; })(),
           name: String(row.name ?? row.code ?? ''),
           sellingPrice: rawPrice !== null && Number.isFinite(rawPrice) ? rawPrice : null,
           taxStatus: resolved?.taxCode ?? null,
@@ -875,7 +930,7 @@ export async function GET(request: NextRequest) {
   const unitIds = [...new Set((data ?? []).map((row) => String(row.unit_id ?? '')).filter(Boolean))];
   const [categoriesResult, unitsResult] = await Promise.all([
     categoryIds.length
-      ? service.from('item_categories').select('id, name').in('id', categoryIds)
+      ? service.from('item_categories').select('id, name, code').in('id', categoryIds)
       : Promise.resolve({ data: [], error: null }),
     unitIds.length
       ? service.from('units_of_measure').select('id, name, abbreviation').in('id', unitIds)
@@ -909,8 +964,22 @@ export async function GET(request: NextRequest) {
   );
   const units = new Map((unitsResult.data ?? []).map((row) => [String(row.id), row as Record<string, unknown>]));
 
+  const itemIds = (data ?? []).map((row) => String(row.id));
+  const profilesResult = itemIds.length
+    ? await service.from('production_raw_material_conversions').select('*').eq('organization_id', ctx.organizationId).in('item_id', itemIds).eq('is_active', true)
+    : { data: [], error: null };
+  if (profilesResult.error) return apiServerError({ ctx, error: profilesResult.error, message: 'Production conversion profiles could not be loaded.', module: 'inventory.items', path: request.nextUrl.pathname, status: 500 });
+  const profileRows = (profilesResult.data ?? []) as Array<Record<string, unknown>>;
+  const profileUnitIds = [...new Set(profileRows.flatMap((row) => [row.purchase_uom_id, row.conversion_uom_id, row.production_output_uom_id]).map(String).filter(Boolean))];
+  if (profileUnitIds.length) {
+    const profileUnits = await service.from('units_of_measure').select('id, name, abbreviation').in('id', profileUnitIds);
+    if (profileUnits.error) return apiServerError({ ctx, error: profileUnits.error, message: 'Production conversion UOMs could not be loaded.', module: 'inventory.items', path: request.nextUrl.pathname, status: 500 });
+    for (const unit of profileUnits.data ?? []) units.set(String(unit.id), unit as Record<string, unknown>);
+  }
+  const profiles = new Map(profileRows.map((row) => [String(row.item_id), row]));
+
   return NextResponse.json({
-    data: (data ?? []).map((row) => normalizeItem(row as Record<string, unknown>, categories, units)),
+    data: (data ?? []).map((row) => normalizeItem(row as Record<string, unknown>, categories, units, profiles.get(String(row.id)) ?? null)),
     pagination: { page, pageSize, total: count ?? 0 },
   });
 }
@@ -934,6 +1003,7 @@ export async function POST(request: NextRequest) {
     trackExpiry?: boolean;
     unitCost?: number | null;
     unitOfMeasureId?: string;
+    productionConversion?: ProductionConversionPayload;
   };
 
   const { code, name, unitOfMeasureId, itemType } = body;
@@ -949,7 +1019,7 @@ export async function POST(request: NextRequest) {
   if (!categoryId) {
     const existing = await service
       .from('item_categories')
-      .select('id, name')
+      .select('id, name, code')
       .eq('organization_id', ctx.organizationId)
       .ilike('name', 'Uncategorized')
       .maybeSingle();
@@ -975,7 +1045,7 @@ export async function POST(request: NextRequest) {
           name: 'Uncategorized',
           organization_id: ctx.organizationId,
         })
-        .select('id, name')
+        .select('id, name, code')
         .single();
       if (created.error || !created.data) {
         return apiServerError({
@@ -994,7 +1064,7 @@ export async function POST(request: NextRequest) {
   } else {
     const { data: categoryRecordRow, error: categoryError } = await service
       .from('item_categories')
-      .select('id, name')
+      .select('id, name, code')
       .eq('id', categoryId)
       .eq('organization_id', ctx.organizationId)
       .single();
@@ -1033,6 +1103,13 @@ export async function POST(request: NextRequest) {
     .single();
 
   if (error) return serverError(error.message);
+
+  try {
+    await saveProductionConversion({ baseUomId: unitOfMeasureId, categoryCode: categoryRecord?.code, itemId: String(data.id), organizationId: ctx.organizationId, payload: body.productionConversion, service });
+  } catch (profileError) {
+    await service.from('items').delete().eq('id', data.id);
+    return badRequest(profileError instanceof Error ? profileError.message : 'Production conversion could not be saved.');
+  }
 
   const categories = new Map<string, Record<string, unknown>>();
   const units = new Map<string, Record<string, unknown>>();

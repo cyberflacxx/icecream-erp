@@ -51,7 +51,8 @@ const itemFormSchema = z.object({
   sellingPrice: z.coerce.number().min(0, 'Selling price must be 0 or more.'),
   trackExpiry: z.boolean(),
   unitCost: z.coerce.number().min(0, 'Unit cost must be 0 or more.'),
-  unitOfMeasureId: z.string().min(1, 'Unit of measure is required.')
+  unitOfMeasureId: z.string().min(1, 'Unit of measure is required.'),
+  purchaseUomId: z.string().optional(), purchaseQuantity: z.coerce.number().optional(), conversionUomId: z.string().optional(), conversionQuantity: z.coerce.number().optional(), productionOutputUomId: z.string().optional(), productionOutputQuantity: z.coerce.number().optional()
 });
 
 const initialFormState = {
@@ -66,7 +67,7 @@ const initialFormState = {
   sellingPrice: '0',
   trackExpiry: false,
   unitCost: '0',
-  unitOfMeasureId: ''
+  unitOfMeasureId: '', purchaseUomId: '', purchaseQuantity: '', conversionUomId: '', conversionQuantity: '', productionOutputUomId: '', productionOutputQuantity: ''
 };
 
 function formatItemType(value: string) {
@@ -110,6 +111,8 @@ export default function InventoryItemsPage() {
   const createItemMutation = useCreateItem();
 
   const items = itemsQuery.data?.data ?? [];
+  const selectedCategory = metaQuery.data?.categories.find((category) => category.id === formState.categoryId);
+  const isProductionRawMaterial = selectedCategory?.code === 'RAW_MATERIAL_PRODUCTION';
   const pagination = itemsQuery.data?.pagination;
 
   function openCreateDrawer() {
@@ -134,6 +137,7 @@ export default function InventoryItemsPage() {
       trackExpiry: Boolean(row.trackExpiry),
       unitCost: String(row.unitCost ?? 0),
       unitOfMeasureId: row.unitOfMeasure?.id ?? ''
+      ,purchaseUomId: row.productionConversion?.purchaseUom.id ?? '', purchaseQuantity: String(row.productionConversion?.purchaseQuantity ?? ''), conversionUomId: row.productionConversion?.conversionUom.id ?? '', conversionQuantity: String(row.productionConversion?.conversionQuantity ?? ''), productionOutputUomId: row.productionConversion?.productionOutputUom.id ?? '', productionOutputQuantity: String(row.productionConversion?.productionOutputQuantity ?? '')
     });
     setFormError(null);
     setIsDrawerOpen(true);
@@ -166,7 +170,8 @@ export default function InventoryItemsPage() {
     try {
       const payload = {
         ...parsed.data,
-        description: parsed.data.description || null
+        description: parsed.data.description || null,
+        productionConversion: isProductionRawMaterial ? { purchaseUomId: parsed.data.purchaseUomId, purchaseQuantity: parsed.data.purchaseQuantity, conversionUomId: parsed.data.conversionUomId, conversionQuantity: parsed.data.conversionQuantity, productionOutputUomId: parsed.data.productionOutputUomId, productionOutputQuantity: parsed.data.productionOutputQuantity } : undefined
       };
       if (editingItem) {
         await request(`/api/inventory/items/${editingItem.id}`, {
@@ -475,6 +480,17 @@ export default function InventoryItemsPage() {
                 ))}
               </select>
             </label>
+            {isProductionRawMaterial ? (
+              <div className="col-span-full grid gap-4 rounded-xl border border-orange/30 bg-orange/5 p-4 sm:grid-cols-2">
+                <div className="sm:col-span-2 text-sm font-semibold text-brown">Production Conversion Setup</div>
+                {([
+                  ['Purchase UOM', 'purchaseUomId', 'select'], ['Purchase Quantity', 'purchaseQuantity', 'number'],
+                  ['Conversion UOM', 'conversionUomId', 'select'], ['Conversion Quantity', 'conversionQuantity', 'number'],
+                  ['Production Output UOM', 'productionOutputUomId', 'select'], ['Production Output Quantity', 'productionOutputQuantity', 'number'],
+                ] as const).map(([label, field, kind]) => <label key={field} className="space-y-2 text-sm text-muted"><span>{label}</span>{kind === 'select' ? <select required value={String(formState[field])} onChange={(event) => setFormState((current) => ({ ...current, [field]: event.target.value }))} className="surface-input-soft"><option value="">Select UOM</option>{metaQuery.data?.unitsOfMeasure.map((unit) => <option key={unit.id} value={unit.id}>{unit.name} ({unit.abbreviation})</option>)}</select> : <input required min="0.000001" step="0.000001" type="number" value={String(formState[field])} onChange={(event) => setFormState((current) => ({ ...current, [field]: event.target.value }))} className="surface-input-soft" />}</label>)}
+                <p className="sm:col-span-2 text-xs text-muted">{formState.purchaseQuantity || '0'} purchase units = {formState.conversionQuantity || '0'} base units = {formState.productionOutputQuantity || '0'} output units</p>
+              </div>
+            ) : null}
             <label className="space-y-2 text-sm text-muted">
               <span>Reorder level</span>
               <input

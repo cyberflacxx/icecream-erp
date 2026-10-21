@@ -12,6 +12,7 @@ export interface PaginatedResponse<T> {
 }
 
 export interface InventoryCategoryOption {
+  code: string;
   id: string;
   name: string;
 }
@@ -166,9 +167,18 @@ export interface InventoryItemRow {
   trackExpiry: boolean;
   unitCost: number;
   category: {
+    code: string;
     id: string;
     name: string;
   };
+  productionConversion?: {
+    conversionQuantity: number;
+    conversionUom: { id: string; name: string; abbreviation: string };
+    productionOutputQuantity: number;
+    productionOutputUom: { id: string; name: string; abbreviation: string };
+    purchaseQuantity: number;
+    purchaseUom: { id: string; name: string; abbreviation: string };
+  } | null;
   unitOfMeasure: {
     id: string;
     abbreviation: string;
@@ -197,6 +207,14 @@ export interface StockBalanceRow {
   quantityOnHand: number;
   quantityReserved: number;
   stockValue: number;
+  productionConversionSummary?: {
+    baseQuantity: number;
+    baseUom: { id: string; name: string; abbreviation: string } | null;
+    purchaseEquivalent: number;
+    purchaseUom: { id: string; name: string; abbreviation: string } | null;
+    potentialOutput: number;
+    productionOutputUom: { id: string; name: string; abbreviation: string } | null;
+  } | null;
   warehouse: {
     id: string;
     code: string;

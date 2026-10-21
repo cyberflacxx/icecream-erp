@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
 import { calculateStockBalanceValue, isMissingTableColumnError, toNumber } from '@/lib/inventory';
 import { createServiceRoleClient } from '@/lib/supabase/server';
+import { calculatePurchaseEquivalent, calculateTheoreticalOutputFromBase, isProductionRawMaterialCategory } from '@/lib/production-raw-material-conversions';
 
 type DbErrorLike = { message: string } | null;
 type StockBalanceDbRow = Record<string, unknown>;
@@ -163,25 +164,33 @@ async function mapBalances(service: ReturnType<typeof createServiceRoleClient>, 
   const itemIds = [...new Set(rows.map((row) => String(row.item_id ?? '')).filter(Boolean))];
   const warehouseIds = [...new Set(rows.map((row) => String(row.warehouse_id ?? '')).filter(Boolean))];
   const [itemsResult, warehousesResult] = await Promise.all([
-    itemIds.length ? service.from('items').select('id, code, name, item_type, reorder_level, reorder_quantity, reorder_qty, unit_of_measure_id, unit_cost, standard_cost').in('id', itemIds) : Promise.resolve({ data: [], error: null }),
+    itemIds.length ? service.from('items').select('id, code, name, item_type, category_id, unit_id, unit_of_measure_id, reorder_level, reorder_quantity, reorder_qty, unit_cost, standard_cost').in('id', itemIds) : Promise.resolve({ data: [], error: null }),
     warehouseIds.length ? service.from('warehouses').select('id, code, name, branch_id').in('id', warehouseIds) : Promise.resolve({ data: [], error: null }),
   ]);
   if (itemsResult.error) throw new Error(itemsResult.error.message);
   if (warehousesResult.error) throw new Error(warehousesResult.error.message);
 
-  const unitIds = [...new Set((itemsResult.data ?? []).map((item) => String(item.unit_of_measure_id ?? '')).filter(Boolean))];
+  const categoryIds = [...new Set((itemsResult.data ?? []).map((item) => String(item.category_id ?? '')).filter(Boolean))];
+  const profilesResult = itemIds.length ? await service.from('production_raw_material_conversions').select('*').in('item_id', itemIds).eq('is_active', true) : { data: [], error: null };
+  if (profilesResult.error) throw new Error(profilesResult.error.message);
+  const profileRows = (profilesResult.data ?? []) as Array<Record<string, unknown>>;
+  const unitIds = [...new Set([...(itemsResult.data ?? []).map((item) => String(item.unit_of_measure_id ?? item.unit_id ?? '')), ...profileRows.flatMap((profile) => [profile.purchase_uom_id, profile.production_output_uom_id]).map(String)].filter(Boolean))];
   const branchIds = [...new Set((warehousesResult.data ?? []).map((warehouse) => String(warehouse.branch_id ?? '')).filter(Boolean))];
-  const [unitsResult, branchesResult] = await Promise.all([
+  const [unitsResult, branchesResult, categoriesResult] = await Promise.all([
     unitIds.length ? service.from('units_of_measure').select('id, name, abbreviation').in('id', unitIds) : Promise.resolve({ data: [], error: null }),
     branchIds.length ? service.from('branches').select('id, name').in('id', branchIds) : Promise.resolve({ data: [], error: null }),
+    categoryIds.length ? service.from('item_categories').select('id, code').in('id', categoryIds) : Promise.resolve({ data: [], error: null }),
   ]);
   if (unitsResult.error) throw new Error(unitsResult.error.message);
   if (branchesResult.error) throw new Error(branchesResult.error.message);
+  if (categoriesResult.error) throw new Error(categoriesResult.error.message);
 
   const items = new Map((itemsResult.data ?? []).map((item) => [String(item.id), item as Record<string, unknown>]));
   const warehouses = new Map((warehousesResult.data ?? []).map((warehouse) => [String(warehouse.id), warehouse as Record<string, unknown>]));
   const units = new Map((unitsResult.data ?? []).map((unit) => [String(unit.id), unit as Record<string, unknown>]));
   const branches = new Map((branchesResult.data ?? []).map((branch) => [String(branch.id), branch as Record<string, unknown>]));
+  const categories = new Map((categoriesResult.data ?? []).map((category) => [String(category.id), category as Record<string, unknown>]));
+  const profiles = new Map(profileRows.map((profile) => [String(profile.item_id), profile]));
 
   return rows.map((row) => {
     const item = items.get(String(row.item_id ?? '')) ?? null;
@@ -193,6 +202,15 @@ async function mapBalances(service: ReturnType<typeof createServiceRoleClient>, 
     const quantityAvailable = toNumber(row.quantity_available ?? (quantityOnHand - quantityReserved));
     const unitCost = toNumber(row.average_cost ?? row.avg_cost ?? item?.unit_cost ?? item?.standard_cost);
     const stockValue = calculateStockBalanceValue({ ...row, items: item });
+    const profile = item && isProductionRawMaterialCategory(categories.get(String(item.category_id ?? ''))?.code) ? profiles.get(String(item.id)) ?? null : null;
+    const productionConversionSummary = profile ? {
+      baseQuantity: quantityAvailable,
+      baseUom: unitOfMeasure ? { id: unitOfMeasure.id, name: unitOfMeasure.name, abbreviation: unitOfMeasure.abbreviation } : null,
+      potentialOutput: calculateTheoreticalOutputFromBase({ conversionQuantity: Number(profile.conversion_quantity), conversionUomId: String(profile.conversion_uom_id), productionOutputQuantity: Number(profile.production_output_quantity), productionOutputUomId: String(profile.production_output_uom_id), purchaseQuantity: Number(profile.purchase_quantity), purchaseUomId: String(profile.purchase_uom_id) }, quantityAvailable),
+      productionOutputUom: units.get(String(profile.production_output_uom_id)) ?? null,
+      purchaseEquivalent: calculatePurchaseEquivalent({ conversionQuantity: Number(profile.conversion_quantity), conversionUomId: String(profile.conversion_uom_id), productionOutputQuantity: Number(profile.production_output_quantity), productionOutputUomId: String(profile.production_output_uom_id), purchaseQuantity: Number(profile.purchase_quantity), purchaseUomId: String(profile.purchase_uom_id) }, quantityAvailable),
+      purchaseUom: units.get(String(profile.purchase_uom_id)) ?? null,
+    } : null;
     return {
       id: row.id,
       lastUpdated: row.last_updated,
@@ -200,6 +218,7 @@ async function mapBalances(service: ReturnType<typeof createServiceRoleClient>, 
       quantityAvailable,
       quantityReserved,
       stockValue,
+      productionConversionSummary,
       item: item
         ? {
             id: item.id,

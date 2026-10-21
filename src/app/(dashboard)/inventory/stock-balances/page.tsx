@@ -176,6 +176,15 @@ export default function StockBalancesPage() {
             render: (row) => quantityFormatter.format(row.quantityAvailable)
           },
           {
+            key: 'productionPotential',
+            header: 'Production Potential',
+            render: (row) => {
+              const summary = row.productionConversionSummary;
+              if (!summary) return '--';
+              return <div className="text-xs text-muted"><div>{quantityFormatter.format(summary.purchaseEquivalent)} {summary.purchaseUom?.abbreviation ?? ''} equivalent</div><div>{quantityFormatter.format(summary.potentialOutput)} {summary.productionOutputUom?.abbreviation ?? ''} potential</div></div>;
+            }
+          },
+          {
             key: 'unitCost',
             header: 'Unit Cost',
             render: (row) => formatCurrency(row.item.unitCost ?? 0)
