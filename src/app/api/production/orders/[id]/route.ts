@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { badRequest, can, forbidden, getAuthContext, notFound, serverError, unauthorized } from '@/lib/api-auth';
 import { ensurePositiveQuantity } from '@/lib/inventory';
+import { mapProductionConversion, RAW_MATERIAL_PRODUCTION_CATEGORY_CODE } from '@/lib/production-raw-material-conversions';
 import { mapProductionRpcError, savePlannedProductionOrder } from '@/lib/production-orders-server';
 import {
   isMissingProductionTable,
@@ -72,9 +73,131 @@ export async function GET(
       if (result.error) throw result.error;
     }
 
+    const rawComponents = (components.data ?? []) as Array<Record<string, unknown>>;
+    const componentItemIds = [...new Set(
+      rawComponents.map((component) => String(component.component_item_id ?? '')).filter(Boolean),
+    )];
+
+    let enrichedComponents = rawComponents;
+    if (componentItemIds.length) {
+      const itemsResult = await service
+        .from('items')
+        .select('id, category_id, unit_of_measure_id')
+        .eq('organization_id', ctx.organizationId)
+        .in('id', componentItemIds);
+      if (itemsResult.error) throw itemsResult.error;
+
+      const categoryIds = [...new Set(
+        (itemsResult.data ?? []).map((item) => String(item.category_id ?? '')).filter(Boolean),
+      )];
+
+      const [categoriesResult, profilesResult] = await Promise.all([
+        categoryIds.length
+          ? service.from('item_categories').select('id, code').in('id', categoryIds)
+          : Promise.resolve({ data: [], error: null }),
+        service
+          .from('production_raw_material_conversions')
+          .select('id, item_id, purchase_uom_id, purchase_quantity, conversion_uom_id, conversion_quantity, production_output_uom_id, production_output_quantity, is_active')
+          .eq('organization_id', ctx.organizationId)
+          .eq('is_active', true)
+          .in('item_id', componentItemIds),
+      ]);
+      if (categoriesResult.error) throw categoriesResult.error;
+      if (profilesResult.error) throw profilesResult.error;
+
+      const items = new Map(
+        (itemsResult.data ?? []).map((item) => [String(item.id), item as Record<string, unknown>]),
+      );
+      const categories = new Map(
+        (categoriesResult.data ?? []).map((category) => [String(category.id), category as Record<string, unknown>]),
+      );
+      const profiles = new Map(
+        (profilesResult.data ?? []).map((profile) => [String(profile.item_id), profile as Record<string, unknown>]),
+      );
+
+      const unitIds = [...new Set([
+        ...(itemsResult.data ?? []).map((item) => String(item.unit_of_measure_id ?? '')).filter(Boolean),
+        ...(profilesResult.data ?? []).flatMap((profile) => [
+          String(profile.purchase_uom_id ?? ''),
+          String(profile.conversion_uom_id ?? ''),
+          String(profile.production_output_uom_id ?? ''),
+        ]).filter(Boolean),
+      ])];
+
+      const warehouseIds = [...new Set(
+        rawComponents
+          .map((component) => String(component.warehouse_id ?? order.production_warehouse_id ?? ''))
+          .filter(Boolean),
+      )];
+
+      const [unitsResult, balancesResult] = await Promise.all([
+        unitIds.length
+          ? service.from('units_of_measure').select('id, name, abbreviation').in('id', unitIds)
+          : Promise.resolve({ data: [], error: null }),
+        warehouseIds.length
+          ? service
+            .from('stock_balances')
+            .select('item_id, warehouse_id, quantity_on_hand, quantity_reserved, quantity_available')
+            .eq('organization_id', ctx.organizationId)
+            .in('item_id', componentItemIds)
+            .in('warehouse_id', warehouseIds)
+          : Promise.resolve({ data: [], error: null }),
+      ]);
+      if (unitsResult.error) throw unitsResult.error;
+      if (balancesResult.error) throw balancesResult.error;
+
+      const units = new Map(
+        (unitsResult.data ?? []).map((unit) => [String(unit.id), unit as Record<string, unknown>]),
+      );
+      const balances = new Map(
+        (balancesResult.data ?? []).map((balance) => [
+          `${String(balance.item_id)}:${String(balance.warehouse_id)}`,
+          balance as Record<string, unknown>,
+        ]),
+      );
+
+      enrichedComponents = rawComponents.map((component) => {
+        const itemId = String(component.component_item_id ?? '');
+        const item = items.get(itemId) ?? null;
+        const category = item ? categories.get(String(item.category_id ?? '')) ?? null : null;
+        const categoryCode = String(category?.code ?? '');
+        const rawProfile = profiles.get(itemId) ?? null;
+        const productionConversion = categoryCode === RAW_MATERIAL_PRODUCTION_CATEGORY_CODE && rawProfile
+          ? mapProductionConversion(rawProfile, units)
+          : null;
+
+        const warehouseId = String(component.warehouse_id ?? order.production_warehouse_id ?? '');
+        const balance = balances.get(`${itemId}:${warehouseId}`) ?? null;
+        const quantityOnHand = Number(balance?.quantity_on_hand ?? 0);
+        const quantityReserved = Number(balance?.quantity_reserved ?? 0);
+        const availableQuantity = Number(
+          balance?.quantity_available ?? (quantityOnHand - quantityReserved),
+        );
+        const baseUom = item ? units.get(String(item.unit_of_measure_id ?? '')) ?? null : null;
+
+        return {
+          ...component,
+          availableBaseStock: balance
+            ? {
+                quantity: availableQuantity,
+                uom: baseUom
+                  ? {
+                      abbreviation: String(baseUom.abbreviation ?? ''),
+                      id: String(baseUom.id ?? ''),
+                      name: String(baseUom.name ?? ''),
+                    }
+                  : null,
+              }
+            : null,
+          categoryCode: categoryCode || null,
+          productionConversion,
+        };
+      });
+    }
+
     return NextResponse.json({
       order,
-      components: components.data ?? [],
+      components: enrichedComponents,
       issues: issues.data ?? [],
       receipts: receipts.data ?? [],
       relationshipMap: relationshipMap.data ?? [],
