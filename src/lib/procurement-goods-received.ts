@@ -486,16 +486,19 @@ export function normalizePostableGrnLines(input: {
 
     const itemMaster = input.itemMastersById.get(itemId) ?? null;
     const transactionUnitId = normalizeGoodsReceivedUnitOfMeasureId({
+      // Explicit transaction/commercial UOM fields must win over generic unit fields.
+      // Compatibility schemas may keep the base UOM in unit_of_measure_id while
+      // transaction_uom_id carries the supplier-facing purchase UOM.
       unit_of_measure_id:
-        rawLine.unit_of_measure_id ??
         rawLine.transaction_uom_id ??
-        purchaseOrderItem?.unit_of_measure_id ??
-        purchaseOrderItem?.transaction_uom_id,
+        purchaseOrderItem?.transaction_uom_id ??
+        rawLine.unit_of_measure_id ??
+        purchaseOrderItem?.unit_of_measure_id,
       unitOfMeasureId:
-        rawLine.unitOfMeasureId ??
         rawLine.transactionUomId ??
-        purchaseOrderItem?.unitOfMeasureId ??
-        purchaseOrderItem?.transactionUomId,
+        purchaseOrderItem?.transactionUomId ??
+        rawLine.unitOfMeasureId ??
+        purchaseOrderItem?.unitOfMeasureId,
       uom_id: rawLine.uom_id ?? purchaseOrderItem?.uom_id,
       uomId: rawLine.uomId ?? purchaseOrderItem?.uomId,
     }) || null;
