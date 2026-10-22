@@ -1012,6 +1012,57 @@ export async function POST(request: NextRequest) {
       .eq('id', orderId)
       .single();
 
+    const persistedOrderItems = Array.isArray((full as Record<string, unknown> | null)?.purchase_order_items)
+      ? ((full as Record<string, unknown>).purchase_order_items as Array<Record<string, unknown>>)
+      : [];
+    const usedPersistedLineIds = new Set<string>();
+
+    const resolvePersistedLine = (item: (typeof resolvedItems)[number]) => {
+      const matching = persistedOrderItems.find((line) => {
+        const lineId = String(line.id ?? '');
+        if (!lineId || usedPersistedLineIds.has(lineId)) return false;
+        if (String(line.item_id ?? '') !== item.itemId) return false;
+
+        const lineRequisitionItemId = String(line.requisition_item_id ?? '');
+        if (item.requisitionItemId && lineRequisitionItemId !== item.requisitionItemId) return false;
+
+        const lineUomId = String(line.transaction_uom_id ?? line.unit_of_measure_id ?? '');
+        if (item.unitOfMeasureId && lineUomId && lineUomId !== item.unitOfMeasureId) return false;
+
+        const lineQuantity = Number(line.transaction_quantity ?? line.quantity_ordered ?? line.quantity ?? 0);
+        return Math.abs(lineQuantity - item.quantityOrdered) < 1e-9;
+      });
+
+      if (matching?.id) usedPersistedLineIds.add(String(matching.id));
+      return matching ?? null;
+    };
+
+    const responseItems = resolvedItems.map((item) => {
+      const persisted = resolvePersistedLine(item);
+      const persistedLineId = persisted?.id ? String(persisted.id) : null;
+
+      return {
+        description: item.description || '',
+        id: persistedLineId,
+        purchase_order_item_id: persistedLineId,
+        purchaseOrderItemId: persistedLineId,
+        item_id: item.itemId,
+        itemId: item.itemId,
+        quantity: item.quantityOrdered,
+        requisition_item_id: item.requisitionItemId || null,
+        requisitionItemId: item.requisitionItemId || null,
+        rowId: persistedLineId,
+        tax_rate: item.taxRate,
+        taxRate: item.taxRate,
+        line_total: item.lineTotal,
+        lineTotal: item.lineTotal,
+        unit_of_measure_id: item.unitOfMeasureId || null,
+        unitOfMeasureId: item.unitOfMeasureId || null,
+        unit_price: item.unitCost,
+        unitPrice: item.unitCost,
+      };
+    });
+
     void recordAuditLog({
       action: 'PURCHASE_ORDER_CREATED',
       entityId: orderId,
@@ -1038,23 +1089,7 @@ export async function POST(request: NextRequest) {
         poNumber: String((full as Record<string, unknown> | null)?.po_number ?? poNumber),
         requisition_id: requisitionId || null,
         requisitionId: requisitionId || null,
-        items: resolvedItems.map((item, index) => ({
-          description: item.description || '',
-          item_id: item.itemId,
-          itemId: item.itemId,
-          quantity: item.quantityOrdered,
-          requisition_item_id: item.requisitionItemId || null,
-          requisitionItemId: item.requisitionItemId || null,
-          rowId: itemPayload[index]?.requisition_item_id ?? item.requisitionItemId ?? `${index}`,
-          tax_rate: item.taxRate,
-          taxRate: item.taxRate,
-          line_total: item.lineTotal,
-          lineTotal: item.lineTotal,
-          unit_of_measure_id: item.unitOfMeasureId || null,
-          unitOfMeasureId: item.unitOfMeasureId || null,
-          unit_price: item.unitCost,
-          unitPrice: item.unitCost,
-        })),
+        items: responseItems,
       },
     }, { status: 201 });
   } catch (err) {
