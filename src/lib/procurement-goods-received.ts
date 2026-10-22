@@ -486,12 +486,28 @@ export function normalizePostableGrnLines(input: {
 
     const itemMaster = input.itemMastersById.get(itemId) ?? null;
     const transactionUnitId = normalizeGoodsReceivedUnitOfMeasureId({
-      unit_of_measure_id: rawLine.unit_of_measure_id ?? purchaseOrderItem?.unit_of_measure_id,
-      unitOfMeasureId: rawLine.unitOfMeasureId ?? purchaseOrderItem?.unitOfMeasureId,
+      unit_of_measure_id:
+        rawLine.unit_of_measure_id ??
+        rawLine.transaction_uom_id ??
+        purchaseOrderItem?.unit_of_measure_id ??
+        purchaseOrderItem?.transaction_uom_id,
+      unitOfMeasureId:
+        rawLine.unitOfMeasureId ??
+        rawLine.transactionUomId ??
+        purchaseOrderItem?.unitOfMeasureId ??
+        purchaseOrderItem?.transactionUomId,
       uom_id: rawLine.uom_id ?? purchaseOrderItem?.uom_id,
       uomId: rawLine.uomId ?? purchaseOrderItem?.uomId,
     }) || null;
-    const baseUnitId = String(itemMaster?.unit_of_measure_id ?? itemMaster?.unit_id ?? '').trim() || transactionUnitId;
+    const baseUnitId = String(
+      rawLine.base_uom_id ??
+      rawLine.baseUomId ??
+      purchaseOrderItem?.base_uom_id ??
+      purchaseOrderItem?.baseUomId ??
+      itemMaster?.unit_of_measure_id ??
+      itemMaster?.unit_id ??
+      '',
+    ).trim() || transactionUnitId;
     const unitCost = resolveLineUnitCost(rawLine, purchaseOrderItem, itemMaster);
     const receivedValue = toNumber(rawLine.line_total ?? rawLine.total_value) || (quantity * unitCost);
     const normalizedQuantity = baseUnitId && transactionUnitId
