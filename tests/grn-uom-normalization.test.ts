@@ -15,6 +15,7 @@ test('068 normalizes commercial GRN quantities into base inventory quantities', 
   assert.match(migration, /v_base_quantity/);
   assert.match(migration, /v_transaction_uom_id/);
   assert.match(migration, /v_base_uom_id/);
+  assert.match(migration, /v_po_line\.base_uom_id = v_item_base_uom_id/);
   assert.match(migration, /item_uom_conversions/);
   assert.match(migration, /No active UOM conversion exists for GRN line/);
   assert.match(migration, /v_base_quantity := round\(v_transaction_quantity \* v_conversion_factor, 8\)/);

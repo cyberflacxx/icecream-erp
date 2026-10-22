@@ -65,6 +65,13 @@ begin
   end if;
   v_definition := replace(v_definition, v_old, v_new);
 
+  v_old := E'    v_base_uom_id := case\n      when v_has_po_line then coalesce(v_po_line.base_uom_id, v_item_base_uom_id, v_transaction_uom_id)\n      else coalesce(v_item_base_uom_id, v_transaction_uom_id)\n    end;';
+  v_new := E'    -- A PO base UOM is authoritative only when it agrees with the item base UOM.\n    -- Older PO creation paths could copy the commercial UOM into base_uom_id.\n    v_base_uom_id := case\n      when v_has_po_line then coalesce(\n        case\n          when v_po_line.base_uom_id is not null\n           and (v_item_base_uom_id is null or v_po_line.base_uom_id = v_item_base_uom_id)\n            then v_po_line.base_uom_id\n        end,\n        v_item_base_uom_id,\n        v_transaction_uom_id\n      )\n      else coalesce(v_item_base_uom_id, v_transaction_uom_id)\n    end;';
+  if position(v_old in v_definition) = 0 then
+    raise exception '068 precondition failed: GRN base UOM resolution has changed.';
+  end if;
+  v_definition := replace(v_definition, v_old, v_new);
+
   execute v_definition;
 end
 $$;
