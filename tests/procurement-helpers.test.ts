@@ -941,6 +941,9 @@ test('normalizePostableGrnLines converts persisted transaction UOM quantity to b
         item_id: 'item-uom',
         po_item_id: 'po-item-uom',
         quantity_received: 5,
+        // Live compatibility can persist the base unit in the generic field.
+        // The PO transaction UOM must still win, otherwise 5 Buckets posts as 5 Litres.
+        unit_of_measure_id: 'uom-litre',
         unit_cost: 20,
         warehouse_id: 'wh-uom',
       },
