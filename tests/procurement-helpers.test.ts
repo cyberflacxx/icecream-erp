@@ -896,6 +896,66 @@ test('findMatchingGrnReceiveLine reuses an existing item line when the seed line
   assert.equal(match?.id, 'seed-line');
 });
 
+test('normalizePostableGrnLines converts persisted transaction UOM quantity to base inventory quantity', () => {
+  const normalized = normalizePostableGrnLines({
+    conversions: [
+      {
+        item_id: 'item-uom',
+        from_uom_id: 'uom-bucket',
+        to_uom_id: 'uom-litre',
+        conversion_factor: 20,
+        is_active: true,
+      },
+    ],
+    fallbackOrganizationId: 'org-uom',
+    grn: {
+      id: 'grn-uom',
+      organization_id: 'org-uom',
+      receiving_warehouse_id: 'wh-uom',
+    },
+    itemMastersById: new Map([
+      ['item-uom', {
+        id: 'item-uom',
+        organization_id: 'org-uom',
+        unit_id: 'uom-litre',
+        standard_cost: 1,
+      }],
+    ]),
+    poItemsById: new Map([
+      ['po-item-uom', {
+        id: 'po-item-uom',
+        item_id: 'item-uom',
+        organization_id: 'org-uom',
+        transaction_uom_id: 'uom-bucket',
+        base_uom_id: 'uom-litre',
+        quantity_ordered: 5,
+        transaction_quantity: 5,
+        base_quantity: 100,
+        uom_conversion_factor: 20,
+        unit_cost: 20,
+      }],
+    ]),
+    rawLines: [
+      {
+        id: 'grn-line-uom',
+        item_id: 'item-uom',
+        po_item_id: 'po-item-uom',
+        quantity_received: 5,
+        unit_cost: 20,
+        warehouse_id: 'wh-uom',
+      },
+    ],
+  });
+
+  assert.equal(normalized.length, 1);
+  assert.equal(normalized[0]?.transactionQuantity, 5);
+  assert.equal(normalized[0]?.transactionUnitId, 'uom-bucket');
+  assert.equal(normalized[0]?.baseQuantity, 100);
+  assert.equal(normalized[0]?.baseUnitId, 'uom-litre');
+  assert.equal(normalized[0]?.conversionFactor, 20);
+  assert.equal(normalized[0]?.quantity, 100);
+});
+
 test('normalizePostableGrnLines prefers accepted quantity and drops duplicate GRN seed lines', () => {
   const normalized = normalizePostableGrnLines({
     fallbackOrganizationId: 'org-dup',
