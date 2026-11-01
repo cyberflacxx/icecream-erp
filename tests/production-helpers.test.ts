@@ -99,6 +99,12 @@ function loadRouteModule<T>(modulePath: string, mocks: Record<string, unknown>):
         return { entryNumber: 'JE-00001', id: 'journal-1' };
       },
     },
+    '@/lib/production-raw-material-conversions': {
+      RAW_MATERIAL_PRODUCTION_CATEGORY_CODE: 'RAW_MATERIAL_PRODUCTION',
+      mapProductionConversion() {
+        return null;
+      },
+    },
     '@/lib/supabase/server': {
       createServiceRoleClient() {
         return {

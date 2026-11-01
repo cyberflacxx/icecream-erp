@@ -19,3 +19,4 @@ verification-results/
 .tmp-tests/
 
 deployment/validation/
+.env*

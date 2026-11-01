@@ -32,6 +32,10 @@ const ITEM_SELECTOR_SELECT_COLUMNS = [
   'is_active',
 ].join(', ');
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 function normalizeItem(
   row: Record<string, unknown>,
   categories = new Map<string, Record<string, unknown>>(),
@@ -793,12 +797,18 @@ export async function GET(request: NextRequest) {
       ? await service.from('production_raw_material_conversions').select('*').eq('organization_id', ctx.organizationId).in('item_id', selectorItemIds).eq('is_active', true)
       : { data: [], error: null };
     if (profilesResult.error) return buildSelectorDbErrorResponse({ ctx, error: profilesResult.error, itemTypes: typeFilters, pageSize: selectorPageSize, request, requestId, search, warehouseId: authorizedWarehouseId });
-    const profileRows = (profilesResult.data ?? []) as Array<Record<string, unknown>>;
+    const profileRows = (profilesResult.data ?? []).filter(isRecord);
     const profileUomIds = [...new Set(profileRows.flatMap((profile) => [profile.purchase_uom_id, profile.conversion_uom_id, profile.production_output_uom_id]).map(String))];
     if (profileUomIds.length) {
       const profileUnits = await service.from('units_of_measure').select('id, name, abbreviation').in('id', profileUomIds);
       if (profileUnits.error) return buildSelectorDbErrorResponse({ ctx, error: profileUnits.error, itemTypes: typeFilters, pageSize: selectorPageSize, request, requestId, search, warehouseId: authorizedWarehouseId });
-      for (const unit of profileUnits.data ?? []) unitById.set(String(unit.id), unit as Record<string, unknown>);
+      for (const unit of profileUnits.data ?? []) {
+        const normalizedUnit = {
+          abbreviation: unit.abbreviation ? String(unit.abbreviation) : null,
+          name: unit.name ? String(unit.name) : null,
+        };
+        unitById.set(String(unit.id), normalizedUnit);
+      }
     }
     const profilesByItemId = new Map(profileRows.map((profile) => [String(profile.item_id), profile]));
     const options = buildItemSelectorOptions({

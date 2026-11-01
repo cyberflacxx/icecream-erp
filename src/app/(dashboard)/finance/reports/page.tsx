@@ -197,7 +197,13 @@ export default function FinanceReportsPage() {
     );
   }
 
-  const income = incomeStatementQuery.data ?? { grossProfit: 0, netProfit: 0, operatingExpenses: 0, revenue: 0 };
+  const income = incomeStatementQuery.data ?? {
+    costOfGoodsSold: 0,
+    grossProfit: 0,
+    netProfit: 0,
+    operatingExpenses: 0,
+    revenue: 0,
+  };
   const position = financialPositionQuery.data ?? { assets: 0, equity: 0, liabilities: 0 };
   const trialBalance = trialBalanceQuery.data ?? {
     rows: [],

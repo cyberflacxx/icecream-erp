@@ -16,6 +16,10 @@ import { normalizeFinanceTransactionRow } from '@/lib/finance';
 
 type Row = Record<string, unknown>;
 
+function isRow(value: unknown): value is Row {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 type FinanceTransactionRow = {
   accountCode?: string;
   accountName?: string;
@@ -64,7 +68,7 @@ async function runCompatibilitySelect(
   for (const attempt of attempts) {
     const result = await financeService().from(table).select(attempt.select);
     if (!result.error) {
-      return filterRowsByOrganization((result.data ?? []) as Row[], organizationId);
+      return filterRowsByOrganization((result.data ?? []).filter(isRow), organizationId);
     }
 
     if (!isCompatibilityFailure(result.error, table)) {
@@ -539,7 +543,7 @@ export async function GET() {
   if (!ctx) return unauthorized();
   if (!can(ctx, 'finance.read')) return forbidden();
 
-  const ledgerRows = await safeSource('finance_transactions.direct', async () => {
+  const ledgerRows = await safeSource<FinanceTransactionRow>('finance_transactions.direct', async () => {
     const direct = await loadDirectFinanceTransactions(ctx.organizationId);
     if (direct.length > 0) return direct;
     return loadJournalTransactions(ctx.organizationId);
@@ -554,13 +558,13 @@ export async function GET() {
     branchSales,
     branchExpenses,
   ] = await Promise.all([
-    safeSource('bank_transactions', () => loadBankTransactions(ctx.organizationId)),
-    safeSource('cash_transactions', () => loadCashTransactions(ctx.organizationId)),
-    safeSource('petty_cash_requests', () => loadPettyCashTransactions(ctx.organizationId)),
-    safeSource('payments', () => loadSalesPayments(ctx.organizationId)),
-    safeSource('supplier_payments', () => loadSupplierPayments(ctx.organizationId)),
-    safeSource('branch_sales', () => loadBranchSales(ctx.organizationId)),
-    safeSource('branch_expenses', () => loadBranchExpenses(ctx.organizationId)),
+    safeSource<FinanceTransactionRow>('bank_transactions', () => loadBankTransactions(ctx.organizationId)),
+    safeSource<FinanceTransactionRow>('cash_transactions', () => loadCashTransactions(ctx.organizationId)),
+    safeSource<FinanceTransactionRow>('petty_cash_requests', () => loadPettyCashTransactions(ctx.organizationId)),
+    safeSource<FinanceTransactionRow>('payments', () => loadSalesPayments(ctx.organizationId)),
+    safeSource<FinanceTransactionRow>('supplier_payments', () => loadSupplierPayments(ctx.organizationId)),
+    safeSource<FinanceTransactionRow>('branch_sales', () => loadBranchSales(ctx.organizationId)),
+    safeSource<FinanceTransactionRow>('branch_expenses', () => loadBranchExpenses(ctx.organizationId)),
   ]);
 
   const rows = [

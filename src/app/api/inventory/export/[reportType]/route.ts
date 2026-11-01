@@ -49,7 +49,7 @@ export async function GET(
       const mapped = await mapCompatibleStockMovementRows(service, result.rows);
 
       rows = mapped.map((row) => ({
-        branch: String(row.branchName ?? ''),
+        branch: '',
         createdBy: String(row.createdBy?.name ?? 'System'),
         destinationWarehouse: String(row.destinationWarehouse?.name ?? ''),
         itemCode: String(row.item?.code ?? ''),

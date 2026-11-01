@@ -5,17 +5,11 @@ import { hrService, writeHrAuditLog } from '@/lib/hr-server';
 
 type RouteContext = { params: Promise<{ id: string }> };
 
-type CountableQuery = {
-  eq: (column: string, value: string) => CountableQuery | Promise<{ count: number | null; error: { message?: string } | null }>;
-  select: (columns: string, options: { count: 'exact'; head: true }) => CountableQuery;
-};
-
-async function countOptionalReferences(service: { from: (table: string) => CountableQuery }, checks: Array<{ column: string; table: string; value: string }>) {
+async function countOptionalReferences(service: ReturnType<typeof hrService>, checks: Array<{ column: string; table: string; value: string }>) {
   let total = 0;
   for (const check of checks) {
     try {
-      const query = service.from(check.table).select('id', { count: 'exact', head: true }).eq(check.column, check.value);
-      const result = await Promise.resolve(query as Promise<{ count: number | null; error: { message?: string } | null }>);
+      const result = await service.from(check.table).select('id', { count: 'exact', head: true }).eq(check.column, check.value);
       if (!result.error) total += result.count ?? 0;
     } catch {}
   }

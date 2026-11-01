@@ -61,7 +61,25 @@ const purchasableItemTypes = new Set([
 ]);
 
 interface PurchaseOrderItemOption extends ItemSelectorOption {
+  categoryCode?: string | null;
   description?: string | null;
+  productionConversion?: {
+    conversionQuantity: number;
+    conversionUom: {
+      abbreviation: string;
+      id: string;
+    };
+    productionOutputQuantity: number;
+    productionOutputUom: {
+      abbreviation: string;
+      id: string;
+    };
+    purchaseQuantity: number;
+    purchaseUom: {
+      abbreviation: string;
+      id: string;
+    };
+  } | null;
 }
 
 function createLineItemDraft() {

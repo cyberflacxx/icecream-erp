@@ -9,6 +9,10 @@ type MachineProfileRow = Record<string, unknown>;
 type MaintenanceScheduleRow = Record<string, unknown>;
 type MachineBreakdownRow = Record<string, unknown>;
 
+function isMaintenanceRow(value: unknown): value is MaintenanceScheduleRow {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 const healthStatuses = new Set(['HEALTHY', 'NEEDS_SERVICE', 'UNDER_MAINTENANCE', 'CRITICAL', 'RETIRED']);
 const operationalStatuses = new Set(['ACTIVE', 'INACTIVE', 'BROKEN_DOWN', 'UNDER_REPAIR']);
 
@@ -118,7 +122,7 @@ async function loadMaintenanceSchedules(service: ReturnType<typeof createService
       .in('machine_id', machineIds)
       .order(attempt.orderBy, { ascending: false });
 
-    if (!result.error) return (result.data ?? []) as MaintenanceScheduleRow[];
+    if (!result.error) return (result.data ?? []).filter(isMaintenanceRow);
     if (isMissingTableError(result.error, 'maintenance_schedules')) return [];
     if (!isMissingColumnError(result.error, 'maintenance_schedules', attempt.orderBy) && !/column maintenance_schedules\./i.test(String(result.error.message ?? ''))) {
       throw result.error;
@@ -145,7 +149,7 @@ async function loadMachineBreakdowns(service: ReturnType<typeof createServiceRol
       .in('machine_id', machineIds)
       .order(attempt.orderBy, { ascending: false });
 
-    if (!result.error) return (result.data ?? []) as MachineBreakdownRow[];
+    if (!result.error) return (result.data ?? []).filter(isMaintenanceRow);
     if (isMissingTableError(result.error, 'machine_breakdowns')) return [];
     if (!isMissingColumnError(result.error, 'machine_breakdowns', attempt.orderBy) && !/column machine_breakdowns\./i.test(String(result.error.message ?? ''))) {
       throw result.error;

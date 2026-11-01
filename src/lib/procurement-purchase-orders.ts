@@ -621,6 +621,7 @@ interface PurchaseOrderDraftPayloadInput {
   approvalNotes?: string | null;
   discountAmount: number;
   expectedDeliveryDate?: string | null;
+  idempotencyKey?: string | null;
   items: Array<{
     description?: string | null;
     itemId?: string | null;
@@ -666,6 +667,7 @@ export function buildPurchaseOrderDraftPayload(input: PurchaseOrderDraftPayloadI
     approvalNotes: input.approvalNotes?.trim() || null,
     discountAmount: input.discountAmount,
     expectedDeliveryDate: input.expectedDeliveryDate ?? null,
+    idempotencyKey: input.idempotencyKey ?? null,
     items: input.items.map((item) => {
       const itemId = normalizePurchaseOrderItemId(item);
       const unitOfMeasureId = normalizePurchaseOrderUnitOfMeasureId(item);
