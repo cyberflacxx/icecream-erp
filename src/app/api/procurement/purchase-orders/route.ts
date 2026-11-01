@@ -126,17 +126,31 @@ function poCreateFailure(
     lineCount: number;
     missing?: string[];
     operation: string;
+    reason?: string;
   },
 ) {
   const requestId = `PO-${Date.now()}-${Math.random().toString(16).slice(2, 10).toUpperCase()}`;
+  const fieldLabels: Record<string, string> = {
+    item_id: 'item',
+    items: 'at least one purchase-order line',
+    quantity: 'a positive quantity',
+    supplier_id: 'supplier',
+    unit_price: 'a valid unit price',
+  };
+  const missingFields = (details.missing ?? []).map((field) => fieldLabels[field] ?? field).join(', ');
+  const message = details.reason
+    ? `Purchase order could not be created: ${details.reason}`
+    : missingFields
+      ? `Purchase order validation failed: ${missingFields} is required.`
+      : `Purchase order could not be created during ${details.operation}.`;
   return NextResponse.json({
     success: false,
     error: {
       code: 'PO_CREATE_FAILED',
-      message: 'Purchase order could not be created. Please check supplier, requisition items, quantities, and prices.',
+      message,
       requestId,
     },
-    message: 'Purchase order could not be created. Please check supplier, requisition items, quantities, and prices.',
+    message,
     code: 'PO_CREATE_FAILED',
     requestId,
     details: {
@@ -794,6 +808,7 @@ export async function POST(request: NextRequest) {
       return poCreateFailure(500, {
         lineCount: normalizedItems.length,
         operation: 'validate_purchase_order_items',
+        reason: itemsCheck.error.message,
       });
     }
     if ((itemsCheck.data?.length ?? 0) !== itemIds.length) {
@@ -937,6 +952,7 @@ export async function POST(request: NextRequest) {
       return poCreateFailure(500, {
         lineCount: resolvedItems.length,
         operation: 'insert_purchase_orders',
+        reason: orderInsert.error.message,
       });
     }
     const order = orderInsert.data;
@@ -995,6 +1011,7 @@ export async function POST(request: NextRequest) {
       return poCreateFailure(500, {
         lineCount: itemPayload.length,
         operation: 'insert_purchase_order_items',
+        reason: itemsErr.message,
       });
     }
 

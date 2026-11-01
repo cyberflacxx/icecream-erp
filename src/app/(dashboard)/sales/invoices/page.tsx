@@ -73,6 +73,7 @@ export default function InvoicesPage() {
   const itemOptionsQuery = useItemSelectorOptions({
     branchId: invoiceForm.branchId || undefined,
     customerId: invoiceForm.customerId || undefined,
+    documentDate: invoiceForm.invoiceDate || undefined,
     includePrice: true,
     includeStock: true,
     limit: 250,

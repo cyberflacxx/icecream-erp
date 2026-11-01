@@ -285,6 +285,7 @@ export async function GET(request: NextRequest) {
   const selector = searchParams.get('selector') === 'true';
   const branchIdParam = searchParams.get('branch_id') ?? searchParams.get('branchId');
   const customerIdParam = searchParams.get('customer_id') ?? searchParams.get('customerId');
+  const pricingDocumentDate = searchParams.get('document_date') ?? searchParams.get('documentDate') ?? new Date().toISOString().slice(0, 10);
   const warehouseId = searchParams.get('warehouse_id') ?? searchParams.get('warehouseId');
   const includeStock = searchParams.get('include_stock') === 'true' || searchParams.get('includeStock') === 'true';
   const includeCost = searchParams.get('include_cost') === 'true' || searchParams.get('includeCost') === 'true';
@@ -780,7 +781,7 @@ export async function GET(request: NextRequest) {
     const resolvedPricing = await loadResolvedSalesItemPricing({
       branchId: effectiveBranchId,
       customer: customerPricing,
-      documentDate: new Date().toISOString().slice(0, 10),
+      documentDate: pricingDocumentDate,
       itemIds: limitedSelectorRows.map((row) => String(row.id)),
       organizationId: ctx.organizationId,
       service,

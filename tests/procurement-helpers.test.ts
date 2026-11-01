@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import { join } from 'node:path';
 
 import {
   SUPPLIER_IMPORT_TEMPLATE_HEADERS,
@@ -3182,4 +3183,14 @@ test('supplier payments delegate financial state changes to one atomic database 
   assert.match(migration, /bank_transaction_id = v_bank_transaction_id/);
   assert.doesNotMatch(migration, /^\s*delete\s+from/im);
   assert.doesNotMatch(migration, /^\s*truncate\s+/im);
+});
+
+test('purchase-order failures expose the exact validation or persistence reason', () => {
+  const route = fs.readFileSync(join('src', 'app', 'api', 'procurement', 'purchase-orders', 'route.ts'), 'utf8');
+
+  assert.match(route, /reason\?: string/);
+  assert.match(route, /Purchase order validation failed:/);
+  assert.match(route, /Purchase order could not be created: \$\{details\.reason\}/);
+  assert.match(route, /reason: orderInsert\.error\.message/);
+  assert.match(route, /reason: itemsErr\.message/);
 });

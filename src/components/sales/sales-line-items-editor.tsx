@@ -1,5 +1,7 @@
 'use client';
 
+import { useEffect } from 'react';
+
 import { Button } from '@/components/ui/button';
 import { ItemSelectorField } from '@/components/shared/item-selector-field';
 import type { ItemSelectorOption } from '@/hooks/useItemSelectorOptions';
@@ -39,6 +41,22 @@ export function normalizeSalesLines(lines: SalesLineDraft[]) {
     }));
 }
 
+export function synchronizeSalesLinePrices(lines: SalesLineDraft[], items: ItemSelectorOption[]) {
+  const itemsById = new Map(items.map((item) => [item.id, item]));
+  let changed = false;
+  const synchronized = lines.map((line) => {
+    if (!line.itemId) return line;
+    const item = itemsById.get(line.itemId);
+    if (!item) return line;
+    const unitPrice = String(item.sellingPrice ?? 0);
+    if (line.unitPrice === unitPrice) return line;
+    changed = true;
+    return { ...line, unitPrice };
+  });
+
+  return changed ? synchronized : lines;
+}
+
 interface SalesLineItemsEditorProps {
   emptyMessage?: string;
   errorMessage?: string | null;
@@ -58,6 +76,11 @@ export function SalesLineItemsEditor({
   onChange,
   onRetry,
 }: SalesLineItemsEditorProps) {
+  useEffect(() => {
+    const synchronized = synchronizeSalesLinePrices(lines, items);
+    if (synchronized !== lines) onChange(synchronized);
+  }, [items, lines, onChange]);
+
   function updateLine(index: number, updates: Partial<SalesLineDraft>) {
     onChange(lines.map((line, lineIndex) => (lineIndex === index ? { ...line, ...updates } : line)));
   }

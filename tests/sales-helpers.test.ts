@@ -265,6 +265,29 @@ test('sales pricing and receipt printing routes use organization-scoped prices a
   assert.match(paymentsHelper, /searchParams\.set\('paymentId', payload\.paymentId\)/);
 });
 
+test('sales price refresh synchronizes open-line prices with the dated selector result', () => {
+  const lineEditor = readFileSync(join('src', 'components', 'sales', 'sales-line-items-editor.tsx'), 'utf8');
+  const selectorHook = readFileSync(join('src', 'hooks', 'useItemSelectorOptions.ts'), 'utf8');
+  const itemSelectorRoute = readFileSync(join('src', 'app', 'api', 'inventory', 'items', 'route.ts'), 'utf8');
+  const invoicesPage = readFileSync(join('src', 'app', '(dashboard)', 'sales', 'invoices', 'page.tsx'), 'utf8');
+  const ordersPage = readFileSync(join('src', 'app', '(dashboard)', 'sales', 'orders', 'page.tsx'), 'utf8');
+  const quotationsPage = readFileSync(join('src', 'app', '(dashboard)', 'sales', 'quotations', 'page.tsx'), 'utf8');
+  const pricing = readFileSync(join('src', 'lib', 'sales-pricing.ts'), 'utf8');
+
+  assert.match(lineEditor, /export function synchronizeSalesLinePrices/);
+  assert.match(lineEditor, /if \(!item\) return line/);
+  assert.match(lineEditor, /useEffect\(\(\) => \{[\s\S]*synchronizeSalesLinePrices/);
+  assert.match(selectorHook, /documentDate\?: string \| null/);
+  assert.match(selectorHook, /document_date/);
+  assert.match(itemSelectorRoute, /pricingDocumentDate/);
+  assert.match(invoicesPage, /documentDate: invoiceForm\.invoiceDate/);
+  assert.match(ordersPage, /documentDate: formState\.orderDate/);
+  assert.match(quotationsPage, /documentDate: formState\.quotationDate/);
+  assert.match(pricing, /input\.customer\?\.priceListCode \? \{ code: input\.customer\.priceListCode, source: 'PRICE_LIST' \}/);
+  assert.match(pricing, /\{ code: 'STANDARD', source: 'STANDARD' \}/);
+  assert.doesNotMatch(pricing, /DEFAULT_WHOLESALE|DEFAULT_RETAIL/);
+});
+
 test('sales invoice cancellation reversal math restores stock, receivable, and balanced journals', () => {
   const restoredStock = calculateSalesStockReversal({
     issueQuantity: 10,

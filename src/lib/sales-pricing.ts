@@ -269,12 +269,7 @@ function buildPricePriority(input: {
   customer?: CustomerPricingContext | null;
 }) {
   return [
-    input.customer?.code ? { code: input.customer.code, source: 'CUSTOMER' } : null,
-    input.customer?.customerGroupCode ? { code: input.customer.customerGroupCode, source: 'CUSTOMER_CATEGORY' } : null,
-    input.branchCode ? { code: input.branchCode, source: 'BRANCH' } : null,
     input.customer?.priceListCode ? { code: input.customer.priceListCode, source: 'PRICE_LIST' } : null,
-    { code: 'WHOLESALE', source: 'DEFAULT_WHOLESALE' },
-    { code: 'RETAIL', source: 'DEFAULT_RETAIL' },
     { code: 'STANDARD', source: 'STANDARD' },
   ].filter((value): value is { code: string; source: string } => Boolean(value?.code));
 }

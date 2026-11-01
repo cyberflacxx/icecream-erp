@@ -60,6 +60,7 @@ export default function SalesPricesPage() {
       setFormError(null);
       setIsDrawerOpen(false);
       await queryClient.invalidateQueries({ queryKey: ['sales'] });
+      await queryClient.invalidateQueries({ queryKey: ['selectors', 'items'] });
     } catch (error) {
       setFormError(error instanceof Error ? error.message : 'Failed to save price adjustment.');
     }

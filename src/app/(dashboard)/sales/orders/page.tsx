@@ -48,6 +48,7 @@ export default function SalesOrdersPage() {
   const itemOptionsQuery = useItemSelectorOptions({
     branchId: formState.branchId || undefined,
     customerId: formState.customerId || undefined,
+    documentDate: formState.orderDate || undefined,
     includePrice: true,
     includeStock: true,
     limit: 250,

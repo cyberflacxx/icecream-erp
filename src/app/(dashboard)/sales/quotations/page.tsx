@@ -43,6 +43,7 @@ export default function SalesQuotationsPage() {
   const itemOptionsQuery = useItemSelectorOptions({
     branchId: formState.branchId || undefined,
     customerId: formState.customerId || undefined,
+    documentDate: formState.quotationDate || undefined,
     includePrice: true,
     includeStock: true,
     limit: 250,
