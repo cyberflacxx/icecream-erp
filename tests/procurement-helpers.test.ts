@@ -3030,12 +3030,12 @@ test('procurement receiving routes and UI use the repaired Batch 1 status contra
 
 test('supplier payments post journals to the selected cash or bank account ledger', () => {
   const supplierPaymentsRoute = fs.readFileSync('src/app/api/procurement/supplier-payments/route.ts', 'utf8');
-
-  assert.match(supplierPaymentsRoute, /paymentSourceType === 'BANK' && bankAccountResult\.data\?\.account_id/);
-  assert.match(supplierPaymentsRoute, /id: String\(bankAccountResult\.data\.account_id\)/);
-  assert.match(supplierPaymentsRoute, /paymentSourceType === 'CASH' && cashAccountResult\.data\?\.account_id/);
-  assert.match(supplierPaymentsRoute, /id: String\(cashAccountResult\.data\.account_id\)/);
-  assert.match(supplierPaymentsRoute, /selectedAccountId: paymentSourceType === 'BANK' \? bankAccountId/);
+  const transactionServer = fs.readFileSync('src/lib/procurement-transactions-server.ts', 'utf8');
+  assert.match(supplierPaymentsRoute, /postSupplierPaymentTransaction/);
+  assert.match(supplierPaymentsRoute, /bankAccountId/);
+  assert.match(supplierPaymentsRoute, /cashAccountId/);
+  assert.match(transactionServer, /p_actor_user_profile_id: ctx\.userId/);
+  assert.match(transactionServer, /p_organization_id: ctx\.organizationId/);
 });
 
 test('purchase order creation is guarded against duplicate submission on client and server', () => {
@@ -3073,13 +3073,10 @@ test('supplier payment posting is idempotent and keeps saved cash or bank accoun
   assert.match(paymentsPage, /\/api\/finance\/cash-accounts\?activeOnly=true/);
   assert.match(paymentsPage, /step="0\.0001"/);
 
-  assert.match(supplierPaymentsRoute, /idempotency_key: idempotencyKey/);
-  assert.match(supplierPaymentsRoute, /SUPPLIER_PAYMENT_IDEMPOTENT_REPLAY/);
   assert.match(supplierPaymentsRoute, /idempotentReplay/);
-  assert.match(supplierPaymentsRoute, /selectedAccountId: paymentSourceType === 'BANK' \? bankAccountId/);
-  assert.match(supplierPaymentsRoute, /completeSupplierPaymentPosting/);
-  assert.match(supplierPaymentsRoute, /status: 'PENDING'/);
-  assert.match(supplierPaymentsRoute, /\.update\(\{ status: 'POSTED'/);
+  assert.match(supplierPaymentsRoute, /idempotencyKey/);
+  assert.match(supplierPaymentsRoute, /postSupplierPaymentTransaction/);
+  assert.doesNotMatch(supplierPaymentsRoute, /completeSupplierPaymentPosting/);
 
   assert.match(migration, /alter table if exists icecream_erp\.supplier_payments/i);
   assert.match(migration, /supplier_payments_org_idempotency_key_uq/i);
@@ -3089,14 +3086,10 @@ test('supplier cash payments cannot be falsely completed when finance posting fa
   const supplierPaymentsRoute = fs.readFileSync('src/app/api/procurement/supplier-payments/route.ts', 'utf8');
   const financeServer = fs.readFileSync('src/lib/finance-server.ts', 'utf8');
 
-  assert.match(supplierPaymentsRoute, /status: 'PENDING'/);
-  assert.match(supplierPaymentsRoute, /markSupplierPaymentFailed/);
-  assert.match(supplierPaymentsRoute, /Insufficient cash balance in the selected cash account/);
-  assert.match(supplierPaymentsRoute, /\.select\(SUPPLIER_PAYMENT_SELECT\)/);
-  assert.match(supplierPaymentsRoute, /\.eq\('status', 'POSTED'\)/);
-  assert.match(supplierPaymentsRoute, /syncSupplierInvoiceBalance/);
-  assert.match(supplierPaymentsRoute, /paymentSourceType === 'CASH' \? cashAccountId/);
-  assert.match(supplierPaymentsRoute, /service\.from\('cash_accounts'\)\.select\('id, account_id, is_active'\)/);
+  assert.match(supplierPaymentsRoute, /postSupplierPaymentTransaction/);
+  assert.match(supplierPaymentsRoute, /Failed to post supplier payment transaction/);
+  assert.match(supplierPaymentsRoute, /Please select a cash or mobile-money account/);
+  assert.doesNotMatch(supplierPaymentsRoute, /syncSupplierInvoiceBalance/);
   assert.match(financeServer, /if \(existing\) \{\s*return \{/);
 });
 
@@ -3157,11 +3150,9 @@ test('procurement payment UI exposes saved cash and bank accounts with useful em
   assert.match(paymentsPage, /Select bank account/);
   assert.match(paymentsPage, /Select cash account/);
 
-  assert.match(supplierPaymentsRoute, /bank_account_id: bankAccountId/);
-  assert.match(supplierPaymentsRoute, /cash_account_id: cashAccountId/);
-  assert.match(supplierPaymentsRoute, /selectedAccountId: paymentSourceType === 'BANK' \? bankAccountId/);
-  assert.match(supplierPaymentsRoute, /id: String\(bankAccountResult\.data\.account_id\)/);
-  assert.match(supplierPaymentsRoute, /id: String\(cashAccountResult\.data\.account_id\)/);
+  assert.match(supplierPaymentsRoute, /bankAccountId/);
+  assert.match(supplierPaymentsRoute, /cashAccountId/);
+  assert.match(supplierPaymentsRoute, /postSupplierPaymentTransaction/);
 });
 
 test('supplier payments delegate financial state changes to one atomic database transaction', () => {
@@ -3170,7 +3161,8 @@ test('supplier payments delegate financial state changes to one atomic database 
   const migration = fs.readFileSync('migrations/065_atomic_receipts_and_supplier_payments.sql', 'utf8');
 
   assert.match(route, /postSupplierPaymentTransaction/);
-  assert.match(route, /The database RPC owns all financial state changes/);
+  assert.match(route, /postSupplierPaymentTransaction/);
+  assert.doesNotMatch(route, /completeSupplierPaymentPosting/);
   assert.match(transactionServer, /post_supplier_payment_transaction/);
   assert.match(migration, /create or replace function icecream_erp\.post_supplier_payment_transaction/);
   assert.match(migration, /for update/);

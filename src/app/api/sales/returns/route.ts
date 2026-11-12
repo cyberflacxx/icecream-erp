@@ -3,6 +3,20 @@ import { NextRequest, NextResponse } from 'next/server';
 import { badRequest, can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
 import { generateSalesReferenceNumber, isMissingSalesColumn, isMissingSalesTable, logSalesRouteError, salesErrorMessage, salesService, writeSalesAuditLog } from '@/lib/sales-server';
 
+type SalesReturnListResult = {
+  data: Record<string, unknown>[];
+  error: unknown;
+};
+
+function normalizeSalesReturnListResult(result: { data?: unknown; error?: unknown }): SalesReturnListResult {
+  return {
+    data: (Array.isArray(result.data) ? result.data : []).filter(
+      (row): row is Record<string, unknown> => typeof row === 'object' && row !== null && !Array.isArray(row),
+    ),
+    error: result.error ?? null,
+  };
+}
+
 export async function GET() {
   const ctx = await getAuthContext();
   if (!ctx) return unauthorized();
@@ -10,17 +24,17 @@ export async function GET() {
 
   try {
     const service = salesService();
-    let returnsResult = await service
+    let returnsResult = normalizeSalesReturnListResult(await service
       .from('customer_returns')
       .select('id, return_number, customer_id, invoice_id, return_date, reason, total_value, status, qc_status, final_stock_action')
       .is('deleted_at', null)
-      .order('return_date', { ascending: false });
+      .order('return_date', { ascending: false }));
 
     if (returnsResult.error && isMissingSalesColumn(returnsResult.error, 'customer_returns', 'deleted_at')) {
-      returnsResult = await service
+      returnsResult = normalizeSalesReturnListResult(await service
         .from('customer_returns')
         .select('id, return_number, customer_id, invoice_id, return_date, reason, total_value, status, qc_status, final_stock_action')
-        .order('return_date', { ascending: false });
+        .order('return_date', { ascending: false }));
     }
 
     if (
@@ -30,15 +44,15 @@ export async function GET() {
         isMissingSalesColumn(returnsResult.error, 'customer_returns', 'qc_status')
       )
     ) {
-      returnsResult = await service
+      returnsResult = normalizeSalesReturnListResult(await service
         .from('customer_returns')
         .select('id, return_number, customer_id, invoice_id, return_date, reason, total_value, status')
-        .order('return_date', { ascending: false });
+        .order('return_date', { ascending: false }));
     }
 
     if (returnsResult.error) throw returnsResult.error;
     return NextResponse.json(
-      ((returnsResult.data ?? []) as Array<Record<string, unknown>>).map((row) => ({
+      returnsResult.data.map((row) => ({
         ...row,
         final_stock_action: row.final_stock_action ?? null,
         qc_status: row.qc_status ?? 'PENDING_QC',

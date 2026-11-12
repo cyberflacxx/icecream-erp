@@ -103,7 +103,7 @@ export async function PATCH(
       const deactivateOld = await service.from('recipes').update({ status: 'INACTIVE', updated_at: new Date().toISOString() }).eq('id', id);
       if (deactivateOld.error) throw deactivateOld.error;
 
-      await service.from('recipe_version_history').insert({
+      await Promise.resolve(service.from('recipe_version_history').insert({
         after_values: { recipe: newRecipe, ingredientCount: ingredientRows.length, packagingCount: packagingRows.length },
         before_values: existing,
         change_type: 'VERSION_CREATED',
@@ -112,7 +112,7 @@ export async function PATCH(
         previous_recipe_id: id,
         recipe_id: newRecipe.id,
         version_number: nextVersion,
-      }).then(() => undefined).catch(() => undefined);
+      })).then(() => undefined).catch(() => undefined);
 
       await writeProductionAuditLog('PRODUCTION_RECIPE_VERSION_CREATED', String(newRecipe.id), ctx.userId, {
         previousRecipeId: id,

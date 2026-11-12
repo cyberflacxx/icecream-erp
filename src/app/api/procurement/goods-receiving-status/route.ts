@@ -8,6 +8,10 @@ import {
 } from '@/lib/procurement-purchase-orders';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
+function isRow(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 export async function GET(request: NextRequest) {
   const ctx = await getAuthContext();
   if (!ctx) return unauthorized();
@@ -40,20 +44,22 @@ export async function GET(request: NextRequest) {
       : itemsQuery;
   if (dataResult.error) return serverError(dataResult.error.message);
 
-  const data = dataResult.data ?? [];
+  const data: Array<Record<string, unknown>> = (Array.isArray(dataResult.data)
+    ? Array.from(dataResult.data, (value): unknown => value)
+    : []
+  ).filter(isRow);
   const itemIds = [...new Set(data.map((row) => String(row.item_id ?? '')).filter(Boolean))];
-  const [ordersSnapshot, itemsResult] = await Promise.all([
-    Promise.resolve({ data: purchaseOrdersResult.data ?? [], error: null }),
-    itemIds.length ? service.from('items').select('id, name').in('id', itemIds) : Promise.resolve({ data: [], error: null }),
-  ]);
-  if (ordersSnapshot.error) return serverError(ordersSnapshot.error.message);
+  const orderRows = purchaseOrdersResult.data ?? [];
+  const itemsResult = itemIds.length
+    ? await service.from('items').select('id, name').in('id', itemIds)
+    : { data: [], error: null };
   if (itemsResult.error) return serverError(itemsResult.error.message);
 
-  const supplierIds = [...new Set((ordersSnapshot.data ?? []).map((row) => String(row.supplier_id ?? '')).filter(Boolean))];
+  const supplierIds = [...new Set(orderRows.map((row) => String(row.supplier_id ?? '')).filter(Boolean))];
   const suppliersResult = supplierIds.length ? await service.from('suppliers').select('id, name').in('id', supplierIds) : { data: [], error: null };
   if (suppliersResult.error) return serverError(suppliersResult.error.message);
 
-  const orders = new Map((ordersSnapshot.data ?? []).map((row) => [String(row.id), row]));
+  const orders = new Map(orderRows.map((row) => [String(row.id), row]));
   const items = new Map((itemsResult.data ?? []).map((row) => [String(row.id), row]));
   const suppliers = new Map((suppliersResult.data ?? []).map((row) => [String(row.id), row]));
 

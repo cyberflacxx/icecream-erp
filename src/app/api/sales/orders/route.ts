@@ -21,6 +21,20 @@ function paginate<T>(data: T[], page: number, pageSize: number) {
   return { data: data.slice(start, start + pageSize), pagination: { page, pageSize, total } };
 }
 
+type SalesOrderListResult = {
+  data: Record<string, unknown>[];
+  error: unknown;
+};
+
+function normalizeSalesOrderListResult(result: { data?: unknown; error?: unknown }): SalesOrderListResult {
+  return {
+    data: (Array.isArray(result.data) ? result.data : []).filter(
+      (row): row is Record<string, unknown> => typeof row === 'object' && row !== null && !Array.isArray(row),
+    ),
+    error: result.error ?? null,
+  };
+}
+
 function mapLineTotals(items: Array<{ discountPercent?: number | null; quantity: number; unitPrice: number }>) {
   const subtotal = items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
   const lineDiscountTotal = items.reduce((sum, item) => {
@@ -63,7 +77,7 @@ export async function GET(request: NextRequest) {
   if (startDate) query = query.gte('order_date', startDate);
   if (endDate) query = query.lte('order_date', endDate);
 
-  let result = await query;
+  let result = normalizeSalesOrderListResult(await query);
   if (
     result.error &&
     (
@@ -88,12 +102,12 @@ export async function GET(request: NextRequest) {
     if (startDate) fallbackQuery = fallbackQuery.gte('order_date', startDate);
     if (endDate) fallbackQuery = fallbackQuery.lte('order_date', endDate);
 
-    result = await fallbackQuery;
+    result = normalizeSalesOrderListResult(await fallbackQuery);
   }
 
-  if (result.error) return serverError(result.error.message);
+  if (result.error) return serverError(salesErrorMessage(result.error) || 'Failed to load sales orders.');
 
-  const rows = (result.data ?? []) as Array<Record<string, unknown>>;
+  const rows = result.data;
   const customerIds = [...new Set(rows.map((row) => String(row.customer_id ?? '')).filter(Boolean))];
   const orderIds = rows.map((row) => String(row.id));
 

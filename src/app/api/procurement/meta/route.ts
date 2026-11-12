@@ -7,8 +7,14 @@ import {
   getPurchaseOrderReceivingLines,
   isPurchaseOrderEligibleForGoodsReceived,
 } from '@/lib/procurement-purchase-orders';
-import { getSafeSupplierErrorDetails, listSupplierOptionRecords } from '@/lib/procurement-suppliers';
+import {
+  getSafeSupplierErrorDetails,
+  listSupplierOptionRecords,
+  type SupplierQueryClient,
+} from '@/lib/procurement-suppliers';
 import { createServiceRoleClient } from '@/lib/supabase/server';
+
+type Row = Record<string, unknown>;
 
 function toNumber(value: unknown) {
   const parsed = Number(value);
@@ -26,6 +32,28 @@ function mapItemType(value: unknown) {
 
 function mapUnitLabel(unit: Record<string, unknown>) {
   return String(unit.name ?? unit.abbreviation ?? unit.code ?? 'Unit');
+}
+
+function createSupplierQueryClient(service: ReturnType<typeof createServiceRoleClient>): SupplierQueryClient {
+  return {
+    from: () => ({
+      select: (columns) => ({
+        eq: (column, value) => ({
+          order: async (orderColumn, options) => {
+            const result = await service
+              .from('suppliers')
+              .select(columns)
+              .eq(column, value)
+              .order(orderColumn, options);
+            return {
+              data: Array.isArray(result.data) ? result.data : null,
+              error: result.error,
+            };
+          },
+        }),
+      }),
+    }),
+  };
 }
 
 async function loadItems(service: ReturnType<typeof createServiceRoleClient>, organizationId: string) {
@@ -59,7 +87,8 @@ async function loadItems(service: ReturnType<typeof createServiceRoleClient>, or
       .order('name');
 
     if (!result.error) {
-      return (result.data ?? []) as Array<Record<string, unknown>>;
+      const rows: unknown[] = Array.isArray(result.data) ? result.data : [];
+      return rows.filter((row): row is Row => typeof row === 'object' && row !== null && !Array.isArray(row));
     }
 
     lastError = result.error;
@@ -93,7 +122,8 @@ async function loadUnits(service: ReturnType<typeof createServiceRoleClient>, or
       .order('name');
 
     if (!result.error) {
-      return (result.data ?? []) as Array<Record<string, unknown>>;
+      const rows: unknown[] = Array.isArray(result.data) ? result.data : [];
+      return rows.filter((row): row is Row => typeof row === 'object' && row !== null && !Array.isArray(row));
     }
   }
 
@@ -161,6 +191,7 @@ export async function GET(request: NextRequest) {
   if (!can(ctx, 'procurement.read')) return forbidden();
 
   const service = createServiceRoleClient();
+  const supplierQueryClient = createSupplierQueryClient(service);
   const { searchParams } = new URL(request.url);
   const purchaseOrderScope = searchParams.get('purchaseOrderScope') === 'receiving' ? 'receiving' : 'all';
 
@@ -174,23 +205,13 @@ export async function GET(request: NextRequest) {
       warehouseQuery = warehouseQuery.or(`branch_id.eq.${ctx.branchId},branch_id.is.null`);
     }
 
-    const [
-      suppliersResult,
-      itemsResult,
-      unitsResult,
-      warehousesResult,
-      purchaseOrdersResult,
-      purchaseOrderItemsResult,
-      stockBalancesResult,
-      goodsReceivedNotesResult,
-      grnItemsResult,
-      approversResult,
-      departmentsResult,
-    ] = await Promise.allSettled([
-      listSupplierOptionRecords(service, ctx.organizationId),
+    const supplierMetadataResults = Promise.allSettled([
+      listSupplierOptionRecords(supplierQueryClient, ctx.organizationId),
       loadItems(service, ctx.organizationId),
       loadUnits(service, ctx.organizationId),
       warehouseQuery.order('name'),
+    ]);
+    const receivingMetadataResults = Promise.allSettled([
       service
         .from('purchase_orders')
         .select('id, po_number, status, approval_status, approved_at, approved_by, sent_at, rejected_at, supplier_id, suppliers(id, name)')
@@ -207,6 +228,8 @@ export async function GET(request: NextRequest) {
         .select('id, received_date, status')
         .eq('organization_id', ctx.organizationId)
         .order('received_date', { ascending: false }),
+    ]);
+    const workflowMetadataResults = Promise.allSettled([
       service
         .from('goods_received_note_items')
         .select('grn_id, goods_received_note_id, item_id, quantity_received, accepted_quantity'),
@@ -217,6 +240,11 @@ export async function GET(request: NextRequest) {
         .eq('organization_id', ctx.organizationId)
         .order('department'),
     ]);
+    const [
+      [suppliersResult, itemsResult, unitsResult, warehousesResult],
+      [purchaseOrdersResult, purchaseOrderItemsResult, stockBalancesResult, goodsReceivedNotesResult],
+      [grnItemsResult, approversResult, departmentsResult],
+    ] = await Promise.all([supplierMetadataResults, receivingMetadataResults, workflowMetadataResults]);
 
     const suppliers = suppliersResult.status === 'fulfilled' ? suppliersResult.value : [];
     const itemsData = itemsResult.status === 'fulfilled' ? itemsResult.value : [];
@@ -288,7 +316,7 @@ export async function GET(request: NextRequest) {
       purchaseOrderItemsByOrderId.set(orderId, [...(purchaseOrderItemsByOrderId.get(orderId) ?? []), row]);
     }
 
-    const allPurchaseOrders = purchaseOrdersRows.map((row) => {
+    const allPurchaseOrders: Array<Row & { derivedStatus: string; lines: Row[]; receivingLines: ReturnType<typeof getPurchaseOrderReceivingLines>; supplier: unknown }> = purchaseOrdersRows.map((row) => {
       const supplier = Array.isArray(row.suppliers) ? row.suppliers[0] : row.suppliers;
       const lines = purchaseOrderItemsByOrderId.get(String(row.id ?? '')) ?? [];
       const derivedStatus = derivePurchaseOrderStatus({

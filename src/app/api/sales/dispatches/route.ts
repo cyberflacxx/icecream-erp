@@ -3,6 +3,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { badRequest, can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
 import { generateSalesReferenceNumber, isMissingSalesColumn, isMissingSalesTable, logSalesRouteError, salesService, writeSalesAuditLog } from '@/lib/sales-server';
 
+function isRow(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 export async function GET() {
   const ctx = await getAuthContext();
   if (!ctx) return unauthorized();
@@ -10,27 +14,31 @@ export async function GET() {
 
   try {
     const service = salesService();
-    let dispatchResult = await service
+    const primaryResult = await service
       .from('sales_dispatch_notes')
       .select('id, dispatch_note_number, invoice_id, customer_id, warehouse_id, dispatch_date, status, vehicle_reference, created_at')
       .order('dispatch_date', { ascending: false });
 
-    if (dispatchResult.error && isMissingSalesColumn(dispatchResult.error, 'sales_dispatch_notes', 'created_at')) {
-      dispatchResult = await service
-        .from('sales_dispatch_notes')
-        .select('id, dispatch_note_number, invoice_id, customer_id, warehouse_id, dispatch_date, status, vehicle_reference')
-        .order('dispatch_date', { ascending: false });
-    }
+    const withoutCreatedAt = primaryResult.error && isMissingSalesColumn(primaryResult.error, 'sales_dispatch_notes', 'created_at')
+      ? await service
+          .from('sales_dispatch_notes')
+          .select('id, dispatch_note_number, invoice_id, customer_id, warehouse_id, dispatch_date, status, vehicle_reference')
+          .order('dispatch_date', { ascending: false })
+      : primaryResult;
 
-    if (dispatchResult.error && isMissingSalesColumn(dispatchResult.error, 'sales_dispatch_notes', 'vehicle_reference')) {
-      dispatchResult = await service
-        .from('sales_dispatch_notes')
-        .select('id, dispatch_note_number, invoice_id, customer_id, warehouse_id, dispatch_date, status')
-        .order('dispatch_date', { ascending: false });
-    }
+    const dispatchResult = withoutCreatedAt.error && isMissingSalesColumn(withoutCreatedAt.error, 'sales_dispatch_notes', 'vehicle_reference')
+      ? await service
+          .from('sales_dispatch_notes')
+          .select('id, dispatch_note_number, invoice_id, customer_id, warehouse_id, dispatch_date, status')
+          .order('dispatch_date', { ascending: false })
+      : withoutCreatedAt;
 
     if (dispatchResult.error) throw dispatchResult.error;
-    return NextResponse.json(dispatchResult.data ?? []);
+    const responseRows = (Array.isArray(dispatchResult.data)
+      ? Array.from(dispatchResult.data, (value): unknown => value)
+      : []
+    ).filter(isRow);
+    return NextResponse.json(responseRows);
   } catch (err) {
     if (isMissingSalesTable(err)) return NextResponse.json([]);
     logSalesRouteError('dispatches', 'load dispatch notes', err);

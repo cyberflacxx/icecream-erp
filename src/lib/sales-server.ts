@@ -65,6 +65,10 @@ export async function generateSalesReferenceNumber(table: string, prefix: string
 
 type SalesService = ReturnType<typeof salesService>;
 
+function isRow(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 function toFiniteNumber(value: unknown) {
   if (value === null || value === undefined) return null;
   if (typeof value === 'string' && value.trim() === '') return null;
@@ -97,8 +101,8 @@ export async function loadSalesOrderById(
 
   const primary = await buildQuery(true, true);
 
-  if (!primary.error && primary.data) {
-    return primary.data as Record<string, unknown>;
+  if (!primary.error && isRow(primary.data)) {
+    return primary.data;
   }
 
   if (primary.error && !isMissingSalesColumn(primary.error, 'sales_orders', 'deleted_at')) {
@@ -107,8 +111,8 @@ export async function loadSalesOrderById(
 
   const organizationFallback = await buildQuery(false, true);
 
-  if (!organizationFallback.error && organizationFallback.data) {
-    return organizationFallback.data as Record<string, unknown>;
+  if (!organizationFallback.error && isRow(organizationFallback.data)) {
+    return organizationFallback.data;
   }
 
   if (organizationFallback.error) {
@@ -121,7 +125,7 @@ export async function loadSalesOrderById(
     throw directFallback.error;
   }
 
-  const directOrder = (directFallback.data ?? null) as Record<string, unknown> | null;
+  const directOrder = isRow(directFallback.data) ? directFallback.data : null;
 
   if (!directOrder) {
     return null;

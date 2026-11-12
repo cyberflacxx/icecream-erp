@@ -219,7 +219,8 @@ test('sales quotations, orders, and invoices use the shared searchable item sele
   assert.match(lineEditor, /readOnly/);
   assert.match(lineEditor, /No saleable items are available\./);
   assert.match(invoiceRoute, /loadResolvedSalesItemPricing/);
-  assert.match(invoiceRoute, /postInventory !== false/);
+  assert.match(invoiceRoute, /invoices cannot post inventory/);
+  assert.match(invoicesPage, /postInventory: false/);
   assert.match(itemSelectorRoute, /customer_id/);
   assert.match(itemSelectorRoute, /loadResolvedSalesItemPricing/);
   assert.match(salesPricing, /unit_cost, standard_cost, selling_price, is_active/);

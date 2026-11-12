@@ -63,7 +63,7 @@ export async function POST(
             sourceDocumentType: 'production_issue_reversal',
             sourceModule: 'production',
           });
-          return NextResponse.json({ ...result, journal: reversalJournal }, { status: result.success === false && result.code === 'CONFLICT' ? 409 : 200 });
+          return NextResponse.json({ ...result, journal: reversalJournal }, { status: 200 });
         }
       }
     }

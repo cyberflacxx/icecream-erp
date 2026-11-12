@@ -10,6 +10,11 @@ const LEGACY_REQUISITION_ITEM_COLUMNS = ['pr_id', 'quantity', 'estimated_cost', 
 const REQUISITION_SELECT_BASE =
   'id, requisition_number, department, request_date, needed_by_date, status, approval_status, requested_by, approver_user_id, approved_by, approved_at, rejected_by, rejected_at, remarks';
 const REQUISITION_SELECT_WITH_APPROVER_DETAILS = `${REQUISITION_SELECT_BASE}, approver_name, approver_email, approval_notes`;
+type Row = Record<string, unknown>;
+
+function isRow(value: unknown): value is Row {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
 function stripMissingLegacyRequisitionItemColumn<T extends Record<string, unknown>>(payload: T, error: unknown) {
   const column = LEGACY_REQUISITION_ITEM_COLUMNS.find((entry) =>
     isMissingColumnError(error, 'purchase_requisition_items', entry),
@@ -103,7 +108,7 @@ export async function GET(request: NextRequest) {
         : await fallbackApplied.range(from, from + pageSize - 1);
       if (fallbackResult.error) return serverError(fallbackResult.error.message);
 
-      const rows = fallbackResult.data ?? [];
+      const rows: Row[] = (Array.isArray(fallbackResult.data) ? fallbackResult.data : []).filter(isRow);
       const userIds = [
         ...new Set(
           rows
@@ -156,9 +161,13 @@ export async function GET(request: NextRequest) {
 
     if (error) return serverError(error.message);
 
+    const rows: Row[] = (Array.isArray(data)
+      ? Array.from(data, (value): unknown => value)
+      : []
+    ).filter(isRow);
     const userIds = [
       ...new Set(
-        (data ?? [])
+        rows
           .flatMap((row) => [row.requested_by, row.approver_user_id, row.approved_by, row.rejected_by])
           .map((value) => String(value ?? ''))
           .filter(Boolean),
@@ -171,7 +180,7 @@ export async function GET(request: NextRequest) {
       (usersResult.error ? [] : usersResult.data ?? []).map((row) => [String(row.id), String(row.full_name ?? 'Unknown')]),
     );
 
-    const mapped = (data ?? []).map((r: Record<string, unknown>) => ({
+    const mapped = rows.map((r) => ({
       id: r.id,
       requisition_number: r.requisition_number,
       requisitionNumber: r.requisition_number,
@@ -354,9 +363,10 @@ export async function POST(request: NextRequest) {
 
     let { error: itemsErr } = await service.from('purchase_requisition_items').insert(itemPayload);
     while (itemsErr) {
-      const nextPayload = itemPayload
-        .map((row) => stripMissingLegacyRequisitionItemColumn(row, itemsErr))
-        .filter((row): row is Record<string, unknown> => Boolean(row));
+      const nextPayload = itemPayload.flatMap((row) => {
+        const compatible = stripMissingLegacyRequisitionItemColumn(row, itemsErr);
+        return compatible ? [compatible] : [];
+      });
       if (nextPayload.length !== itemPayload.length) break;
       if (JSON.stringify(nextPayload) === JSON.stringify(itemPayload)) break;
       itemPayload = nextPayload;

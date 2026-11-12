@@ -9,6 +9,7 @@ import {
   isUuidLikeRequisitionIdentifier,
   normalizeRequisitionItemId,
   normalizeRequisitionUnitOfMeasureId,
+  type RequisitionItemQueryClient,
   safeSelectItemsByIds,
 } from '@/lib/procurement-requisitions';
 import { getErrorMessage, isMissingColumnError } from '@/lib/postgrest-compat';
@@ -38,6 +39,17 @@ const REQUISITION_ITEM_SELECT_COLUMNS = [
   'tax_rate',
 ] as const;
 const REQUISITION_ITEM_SELECT = REQUISITION_ITEM_SELECT_COLUMNS.join(', ');
+type Row = Record<string, unknown>;
+type RequisitionHeaderResult = {
+  candidate: ReturnType<typeof buildRequisitionDetailLookupCandidates>[number] | null;
+  data: Row | null;
+  error?: unknown;
+  usedDeletedFilter: boolean;
+};
+
+function isRow(value: unknown): value is Row {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
 
 function stripMissingLegacyRequisitionItemColumn<T extends Record<string, unknown>>(payload: T, error: unknown) {
   const column = LEGACY_REQUISITION_ITEM_COLUMNS.find((entry) =>
@@ -84,11 +96,45 @@ function isActivePurchaseOrderForRequisitionConversion(row: Record<string, unkno
   return !row.deleted_at && !row.rejected_at && !['CANCELLED', 'DELETED', 'REJECTED', 'VOID'].includes(status);
 }
 
+function createRequisitionItemQueryClient(
+  service: ReturnType<typeof createServiceRoleClient>,
+): RequisitionItemQueryClient {
+  return {
+    from: () => ({
+      select: (columns) => ({
+        eq: (column, value) => ({
+          in: async (inColumn, values) => {
+            const result = await service
+              .from('items')
+              .select(columns)
+              .eq(column, value)
+              .in(inColumn, values);
+            return {
+              data: Array.isArray(result.data) ? Array.from(result.data) : null,
+              error: result.error,
+            };
+          },
+        }),
+        in: async (inColumn, values) => {
+          const result = await service
+            .from('items')
+            .select(columns)
+            .in(inColumn, values);
+          return {
+            data: Array.isArray(result.data) ? Array.from(result.data) : null,
+            error: result.error,
+          };
+        },
+      }),
+    }),
+  };
+}
+
 async function fetchRequisitionHeader(
   service: ReturnType<typeof createServiceRoleClient>,
   organizationId: string,
   requestedId: string,
-) {
+): Promise<RequisitionHeaderResult> {
   const candidates = buildRequisitionDetailLookupCandidates(requestedId);
   let lastError: unknown = null;
 
@@ -109,10 +155,10 @@ async function fetchRequisitionHeader(
         }
 
         const response = await query.maybeSingle();
-        if (response.data) {
+        if (isRow(response.data)) {
           return {
             candidate,
-            data: response.data as Record<string, unknown>,
+            data: response.data,
             usedDeletedFilter: includeDeletedFilter,
           };
         }
@@ -176,7 +222,10 @@ async function fetchRequisitionItems(
 
       if (!response.error) {
         return {
-          data: (response.data ?? []) as Record<string, unknown>[],
+          data: (Array.isArray(response.data)
+            ? Array.from(response.data, (value): unknown => value)
+            : []
+          ).filter(isRow),
           filterColumn,
         };
       }
@@ -212,6 +261,7 @@ export async function GET(
 
   const { id } = await params;
   const service = createServiceRoleClient();
+  const itemQueryClient = createRequisitionItemQueryClient(service);
 
   try {
     const headerResult = await fetchRequisitionHeader(service, ctx.organizationId, id);
@@ -243,7 +293,7 @@ export async function GET(
     ];
 
     const [itemsById, unitLookup] = await Promise.all([
-      safeSelectItemsByIds(service, itemIds, ctx.organizationId),
+      safeSelectItemsByIds(itemQueryClient, itemIds, ctx.organizationId),
       unitIds.length
         ? service
             .from('units_of_measure')
@@ -524,9 +574,10 @@ export async function PATCH(
       }));
       let { error: itemsErr } = await service.from('purchase_requisition_items').insert(itemPayload);
       while (itemsErr) {
-        const nextPayload = itemPayload
-          .map((row) => stripMissingLegacyRequisitionItemColumn(row, itemsErr))
-          .filter((row): row is Record<string, unknown> => Boolean(row));
+        const nextPayload = itemPayload.flatMap((row) => {
+          const compatible = stripMissingLegacyRequisitionItemColumn(row, itemsErr);
+          return compatible ? [compatible] : [];
+        });
         if (nextPayload.length !== itemPayload.length) break;
         if (JSON.stringify(nextPayload) === JSON.stringify(itemPayload)) break;
         itemPayload = nextPayload;

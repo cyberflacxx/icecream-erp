@@ -7,33 +7,36 @@ import { recordAuditLog } from '@/lib/security-server';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 import { parseUserPhoneValue, serializeUserPhoneValue } from '@/lib/user-access-profile';
 
-type CountableQuery = {
-  eq: (column: string, value: string) => Promise<{ count: number | null; error: { message?: string } | null }>;
-  select: (columns: string, options: { count: 'exact'; head: true }) => CountableQuery;
-};
+const USER_HISTORY_REFERENCE_CHECKS = [
+  ['audit_logs', 'user_profile_id'],
+  ['audit_logs', 'user_id'],
+  ['journal_entries', 'created_by'],
+  ['journal_entries', 'posted_by'],
+  ['stock_movements', 'created_by'],
+  ['production_issues', 'issued_by'],
+  ['production_issues', 'posted_by'],
+  ['production_receipts', 'received_by'],
+  ['production_worker_assignments', 'created_by'],
+  ['hr_labour_cost_allocations', 'created_by'],
+  ['branch_expenses', 'created_by'],
+  ['branch_expenses', 'posted_by'],
+  ['invoices', 'created_by'],
+  ['payments', 'created_by'],
+] as const;
 
-async function countUserHistory(schemaService: { from: (table: string) => CountableQuery }, userId: string) {
-  const referenceChecks = [
-    ['audit_logs', 'user_profile_id'],
-    ['audit_logs', 'user_id'],
-    ['journal_entries', 'created_by'],
-    ['journal_entries', 'posted_by'],
-    ['stock_movements', 'created_by'],
-    ['production_issues', 'issued_by'],
-    ['production_issues', 'posted_by'],
-    ['production_receipts', 'received_by'],
-    ['production_worker_assignments', 'created_by'],
-    ['hr_labour_cost_allocations', 'created_by'],
-    ['branch_expenses', 'created_by'],
-    ['branch_expenses', 'posted_by'],
-    ['invoices', 'created_by'],
-    ['payments', 'created_by'],
-  ] as const;
+type UserHistoryTable = (typeof USER_HISTORY_REFERENCE_CHECKS)[number][0];
+type CountReference = (
+  table: UserHistoryTable,
+  column: string,
+  userId: string,
+) => Promise<{ count: number | null; error: { message?: string } | null }>;
+
+async function countUserHistory(countReference: CountReference, userId: string) {
 
   let total = 0;
-  for (const [table, column] of referenceChecks) {
+  for (const [table, column] of USER_HISTORY_REFERENCE_CHECKS) {
     try {
-      const { count, error } = await schemaService.from(table).select('id', { count: 'exact', head: true }).eq(column, userId);
+      const { count, error } = await countReference(table, column, userId);
       if (!error) total += count ?? 0;
     } catch {}
   }
@@ -274,7 +277,16 @@ export async function DELETE(
     if (adminKeyError) return adminKeyError;
 
     const deletedAt = new Date().toISOString();
-    const historyCount = await countUserHistory(schemaService, id);
+    const historyCount = await countUserHistory(async (table, column, userId) => {
+      const result = await schemaService
+        .from(table)
+        .select('id', { count: 'exact', head: true })
+        .eq(column, userId);
+      return {
+        count: result.count ?? null,
+        error: result.error ? { message: result.error.message } : null,
+      };
+    }, id);
 
     const { error: deleteError } = await schemaService
       .from('users')

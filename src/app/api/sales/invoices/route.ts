@@ -285,7 +285,16 @@ export async function POST(request: NextRequest) {
   }
 
   const invoiceDate = body.invoiceDate ?? new Date().toISOString().slice(0, 10);
-  const postInventory = body.postInventory !== false;
+  // Inventory is reserved by the invoice workflow and issued by dispatch.
+  // Migration 049 retired invoice-time stock and COGS posting, so callers
+  // must not be able to revive that path with a request flag.
+  if (body.postInventory === true) {
+    return NextResponse.json(
+      { error: 'Inventory is issued when the related dispatch is posted; invoices cannot post inventory.' },
+      { status: 400 },
+    );
+  }
+  const postInventory = false;
   const idempotencyKey = String(body.idempotencyKey ?? '').trim() || crypto.randomUUID();
 
   let orderItems: Array<{

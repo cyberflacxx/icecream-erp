@@ -36,16 +36,13 @@ export interface RequisitionDetailLookupCandidate {
   value: string;
 }
 
-type ServiceLike = {
-  from: (table: string) => {
+export type RequisitionItemQueryClient = {
+  from: (table: 'items') => {
     select: (columns: string) => {
       eq: (column: string, value: string) => {
-        eq: (column: string, value: string) => {
-          in: (column: string, values: string[]) => Promise<{ data?: unknown[] | null; error?: unknown }>;
-        };
-        in: (column: string, values: string[]) => Promise<{ data?: unknown[] | null; error?: unknown }>;
+        in: (column: string, values: string[]) => PromiseLike<{ data?: unknown[] | null; error?: unknown }>;
       };
-      in: (column: string, values: string[]) => Promise<{ data?: unknown[] | null; error?: unknown }>;
+      in: (column: string, values: string[]) => PromiseLike<{ data?: unknown[] | null; error?: unknown }>;
     };
   };
 };
@@ -103,7 +100,7 @@ function mapSafeItemMetadata(row: Record<string, unknown>) {
 }
 
 export async function safeSelectItemsByIds(
-  service: ServiceLike,
+  service: RequisitionItemQueryClient,
   itemIds: string[],
   organizationId?: string | null,
 ) {

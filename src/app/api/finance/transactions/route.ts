@@ -68,7 +68,12 @@ async function runCompatibilitySelect(
   for (const attempt of attempts) {
     const result = await financeService().from(table).select(attempt.select);
     if (!result.error) {
-      return filterRowsByOrganization((result.data ?? []).filter(isRow), organizationId);
+      // Compatibility selects can be inferred as a PostgREST parser-error
+      // union when the generated schema does not include an older table.
+      // Treat the response as unknown at the boundary and retain only actual
+      // object rows before applying the organization filter.
+      const rawRows: unknown[] = Array.isArray(result.data) ? result.data : [];
+      return filterRowsByOrganization(rawRows.filter(isRow), organizationId);
     }
 
     if (!isCompatibilityFailure(result.error, table)) {
@@ -105,7 +110,7 @@ async function loadDirectFinanceTransactions(organizationId: string) {
     'finance.transactions',
   );
 
-  return rows.map((row) => {
+  return rows.map((row: Row) => {
     const account = mapNestedRow(row.accounts as Row | Row[] | null);
     const normalized = normalizeFinanceTransactionRow({
       ...row,
@@ -229,7 +234,7 @@ async function loadBankTransactions(organizationId: string) {
     'finance.transactions',
   );
 
-  return rows.map((row) => {
+  return rows.map((row: Row) => {
     const account = mapNestedRow(row.bank_accounts as Row | Row[] | null);
     const normalized = normalizeFinanceTransactionRow(row);
     return {
@@ -497,7 +502,7 @@ async function loadBranchExpenses(organizationId: string) {
 
 async function loadPettyCashTransactions(organizationId: string) {
   const rows = await loadPettyCashRequestsCompatibility(organizationId, { routeName: 'finance.transactions' });
-  return rows.map((row) => {
+  return rows.map((row: Row) => {
     const branch = mapNestedRow(row.branches as Row | Row[] | null);
     const normalized = normalizeFinanceTransactionRow({
       ...row,

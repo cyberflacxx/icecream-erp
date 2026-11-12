@@ -112,7 +112,6 @@ export async function POST(request: NextRequest) {
     goodsReceivedNoteId?: string | null;
     grn_id?: string | null;
     grnId?: string | null;
-    goodsReceivedNoteId?: string | null;
     invoice_amount?: number | null;
     invoiceDate?: string | null;
     invoiceNumber?: string;

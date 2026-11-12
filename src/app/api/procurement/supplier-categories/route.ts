@@ -22,7 +22,7 @@ export async function GET(_request: NextRequest) {
       .select('id, name')
       .eq('organization_id', ctx.organizationId)
       .order('name');
-    data = fallback.data?.map((row) => ({ ...row, description: null }));
+    data = (fallback.data ?? []).map((row) => ({ ...row, description: null }));
     error = fallback.error;
   }
 

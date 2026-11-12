@@ -22,12 +22,12 @@ function getEnvironmentName() {
   return process.env.VERCEL_ENV ?? process.env.NODE_ENV ?? 'development';
 }
 
-async function withTimeout<T>(promise: Promise<T>, timeoutMs: number) {
+async function withTimeout<T>(promise: PromiseLike<T>, timeoutMs: number) {
   let timeoutHandle: NodeJS.Timeout | undefined;
 
   try {
     return await Promise.race([
-      promise,
+      Promise.resolve(promise),
       new Promise<never>((_, reject) => {
         timeoutHandle = setTimeout(() => reject(new Error('Database health check timed out.')), timeoutMs);
       }),

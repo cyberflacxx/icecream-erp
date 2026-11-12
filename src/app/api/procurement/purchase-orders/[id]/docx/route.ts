@@ -23,6 +23,10 @@ function isMissingColumnError(error: { message?: string } | null | undefined, ta
   return (error?.message ?? '').includes(`column ${table}.${columnName} does not exist`);
 }
 
+function isRow(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 export async function GET(
   _request: Request,
   { params }: { params: Promise<{ id: string }> },
@@ -68,7 +72,8 @@ export async function GET(
         : orderPrimary;
 
     if (orderRes.error) return serverError(orderRes.error.message);
-    if (!orderRes.data) return notFound('Purchase order not found.');
+    if (!isRow(orderRes.data)) return notFound('Purchase order not found.');
+    const order: Record<string, unknown> = { ...orderRes.data };
 
     const itemsPrimary = await service
       .from('purchase_order_items')
@@ -89,9 +94,14 @@ export async function GET(
 
     if (itemsRes.error) return serverError(itemsRes.error.message);
 
-    const unitIds = [...new Set((itemsRes.data ?? []).map((item) => {
-      const product = Array.isArray(item.items) ? item.items[0] : item.items;
-      return String(item.unit_of_measure_id ?? (product as Record<string, unknown> | null)?.unit_of_measure_id ?? '');
+    const itemRowsSource: Array<Record<string, unknown>> = (Array.isArray(itemsRes.data)
+      ? Array.from(itemsRes.data, (value): unknown => value)
+      : []
+    ).filter(isRow);
+    const unitIds = [...new Set(itemRowsSource.map((item) => {
+      const productValue = Array.isArray(item.items) ? item.items[0] : item.items;
+      const product = isRow(productValue) ? productValue : null;
+      return String(item.unit_of_measure_id ?? product?.unit_of_measure_id ?? '');
     }).filter(Boolean))];
 
     const unitsRes = unitIds.length
@@ -99,14 +109,17 @@ export async function GET(
       : { data: [], error: null };
     if (unitsRes.error) return serverError(unitsRes.error.message);
 
-    const supplier = Array.isArray(orderRes.data.suppliers) ? orderRes.data.suppliers[0] : orderRes.data.suppliers;
+    const supplierValue = order.suppliers;
+    const supplierCandidate = Array.isArray(supplierValue) ? supplierValue[0] : supplierValue;
+    const supplier = isRow(supplierCandidate) ? supplierCandidate : null;
     const unitsById = new Map((unitsRes.data ?? []).map((unit) => [String(unit.id), unit]));
     const companyName = company?.name?.trim() || 'Absolute Quality Icecream';
-    const companyCurrency = String(orderRes.data.currency ?? company?.currency ?? 'USD');
+    const companyCurrency = String(order.currency ?? company?.currency ?? 'USD');
 
-    const rows = (itemsRes.data ?? []).map((item) => {
-      const product = Array.isArray(item.items) ? item.items[0] : item.items;
-      const unitId = String(item.unit_of_measure_id ?? (product as Record<string, unknown> | null)?.unit_of_measure_id ?? '');
+    const rows = itemRowsSource.map((item) => {
+      const productValue = Array.isArray(item.items) ? item.items[0] : item.items;
+      const product = isRow(productValue) ? productValue : null;
+      const unitId = String(item.unit_of_measure_id ?? product?.unit_of_measure_id ?? '');
       const unit = unitsById.get(unitId);
       const quantity = Number(item.quantity_ordered ?? 0);
       const unitPrice = Number(item.unit_price ?? item.unit_cost ?? 0);
@@ -125,11 +138,11 @@ export async function GET(
     const document = Buffer.from(createBusinessDocx({
       companyName,
       title: 'PURCHASE ORDER',
-      subtitle: String(orderRes.data.po_number ?? id),
+      subtitle: String(order.po_number ?? id),
       metadata: [
-        { label: 'PO Number', value: String(orderRes.data.po_number ?? '-') },
-        { label: 'Order Date', value: formatDate(orderRes.data.order_date) },
-        { label: 'Expected Delivery', value: formatDate(orderRes.data.expected_delivery_date) },
+        { label: 'PO Number', value: String(order.po_number ?? '-') },
+        { label: 'Order Date', value: formatDate(order.order_date) },
+        { label: 'Expected Delivery', value: formatDate(order.expected_delivery_date) },
         { label: 'Currency', value: companyCurrency },
       ],
       sections: [
@@ -146,16 +159,16 @@ export async function GET(
           title: 'Buyer / Delivery',
           lines: [
             companyName,
-            String(orderRes.data.delivery_address ?? company?.address ?? '-'),
-            `Prepared for: ${String(orderRes.data.prepared_for ?? orderRes.data.notes ?? 'Procurement / Operations')}`,
+            String(order.delivery_address ?? company?.address ?? '-'),
+            `Prepared for: ${String(order.prepared_for ?? order.notes ?? 'Procurement / Operations')}`,
           ],
         },
         {
           title: 'Payment and Delivery Terms',
           lines: [
-            `Payment terms: ${String(orderRes.data.payment_terms ?? 'As agreed with supplier')}`,
-            `Delivery terms: ${String(orderRes.data.delivery_terms ?? 'Standard supplier delivery')}`,
-            `Supplier quote / proforma: ${String(orderRes.data.supplier_quote ?? '-')}`,
+            `Payment terms: ${String(order.payment_terms ?? 'As agreed with supplier')}`,
+            `Delivery terms: ${String(order.delivery_terms ?? 'Standard supplier delivery')}`,
+            `Supplier quote / proforma: ${String(order.supplier_quote ?? '-')}`,
           ],
         },
       ],
@@ -173,15 +186,15 @@ export async function GET(
         rows,
       },
       totals: [
-        { label: 'Subtotal', value: formatCurrency(Number(orderRes.data.subtotal ?? 0)) },
-        { label: 'Discount', value: formatCurrency(Number(orderRes.data.discount_amount ?? 0)) },
-        { label: 'Tax', value: formatCurrency(Number(orderRes.data.tax_amount ?? 0)) },
-        { label: 'TOTAL', value: formatCurrency(Number(orderRes.data.total ?? 0)) },
+        { label: 'Subtotal', value: formatCurrency(Number(order.subtotal ?? 0)) },
+        { label: 'Discount', value: formatCurrency(Number(order.discount_amount ?? 0)) },
+        { label: 'Tax', value: formatCurrency(Number(order.tax_amount ?? 0)) },
+        { label: 'TOTAL', value: formatCurrency(Number(order.total ?? 0)) },
       ],
-      footerText: `Generated by Absolute Ice Cream ERP | Approved: ${String(orderRes.data.approved_by ?? 'Pending')} | ${formatDate(orderRes.data.approved_at)}`,
+      footerText: `Generated by Absolute Ice Cream ERP | Approved: ${String(order.approved_by ?? 'Pending')} | ${formatDate(order.approved_at)}`,
     }));
 
-    const fileName = `purchase-order-${sanitizeFileToken(String(orderRes.data.po_number ?? id), 'purchase-order')}.docx`;
+    const fileName = `purchase-order-${sanitizeFileToken(String(order.po_number ?? id), 'purchase-order')}.docx`;
     return new NextResponse(document, {
       headers: {
         'Content-Disposition': `attachment; filename="${fileName}"`,

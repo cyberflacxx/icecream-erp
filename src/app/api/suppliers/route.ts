@@ -6,6 +6,7 @@ import {
   filterSupplierOptions,
   getSafeSupplierErrorDetails,
   listSupplierOptionRecords,
+  type SupplierQueryClient,
 } from '@/lib/procurement-suppliers';
 import { recordAuditLog } from '@/lib/security-server';
 import { createServiceRoleClient } from '@/lib/supabase/server';
@@ -25,12 +26,35 @@ function getForwardedIpAddress(headerValue: string | null) {
   return headerValue?.split(',')[0]?.trim() || null;
 }
 
+function createSupplierQueryClient(service: ReturnType<typeof createServiceRoleClient>): SupplierQueryClient {
+  return {
+    from: () => ({
+      select: (columns) => ({
+        eq: (column, value) => ({
+          order: async (orderColumn, options) => {
+            const result = await service
+              .from('suppliers')
+              .select(columns)
+              .eq(column, value)
+              .order(orderColumn, options);
+            return {
+              data: Array.isArray(result.data) ? Array.from(result.data) : null,
+              error: result.error,
+            };
+          },
+        }),
+      }),
+    }),
+  };
+}
+
 export async function GET(request: NextRequest) {
   const ctx = await getAuthContext();
   if (!ctx) return unauthorized();
   if (!can(ctx, 'suppliers.read', 'procurement.supplier.view', 'procurement.read')) return forbidden();
 
   const service = createServiceRoleClient();
+  const supplierQueryClient = createSupplierQueryClient(service);
   const { searchParams } = new URL(request.url);
 
   const page = Math.max(1, parseInt(searchParams.get('page') ?? '1'));
@@ -44,7 +68,7 @@ export async function GET(request: NextRequest) {
   try {
     if (picker) {
       const rows = filterSupplierOptions(
-        await listSupplierOptionRecords(service, ctx.organizationId),
+        await listSupplierOptionRecords(supplierQueryClient, ctx.organizationId),
         {
           activeOnly,
           search,

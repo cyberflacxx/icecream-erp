@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
 import { isCustomerInactiveStatus } from '@/lib/sales-customers';
-import { isMissingSalesColumn, isMissingSalesTable } from '@/lib/sales-server';
+import { isMissingSalesColumn, isMissingSalesTable, salesErrorMessage } from '@/lib/sales-server';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -17,6 +17,20 @@ function paginate<T>(data: T[], page: number, pageSize: number) {
   const total = data.length;
   const start = (page - 1) * pageSize;
   return { data: data.slice(start, start + pageSize), pagination: { page, pageSize, total } };
+}
+
+type QuotationListResult = {
+  data: Record<string, unknown>[];
+  error: unknown;
+};
+
+function normalizeQuotationListResult(result: { data?: unknown; error?: unknown }): QuotationListResult {
+  return {
+    data: (Array.isArray(result.data) ? result.data : []).filter(
+      (row): row is Record<string, unknown> => typeof row === 'object' && row !== null && !Array.isArray(row),
+    ),
+    error: result.error ?? null,
+  };
 }
 
 function mapLineTotals(items: Array<{ discountPercent?: number | null; quantity: number; unitPrice: number }>) {
@@ -119,7 +133,7 @@ export async function GET(request: NextRequest) {
   if (startDate) query = query.gte('quotation_date', startDate);
   if (endDate) query = query.lte('quotation_date', endDate);
 
-  let result = await query;
+  let result = normalizeQuotationListResult(await query);
   if (
     result.error &&
     (
@@ -138,12 +152,12 @@ export async function GET(request: NextRequest) {
     if (startDate) fallbackQuery = fallbackQuery.gte('quotation_date', startDate);
     if (endDate) fallbackQuery = fallbackQuery.lte('quotation_date', endDate);
 
-    result = await fallbackQuery;
+    result = normalizeQuotationListResult(await fallbackQuery);
   }
 
-  if (result.error) return serverError(result.error.message);
+  if (result.error) return serverError(salesErrorMessage(result.error) || 'Failed to load quotations.');
 
-  const rows = (result.data ?? []) as Array<Record<string, unknown>>;
+  const rows = result.data;
   const customerIds = [...new Set(rows.map((row) => String(row.customer_id ?? '')).filter(Boolean))];
   const quotationIds = rows.map((row) => String(row.id));
 

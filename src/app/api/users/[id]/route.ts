@@ -3,13 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { recordProtectedActionAudit, requireAdminDeleteKey } from '@/lib/admin-delete-server';
 import { createClient, createServiceRoleClient } from '@/lib/supabase/server';
 
-type CountableQuery = {
-  eq: (column: string, value: string) => Promise<{ count: number | null; error: { message?: string } | null }>;
-  select: (columns: string, options: { count: 'exact'; head: true }) => CountableQuery;
-};
-
-async function countUserHistory(schemaService: { from: (table: string) => CountableQuery }, userId: string) {
-  const referenceChecks = [
+const USER_HISTORY_REFERENCE_CHECKS = [
     ['audit_logs', 'user_profile_id'],
     ['audit_logs', 'user_id'],
     ['journal_entries', 'created_by'],
@@ -26,10 +20,19 @@ async function countUserHistory(schemaService: { from: (table: string) => Counta
     ['payments', 'created_by'],
   ] as const;
 
+type UserHistoryTable = (typeof USER_HISTORY_REFERENCE_CHECKS)[number][0];
+type CountReference = (
+  table: UserHistoryTable,
+  column: string,
+  userId: string,
+) => Promise<{ count: number | null; error: { message?: string } | null }>;
+
+async function countUserHistory(countReference: CountReference, userId: string) {
+
   let total = 0;
-  for (const [table, column] of referenceChecks) {
+  for (const [table, column] of USER_HISTORY_REFERENCE_CHECKS) {
     try {
-      const { count, error } = await schemaService.from(table).select('id', { count: 'exact', head: true }).eq(column, userId);
+      const { count, error } = await countReference(table, column, userId);
       if (!error) total += count ?? 0;
     } catch {}
   }
@@ -116,18 +119,8 @@ export async function DELETE(request: NextRequest, { params }: { params: { id: s
     action: 'USER_DELETED',
     body,
     ctx: {
-      branchAssignments: [],
-      branchId: null,
-      isBranchScoped: false,
       organizationId: String(caller.organization_id ?? 'absolute-ice-cream'),
-      permissions: ['manage_roles'],
-      role: String(caller.role ?? 'super_admin'),
-      roles: [],
-      sessionTimeoutMinutes: 0,
-      userAccountId: user.id,
       userId: String(caller.id),
-      warehouseAssignments: [],
-      workId: String(user.email ?? user.id),
     },
     entityId: params.id,
     entityType: 'user',
@@ -135,7 +128,16 @@ export async function DELETE(request: NextRequest, { params }: { params: { id: s
   });
   if (adminKeyError) return adminKeyError;
 
-  const historyCount = await countUserHistory(schemaService, params.id);
+  const historyCount = await countUserHistory(async (table, column, userId) => {
+    const result = await schemaService
+      .from(table)
+      .select('id', { count: 'exact', head: true })
+      .eq(column, userId);
+    return {
+      count: result.count ?? null,
+      error: result.error ? { message: result.error.message } : null,
+    };
+  }, params.id);
   const { error } = await schemaService
     .from('users')
     .update({ status: 'inactive', updated_at: new Date().toISOString() })
@@ -153,18 +155,8 @@ export async function DELETE(request: NextRequest, { params }: { params: { id: s
     oldValues: target as Record<string, unknown>,
     newValues: { hardDeleted: false, historyCount, status: 'inactive' },
     ctx: {
-      branchAssignments: [],
-      branchId: null,
-      isBranchScoped: false,
       organizationId: String(caller.organization_id ?? 'absolute-ice-cream'),
-      permissions: ['manage_roles'],
-      role: String(caller.role ?? 'super_admin'),
-      roles: [],
-      sessionTimeoutMinutes: 0,
-      userAccountId: user.id,
       userId: String(caller.id),
-      warehouseAssignments: [],
-      workId: String(user.email ?? user.id),
     },
     request,
   });

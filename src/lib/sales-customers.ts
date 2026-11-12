@@ -17,6 +17,7 @@ export type SalesCustomerRecord = {
   address?: string | null;
   code?: string | null;
   created_at?: string | null;
+  credit_limit?: number | string | null;
   current_balance?: number | string | null;
   customer_type?: string | null;
   email?: string | null;

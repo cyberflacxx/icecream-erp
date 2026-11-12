@@ -278,10 +278,11 @@ async function loadReceivablePurchaseOrderPickerRows(
   }
 
   const itemsByOrderId = new Map<string, Array<Record<string, unknown>>>();
-  for (const item of compatibleOrderItemsResult.data ?? []) {
+  for (const selectedItem of compatibleOrderItemsResult.data ?? []) {
+    const item: Record<string, unknown> = { ...selectedItem };
     const orderId = String(item.purchase_order_id ?? item.po_id ?? '').trim();
     if (!orderId) continue;
-    itemsByOrderId.set(orderId, [...(itemsByOrderId.get(orderId) ?? []), item as Record<string, unknown>]);
+    itemsByOrderId.set(orderId, [...(itemsByOrderId.get(orderId) ?? []), item]);
   }
 
   const data = (ordersResult.data ?? [])

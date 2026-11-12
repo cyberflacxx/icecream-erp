@@ -4,6 +4,20 @@ import { apiServerError, badRequest, can, forbidden, getAuthContext, unauthorize
 import { ensureNonNegative } from '@/lib/inventory';
 import { isMissingSalesColumn, logSalesRouteError, salesService, writeSalesAuditLog } from '@/lib/sales-server';
 
+type SalesPriceListResult = {
+  data: Record<string, unknown>[];
+  error: unknown;
+};
+
+function normalizeSalesPriceListResult(result: { data?: unknown; error?: unknown }): SalesPriceListResult {
+  return {
+    data: (Array.isArray(result.data) ? result.data : []).filter(
+      (row): row is Record<string, unknown> => typeof row === 'object' && row !== null && !Array.isArray(row),
+    ),
+    error: result.error ?? null,
+  };
+}
+
 export async function GET() {
   const ctx = await getAuthContext();
   if (!ctx) return unauthorized();
@@ -24,22 +38,22 @@ export async function GET() {
       return NextResponse.json([]);
     }
 
-    let pricesResult = await service
+    let pricesResult = normalizeSalesPriceListResult(await service
       .from('sales_product_prices')
       .select('id, item_id, price_list_code, selling_price, effective_date, expiry_date, is_active, created_at')
       .in('item_id', itemIds)
-      .order('created_at', { ascending: false });
+      .order('created_at', { ascending: false }));
 
     if (pricesResult.error && isMissingSalesColumn(pricesResult.error, 'sales_product_prices', 'created_at')) {
-      pricesResult = await service
+      pricesResult = normalizeSalesPriceListResult(await service
         .from('sales_product_prices')
         .select('id, item_id, price_list_code, selling_price, effective_date, expiry_date, is_active')
-        .in('item_id', itemIds);
+        .in('item_id', itemIds));
     }
 
     if (pricesResult.error) throw pricesResult.error;
 
-    const rows = (pricesResult.data ?? []) as Array<Record<string, unknown>>;
+    const rows = pricesResult.data;
     const itemsById = new Map(
       itemRows.map((item) => [
         String(item.id),

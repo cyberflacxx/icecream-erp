@@ -26,14 +26,16 @@ export interface SupplierOptionRecord {
   status: string | null;
 }
 
-type SupabaseSchemaClient = {
-  from: (table: string) => {
+type SupplierQueryResult = {
+  data?: unknown[] | null;
+  error?: unknown;
+};
+
+export type SupplierQueryClient = {
+  from: (table: 'suppliers') => {
     select: (columns: string) => {
-      eq: (column: string, value: unknown) => {
-        order: (column: string, options?: { ascending?: boolean }) => Promise<{
-          data: unknown[] | null;
-          error: unknown;
-        }>;
+      eq: (column: string, value: string) => {
+        order: (column: string, options?: { ascending?: boolean }) => PromiseLike<SupplierQueryResult>;
       };
     };
   };
@@ -129,7 +131,7 @@ export function filterSupplierOptions(
 }
 
 export async function listSupplierOptionRecords(
-  service: SupabaseSchemaClient,
+  service: SupplierQueryClient,
   organizationId: string,
 ) {
   let columns = [...REQUIRED_SUPPLIER_COLUMNS, ...OPTIONAL_SUPPLIER_COLUMNS];

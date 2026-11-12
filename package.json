@@ -21,6 +21,7 @@
     "test:sales": "tsc --outDir .tmp-tests tests/sales-helpers.test.ts src/lib/sales.ts src/lib/inventory.ts --module commonjs --target es2020 --esModuleInterop --skipLibCheck && node --test .tmp-tests/tests/sales-helpers.test.js",
     "test:branches": "tsc --outDir .tmp-tests tests/branch-helpers.test.ts src/lib/branches.ts src/lib/inventory.ts --module commonjs --target es2020 --esModuleInterop --skipLibCheck && node --test .tmp-tests/tests/branch-helpers.test.js",
     "test:finance": "tsc --outDir .tmp-tests tests/finance-helpers.test.ts src/lib/finance.ts src/lib/inventory.ts --module commonjs --target es2020 --esModuleInterop --skipLibCheck && node --test .tmp-tests/tests/finance-helpers.test.js",
+    "test:finance:integration": "node scripts/run-financial-payment-integration.mjs",
     "test:quality": "tsc --outDir .tmp-tests tests/quality-helpers.test.ts src/lib/quality.ts src/lib/inventory.ts --module commonjs --target es2020 --esModuleInterop --skipLibCheck && node --test .tmp-tests/tests/quality-helpers.test.js",
     "test:security": "tsc --outDir .tmp-tests tests/security-helpers.test.ts src/lib/security.ts --module commonjs --target es2020 --esModuleInterop --skipLibCheck && node --test .tmp-tests/tests/security-helpers.test.js",
     "test:reports": "tsc --outDir .tmp-tests tests/reporting-helpers.test.ts src/lib/reporting.ts --module commonjs --target es2020 --esModuleInterop --skipLibCheck && node --test .tmp-tests/tests/reporting-helpers.test.js",

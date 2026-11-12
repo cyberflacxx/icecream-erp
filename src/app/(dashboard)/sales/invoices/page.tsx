@@ -193,7 +193,7 @@ export default function InvoicesPage() {
                 settleInFull: true,
               }
             : undefined,
-          postInventory: true,
+          postInventory: false,
           salesOrderId: invoiceForm.salesOrderId || undefined,
           taxAmount: Number(invoiceForm.taxAmount || 0),
           warehouseId: invoiceForm.warehouseId || undefined,

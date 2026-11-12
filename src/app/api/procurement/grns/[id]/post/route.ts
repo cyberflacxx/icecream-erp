@@ -63,10 +63,11 @@ export async function POST(
       grnId: id,
       organizationId: ctx.organizationId,
     });
+    const grnDetailRecord: Record<string, unknown> = { ...grnDetail };
     const warehouseId = normalizeGoodsReceivedWarehouseId({
-      destination_warehouse_id: grnDetail.destination_warehouse_id,
-      receiving_warehouse_id: grnDetail.receiving_warehouse_id,
-      warehouse_id: existing.warehouse_id ?? grnDetail.warehouse_id,
+      destination_warehouse_id: grnDetailRecord.destination_warehouse_id,
+      receiving_warehouse_id: grnDetailRecord.receiving_warehouse_id,
+      warehouse_id: existing.warehouse_id ?? grnDetailRecord.warehouse_id,
     });
     if (!warehouseId) {
       return badRequest(`GRN ${String(existing.grn_number ?? id)} cannot be posted because warehouse_id is missing.`);
@@ -104,8 +105,8 @@ export async function POST(
     const postingDate = toDateOnly(
       String(
         existing.received_date ??
-          grnDetail.received_date ??
-          grnDetail.created_at ??
+          grnDetailRecord.received_date ??
+          grnDetailRecord.created_at ??
           '',
       ),
     );

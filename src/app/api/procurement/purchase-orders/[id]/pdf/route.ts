@@ -22,6 +22,10 @@ function isMissingColumnError(error: { message?: string } | null | undefined, ta
   return (error?.message ?? '').includes(`column ${table}.${columnName} does not exist`);
 }
 
+function isRow(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 export async function GET(
   _request: Request,
   { params }: { params: Promise<{ id: string }> },
@@ -69,6 +73,7 @@ export async function GET(
 
     if (orderRes.error) return serverError(orderRes.error.message);
     if (!orderRes.data) return notFound('Purchase order not found.');
+    const order: Record<string, unknown> = orderRes.data;
 
     const itemsPrimary = await service
       .from('purchase_order_items')
@@ -87,10 +92,11 @@ export async function GET(
             .order('created_at', { ascending: true })
         : itemsPrimary;
     if (itemsRes.error) return serverError(itemsRes.error.message);
+    const itemRowsSource: Array<Record<string, unknown>> = (Array.isArray(itemsRes.data) ? itemsRes.data : []).filter(isRow);
 
     const unitIds = [
       ...new Set(
-        (itemsRes.data ?? [])
+        itemRowsSource
           .map((item) => {
             const product = Array.isArray(item.items) ? item.items[0] : item.items;
             return String(item.unit_of_measure_id ?? (product as Record<string, unknown> | null)?.unit_of_measure_id ?? '');
@@ -110,9 +116,10 @@ export async function GET(
     const companyTaxNumber = company?.tax_number?.trim() || '';
     const companyCurrency = company?.currency?.trim() || 'USD';
 
-    const supplier = Array.isArray(orderRes.data.suppliers) ? orderRes.data.suppliers[0] : orderRes.data.suppliers;
+    const supplierValue = order.suppliers;
+    const supplier = Array.isArray(supplierValue) ? supplierValue[0] : supplierValue;
     const unitsById = new Map((unitsRes.data ?? []).map((unit) => [String(unit.id), unit]));
-    const itemRows = (itemsRes.data ?? []).map((item) => {
+    const itemRows = itemRowsSource.map((item) => {
       const product = Array.isArray(item.items) ? item.items[0] : item.items;
       const resolvedUnitId = String(
         item.unit_of_measure_id ?? (product as Record<string, unknown> | null)?.unit_of_measure_id ?? '',
@@ -132,25 +139,25 @@ export async function GET(
 
     const pdf = Buffer.from(createPurchaseOrderPdfDocument({
       authorization: {
-        approvedBy: String(orderRes.data.approved_by ?? '____________________'),
-        date: formatDate(orderRes.data.approved_at ?? orderRes.data.order_date),
+        approvedBy: String(order.approved_by ?? '____________________'),
+        date: formatDate(order.approved_at ?? order.order_date),
       },
       buyer: {
-        address: String(orderRes.data.delivery_address ?? companyAddress ?? '-'),
+        address: String(order.delivery_address ?? companyAddress ?? '-'),
         companyName,
-        preparedFor: String(orderRes.data.prepared_for ?? orderRes.data.notes ?? 'Procurement / Operations'),
+        preparedFor: String(order.prepared_for ?? order.notes ?? 'Procurement / Operations'),
       },
-      currency: String(orderRes.data.currency ?? companyCurrency ?? 'USD'),
+      currency: String(order.currency ?? companyCurrency ?? 'USD'),
       deliveryTerms: [
-        `Payment method: ${String(orderRes.data.payment_terms ?? 'As agreed with supplier')}`,
-        `Delivery address: ${String(orderRes.data.delivery_address ?? companyAddress ?? '-')}`,
+        `Payment method: ${String(order.payment_terms ?? 'As agreed with supplier')}`,
+        `Delivery address: ${String(order.delivery_address ?? companyAddress ?? '-')}`,
         `Delivery terms: ${String(
-          orderRes.data.delivery_terms ??
-            (orderRes.data.expected_delivery_date
-              ? `Expected by ${formatDate(orderRes.data.expected_delivery_date)}`
+          order.delivery_terms ??
+            (order.expected_delivery_date
+              ? `Expected by ${formatDate(order.expected_delivery_date)}`
               : 'Standard supplier delivery'),
         )}`,
-        `Supplier quote / proforma: ${String(orderRes.data.supplier_quote ?? '-')}`,
+        `Supplier quote / proforma: ${String(order.supplier_quote ?? '-')}`,
       ],
       footerText: `Generated Purchase Order | ${companyName}`,
       items: itemRows.map((item) => ({
@@ -163,10 +170,10 @@ export async function GET(
         uom: item.uom || '-',
       })),
       metadata: [
-        { label: 'PO No', value: String(orderRes.data.po_number ?? '-') },
-        { label: 'PO Date', value: formatDate(orderRes.data.order_date) },
-        { label: 'Supplier Quote', value: String(orderRes.data.supplier_quote ?? '-') },
-        { label: 'Currency', value: String(orderRes.data.currency ?? companyCurrency ?? 'USD') },
+        { label: 'PO No', value: String(order.po_number ?? '-') },
+        { label: 'PO Date', value: formatDate(order.order_date) },
+        { label: 'Supplier Quote', value: String(order.supplier_quote ?? '-') },
+        { label: 'Currency', value: String(order.currency ?? companyCurrency ?? 'USD') },
       ],
       supplier: {
         address: String(supplier?.address ?? '-'),
@@ -176,13 +183,13 @@ export async function GET(
       },
       title: 'PURCHASE ORDER',
       totals: [
-        { label: 'Total Net Price', value: formatCurrency(Number(orderRes.data.subtotal ?? 0)) },
-        { label: 'Discount', value: formatCurrency(Number(orderRes.data.discount_amount ?? 0)) },
-        { label: 'Tax', value: formatCurrency(Number(orderRes.data.tax_amount ?? 0)) },
-        { label: 'TOTAL', value: formatCurrency(Number(orderRes.data.total ?? 0)) },
+        { label: 'Total Net Price', value: formatCurrency(Number(order.subtotal ?? 0)) },
+        { label: 'Discount', value: formatCurrency(Number(order.discount_amount ?? 0)) },
+        { label: 'Tax', value: formatCurrency(Number(order.tax_amount ?? 0)) },
+        { label: 'TOTAL', value: formatCurrency(Number(order.total ?? 0)) },
       ],
     }));
-    const fileName = `purchase-order-${sanitizeFileToken(String(orderRes.data.po_number ?? id), 'purchase-order')}.pdf`;
+    const fileName = `purchase-order-${sanitizeFileToken(String(order.po_number ?? id), 'purchase-order')}.pdf`;
 
     return new NextResponse(pdf, {
       headers: {

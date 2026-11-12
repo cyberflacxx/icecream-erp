@@ -6,6 +6,7 @@ import {
   loadCustomerBalanceSnapshot,
   mapCustomerRow,
   normalizeCustomerStatus,
+  type SalesCustomerRecord,
 } from '@/lib/sales-customers';
 import { validateCustomerCodeUniqueness } from '@/lib/sales';
 import { salesErrorMessage, salesService, writeSalesAuditLog } from '@/lib/sales-server';
@@ -22,6 +23,10 @@ function isMissingCustomerColumn(error: unknown) {
     message.includes('deleted_at') ||
     message.includes('schema cache')
   );
+}
+
+function isCustomerRow(value: unknown): value is SalesCustomerRecord {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function parsePagination(searchParams: URLSearchParams) {
@@ -66,8 +71,9 @@ export async function GET(request: NextRequest) {
       query = query.or(`code.ilike.%${search}%,name.ilike.%${search}%,email.ilike.%${search}%,phone.ilike.%${search}%`);
     }
 
-    let { data, error } = await query;
-    if (error && isMissingCustomerColumn(error)) {
+    const primaryResult = await query;
+    const result = primaryResult.error && isMissingCustomerColumn(primaryResult.error)
+      ? await (async () => {
       let fallback = service
         .from('customers')
         .select(LEGACY_CUSTOMER_SELECT)
@@ -82,13 +88,17 @@ export async function GET(request: NextRequest) {
         fallback = fallback.or(`code.ilike.%${search}%,name.ilike.%${search}%,email.ilike.%${search}%,phone.ilike.%${search}%`);
       }
 
-      const fallbackResult = await fallback;
-      data = fallbackResult.data;
-      error = fallbackResult.error;
-    }
-    if (error) throw error;
+        return fallback;
+      })()
+      : primaryResult;
+    if (result.error) throw result.error;
+    const resultData: unknown = result.data;
+    const customerRows = (Array.isArray(resultData)
+      ? Array.from(resultData, (value): unknown => value)
+      : []
+    ).filter(isCustomerRow);
 
-    const rows = await Promise.all((data ?? []).map(async (row) => {
+    const rows = await Promise.all(customerRows.map(async (row) => {
       const balance = await loadCustomerBalanceSnapshot(
         service,
         String(row.id),
@@ -169,14 +179,14 @@ export async function POST(request: NextRequest) {
       status: normalizeCustomerStatus(body.status),
     };
 
-    let insertResult = await service
+    const primaryInsertResult = await service
       .from('customers')
       .insert(insertPayload)
       .select(CUSTOMER_SELECT)
       .single();
 
-    if (insertResult.error && isMissingCustomerColumn(insertResult.error)) {
-      insertResult = await service
+    const insertResult = primaryInsertResult.error && isMissingCustomerColumn(primaryInsertResult.error)
+      ? await service
         .from('customers')
         .insert({
           address: body.address?.trim() || null,
@@ -191,31 +201,32 @@ export async function POST(request: NextRequest) {
           status: normalizeCustomerStatus(body.status),
         })
         .select(LEGACY_CUSTOMER_SELECT)
-        .single();
-    }
+        .single()
+      : primaryInsertResult;
 
     const { data, error } = insertResult;
-    if (error || !data) {
+    const customer = isCustomerRow(data) ? data : null;
+    if (error || !customer) {
       throw error ?? new Error('Failed to create customer.');
     }
 
     const balance = await loadCustomerBalanceSnapshot(
       service,
-      String(data.id),
-      data.current_balance ?? data.outstanding_balance,
-      data.credit_limit,
-      data.payment_terms ?? body.paymentTerms,
+      String(customer.id),
+      customer.current_balance ?? customer.outstanding_balance,
+      customer.credit_limit,
+      customer.payment_terms ?? body.paymentTerms,
     );
 
     await writeSalesAuditLog(
       'SALES_CUSTOMER_CREATED',
-      String(data.id),
+      String(customer.id),
       ctx.userId,
-      { code, status: data.status },
+      { code, status: customer.status },
       'customer',
     );
 
-    return NextResponse.json(mapCustomerRow(data, balance), { status: 201 });
+    return NextResponse.json(mapCustomerRow(customer, balance), { status: 201 });
   } catch (error) {
     return serverError(error instanceof Error ? error.message : 'Failed to create customer.');
   }
