@@ -76,8 +76,14 @@ export function useBankAccounts() {
   return useFinanceCollectionQuery<Record<string, unknown>>('bank-accounts', '/api/finance/bank-accounts');
 }
 
-export function useCashAccounts() {
-  return useFinanceCollectionQuery<Record<string, unknown>>('cash-accounts', '/api/finance/cash-accounts');
+export function useCashAccounts(options: { activeOnly?: boolean; branchId?: string; includeHeadOffice?: boolean } = {}) {
+  const search = new URLSearchParams();
+  if (options.activeOnly) search.set('activeOnly', 'true');
+  if (options.branchId) search.set('branchId', options.branchId);
+  if (options.includeHeadOffice) search.set('includeHeadOffice', 'true');
+  const suffix = search.toString();
+  const path = `/api/finance/cash-accounts${suffix ? `?${suffix}` : ''}`;
+  return useFinanceCollectionQuery<Record<string, unknown>>(`cash-accounts:${suffix}`, path);
 }
 
 export function useChartOfAccounts() {

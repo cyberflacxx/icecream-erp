@@ -20,6 +20,7 @@ import {
   resolvePurchaseOrderItemUnitOfMeasureId,
   resolvePurchaseOrderItemUnitPrice,
 } from '@/lib/procurement-purchase-orders';
+import { isPostgresUniqueViolation, nextPurchaseOrderNumber } from '@/lib/purchase-order-numbering';
 import { isMissingColumnError } from '@/lib/postgrest-compat';
 import { recordAuditLog } from '@/lib/security-server';
 import { createServiceRoleClient } from '@/lib/supabase/server';
@@ -180,6 +181,47 @@ async function loadPurchaseOrderByIdempotencyKey(
   }
 
   return result;
+}
+
+async function loadNextPurchaseOrderNumber(
+  service: ReturnType<typeof createServiceRoleClient>,
+  organizationId: string,
+) {
+  const pageSize = 1000;
+  const numbers: unknown[] = [];
+
+  for (let from = 0; ; from += pageSize) {
+    const result = await service
+      .from('purchase_orders')
+      .select('po_number')
+      .eq('organization_id', organizationId)
+      .like('po_number', 'PO-%')
+      .range(from, from + pageSize - 1);
+
+    if (result.error) throw result.error;
+    const rows = result.data ?? [];
+    numbers.push(...rows.map((row) => row.po_number));
+    if (rows.length < pageSize) break;
+  }
+
+  return nextPurchaseOrderNumber(numbers);
+}
+
+async function insertPurchaseOrderHeader(
+  service: ReturnType<typeof createServiceRoleClient>,
+  initialPayload: Record<string, unknown>,
+) {
+  let payload = initialPayload;
+  let result = await service.from('purchase_orders').insert(payload).select().single();
+
+  while (result.error) {
+    const nextPayload = stripMissingOptionalHeaderColumn(payload, result.error);
+    if (!nextPayload || JSON.stringify(nextPayload) === JSON.stringify(payload)) break;
+    payload = nextPayload;
+    result = await service.from('purchase_orders').insert(payload).select().single();
+  }
+
+  return { payload, result };
 }
 
 function purchaseOrderReplayResponse(row: Record<string, unknown>, requisitionId: string | null) {
@@ -883,20 +925,13 @@ export async function POST(request: NextRequest) {
       };
     });
 
-    // Generate PO number
-    const { count: poCount } = await service
-      .from('purchase_orders')
-      .select('id', { count: 'exact', head: true })
-      .eq('organization_id', ctx.organizationId);
-
-    const poNumber = `PO-${String((poCount ?? 0) + 1).padStart(5, '0')}`;
     const taxAmount = body.taxAmount ?? 0;
     const discountAmount = body.discountAmount ?? 0;
     const subtotal = resolvedItems.reduce((sum, i) => sum + i.quantityOrdered * i.unitCost, 0);
     const total = subtotal + taxAmount - discountAmount;
 
+    let poNumber = '';
     let orderPayload: Record<string, unknown> = {
-      po_number: poNumber,
       supplier_id: supplierId,
       requisition_id: requisitionId || null,
       order_date: body.orderDate ?? new Date().toISOString(),
@@ -920,23 +955,29 @@ export async function POST(request: NextRequest) {
       approved_at: null,
       approved_by: null,
     };
-    let orderInsert = await service.from('purchase_orders').insert(orderPayload).select().single();
-    while (orderInsert.error) {
-      const nextPayload = stripMissingOptionalHeaderColumn(orderPayload, orderInsert.error);
-      if (!nextPayload || JSON.stringify(nextPayload) === JSON.stringify(orderPayload)) {
-        break;
-      }
-      orderPayload = nextPayload;
-      orderInsert = await service.from('purchase_orders').insert(orderPayload).select().single();
-    }
+    let orderInsert: Awaited<ReturnType<typeof insertPurchaseOrderHeader>>['result'] | null = null;
 
-    if (orderInsert.error) {
-      if (orderInsert.error.code === '23505') {
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      poNumber = await loadNextPurchaseOrderNumber(service, ctx.organizationId);
+      const inserted = await insertPurchaseOrderHeader(service, { ...orderPayload, po_number: poNumber });
+      orderPayload = inserted.payload;
+      orderInsert = inserted.result;
+      if (!orderInsert.error) break;
+
+      if (isPostgresUniqueViolation(orderInsert.error)) {
         const replay = await loadPurchaseOrderByIdempotencyKey(service, ctx.organizationId, idempotencyKey);
+        if (replay.error) return serverError(replay.error.message);
         if (replay.data) {
           return purchaseOrderReplayResponse(replay.data as Record<string, unknown>, requisitionId || null);
         }
+        continue;
       }
+
+      break;
+    }
+
+    if (!orderInsert || orderInsert.error) {
+      const uniqueCollision = isPostgresUniqueViolation(orderInsert?.error);
 
       logPurchaseOrderFailure('purchase_orders.insert', {
         firstLine: resolvedItems[0] ?? null,
@@ -948,12 +989,16 @@ export async function POST(request: NextRequest) {
           total: orderPayload.total,
         },
         lineCount: resolvedItems.length,
-        message: orderInsert.error.message,
+        message: uniqueCollision
+          ? 'Purchase order number allocation remained busy after five attempts.'
+          : orderInsert?.error?.message ?? 'Purchase order insert did not return a result.',
       });
-      return poCreateFailure(500, {
+      return poCreateFailure(uniqueCollision ? 409 : 500, {
         lineCount: resolvedItems.length,
         operation: 'insert_purchase_orders',
-        reason: orderInsert.error.message,
+        reason: uniqueCollision
+          ? 'Another request is allocating purchase order numbers. Please retry; duplicate submission protection remains active.'
+          : orderInsert?.error?.message ?? 'The purchase order could not be saved.',
       });
     }
     const order = orderInsert.data;

@@ -13,6 +13,7 @@ import {
   calculateBudgetVariance,
   calculateInventoryValuation,
   calculateJournalBalance,
+  isCashAccountEligibleForBranch,
   isPostedJournalStatus,
   parseFinanceSourceReference,
   calculatePayableBalance,
@@ -65,6 +66,21 @@ import {
   resolveProductionCostCentrePriority,
 } from '../src/lib/finance-integration';
 import { MONEY_EPSILON } from '../src/lib/money';
+
+test('cash account eligibility includes active branch and shared head-office accounts', () => {
+  assert.equal(isCashAccountEligibleForBranch({ branchId: 'main', isActive: true }, 'main'), true);
+  assert.equal(isCashAccountEligibleForBranch({ branchId: null, isActive: true }, 'main'), true);
+});
+
+test('cash account eligibility excludes another branch and inactive accounts', () => {
+  assert.equal(isCashAccountEligibleForBranch({ branchId: 'other', isActive: true }, 'main'), false);
+  assert.equal(isCashAccountEligibleForBranch({ branchId: 'main', isActive: false }, 'main'), false);
+});
+
+test('head-office expenses only expose unassigned active cash accounts', () => {
+  assert.equal(isCashAccountEligibleForBranch({ branch_id: null, is_active: true }, null), true);
+  assert.equal(isCashAccountEligibleForBranch({ branch_id: 'main', is_active: true }, null), false);
+});
 
 test('budget and costing helpers derive expected finance metrics', () => {
   const budget = calculateBudgetVariance(1000, 1200);
@@ -332,6 +348,27 @@ test('finance cash account queries do not request live-missing name or account_n
   assert.match(financeServer, /account_name/);
   assert.match(financeServer, /accounts\(code, name\)/);
   assert.match(transactionsRoute, /cash_accounts\(account_name\)/);
+});
+
+test('expense cash selector refreshes by branch and distinguishes loading failures from missing setup', () => {
+  const expensePage = readFileSync(join(process.cwd(), 'src/app/(dashboard)/finance/expenses/page.tsx'), 'utf8');
+  const cashRoute = readFileSync(join(process.cwd(), 'src/app/api/finance/cash-accounts/route.ts'), 'utf8');
+  const expenseRoute = readFileSync(join(process.cwd(), 'src/app/api/finance/expenses/route.ts'), 'utf8');
+  const financeServer = readFileSync(join(process.cwd(), 'src/lib/finance-server.ts'), 'utf8');
+
+  assert.match(expensePage, /useCashAccounts\(\{/);
+  assert.match(expensePage, /branchId: form\.branchId \|\| undefined/);
+  assert.match(expensePage, /includeHeadOffice: Boolean\(form\.branchId\)/);
+  assert.match(expensePage, /cashAccountsQuery\.isError/);
+  assert.match(expensePage, /Cash accounts could not be loaded/);
+  assert.match(expensePage, /authorized finance administrator/);
+  assert.match(cashRoute, /branchId must be a valid UUID/);
+  assert.match(financeServer, /branch_id\.is\.null/);
+  assert.match(expenseRoute, /ensureFinanceAccountCanBePosted/);
+  assert.match(expenseRoute, /\.eq\('organization_id', ctx\.organizationId\)/);
+  assert.match(expenseRoute, /Selected cash account is unavailable, inactive/);
+  assert.match(expenseRoute, /Selected cash account is not authorized for this expense branch/);
+  assert.match(expenseRoute, /Selected bank account is unavailable, inactive/);
 });
 
 test('normalizeFinanceCollectionResponse handles array and wrapped finance payload shapes', () => {

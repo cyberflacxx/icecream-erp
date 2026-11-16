@@ -1,7 +1,7 @@
 'use client';
 
 import { AlertCircle, FileBarChart2, Plus } from 'lucide-react';
-import { type FormEvent, useState } from 'react';
+import { type FormEvent, useEffect, useState } from 'react';
 
 import { PageHeader } from '@/components/dashboard/page-header';
 import { FinanceEmptyState } from '@/components/finance/finance-empty-state';
@@ -9,6 +9,7 @@ import { FinanceNav } from '@/components/finance/finance-nav';
 import { Button } from '@/components/ui/button';
 import { FormDrawer, LoadingState } from '@/components/ui-library';
 import { useBankAccounts, useCashAccounts, useFinanceExpenses, useFinanceMeta, useFinanceMutation } from '@/hooks/finance/useFinanceResources';
+import { isCashAccountEligibleForBranch } from '@/lib/finance';
 import { formatCurrency } from '@/lib/money';
 
 type ExpenseFormState = {
@@ -49,7 +50,6 @@ function text(row: Record<string, unknown>, key: string, fallback = '') {
 export default function FinanceExpensesPage() {
   const query = useFinanceExpenses();
   const metaQuery = useFinanceMeta();
-  const cashAccountsQuery = useCashAccounts();
   const bankAccountsQuery = useBankAccounts();
   const createExpense = useFinanceMutation('/api/finance/expenses', { invalidateKey: 'expenses' });
   const postExpense = useFinanceMutation(
@@ -63,6 +63,15 @@ export default function FinanceExpensesPage() {
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [form, setForm] = useState<ExpenseFormState>(() => createInitialFormState());
   const [formError, setFormError] = useState<string | null>(null);
+  const cashAccountsQuery = useCashAccounts({
+    activeOnly: true,
+    branchId: form.branchId || undefined,
+    includeHeadOffice: Boolean(form.branchId),
+  });
+
+  useEffect(() => {
+    setForm((current) => ({ ...current, cashAccountId: '' }));
+  }, [form.branchId]);
 
   if (query.isLoading) return <LoadingState />;
   if (query.isError || !query.data) {
@@ -84,13 +93,9 @@ export default function FinanceExpensesPage() {
   });
   const accountOptions = expenseAccounts.length > 0 ? expenseAccounts : accounts;
   const paymentRequiresCash = form.paymentMethod === 'CASH' || form.paymentMethod === 'PETTY_CASH';
-  const cashAccounts = (cashAccountsQuery.data ?? []).filter((account) => {
-    const isActive = account.isActive ?? account.is_active;
-    if (isActive === false) return false;
-    const accountBranchId = String(account.branchId ?? account.branch_id ?? '').trim();
-    // Branch expenses may use their branch account or an explicitly shared HQ account.
-    return form.branchId ? !accountBranchId || accountBranchId === form.branchId : !accountBranchId;
-  });
+  const cashAccounts = (cashAccountsQuery.data ?? []).filter((account) =>
+    isCashAccountEligibleForBranch(account, form.branchId),
+  );
   const bankAccounts = bankAccountsQuery.data ?? [];
 
   async function submitExpense(event: FormEvent<HTMLFormElement>) {
@@ -272,7 +277,12 @@ export default function FinanceExpensesPage() {
           <select
             className="surface-input-soft"
             value={form.paymentMethod}
-            onChange={(event) => setForm((current) => ({ ...current, paymentMethod: event.target.value as ExpenseFormState['paymentMethod'] }))}
+            onChange={(event) => setForm((current) => ({
+              ...current,
+              bankAccountId: '',
+              cashAccountId: '',
+              paymentMethod: event.target.value as ExpenseFormState['paymentMethod'],
+            }))}
           >
             <option value="CASH">Cash</option>
             <option value="BANK">Bank</option>
@@ -284,17 +294,24 @@ export default function FinanceExpensesPage() {
                 className="surface-input-soft"
                 value={form.cashAccountId}
                 onChange={(event) => setForm((current) => ({ ...current, cashAccountId: event.target.value }))}
-                disabled={cashAccountsQuery.isLoading || cashAccounts.length === 0}
+                disabled={cashAccountsQuery.isLoading || cashAccountsQuery.isError || cashAccounts.length === 0}
               >
-                <option value="">Cash account</option>
+                <option value="">{cashAccountsQuery.isLoading ? 'Loading cash accounts...' : 'Cash account'}</option>
                 {cashAccounts.map((account) => (
                   <option key={String(account.id)} value={String(account.id)}>
                     {String(account.name ?? account.accountName ?? account.account_name ?? account.id)}
                   </option>
                 ))}
               </select>
-              {!cashAccountsQuery.isLoading && cashAccounts.length === 0 ? (
-                <p className="text-sm text-amber-700">No active cash account is configured for this branch/head office.</p>
+              {cashAccountsQuery.isError ? (
+                <div className="space-y-2 text-sm text-rose-700">
+                  <p>Cash accounts could not be loaded. No account has been substituted.</p>
+                  <Button type="button" size="sm" variant="outline" onClick={() => void cashAccountsQuery.refetch()}>
+                    Retry cash accounts
+                  </Button>
+                </div>
+              ) : !cashAccountsQuery.isLoading && cashAccounts.length === 0 ? (
+                <p className="text-sm text-amber-700">No active cash account is configured for this branch/head office. Ask an authorized finance administrator to configure one.</p>
               ) : null}
             </>
           ) : (

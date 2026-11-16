@@ -35,6 +35,11 @@ import {
   resolvePurchaseOrderItemUnitPrice,
 } from '../src/lib/procurement-purchase-orders';
 import {
+  isPostgresUniqueViolation,
+  nextPurchaseOrderNumber,
+  parsePurchaseOrderNumber,
+} from '../src/lib/purchase-order-numbering';
+import {
   buildGoodsReceivedDraftPayload,
   createOrUpdateStockBalance,
   fetchGoodsReceivedNoteDetail,
@@ -67,6 +72,34 @@ import {
   getRequisitionActionState,
   normalizeProcurementRoleName,
 } from '../src/lib/procurement-workflow';
+
+test('purchase order numbering starts with the preserved five-digit format', () => {
+  assert.equal(nextPurchaseOrderNumber([]), 'PO-00001');
+});
+
+test('purchase order numbering advances from the highest historical number instead of row count', () => {
+  assert.equal(nextPurchaseOrderNumber(['PO-00001', 'PO-00025', 'PO-00023']), 'PO-00026');
+});
+
+test('purchase order numbering ignores unrelated and malformed document numbers', () => {
+  assert.equal(nextPurchaseOrderNumber(['INV-99999', 'PO-MANUAL', null, 'PO-00009']), 'PO-00010');
+});
+
+test('purchase order numbering remains organization-scoped with separate histories', () => {
+  assert.equal(nextPurchaseOrderNumber(['PO-00001', 'PO-00002']), 'PO-00003');
+  assert.equal(nextPurchaseOrderNumber(['PO-00001']), 'PO-00002');
+});
+
+test('purchase order number parsing preserves larger sequence values', () => {
+  assert.equal(parsePurchaseOrderNumber('PO-100001'), 100001);
+  assert.equal(nextPurchaseOrderNumber(['PO-100001']), 'PO-100002');
+});
+
+test('only PostgreSQL unique violations trigger purchase order collision retry handling', () => {
+  assert.equal(isPostgresUniqueViolation({ code: '23505' }), true);
+  assert.equal(isPostgresUniqueViolation({ code: '23503' }), false);
+  assert.equal(isPostgresUniqueViolation(new Error('duplicate')), false);
+});
 
 test('validateSupplierCodeUniqueness blocks duplicate supplier codes', () => {
   assert.equal(validateSupplierCodeUniqueness(['SUP-001', 'SUP-002'], 'SUP-003'), true);
@@ -3060,6 +3093,19 @@ test('purchase order creation is guarded against duplicate submission on client 
   assert.match(migration, /where idempotency_key is not null/i);
 });
 
+test('purchase order creation retries concurrent number collisions without weakening uniqueness', () => {
+  const purchaseOrdersRoute = fs.readFileSync('src/app/api/procurement/purchase-orders/route.ts', 'utf8');
+
+  assert.match(purchaseOrdersRoute, /loadNextPurchaseOrderNumber/);
+  assert.match(purchaseOrdersRoute, /nextPurchaseOrderNumber/);
+  assert.match(purchaseOrdersRoute, /attempt < 5/);
+  assert.match(purchaseOrdersRoute, /isPostgresUniqueViolation/);
+  assert.match(purchaseOrdersRoute, /loadPurchaseOrderByIdempotencyKey/);
+  assert.match(purchaseOrdersRoute, /rollbackCreatedPurchaseOrder/);
+  assert.doesNotMatch(purchaseOrdersRoute, /count: 'exact', head: true/);
+  assert.doesNotMatch(purchaseOrdersRoute, /\(poCount \?\? 0\) \+ 1/);
+});
+
 test('supplier payment posting is idempotent and keeps saved cash or bank account selectors', () => {
   const paymentsPage = fs.readFileSync('src/app/(dashboard)/procurement/payments/page.tsx', 'utf8');
   const supplierPaymentsRoute = fs.readFileSync('src/app/api/procurement/supplier-payments/route.ts', 'utf8');
@@ -3183,6 +3229,7 @@ test('purchase-order failures expose the exact validation or persistence reason'
   assert.match(route, /reason\?: string/);
   assert.match(route, /Purchase order validation failed:/);
   assert.match(route, /Purchase order could not be created: \$\{details\.reason\}/);
-  assert.match(route, /reason: orderInsert\.error\.message/);
+  assert.match(route, /orderInsert\?\.error\?\.message/);
+  assert.match(route, /Another request is allocating purchase order numbers/);
   assert.match(route, /reason: itemsErr\.message/);
 });

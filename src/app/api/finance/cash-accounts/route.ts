@@ -47,11 +47,17 @@ export async function GET(request: NextRequest) {
 
   const activeOnly = searchParams.get('activeOnly') === 'true';
   const branchId = searchParams.get('branchId');
+  const includeHeadOffice = searchParams.get('includeHeadOffice') === 'true';
+
+  if (branchId && !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(branchId)) {
+    return badRequest('branchId must be a valid UUID.');
+  }
 
   try {
     const data = await loadCashAccountsCompatibility(ctx.organizationId, {
       activeOnly,
       branchId: branchId ?? undefined,
+      includeHeadOffice,
       routeName: 'finance.cash-accounts',
     });
 

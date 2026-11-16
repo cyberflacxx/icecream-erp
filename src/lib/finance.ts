@@ -332,6 +332,18 @@ export function normalizeCashAccount(row: Record<string, unknown>): NormalizedCa
   };
 }
 
+export function isCashAccountEligibleForBranch(
+  account: Record<string, unknown>,
+  branchId: string | null | undefined,
+) {
+  const isActive = account.isActive ?? account.is_active;
+  if (isActive === false) return false;
+
+  const selectedBranchId = String(branchId ?? '').trim();
+  const accountBranchId = String(account.branchId ?? account.branch_id ?? '').trim();
+  return selectedBranchId ? !accountBranchId || accountBranchId === selectedBranchId : !accountBranchId;
+}
+
 export interface FinanceDashboardData {
   charts: {
     cashflowLast7Days: Array<{

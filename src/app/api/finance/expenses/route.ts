@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { badRequest, can, forbidden, getAuthContext, serverError, unauthorized } from '@/lib/api-auth';
+import { ensureFinanceAccountCanBePosted } from '@/lib/finance-foundation-server';
 import { financeErrorMessage, financeService, isMissingFinanceTable, writeFinanceAuditLog } from '@/lib/finance-server';
 
 function normalizeExpensePaymentMethod(value: unknown) {
@@ -51,8 +52,8 @@ export async function POST(request: NextRequest) {
       supportingDocument?: string;
     };
 
-    if (!body.expenseDate || !body.category || !body.description || Number(body.amount) <= 0) {
-      return badRequest('expenseDate, category, description, and a positive amount are required');
+    if (!body.accountId || !body.expenseDate || !body.category || !body.description || Number(body.amount) <= 0) {
+      return badRequest('accountId, expenseDate, category, description, and a positive amount are required');
     }
 
     const paymentMethod = normalizeExpensePaymentMethod(body.paymentMethod);
@@ -63,7 +64,37 @@ export async function POST(request: NextRequest) {
       return badRequest('bankAccountId is required for bank expenses.');
     }
 
-    const { data, error } = await financeService()
+    await ensureFinanceAccountCanBePosted(ctx.organizationId, body.accountId);
+    const service = financeService();
+
+    if (paymentMethod === 'CASH' || paymentMethod === 'PETTY_CASH') {
+      const cashResult = await service
+        .from('cash_accounts')
+        .select('id, branch_id, account_id, is_active')
+        .eq('organization_id', ctx.organizationId)
+        .eq('id', body.cashAccountId as string)
+        .maybeSingle();
+      if (cashResult.error) throw cashResult.error;
+      if (!cashResult.data || cashResult.data.is_active === false || !cashResult.data.account_id) {
+        return badRequest('Selected cash account is unavailable, inactive, or missing its linked ledger account.');
+      }
+      if (body.branchId && cashResult.data.branch_id && cashResult.data.branch_id !== body.branchId) {
+        return badRequest('Selected cash account is not authorized for this expense branch.');
+      }
+    } else {
+      const bankResult = await service
+        .from('bank_accounts')
+        .select('id, account_id, is_active')
+        .eq('organization_id', ctx.organizationId)
+        .eq('id', body.bankAccountId as string)
+        .maybeSingle();
+      if (bankResult.error) throw bankResult.error;
+      if (!bankResult.data || bankResult.data.is_active === false || !bankResult.data.account_id) {
+        return badRequest('Selected bank account is unavailable, inactive, or missing its linked ledger account.');
+      }
+    }
+
+    const { data, error } = await service
       .from('finance_expenses')
       .insert({
         organization_id: ctx.organizationId,
